@@ -1,0 +1,2090 @@
+{
+  "version": 1,
+  "made": "2026-11-03T19:16:12.056Z",
+  "note": "튜토리얼 6 예시 답변(연결이 없을 때 보여 준다). scripts/tutorial-advanced/make-answers.mjs 가 실제 AI 결과로 만들고 사람이 검수한다. 수치는 연습용 가상 자료.",
+  "steps": {
+    "A1": {
+      "summary": "선택한 그림의 막대 색상을 문서의 다른 그림과 같은 차분한 남색(#1F4E79)으로 통일하는 교체안을 제안했습니다. 기존 수치, 항목 순서, 축과 캡션은 유지했습니다.",
+      "instructionSummary": "선택한 그림의 선명한 색상을 문서의 다른 그림에 맞춘 문서의 남색 톤으로 변경",
+      "calls": [
+        {
+          "name": "propose_figure",
+          "args": {
+            "replace_ref": "@figure:소속대학별 재수강 경험 비율",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2000 800\"><rect width=\"2000\" height=\"800\" fill=\"white\"/><g stroke=\"#d9d9d9\" stroke-width=\"2\"><path d=\"M124 594H1970M124 467H1970M124 339H1970M124 212H1970M124 85H1970\"/></g><g stroke=\"#808080\" stroke-width=\"2\"><path d=\"M124 28V722H1970\" fill=\"none\"/></g><g fill=\"#1f4e79\"><rect x=\"208\" y=\"257\" width=\"121\" height=\"465\"/><rect x=\"403\" y=\"259\" width=\"121\" height=\"463\"/><rect x=\"598\" y=\"135\" width=\"120\" height=\"587\"/><rect x=\"792\" y=\"174\" width=\"121\" height=\"548\"/><rect x=\"987\" y=\"282\" width=\"121\" height=\"440\"/><rect x=\"1182\" y=\"180\" width=\"120\" height=\"542\"/><rect x=\"1376\" y=\"262\" width=\"121\" height=\"460\"/><rect x=\"1571\" y=\"142\" width=\"120\" height=\"580\"/><rect x=\"1765\" y=\"291\" width=\"121\" height=\"431\"/></g><g fill=\"#262626\" font-size=\"32\" text-anchor=\"middle\"><text x=\"268.5\" y=\"239\">36.5%</text><text x=\"463.5\" y=\"241\">36.3%</text><text x=\"658\" y=\"117\">46.0%</text><text x=\"852.5\" y=\"156\">43.0%</text><text x=\"1047.5\" y=\"264\">34.5%</text><text x=\"1242\" y=\"162\">42.5%</text><text x=\"1436.5\" y=\"244\">36.1%</text><text x=\"1631\" y=\"124\">45.5%</text><text x=\"1825.5\" y=\"273\">33.8%</text></g><g fill=\"#000000\" font-size=\"32\"><g text-anchor=\"end\"><text x=\"105\" y=\"734\">0</text><text x=\"105\" y=\"606\">10</text><text x=\"105\" y=\"479\">20</text><text x=\"105\" y=\"351\">30</text><text x=\"105\" y=\"224\">40</text><text x=\"105\" y=\"97\">50</text></g><g text-anchor=\"middle\"><text x=\"268.5\" y=\"764\">가대학</text><text x=\"463.5\" y=\"764\">나대학</text><text x=\"658\" y=\"764\">다대학</text><text x=\"852.5\" y=\"764\">라대학</text><text x=\"1047.5\" y=\"764\">마대학</text><text x=\"1242\" y=\"764\">바대학</text><text x=\"1436.5\" y=\"764\">사대학</text><text x=\"1631\" y=\"764\">아대학</text><text x=\"1825.5\" y=\"764\">자대학</text><text transform=\"translate(52 375) rotate(-90)\">재수강 경험 비율(%)</text></g></g><g stroke=\"#000000\" stroke-width=\"2\"><path d=\"M114 722H124M114 594H124M114 467H124M114 339H124M114 212H124M114 85H124M268.5 722V732M463.5 722V732M658 722V732M852.5 722V732M1047.5 722V732M1242 722V732M1436.5 722V732M1631 722V732M1825.5 722V732\"/></g></svg>",
+            "width_mm": 149.9,
+            "reason": "다른 그림의 남색(#1F4E79)으로 막대 색상을 통일하고 기존 수치·항목 순서·축·캡션·크기를 유지함."
+          }
+        }
+      ]
+    },
+    "A2": {
+      "summary": "문서의 다른 그래프와 같은 남색 막대·회색 눈금선·값 표시로 입학년도별 재수강 경험 비율 그래프를 그려 표 뒤에 넣는 제안을 남겼습니다.",
+      "instructionSummary": "기존 그래프와 유사한 톤앤매너로 입학년도별 재수강 경험 비율 표를 그래프로 시각화",
+      "calls": [
+        {
+          "name": "propose_figure",
+          "args": {
+            "after_ref": "@tablepara:입학년도별 재수강 경험 비율",
+            "caption": "입학년도별 재수강 경험 비율",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1600 640\"><rect width=\"1600\" height=\"640\" fill=\"white\"/><g stroke=\"#D8D8D8\" stroke-width=\"2\"><path d=\"M100 476H1576M100 374H1576M100 272H1576M100 170H1576M100 68H1576\"/></g><path d=\"M100 24V578H1576\" fill=\"none\" stroke=\"#808080\" stroke-width=\"2\"/><g fill=\"#111\" font-size=\"26\" text-anchor=\"end\"><text x=\"85\" y=\"587\">0</text><text x=\"85\" y=\"485\">10</text><text x=\"85\" y=\"383\">20</text><text x=\"85\" y=\"281\">30</text><text x=\"85\" y=\"179\">40</text><text x=\"85\" y=\"77\">50</text></g><text x=\"40\" y=\"300\" transform=\"rotate(-90 40 300)\" text-anchor=\"middle\" font-size=\"27\" fill=\"#111\">재수강 경험 비율(%)</text><rect x=\"145\" y=\"117.98\" width=\"140\" height=\"460.02\" fill=\"#1F4E79\"/><rect x=\"395\" y=\"146.54\" width=\"140\" height=\"431.46\" fill=\"#1F4E79\"/><rect x=\"645\" y=\"156.74\" width=\"140\" height=\"421.26\" fill=\"#1F4E79\"/><rect x=\"895\" y=\"173.06\" width=\"140\" height=\"404.94\" fill=\"#1F4E79\"/><rect x=\"1145\" y=\"272\" width=\"140\" height=\"306\" fill=\"#1F4E79\"/><rect x=\"1395\" y=\"173.06\" width=\"140\" height=\"404.94\" fill=\"#7F7F7F\"/><g fill=\"#262626\" font-size=\"28\" text-anchor=\"middle\"><text x=\"215\" y=\"103\">45.1%</text><text x=\"465\" y=\"132\">42.3%</text><text x=\"715\" y=\"142\">41.3%</text><text x=\"965\" y=\"158\">39.7%</text><text x=\"1215\" y=\"257\">30.0%</text><text x=\"1465\" y=\"158\">39.7%</text></g><g stroke=\"#111\" stroke-width=\"2\"><path d=\"M215 578v8M465 578v8M715 578v8M965 578v8M1215 578v8M1465 578v8\"/></g><g fill=\"#111\" font-size=\"28\" text-anchor=\"middle\"><text x=\"215\" y=\"615\">2019</text><text x=\"465\" y=\"615\">2020</text><text x=\"715\" y=\"615\">2021</text><text x=\"965\" y=\"615\">2022</text><text x=\"1215\" y=\"615\">2023</text><text x=\"1465\" y=\"615\">전체</text></g></svg>",
+            "width_mm": 149,
+            "reason": "문서의 다른 그래프(남색 막대·흰 바탕·회색 가로 눈금선·값 표시)와 같은 꼴로 입학년도별 경험 비율과 전체 비율을 그림. 표 바로 뒤에 넣고 표는 그대로 둠."
+          }
+        }
+      ]
+    },
+    "A3": {
+      "summary": "분석 기준 총괄표를 분석 대상 선정, 재수강 판정, 지표, 제시 기준의 네 영역으로 시각화한 그림을 제안했습니다. 원표의 기준·수치·주석을 모두 반영하고, 기존 그림의 청색 계열에 맞추었으며 원표는 유지했습니다.",
+      "instructionSummary": "분석 기준 총괄표를 기준과 적용 규모가 드러나는 도식으로 시각화",
+      "calls": [
+        {
+          "name": "propose_figure",
+          "args": {
+            "after_ref": "@tablepara:분석 기준 총괄",
+            "caption": "분석 대상·재수강 판정·지표·제시 기준의 구성",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1500 2180\"><rect width=\"1500\" height=\"2180\" fill=\"white\"/><defs><marker id=\"a\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"5\" orient=\"auto\"><path d=\"M0 0L10 5L0 10\" fill=\"none\" stroke=\"#808080\" stroke-width=\"1.5\"/></marker></defs><g fill=\"#222222\" font-size=\"30\"><rect x=\"20\" y=\"20\" width=\"1460\" height=\"58\" rx=\"8\" fill=\"#1F4E79\"/><text x=\"45\" y=\"60\" fill=\"white\" font-size=\"34\" font-weight=\"bold\">① 분석 대상 · 누구를 분석하는가</text><rect x=\"300\" y=\"100\" width=\"900\" height=\"95\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#1F4E79\" stroke-width=\"2\"/><text x=\"750\" y=\"138\" text-anchor=\"middle\">수집: 2019~2024학년도 학사과정 입학생</text><text x=\"750\" y=\"177\" text-anchor=\"middle\" font-size=\"36\" font-weight=\"bold\" fill=\"#1F4E79\">29,821명</text><path d=\"M750 195V225\" stroke=\"#808080\" stroke-width=\"3\" marker-end=\"url(#a)\"/><rect x=\"20\" y=\"240\" width=\"470\" height=\"160\" rx=\"10\" fill=\"#F4F4F4\" stroke=\"#BFBFBF\"/><text x=\"40\" y=\"278\" font-weight=\"bold\">제외 ① · 4,647명</text><text x=\"40\" y=\"319\">2024학년도 입학생</text><text x=\"40\" y=\"360\">관측 4학기, 관측 미완</text><rect x=\"515\" y=\"240\" width=\"470\" height=\"160\" rx=\"10\" fill=\"#F4F4F4\" stroke=\"#BFBFBF\"/><text x=\"535\" y=\"278\" font-weight=\"bold\">제외 ② · 832명</text><text x=\"535\" y=\"319\">1학년 정규학기 성적이</text><text x=\"535\" y=\"360\">없는 학생</text><rect x=\"1010\" y=\"240\" width=\"470\" height=\"160\" rx=\"10\" fill=\"#F4F4F4\" stroke=\"#BFBFBF\"/><text x=\"1030\" y=\"278\" font-weight=\"bold\">제외 ③ · 3,262명(중복 55)</text><text x=\"1030\" y=\"319\">예외 집단: 예체능·의약 계열</text><text x=\"1030\" y=\"360\">부록에 별도 집계</text><path d=\"M750 400V430\" stroke=\"#808080\" stroke-width=\"3\" marker-end=\"url(#a)\"/><rect x=\"160\" y=\"445\" width=\"1180\" height=\"100\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#1F4E79\" stroke-width=\"2\"/><text x=\"750\" y=\"485\" text-anchor=\"middle\" font-size=\"36\" font-weight=\"bold\" fill=\"#1F4E79\">분석 모집단 21,135명</text><text x=\"750\" y=\"526\" text-anchor=\"middle\">2019~2023학년도 입학생 중 제외 ②③을 뺀 학생</text><text x=\"45\" y=\"590\">층화: 정원 내·외, 입학 유형(신입학·편입학) · 정원외 1,839명·편입 83명</text><rect x=\"20\" y=\"630\" width=\"1460\" height=\"58\" rx=\"8\" fill=\"#1F4E79\"/><text x=\"45\" y=\"670\" fill=\"white\" font-size=\"34\" font-weight=\"bold\">② 재수강 판정 · 무엇을 재수강으로 보는가</text><rect x=\"160\" y=\"710\" width=\"1180\" height=\"120\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#1F4E79\" stroke-width=\"2\"/><text x=\"750\" y=\"748\" text-anchor=\"middle\" font-size=\"36\" font-weight=\"bold\" fill=\"#1F4E79\">재수강 판정 19,144건</text><text x=\"750\" y=\"787\" text-anchor=\"middle\">재이수 표시가 있거나, 같은 교과목을 다시 들어</text><text x=\"750\" y=\"820\" text-anchor=\"middle\">원 성적이 무효가 된 수강</text><path d=\"M750 830V850H380V870M750 850H1120V870\" fill=\"none\" stroke=\"#808080\" stroke-width=\"3\" marker-end=\"url(#a)\"/><rect x=\"20\" y=\"885\" width=\"715\" height=\"130\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#1F4E79\"/><text x=\"45\" y=\"925\" font-size=\"34\" font-weight=\"bold\" fill=\"#1F4E79\">주분석 · 16,177건·7,386명</text><text x=\"45\" y=\"971\">원 수강·재수강이 모두 정규학기</text><rect x=\"765\" y=\"885\" width=\"715\" height=\"130\" rx=\"10\" fill=\"#F4F4F4\" stroke=\"#BFBFBF\"/><text x=\"790\" y=\"925\" font-size=\"34\" font-weight=\"bold\">계절학기 · 2,967건·2,602명</text><text x=\"790\" y=\"971\">원 수강 또는 재수강이 계절학기(별도 분석)</text><rect x=\"20\" y=\"1035\" width=\"715\" height=\"140\" rx=\"10\" fill=\"white\" stroke=\"#BFBFBF\"/><text x=\"45\" y=\"1074\" font-weight=\"bold\">원 성적 · 3회차 이상 1,090건</text><text x=\"45\" y=\"1115\">같은 교과목의 바로 앞 시도</text><text x=\"45\" y=\"1154\">3회차 이상 포함</text><rect x=\"765\" y=\"1035\" width=\"715\" height=\"140\" rx=\"10\" fill=\"white\" stroke=\"#BFBFBF\"/><text x=\"790\" y=\"1074\" font-weight=\"bold\">W·S/U · W 2,375행·S/U 593행</text><text x=\"790\" y=\"1115\">수강 철회(W)·S/U 수강은</text><text x=\"790\" y=\"1154\">시도로 세지 않음</text><rect x=\"20\" y=\"1195\" width=\"715\" height=\"140\" rx=\"10\" fill=\"white\" stroke=\"#BFBFBF\"/><text x=\"45\" y=\"1234\" font-weight=\"bold\">대체 교과목 · 1,149건(686쌍)</text><text x=\"45\" y=\"1275\">교과목 번호가 바뀐 재수강은</text><text x=\"45\" y=\"1314\">같은 교과목으로 봄</text><rect x=\"765\" y=\"1195\" width=\"715\" height=\"140\" rx=\"10\" fill=\"white\" stroke=\"#BFBFBF\"/><text x=\"790\" y=\"1234\" font-weight=\"bold\">성적 상한 · 27건</text><text x=\"790\" y=\"1275\">재수강 성적 A+는 상한 규정에 따라</text><text x=\"790\" y=\"1314\">A0으로 처리</text><rect x=\"20\" y=\"1370\" width=\"1460\" height=\"58\" rx=\"8\" fill=\"#1F4E79\"/><text x=\"45\" y=\"1410\" fill=\"white\" font-size=\"34\" font-weight=\"bold\">③ 지표 · 무엇을 어떻게 재는가</text><rect x=\"20\" y=\"1450\" width=\"715\" height=\"175\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#BFBFBF\"/><text x=\"45\" y=\"1490\" font-size=\"34\" font-weight=\"bold\" fill=\"#1F4E79\">성적 개선 · 16,177건</text><text x=\"45\" y=\"1534\">평점변화 = 재수강 평점 − 원 평점</text><text x=\"45\" y=\"1578\">4.5 만점</text><rect x=\"765\" y=\"1450\" width=\"715\" height=\"175\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#BFBFBF\"/><text x=\"790\" y=\"1490\" font-size=\"34\" font-weight=\"bold\" fill=\"#1F4E79\">순효과 · 비교 24,266과목</text><text x=\"790\" y=\"1534\">평점변화 − 같은 등급 비재수강 과목의</text><text x=\"790\" y=\"1578\">후속 평점 변화</text><rect x=\"20\" y=\"1645\" width=\"715\" height=\"175\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#BFBFBF\"/><text x=\"45\" y=\"1685\" font-size=\"34\" font-weight=\"bold\" fill=\"#1F4E79\">학업 진도 · 179,648 학생-학기</text><text x=\"45\" y=\"1729\">학생 × 정규학기 자료</text><rect x=\"765\" y=\"1645\" width=\"715\" height=\"175\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#BFBFBF\"/><text x=\"790\" y=\"1685\" font-size=\"34\" font-weight=\"bold\" fill=\"#1F4E79\">졸업 · 21,052명</text><text x=\"790\" y=\"1729\">신입학(편입학 제외)</text><text x=\"790\" y=\"1773\">미졸업자는 2026-1학기에서 절단</text><rect x=\"20\" y=\"1855\" width=\"1460\" height=\"58\" rx=\"8\" fill=\"#1F4E79\"/><text x=\"45\" y=\"1895\" fill=\"white\" font-size=\"34\" font-weight=\"bold\">④ 제시 기준 · 어떤 단위로 제시하는가</text><rect x=\"20\" y=\"1935\" width=\"1460\" height=\"85\" rx=\"10\" fill=\"#EDF3F8\" stroke=\"#BFBFBF\"/><text x=\"45\" y=\"1988\">대학 단위: 소속대학 9개(가상 대학 이름) · 적용 규모: –</text><text x=\"25\" y=\"2080\" font-size=\"28\" fill=\"#555555\">주: 적용 규모는 분석 모집단 기준(졸업 분석·학업 진도는 해당 표본).</text><text x=\"25\" y=\"2125\" font-size=\"28\" fill=\"#555555\">수치는 연습용 가상 자료임.</text></g></svg>",
+            "width_mm": 149,
+            "reason": "표의 모든 기준과 적용 규모를 네 단계 도식으로 구성하고, 분석 대상 선정과 재수강 분석 구분을 시각적으로 제시함. 원표는 유지함."
+          }
+        }
+      ]
+    },
+    "A4": {
+      "summary": "기존 수치와 범주를 유지하면서 그림의 표기를 영문으로 바꾸고 글자를 키운 교체안을 제안함. 그림 제목과 주석도 영문으로 변경하고 글자 크기를 확대하도록 제안함.",
+      "instructionSummary": "선택한 그림을 영문으로 변경하고 글자 크기 확대",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@para:학생당 재수강 건수 분",
+                "find": "학생당 재수강 건수 분포",
+                "occurrence": 1,
+                "replace": "Distribution of Course Retakes per Student",
+                "reason": "그림 제목을 영문으로 변경하고 글자 크기를 11pt에서 12pt로 확대함."
+              },
+              {
+                "ref": "@para:주: 분석 모집단 기준. 5건",
+                "find": "주: 분석 모집단 기준. 5건 이상은 한 범주로 묶음.",
+                "occurrence": 1,
+                "replace": "Note: Based on the analysis population. Five or more retakes are grouped into one category.",
+                "reason": "그림 주석도 영문으로 통일하고 글자 크기를 9pt에서 10pt로 확대함."
+              }
+            ]
+          }
+        },
+        {
+          "name": "propose_figure",
+          "args": {
+            "replace_ref": "@figure:학생당 재수강 건수 분포",
+            "chart": {
+              "type": "bar",
+              "categories": [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5 or more"
+              ],
+              "series": [
+                {
+                  "name": "Number of students",
+                  "values": [
+                    12742,
+                    3668,
+                    2381,
+                    1083,
+                    681,
+                    580
+                  ]
+                }
+              ],
+              "y_label": "Number of students",
+              "y_min": 0,
+              "y_max": 15000,
+              "value_labels": "all",
+              "decimals": 0
+            },
+            "width_mm": 149,
+            "reason": "원본의 범주와 학생 수를 유지하면서 축과 범주 표기를 영문으로 바꾸고, 눈금·범주·수치 글자를 확대하여 가독성을 높임."
+          }
+        }
+      ]
+    },
+    "A5": {
+      "summary": "그림의 등급별 평점변화를 위 표와 대조하여 세 등급의 일치를 확인하고, C0의 수치 불일치와 C+의 반올림 자릿수 차이를 의견으로 남겼습니다.",
+      "instructionSummary": "그림에 표시된 평균 평점변화를 위 표의 수치와 대조 검토",
+      "calls": [
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@cell:원 등급별 재수강 평점변화|5|4",
+            "text": "C+는 표의 평점변화가 0.7점이고 그림은 0.69점으로 표시되어 있음. 0.69를 소수 첫째 자리로 반올림하면 0.7이므로 반올림 자릿수 차이일 수 있으며, 표의 재수강 평점 3.19점에서 원 평점 2.5점을 뺀 값도 0.69점임. 원자료의 평균 변화량을 확인한 뒤 표와 그림의 소수 자릿수를 통일할 필요가 있음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:원 등급별 평균",
+            "text": "그림의 수치와 위 표의 ‘평점변화’ 열을 대조한 결과, F(2.01점), D0(1.70점), D+(1.55점)는 일치함. C0는 그림 1.07점, 표 0.98점으로 그림이 0.09점 높아 불일치함. 표의 재수강 평점 2.98점에서 원 평점 2.0점을 뺀 값도 0.98점이므로, 그림의 C0 값 표기와 막대 높이를 0.98점에 맞춰 수정할 필요가 있음."
+          }
+        }
+      ]
+    },
+    "B1": {
+      "summary": "선택한 표의 테두리·음영·제목·정렬을 APA식으로 정리하고, 평점·평점변화·표준편차·t값의 자릿수를 확인해 0.7→0.70, 3.0→3.00 등 7칸을 소수 둘째 자리로 통일하도록 제안했습니다. 표 주석의 p = 0.000은 p < .001로 고쳤습니다. 현재 값에 0을 덧붙였으며 원자료의 추가 정밀도를 복원한 것은 아닙니다.",
+      "instructionSummary": "APA 표 모양과 통계량별 소수 자릿수 통일",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@para:원 등급별 재수",
+                "find": "[표 ] 원 등급별 재수강 평점변화",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "APA 표 형식에 맞춰 표 번호와 제목을 왼쪽에 정렬함."
+              },
+              {
+                "ref": "@para:원 등급별 재수",
+                "find": "원 등급별 재수강 평점변화",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false,
+                    "italic": true
+                  }
+                },
+                "reason": "APA 표 제목의 기울임 서식을 적용하고 제목 글은 유지함."
+              },
+              {
+                "ref": "@para:원 등급별 재수",
+                "find": "[표 ]",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": true,
+                    "italic": false
+                  }
+                },
+                "reason": "기존 자동 번호 표기는 유지하면서 APA 방식으로 표 번호를 굵게 표시함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|0",
+                "find": "원 등급",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  },
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "첫 열 머리글을 왼쪽에 정렬하고 APA 표의 일반체 머리글로 정리함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|1",
+                "find": "건수",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  }
+                },
+                "reason": "APA 표의 머리글을 일반체로 통일함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|2",
+                "find": "원 평점",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  }
+                },
+                "reason": "APA 표의 머리글을 일반체로 통일함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|3",
+                "find": "재수강 평점",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  }
+                },
+                "reason": "APA 표의 머리글을 일반체로 통일함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|4",
+                "find": "평점변화",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  }
+                },
+                "reason": "APA 표의 머리글을 일반체로 통일함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|5",
+                "find": "표준편차",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false
+                  }
+                },
+                "reason": "APA 표의 머리글을 일반체로 통일함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|0|6",
+                "find": "t",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "bold": false,
+                    "italic": true
+                  }
+                },
+                "reason": "통계 기호 t를 APA 방식의 기울임꼴로 표시함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|1|0",
+                "find": "F",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "등급명인 첫 열의 값을 왼쪽 정렬함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|2|0",
+                "find": "D0",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "등급명인 첫 열의 값을 왼쪽 정렬함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|3|0",
+                "find": "D+",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "등급명인 첫 열의 값을 왼쪽 정렬함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|4|0",
+                "find": "C0",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "등급명인 첫 열의 값을 왼쪽 정렬함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|5|0",
+                "find": "C+",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "등급명인 첫 열의 값을 왼쪽 정렬함."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|6|0",
+                "find": "전체",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "첫 열의 합계 항목을 등급명과 같은 왼쪽 정렬로 통일함."
+              }
+            ]
+          }
+        },
+        {
+          "name": "propose_table_edit",
+          "args": {
+            "table": "@table:원 등급별 재수강 평점변화",
+            "ops": [
+              {
+                "op": "border",
+                "sides": [
+                  "all"
+                ],
+                "line": {
+                  "type": "NONE"
+                }
+              },
+              {
+                "op": "fill",
+                "color": "none"
+              },
+              {
+                "op": "border",
+                "sides": [
+                  "top",
+                  "bottom"
+                ],
+                "line": {
+                  "type": "SOLID",
+                  "width_mm": 0.2,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "border",
+                "range": {
+                  "row_from": 0,
+                  "row_to": 0
+                },
+                "sides": [
+                  "bottom"
+                ],
+                "line": {
+                  "type": "SOLID",
+                  "width_mm": 0.15,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "cell_align",
+                "vert_align": "CENTER"
+              },
+              {
+                "op": "table",
+                "header_rows": 1,
+                "repeat_header": true,
+                "width_mm": 149,
+                "align": "LEFT"
+              }
+            ],
+            "reason": "APA 표의 기본 원칙에 따라 세로선·내부 격자선·배경 음영을 없애고 표 위아래와 머리행 아래에만 가로 실선을 둠."
+          }
+        },
+        {
+          "name": "propose_changes",
+          "skipIfApplied": true,
+          "args": {
+            "proposals": [
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|1|2",
+                "find": "0.0",
+                "replace": "0.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|2|2",
+                "find": "1.0",
+                "replace": "1.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|3|2",
+                "find": "1.5",
+                "replace": "1.50",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|3|3",
+                "find": "3.0",
+                "replace": "3.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|4|2",
+                "find": "2.0",
+                "replace": "2.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|5|2",
+                "find": "2.5",
+                "replace": "2.50",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|5|4",
+                "find": "0.7",
+                "replace": "0.70",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@para:주: 대응표본 t검정",
+                "find": "\n주: 대응표본 t검정, 모든 등급에서 p = 0.000. 원 평점은 4.5 만점 기준 등급 평점.",
+                "replace": "\n주: 대응표본 t검정, 모든 등급에서 p < .001. 원 평점은 4.5 만점 기준 등급 평점.",
+                "occurrence": 1,
+                "reason": "반올림되어 0.000으로 보고된 p값을 p < .001로 표시함."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "B2": {
+      "summary": "본문 인용과 참고문헌의 저자·연도·구두점·대문자 표기를 APA 7판에 맞게 수정 제안하고, 이탤릭체와 내어쓰기 서식도 제안함. 문헌 배열, 본문 미인용 자료 및 DOI 확인이 필요한 사항은 의견으로 남김.",
+      "instructionSummary": "본문 인용과 참고문헌을 APA 7판 양식으로 정비",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@para:Cohen J.",
+                "find": "Cohen J. 1988. Statistical power analysis for the behavioral sciences, 2nd ed. Lawrence Erlbaum Associates.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 0.5인치 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:가상대학교 교무",
+                "find": "가상대학교 교무처 (2023), 「학사운영 편람」, 가상대학교.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:Cox, D. ",
+                "find": "Cox, D. R., Regression models and life-tables, Journal of the Royal Statistical Society: Series B (Methodological), 34(2), 187-220, 1972.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:Rosenbau",
+                "find": "Rosenbaum, P. R. and Rubin, D. B. (1983) The central role of the propensity score in observational studies for causal effects. Biometrika 70(1): 41–55.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:Barnett,",
+                "find": "Barnett, A. G., van der Pols, J. C., & Dobson, A. J. (2005). Regression to the mean: what it is and how to deal with it. International journal of epidemiology, 34(1), 215–220.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:가상대학교 대학",
+                "find": "가상대학교 대학혁신센터. 2024. 재수강 제도 개선 기초 조사 결과. 내부 자료.",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT",
+                    "lineSpacing": {
+                      "type": "PERCENT",
+                      "value": 200
+                    },
+                    "spaceBeforePt": 0,
+                    "spaceAfterPt": 0,
+                    "indentPt": -36,
+                    "leftMarginPt": 36
+                  }
+                },
+                "reason": "APA 7판 참고문헌의 내어쓰기와 두 줄 간격을 적용함."
+              },
+              {
+                "ref": "@para:Cohen J.",
+                "find": "Statistical power analysis for the behavioral sciences",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "italic": true
+                  }
+                },
+                "reason": "단행본 제목을 이탤릭체로 표시함."
+              },
+              {
+                "ref": "@para:가상대학교 교무",
+                "find": "학사운영 편람",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "italic": true
+                  }
+                },
+                "reason": "독립 간행물 제목을 이탤릭체로 표시함."
+              },
+              {
+                "ref": "@para:Cox, D. ",
+                "find": "Journal of the Royal Statistical Society: Series B (Methodological), 34",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "italic": true
+                  }
+                },
+                "reason": "학술지명과 권을 이탤릭체로 표시하고 호는 제외함."
+              },
+              {
+                "ref": "@para:가상대학교 대학",
+                "find": "재수강 제도 개선 기초 조사 결과",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "char": {
+                    "italic": true
+                  }
+                },
+                "reason": "독립 자료의 제목을 이탤릭체로 표시함."
+              },
+              {
+                "ref": "@para:(해석) 효과의",
+                "find": "Cohen(1988)",
+                "occurrence": 1,
+                "replace": "Cohen (1988)",
+                "reason": "서술형 인용의 저자명과 연도 괄호 사이에 공백을 둠."
+              },
+              {
+                "ref": "@para:(해석) 효과의",
+                "find": "Barnett et al 2005",
+                "occurrence": 1,
+                "replace": "Barnett et al., 2005",
+                "reason": "저자가 3명 이상인 괄호형 인용에 et al.과 연도 앞 쉼표를 적용함."
+              },
+              {
+                "ref": "@para:(해석) 효과의",
+                "find": "로젠바움과 루빈, 1983",
+                "occurrence": 1,
+                "replace": "Rosenbaum & Rubin, 1983",
+                "reason": "참고문헌과 저자 표기를 일치시키고 두 저자의 괄호형 인용에 &를 사용함."
+              },
+              {
+                "ref": "@para:Cohen J.",
+                "find": "Cohen J. 1988.",
+                "occurrence": 1,
+                "replace": "Cohen, J. (1988).",
+                "reason": "저자 성과 이니셜 사이에 쉼표를 넣고 발행연도를 괄호로 표시함."
+              },
+              {
+                "ref": "@para:Cohen J.",
+                "find": ", 2nd ed.",
+                "occurrence": 1,
+                "replace": " (2nd ed.).",
+                "reason": "판차를 단행본 제목 뒤 괄호 안에 표시함."
+              },
+              {
+                "ref": "@para:가상대학교 교무",
+                "find": "교무처 (2023), 「",
+                "occurrence": 1,
+                "replace": "교무처. (2023). ",
+                "reason": "기관 저자와 발행연도 뒤에 마침표를 쓰고 제목의 낫표를 제거함."
+              },
+              {
+                "ref": "@para:가상대학교 교무",
+                "find": "」, ",
+                "occurrence": 1,
+                "replace": ". ",
+                "reason": "제목 뒤 낫표와 쉼표를 마침표로 바꾸어 출판사 정보와 구분함."
+              },
+              {
+                "ref": "@para:Cox, D. ",
+                "find": "Cox, D. R., ",
+                "occurrence": 1,
+                "replace": "Cox, D. R. (1972). ",
+                "reason": "발행연도를 저자명 바로 뒤 괄호 안으로 옮김."
+              },
+              {
+                "ref": "@para:Cox, D. ",
+                "find": "Regression models and life-tables,",
+                "occurrence": 1,
+                "replace": "Regression models and life-tables.",
+                "reason": "논문 제목과 학술지명을 마침표로 구분함."
+              },
+              {
+                "ref": "@para:Cox, D. ",
+                "find": "187-220, 1972.",
+                "occurrence": 1,
+                "replace": "187–220.",
+                "reason": "쪽 범위에 en 대시를 쓰고 저자명 뒤로 옮긴 발행연도의 중복을 제거함."
+              },
+              {
+                "ref": "@para:Rosenbau",
+                "find": "Rosenbaum, P. R. and Rubin",
+                "occurrence": 1,
+                "replace": "Rosenbaum, P. R., & Rubin",
+                "reason": "참고문헌의 마지막 저자 앞에 쉼표와 &를 사용함."
+              },
+              {
+                "ref": "@para:Rosenbau",
+                "find": "(1983) The",
+                "occurrence": 1,
+                "replace": "(1983). The",
+                "reason": "발행연도 뒤에 마침표를 추가함."
+              },
+              {
+                "ref": "@para:Rosenbau",
+                "find": "Biometrika 70(1):",
+                "occurrence": 1,
+                "replace": "Biometrika, 70(1),",
+                "runs": [
+                  {
+                    "text": "Biometrika, 70",
+                    "charPrId": "17",
+                    "char": {
+                      "italic": true
+                    }
+                  },
+                  {
+                    "text": "(1),",
+                    "charPrId": "17",
+                    "char": {
+                      "italic": false
+                    }
+                  }
+                ],
+                "reason": "학술지명·권·쪽 사이의 구두점을 수정하고 학술지명과 권만 이탤릭체로 표시함."
+              },
+              {
+                "ref": "@para:Barnett,",
+                "find": "Regression to the mean: what",
+                "occurrence": 1,
+                "replace": "Regression to the mean: What",
+                "reason": "문장식 대문자 표기에 따라 콜론 뒤 부제의 첫 단어를 대문자로 시작함."
+              },
+              {
+                "ref": "@para:Barnett,",
+                "find": "International journal of epidemiology, 34",
+                "occurrence": 1,
+                "replace": "International Journal of Epidemiology, 34",
+                "runs": [
+                  {
+                    "text": "International Journal of Epidemiology, 34",
+                    "charPrId": "17",
+                    "char": {
+                      "italic": true
+                    }
+                  }
+                ],
+                "reason": "학술지명을 제목식 대문자로 수정하고 학술지명과 권을 이탤릭체로 표시함."
+              },
+              {
+                "ref": "@para:가상대학교 대학",
+                "find": "2024.",
+                "occurrence": 1,
+                "replace": "(2024).",
+                "reason": "기관 저자 뒤 발행연도를 괄호 안에 표시함."
+              },
+              {
+                "ref": "@para:가상대학교 대학",
+                "find": ". 내부 자료.",
+                "occurrence": 1,
+                "replace": " [내부 자료].",
+                "reason": "자료 유형을 제목 바로 뒤 대괄호 안에 표시함."
+              }
+            ]
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:참고문헌",
+            "text": "참고문헌의 배열 순서는 추가 정리가 필요함. 영문 문헌은 첫 저자의 성을 기준으로 Barnett → Cohen → Cox → Rosenbaum 순으로 옮겨야 함. 국문·영문 문헌을 나누어 배열할지는 제출처 지침을 확인하고, 국문 문헌은 기관명 기준으로 교무처 → 대학혁신센터 순으로 배열하기 바람. 이번 제안에는 문단 이동을 포함하지 않았음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:가상대학교 교무",
+            "text": "본문 전체에서 교무처(2023)와 대학혁신센터(2024)의 인용을 찾지 못함. 실제로 근거로 사용한 문헌이면 해당 주장에 저자–연도 인용을 추가하고, 사용하지 않았다면 참고문헌에서 제외하기 바람. 대학혁신센터의 내부 자료는 예상 독자가 열람할 수 있는지도 확인하여 수록 여부를 정할 필요가 있음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:Cox, D. ",
+            "text": "학술지 논문 3편의 DOI가 원문 자료에 없어 임의로 추가하지 않았음. Cox(1972), Rosenbaum과 Rubin(1983), Barnett 등(2005)의 출판사 서지정보에서 DOI를 확인한 뒤, 존재하는 경우 각 항목 끝에 https://doi.org/ 형식으로 추가하기 바람."
+          }
+        }
+      ]
+    },
+    "B3": {
+      "summary": "선택한 표를 문서의 표준서식에 맞추도록 테두리·음영·크기·쪽 나눔과 첫 열 정렬 변경을 제안했습니다. 표의 내용과 수치, 기존 글꼴 및 7열 표용 장평·자간은 유지했습니다.",
+      "instructionSummary": "선택한 표의 서식을 문서의 다른 표와 통일",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@cell:소속대학별 재수강 현황|1|0",
+                "find": "가대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|2|0",
+                "find": "나대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|3|0",
+                "find": "다대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|4|0",
+                "find": "라대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|5|0",
+                "find": "마대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|6|0",
+                "find": "바대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|7|0",
+                "find": "사대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|8|0",
+                "find": "아대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|9|0",
+                "find": "자대학",
+                "occurrence": 1,
+                "type": "format",
+                "format": {
+                  "paragraph": {
+                    "align": "LEFT"
+                  }
+                },
+                "reason": "표준서식의 첫 열 왼쪽 정렬에 맞춤."
+              }
+            ]
+          }
+        },
+        {
+          "name": "propose_table_edit",
+          "args": {
+            "table": "@table:소속대학별 재수강 현황",
+            "ops": [
+              {
+                "op": "border",
+                "sides": [
+                  "all"
+                ],
+                "line": {
+                  "type": "SOLID",
+                  "width_mm": 0.15,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "border",
+                "sides": [
+                  "left",
+                  "right"
+                ],
+                "line": {
+                  "type": "NONE"
+                }
+              },
+              {
+                "op": "border",
+                "range": {
+                  "row_from": 0,
+                  "row_to": 0
+                },
+                "sides": [
+                  "top"
+                ],
+                "line": {
+                  "type": "SOLID",
+                  "width_mm": 0.5,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "border",
+                "range": {
+                  "row_from": 0,
+                  "row_to": 0
+                },
+                "sides": [
+                  "bottom"
+                ],
+                "line": {
+                  "type": "DOUBLE_SLIM",
+                  "width_mm": 0.5,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "border",
+                "range": {
+                  "row_from": 1,
+                  "row_to": 1
+                },
+                "sides": [
+                  "top"
+                ],
+                "line": {
+                  "type": "DOUBLE_SLIM",
+                  "width_mm": 0.5,
+                  "color": "#000000"
+                }
+              },
+              {
+                "op": "fill",
+                "range": {
+                  "row_from": 0,
+                  "row_to": 0
+                },
+                "color": "#BFBFBF"
+              },
+              {
+                "op": "fill",
+                "range": {
+                  "row_from": 1,
+                  "row_to": 9
+                },
+                "color": "none"
+              },
+              {
+                "op": "row_height",
+                "height_mm": 3.92
+              },
+              {
+                "op": "cell_align",
+                "vert_align": "CENTER"
+              },
+              {
+                "op": "table",
+                "header_rows": 1,
+                "repeat_header": true,
+                "width_mm": 149.01,
+                "treat_as_char": false,
+                "page_break": "CELL"
+              }
+            ],
+            "reason": "문서의 표준서식에 맞춰 머리행 음영과 위·아래 테두리, 본문 구분선, 좌우 바깥선 제거, 표 폭·행 높이·제목 줄 반복 및 쪽 나눔을 통일함."
+          }
+        }
+      ]
+    },
+    "B4": {
+      "summary": "인원·건수의 천 단위 쉼표와 비율 소수 첫째 자리(끝자리 0 포함)를 정리하고, 평점·평점변화·표준편차·t값은 소수 둘째 자리, p값은 별도 기준으로 점검하도록 제안함. B1에서 반영한 자릿수 수정은 중복 제안하지 않음. 연도·식별자·결측과 이미 기준에 맞는 값은 유지하며 원자료에 없는 정밀한 값을 추정하지 않음.",
+      "instructionSummary": "인원·비율·평점 등 통계량별 숫자 표기와 끝자리 0 통일",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@cell:소속대학별 재수강 현황|1|2",
+                "find": "2606",
+                "occurrence": 1,
+                "replace": "2,606",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|1|4",
+                "find": "36.49",
+                "occurrence": 1,
+                "replace": "36.5",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|2|2",
+                "find": "2404",
+                "occurrence": 1,
+                "replace": "2,404",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|2|4",
+                "find": "36.31",
+                "occurrence": 1,
+                "replace": "36.3",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|3|2",
+                "find": "2886",
+                "occurrence": 1,
+                "replace": "2,886",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|3|3",
+                "find": "1328",
+                "occurrence": 1,
+                "replace": "1,328",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|3|4",
+                "find": "46.02",
+                "occurrence": 1,
+                "replace": "46.0",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|4|2",
+                "find": "2483",
+                "occurrence": 1,
+                "replace": "2,483",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|4|3",
+                "find": "1068",
+                "occurrence": 1,
+                "replace": "1,068",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|4|4",
+                "find": "43.01",
+                "occurrence": 1,
+                "replace": "43.0",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|5|2",
+                "find": "1874",
+                "occurrence": 1,
+                "replace": "1,874",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|5|4",
+                "find": "34.53",
+                "occurrence": 1,
+                "replace": "34.5",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|6|2",
+                "find": "2444",
+                "occurrence": 1,
+                "replace": "2,444",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|6|3",
+                "find": "1039",
+                "occurrence": 1,
+                "replace": "1,039",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|6|4",
+                "find": "42.51",
+                "occurrence": 1,
+                "replace": "42.5",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|7|2",
+                "find": "2098",
+                "occurrence": 1,
+                "replace": "2,098",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|7|4",
+                "find": "36.08",
+                "occurrence": 1,
+                "replace": "36.1",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|8|2",
+                "find": "2249",
+                "occurrence": 1,
+                "replace": "2,249",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|8|3",
+                "find": "1023",
+                "occurrence": 1,
+                "replace": "1,023",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|8|4",
+                "find": "45.49",
+                "occurrence": 1,
+                "replace": "45.5",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|9|2",
+                "find": "2091",
+                "occurrence": 1,
+                "replace": "2,091",
+                "reason": "인원에 천 단위 구분 쉼표를 넣음."
+              },
+              {
+                "ref": "@cell:소속대학별 재수강 현황|9|4",
+                "find": "33.81",
+                "occurrence": 1,
+                "replace": "33.8",
+                "reason": "경험 비율을 소수 둘째 자리에서 반올림하여 소수 첫째 자리로 맞춤."
+              }
+            ]
+          }
+        },
+        {
+          "name": "propose_changes",
+          "skipIfApplied": true,
+          "args": {
+            "proposals": [
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|1|2",
+                "find": "0.0",
+                "replace": "0.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|2|2",
+                "find": "1.0",
+                "replace": "1.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|3|2",
+                "find": "1.5",
+                "replace": "1.50",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|3|3",
+                "find": "3.0",
+                "replace": "3.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|4|2",
+                "find": "2.0",
+                "replace": "2.00",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|5|2",
+                "find": "2.5",
+                "replace": "2.50",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@cell:원 등급별 재수강 평점변화|5|4",
+                "find": "0.7",
+                "replace": "0.70",
+                "occurrence": 1,
+                "reason": "같은 통계량·열을 소수 둘째 자리로 통일하고 끝자리 0을 유지함. 현재 값에 0을 덧붙이는 표기 정리이며 원자료의 추가 정밀도를 추정하지 않음."
+              },
+              {
+                "ref": "@para:주: 대응표본 t검정",
+                "find": "\n주: 대응표본 t검정, 모든 등급에서 p = 0.000. 원 평점은 4.5 만점 기준 등급 평점.",
+                "replace": "\n주: 대응표본 t검정, 모든 등급에서 p < .001. 원 평점은 4.5 만점 기준 등급 평점.",
+                "occurrence": 1,
+                "reason": "반올림되어 0.000으로 보고된 p값을 p < .001로 표시함."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "B5": {
+      "summary": "2020(참고) 열을 지우고 연도별 합계 줄을 넣은 뒤, 쪽이 넘어가면 제목 줄이 반복되게 하는 표 고치기와 주석 정리를 제안했습니다. 합계는 학기 유형별 건수를 더한 값입니다.",
+      "instructionSummary": "2020(참고) 열 삭제, 연도별 합계 행 추가 및 제목 줄 반복 설정",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+                "find": " 2020학년도는 분석 기간 밖이라 참고로만 제시함.",
+                "occurrence": 1,
+                "replace": "",
+                "reason": "2020(참고) 열 삭제에 따라 더 이상 해당하지 않는 주석을 삭제함."
+              }
+            ]
+          }
+        },
+        {
+          "name": "propose_table_edit",
+          "args": {
+            "table": "@table:재수강 학년도·학기 유형별 재수강 건수",
+            "ops": [
+              {
+                "op": "delete_cols",
+                "cols": [
+                  1
+                ],
+                "keep_width": true
+              },
+              {
+                "op": "insert_rows",
+                "row": 4,
+                "count": 1,
+                "position": "below",
+                "values": [
+                  [
+                    "합계",
+                    "9,040",
+                    "9,818",
+                    "10,330",
+                    "10,393",
+                    "10,861"
+                  ]
+                ]
+              },
+              {
+                "op": "table",
+                "header_rows": 1,
+                "repeat_header": true,
+                "page_break": "CELL"
+              }
+            ],
+            "reason": "2020(참고) 열을 삭제하고 표 끝에 합계 행을 추가하며, 쪽이 넘어가면 첫 번째 제목 줄이 반복되도록 설정함."
+          }
+        }
+      ]
+    },
+    "C1": {
+      "summary": "문서 전체의 오탈자와 맞춤법·띄어쓰기 오류에 대해 20건의 수정안을 제안함. 의미·수치·용어와 기존 문체·서식은 유지함.",
+      "instructionSummary": "문서 전체에서 의미·수치·용어를 유지하면서 오탈자와 맞춤법·띄어쓰기 오류만 수정",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@para:(배경) 가상대",
+                "find": "재수강 회수 제한",
+                "occurrence": 1,
+                "replace": "재수강 횟수 제한",
+                "reason": "일이 일어난 차례의 수를 뜻하므로 ‘횟수’로 바로잡음."
+              },
+              {
+                "ref": "@para:(배경) 가상대",
+                "find": "기회로써",
+                "occurrence": 1,
+                "replace": "기회로서",
+                "reason": "기회의 자격이나 성격을 나타내므로 조사 ‘로서’를 사용함."
+              },
+              {
+                "ref": "@para:(필요성) 재수",
+                "find": "꾸준이",
+                "occurrence": 1,
+                "replace": "꾸준히",
+                "reason": "부사 ‘꾸준히’의 잘못된 표기를 바로잡음."
+              },
+              {
+                "ref": "@para:(필요성) 재수",
+                "find": "이루어 지지",
+                "occurrence": 1,
+                "replace": "이루어지지",
+                "reason": "‘이루어지다’는 한 단어이므로 붙여 씀."
+              },
+              {
+                "ref": "@para:RQ3: 재수강",
+                "find": "관련이있는가",
+                "occurrence": 1,
+                "replace": "관련이 있는가",
+                "reason": "조사가 붙은 명사와 뒤의 용언을 띄어 씀."
+              },
+              {
+                "ref": "@cell:분석 기준 총괄|6|3",
+                "find": "정원외",
+                "occurrence": 1,
+                "replace": "정원 외",
+                "reason": "일정한 범위의 밖을 뜻하는 ‘외’를 앞말과 띄어 씀."
+              },
+              {
+                "ref": "@para:(모집단) 입학",
+                "find": "제외됬음",
+                "occurrence": 1,
+                "replace": "제외됐음",
+                "reason": "‘제외되었음’의 준말은 ‘제외됐음’이므로 오기를 바로잡음."
+              },
+              {
+                "ref": "@para:(판정) 재수강",
+                "find": "일일히",
+                "occurrence": 1,
+                "replace": "일일이",
+                "reason": "부사 ‘일일이’의 잘못된 표기를 바로잡음."
+              },
+              {
+                "ref": "@para:(주분석) 원 ",
+                "find": "분석 하였음",
+                "occurrence": 1,
+                "replace": "분석하였음",
+                "reason": "접미사 ‘하다’가 결합한 ‘분석하다’는 붙여 씀."
+              },
+              {
+                "ref": "@para:(지표) 성적 ",
+                "find": "제시 함",
+                "occurrence": 1,
+                "replace": "제시함",
+                "reason": "‘제시하다’의 명사형은 붙여 씀."
+              },
+              {
+                "ref": "@para:(현황) 분석 ",
+                "find": "입학년도",
+                "occurrence": 1,
+                "replace": "입학 연도",
+                "reason": "명사 뒤에서는 ‘연도’를 사용하고 앞말과 띄어 씀."
+              },
+              {
+                "ref": "@para:(해석) 최근 ",
+                "find": "할수",
+                "occurrence": 1,
+                "replace": "할 수",
+                "reason": "의존 명사 ‘수’를 앞말과 띄어 씀."
+              },
+              {
+                "ref": "@para:입학년도별 재수",
+                "find": "입학년도별",
+                "occurrence": 1,
+                "replace": "입학 연도별",
+                "reason": "명사 뒤의 ‘년도’를 ‘연도’로 바로잡고 띄어 씀."
+              },
+              {
+                "ref": "@cell:입학년도별 재수강 경험 비율|0|0",
+                "find": "입학년도",
+                "occurrence": 1,
+                "replace": "입학 연도",
+                "reason": "명사 뒤에서는 ‘연도’를 사용하고 앞말과 띄어 씀."
+              },
+              {
+                "ref": "@para:(평점변화) 주",
+                "find": "가장 낳은",
+                "occurrence": 1,
+                "replace": "가장 나은",
+                "reason": "성적 변화의 좋고 나쁨을 나타내는 문맥이므로 ‘낫다’의 활용형 ‘나은’으로 바로잡음."
+              },
+              {
+                "ref": "@para:(대학별) 소속",
+                "find": "들어남",
+                "occurrence": 1,
+                "replace": "드러남",
+                "reason": "차이가 겉으로 나타난다는 뜻의 ‘드러나다’로 표기를 바로잡음."
+              },
+              {
+                "ref": "@para:(학기 유형) ",
+                "find": "금새",
+                "occurrence": 1,
+                "replace": "금세",
+                "reason": "‘지금 바로’라는 뜻의 부사는 ‘금세’이므로 오기를 바로잡음."
+              },
+              {
+                "ref": "@para:(종합) 분성 ",
+                "find": "분성 결과",
+                "occurrence": 1,
+                "replace": "분석 결과",
+                "reason": "문맥상 ‘분석’을 잘못 입력한 오탈자를 바로잡음."
+              },
+              {
+                "ref": "@para:입학년도가 늦을수록 재",
+                "find": "입학년도",
+                "occurrence": 1,
+                "replace": "입학 연도",
+                "reason": "명사 뒤에서는 ‘연도’를 사용하고 앞말과 띄어 씀."
+              },
+              {
+                "ref": "@para:입학년도가 늦을수록 재",
+                "find": "역활",
+                "occurrence": 1,
+                "replace": "역할",
+                "reason": "‘역할’의 잘못된 표기를 바로잡음."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "C3": {
+      "summary": "표와 본문을 대조하여 모집단 규모, 입학년도별 경험 비율, 대학별 경험 비율의 불일치를 수정하고 중복 제외 설명을 보완함. 표 내부에서 표시값 간 계산 차이가 있는 항목은 원집계 확인 의견을 남김.",
+      "instructionSummary": "표의 수치와 본문 서술을 대조하여 불일치를 수정하고 확정하기 어려운 수치는 확인 의견으로 제시",
+      "calls": [
+        {
+          "name": "propose_changes",
+          "args": {
+            "proposals": [
+              {
+                "ref": "@para:(모집단) 입학",
+                "find": "21,199명",
+                "occurrence": 1,
+                "replace": "21,135명",
+                "reason": "분석 기준 총괄표와 입학년도별 표의 모집단은 모두 21,135명이며, 제외 집단의 중복 55명을 반영한 계산 결과와도 일치함."
+              },
+              {
+                "ref": "@para:(모집단) 입학",
+                "find": "예외 집단 3,262명을 빼고",
+                "occurrence": 1,
+                "replace": "예외 집단 3,262명을 제외하되, 제외 집단 간 중복 55명은 한 번만 차감하여",
+                "reason": "29,821−4,647−832−3,262+55=21,135명이므로 표에 제시된 중복 제외 기준을 본문에도 명시함."
+              },
+              {
+                "ref": "@para:(현황) 분석 ",
+                "find": "2021학년도 입학생의 재수강 경험 비율은 42.3%로 2020학년도와 비슷한 수준임.",
+                "occurrence": 1,
+                "replace": "2021학년도 입학생의 재수강 경험 비율은 41.3%로 2020학년도(42.3%)보다 1.0%p 낮음.",
+                "reason": "입학년도별 표에서 2021학년도 경험 비율은 41.3%, 2020학년도는 42.3%이므로 수치와 비교 서술을 함께 수정함."
+              },
+              {
+                "ref": "@para:(대학별) 소속",
+                "find": "47.1%",
+                "occurrence": 1,
+                "replace": "46.0%",
+                "reason": "소속대학별 표의 다대학 경험 비율 46.02%를 본문의 비율 표기 기준인 소수 첫째 자리로 반올림함."
+              }
+            ]
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@cell:원 등급별 재수강 평점변화|3|3",
+            "text": "D+ 행의 표시값으로 계산하면 재수강 평점 3.0−원 평점 1.5=1.50점이나, 평점변화는 1.55점으로 제시되어 있음. 반올림 전 수치와 표시 자릿수 차이 때문일 수 있으므로 임의로 수정하지 않았음. 원집계에서 재수강 평균과 평점변화를 확인하고, 비교 가능한 소수 자릿수로 제시할 필요가 있음."
+          }
+        }
+      ]
+    },
+    "C4": {
+      "summary": "교육학·통계학 관점에서 보고서를 점검하여 수치 불일치, 인과·동기 해석의 비약, 분석 방법과 결과의 불일치 등에 관한 검토 메모 20건을 작성함. 본문과 서식은 변경하지 않음.",
+      "instructionSummary": "보고서의 심각한 오류·과도한 해석·추측성 서술을 점검하고 근거와 확인 사항을 메모로 남김.",
+      "calls": [
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:RQ2: 학생·",
+            "text": "[분석 질문과 결과의 불일치] 현재 RQ2 결과는 주로 소속대학별 재수강 경험 현황이며, 교과목 특성별 성과 분석은 제시되지 않음. 재수강 경험 비율의 차이와 재수강 후 성과의 차이는 별개이므로 질문에 답한 범위를 구분해야 함. 성과 차이를 해석하려면 원 등급과 교과목 구성 등의 차이도 고려해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@cell:분석 기준 총괄|10|2",
+            "text": "[추정 대상 확인] 이 정의의 평점변화는 최초 수강 대비 최종 성과가 아니라 인접한 두 시도 사이의 변화임. 여러 번 재수강한 학생·교과목은 분석에 반복 기여하므로, 건별 평균을 학생 1명당 개선 정도나 제도 이용 전후의 누적 개선으로 해석하면 안 됨. 학생 단위 및 최초·최종 시도 기준 결과와의 민감도 확인이 필요함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@cell:분석 기준 총괄|15|2",
+            "text": "[중대·비교지표와 인과효과의 혼동] 재수강하지 않은 과목의 ‘후속 평점’이 무엇인지 정의되지 않아 지표를 재현할 수 없음. 다른 과목 성적이라면 교과목·난도·평가 차이가 섞이며, 같은 원 등급만 맞춘 집단이 적절한 반사실 비교집단이라는 보장도 없음. 비교 대상과 시점·산식을 명시하고, 식별 근거가 없는 상태에서 차이를 ‘순효과’로 부르지 않아야 함. 해당 비교 결과도 현재 본문에는 제시되지 않음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(모집단) 입학",
+            "text": "[중대·모집단 불일치] 본문의 21,199명은 분석 기준 표와 결과에 쓰인 21,135명과 다름. 제외 집단 간 중복이 표에 적힌 55명뿐이라면 29,821−4,647−832−3,262+55=21,135명이 됨. 제외 순서와 중복 처리 내역을 확인하여 모든 분석의 분모를 일치시켜야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(예외 집단) ",
+            "text": "[적용 범위 및 근거 누락] 제공된 문서에는 예외 집단의 부록 집계가 보이지 않음. 예체능·의약 계열과 1학년 성적이 없는 학생을 제외한 결과는 대학 전체 학생에게 그대로 일반화할 수 없으므로, 부록의 존재를 확인하고 결론에 적용 대상의 한계를 명시해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(해석) 효과의",
+            "text": "[중대·방법과 결과의 불일치] 현재 결과에는 생존분석 추정치나 성향점수 분석 결과가 없고, 종합에서는 졸업 분석을 후속 과제로 남김. 실제 수행한 분석과 계획한 분석을 구분해야 함. 또한 성향점수는 관측된 공변량에 대한 조정이므로 자기선택 문제 전체를 해결하지 않으며, 수행했다면 투입 변수·공통지지·균형 진단을 제시해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(현황) 분석 ",
+            "text": "[수치 불일치] 입학년도별 표에는 2021학년도 41.3%, 2020학년도 42.3%로 제시되어 있음. 본문의 2021학년도 수치가 다른 연도의 값을 옮긴 것인지 원 집계를 확인해야 함. 두 연도가 비슷하다는 설명과 별개로 수치 자체는 일치시켜야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(해석) 최근 ",
+            "text": "[코호트 비교의 한계] 관측 기간 차이를 언급한 점은 적절하나, 이 조건에서는 누적 경험 비율을 그대로 비교하여 최근 코호트의 재수강 성향이 낮아졌다고 결론 내릴 수 없음. 입학 후 동일 학기까지의 경험 비율 등 공통 관측창으로 비교해야 하며, 현재 자료만으로 관측 기간 차이가 격차를 얼마나 설명하는지도 알 수 없음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(평점변화) 주",
+            "text": "[과도한 성과 비교 주의] 재수강 성적 상한이 A0이므로 원 등급이 낮을수록 상승 가능한 폭이 구조적으로 큼. 낮은 원 점수를 기준으로 선정한 데 따른 평균회귀도 고려해야 함. 따라서 변화량의 크기만으로 낮은 등급 학생이 더 많이 학습했거나 재수강 효과가 더 컸다고 해석할 수 없음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(해석) 이러한",
+            "text": "[중대·인과 및 측정 해석의 비약] 재수강 전후 과목 평점의 차이만으로 재수강의 인과효과나 학업 역량 자체의 향상을 확인할 수 없음. 평균회귀, 재수강자의 자기선택, 평가·담당교원 변화 등이 대안 설명이며, 학업 역량을 직접 측정한 지표도 제시되지 않음. 현재 근거로는 분석 대상 재수강 건에서 평점 상승이 관찰되었다는 범위로 해석해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@tablepara:원 등급별 재수강 평점변화",
+            "text": "[통계적 추론·독립성 점검] 대응표본 검정은 각 건의 전후 성적을 짝짓지만, 같은 학생이 여러 건을 제공하거나 같은 과목의 시도가 연속되는 의존성까지 해결하지는 않음. 주분석은 7,386명이 16,177건을 제공하므로 건 간 독립성 가정을 확인해야 함. 학생 단위 군집 표준오차·군집 부트스트랩·다층모형 등 자료 구조에 맞는 방법으로 불확실성을 재평가할 필요가 있음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@tablepara:원 등급별 재수강 평점변화",
+            "text": "[통계 보고 오류] 출력값이 소수 셋째 자리에서 0.000으로 반올림되었다고 해서 p값이 정확히 0인 것은 아님. 원 검정 결과를 확인하여 통상 p<.001로 보고해야 함. 통계적 유의성은 교육적 중요성이나 재수강의 인과효과를 입증하지 않으므로, 평균 변화의 신뢰구간과 실질적 의미를 별도로 제시하는 것이 필요함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(대학별) 소속",
+            "text": "[수치 불일치] 소속대학별 표의 다대학 경험 비율은 46.02%이며, 경험자 1,328명을 모집단 2,886명으로 나눈 비율과도 부합함. 본문의 47.1%는 표와 일치하지 않으므로 집계 기준 또는 전사 오류를 확인해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(해석) 특히 ",
+            "text": "[중대·동기 추정 및 낙인 위험] 계열별 재수강 비율은 학생의 신청 동기나 부정한 의도를 측정하지 않음. 필수과목 구성, 과목 난도, 평가 관행, 재수강 기회 등의 차이로도 비율이 달라질 수 있어 특정 계열 학생의 의도를 단정할 수 없음. 동기 조사 등의 별도 근거 없이 해당 표현을 유지하지 않는 것이 타당함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@tablepara:소속대학별 재수강 현황",
+            "text": "[지표 범위 확인] 이 표의 건수는 계절학기를 포함하지만, 같은 표의 평점변화가 정규학기 주분석 기준인지 전체 재수강 기준인지는 명시되지 않음. 서로 다른 분석 범위의 지표를 나란히 비교하면 대학별 성과를 오해할 수 있으므로 평점변화의 대상 건수와 학기 범위도 밝혀야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@cell:소속대학별 재수강 현황|0|5",
+            "text": "[집계 정합성 확인] 대학별 경험자 수에 학생당 건수를 곱해 합산하면 재수강은 약 18,910건으로 추산되나, 분석 기준 표의 전체 재수강은 19,144건임. 학생당 건수의 소수 둘째 자리 반올림만으로는 이 차이를 설명하기 어려움. 두 표의 대상·기간·학기 포함 범위가 같은지와 분자·분모 산식을 확인해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(학기 유형) ",
+            "text": "[분모 및 분석 범위 주의] 이 건수는 주분석 모집단 밖의 학생까지 포함하므로 앞선 입학 코호트 분석의 규모·추세와 직접 비교할 수 없음. 또한 연도별 건수 증가는 재학생 수나 전체 수강량 변화로도 발생할 수 있어 재수강 성향의 증가를 뜻하지 않음. 운영 추세를 해석하려면 연도별 수강량 등 적절한 분모와 일관된 대상 기준이 필요함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(학기 유형) ",
+            "text": "[중대·정책 시행 효과의 근거 부족] 추진 배경에서는 성적 상한을 2019학년도부터 운영했다고 하나, 제시된 표는 참고 연도까지 포함해도 2020학년도 이후임. 도입 전 자료가 없어 도입 직후 감소 여부나 규정의 억제 효과를 판단할 수 없음. 시행 시점과 도입 전후 비교 자료를 확인해야 함."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@para:(시사) 따라서",
+            "text": "[중대·정책 결론의 비약] 제시된 기술통계는 계열별 입학 정원 감축의 필요성이나 효과를 검증하지 않음. 재수강 비율이 높다는 사실을 정원 과다 또는 입학생 선발 문제로 연결할 근거가 없으며, 교육과정·평가·학습지원의 영향도 분리하지 않았음. 이 정책 권고는 현재 분석으로 뒷받침되지 않음."
+          }
+        },
+        {
+          "name": "add_memo",
+          "args": {
+            "ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "[분석 범위의 미완결] 학업 진도와 졸업 성과를 핵심 분석 질문으로 제시했으나 이에 대응하는 결과가 없음. 입학 코호트별 재수강 경험 비율은 두 질문의 답이 되지 않음. 현재 보고서의 결론 범위를 RQ1·RQ2의 제시 결과로 한정하고, RQ3·RQ4가 미분석 상태임을 분석 개요와 방법에서도 분명히 밝혀야 함."
+          }
+        }
+      ]
+    },
+    "C2": {
+      "summary": "첨부한 설문 엑셀(가상 자료)로 3장 끝에 「5) 재수강 경험자 설문 결과」 절(본문 다섯 문단, 표 2개, 그래프 1개, 주석)을 넣는 제안을 남겼습니다. 수치는 엑셀의 요약 시트 값을 그대로 옮겼습니다.",
+      "instructionSummary": "엑셀로 설문 결과 절 작성",
+      "calls": [
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "5) 재수강 경험자 설문 결과",
+            "format": {
+              "styleId": "7"
+            },
+            "reason": "3장 마지막(표 5 뒤 빈 줄 다음)에 새 절 제목 — 절 제목 앞 빈 줄은 표 뒤 빈 줄이 맡는다"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(조사 개요) 재수강 제도에 대한 학생 인식을 확인하기 위해 2021~2025학년도 재수강 경험이 있는 재학생 8,867명을 대상으로 2025년 9월 15일부터 10월 3일까지 설문을 실시하였고, 2,141명이 응답함(응답률 24.1%). 문항은 5점 척도(1 전혀 그렇지 않다 ~ 5 매우 그렇다)로 구성함.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "엑셀 개요 시트"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(문항별 평가) 신청 절차의 이해 용이성(평균 3.75점, 긍정 응답 63.1%)과 재수강을 통한 과목 이해도 향상(3.59점, 56.3%)은 긍정 응답이 과반이었음. 반면 졸업 계획 부담이 없었다는 응답(2.86점, 21.2%)과 성적 상한(A0) 규정의 적절성(2.92점, 24.1%), 과목 선택 정보의 충분성(3.13점, 33.8%)은 긍정 응답이 낮았음.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "엑셀 문항별 분포 시트"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(계열별 차이) 자연·공학 계열은 성적 상한 규정(2.79점)과 졸업 계획 부담(2.77점)에서 인문·사회 계열(3.07점, 2.96점)보다 낮게 응답함. 예술·체육(78명)과 기타(39명)는 응답자가 적어 계열 간 비교에 유의해야 함.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "엑셀 집단별 평균 시트"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(재수강 이유) 재수강 이유(복수 응답)는 성적 향상(70.9%)이 가장 많았고, 전공 기초 보충(40.3%), 졸업 요건 충족(33.5%)이 뒤를 이음.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "엑셀 재수강 이유 시트"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(자유응답) 재수강 대상·대체 교과목 정보를 학기 초에 알기 어렵다는 의견, 계절학기 재수강의 과제 부담, 재수강 횟수 제한을 미리 안내해 달라는 요청이 있었음. 설문은 응답률이 24.1%인 자기보고 자료이므로 결과를 재수강 경험자 전체로 일반화하는 데에는 한계가 있음.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "엑셀 자유응답 요약 시트 — 해석의 한계를 함께 적음"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(단위: 점, %)",
+            "format": {
+              "styleId": "11"
+            },
+            "reason": "표 앞 단위 줄"
+          }
+        },
+        {
+          "name": "propose_table",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "caption": "문항별 평균과 긍정 응답률",
+            "header_rows": 1,
+            "rows": [
+              [
+                "문항",
+                "평균",
+                "긍정 응답률"
+              ],
+              [
+                "신청 절차의 이해 용이성",
+                "3.75",
+                "63.1"
+              ],
+              [
+                "과목 선택 정보의 충분성",
+                "3.13",
+                "33.8"
+              ],
+              [
+                "과목 이해도 향상",
+                "3.59",
+                "56.3"
+              ],
+              [
+                "성적 상한(A0) 규정의 적절성",
+                "2.92",
+                "24.1"
+              ],
+              [
+                "재수강 횟수 제한의 적절성",
+                "3.32",
+                "41.8"
+              ],
+              [
+                "졸업 계획에 부담이 되지 않음",
+                "2.86",
+                "21.2"
+              ],
+              [
+                "재수강 과목의 수업 운영 만족",
+                "3.40",
+                "49.9"
+              ],
+              [
+                "재수강 제도 전반 만족",
+                "3.38",
+                "45.1"
+              ]
+            ],
+            "reason": "엑셀 문항별 분포 시트의 평균과 긍정(4~5점) 비율"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "blank": true,
+            "reason": "표 뒤 빈 줄"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "(단위: 명, 점)",
+            "format": {
+              "styleId": "11"
+            },
+            "reason": "표 앞 단위 줄"
+          }
+        },
+        {
+          "name": "propose_table",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "caption": "계열별 주요 문항 평균",
+            "header_rows": 1,
+            "rows": [
+              [
+                "계열",
+                "응답",
+                "성적 상한",
+                "졸업 부담 없음",
+                "수업 운영",
+                "제도 전반"
+              ],
+              [
+                "인문·사회",
+                "928",
+                "3.07",
+                "2.96",
+                "3.63",
+                "3.44"
+              ],
+              [
+                "자연·공학",
+                "1,096",
+                "2.79",
+                "2.77",
+                "3.25",
+                "3.31"
+              ],
+              [
+                "예술·체육",
+                "78",
+                "3.17",
+                "3.19",
+                "3.29",
+                "3.67"
+              ],
+              [
+                "기타",
+                "39",
+                "2.67",
+                "2.36",
+                "2.33",
+                "3.67"
+              ]
+            ],
+            "reason": "엑셀 집단별 평균 시트(Q4·Q6·Q7·Q8)"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "blank": true,
+            "reason": "표 뒤 빈 줄(2번째)"
+          }
+        },
+        {
+          "name": "propose_figure",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "caption": "재수강 이유(복수 응답)",
+            "width_mm": 140,
+            "chart": {
+              "type": "hbar",
+              "categories": [
+                "성적 향상",
+                "전공 기초 보충",
+                "졸업 요건 충족",
+                "장학금 유지",
+                "진로·대학원 준비",
+                "기타"
+              ],
+              "series": [
+                {
+                  "name": "응답 비율",
+                  "values": [
+                    70.9,
+                    40.3,
+                    33.5,
+                    26.6,
+                    26.6,
+                    3.7
+                  ]
+                }
+              ],
+              "y_label": "응답 비율(%)",
+              "unit": "%",
+              "y_min": 0,
+              "y_max": 100,
+              "value_labels": "all",
+              "decimals": 1
+            },
+            "reason": "엑셀 재수강 이유 시트 — 항목 이름이 길어 가로 막대"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:1>>@tablepara:재수강 학년도·학기 유형별 재수강 건수",
+            "text": "주: 연습용 가상 자료. 긍정 응답은 4~5점 응답의 비율이며, 재수강 이유는 복수 응답이라 합이 100%를 넘음.",
+            "format": {
+              "styleId": "8"
+            },
+            "reason": "그림 주석"
+          }
+        }
+      ]
+    },
+    "C5": {
+      "summary": "분석 결과의 종합 뒤에 「2) 시사점 및 정책제언」 절을 두고 시사점 3개·정책제언 3개를 근거 표·그림과 함께 제안했으며, 차례 새로 고침도 남겼습니다. 인과 단정과 분석 범위를 넘는 입시제도 제언은 넣지 않았습니다.",
+      "instructionSummary": "시사점·정책제언 작성과 차례 새로 고침",
+      "calls": [
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "blank": true,
+            "reason": "절 제목 앞 빈 줄"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "2) 시사점 및 정책제언",
+            "format": {
+              "styleId": "7"
+            },
+            "reason": "종합 뒤 새 절"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "(시사점) 분석 결과에서 다음 세 가지를 확인할 수 있음.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "본문"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "원 등급이 낮을수록 재수강 후 평점변화가 컸음(근거: 「원 등급별 재수강 평점변화」 표·그림). 다만 평균회귀 기준선을 뺀 순효과는 아직 제시하지 않았으므로 재수강의 효과로 단정하지 않음.",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "시사점 1"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "자연·공학 계열 대학의 재수강 경험 비율과 학생당 건수가 인문·사회 계열보다 높았음(근거: 「소속대학별 재수강 현황」 표). 계열별 교과 구성과 평가 방식의 차이를 함께 살펴야 함.",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "시사점 2"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "최근 입학 코호트의 경험 비율이 낮았으나 관측 학기가 짧은 영향일 수 있음(근거: 「입학년도별 재수강 경험 비율」 표). 같은 경과 학기 기준의 비교가 필요함.",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "시사점 3"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "(정책제언) 위 시사점에 따라 다음을 제안함.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "본문"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "원 등급이 낮은 재수강 학생에게 학습상담·기초학습 지원을 연계하고, 그 효과를 비교집단과 함께 점검함(근거: 「원 등급별 재수강 평점변화」 표).",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "정책제언 1"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "재수강이 많은 교과목과 대학을 중심으로 수강 여건과 평가 방식을 점검함(근거: 「소속대학별 재수강 현황」 표, 「재수강 학년도·학기 유형별 재수강 건수」 표).",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "정책제언 2"
+          }
+        },
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@after:4>>@para:1) 분석 결과의 종합",
+            "text": "입학 코호트별로 같은 경과 학기의 재수강 경험을 다시 산출하고, 학업 진도·졸업 성과는 후속 분석에서 확인함(근거: 「입학년도별 재수강 경험 비율」 표).",
+            "format": {
+              "styleId": "2"
+            },
+            "reason": "정책제언 3"
+          }
+        },
+        {
+          "name": "propose_toc_update",
+          "args": {
+            "apply_styles": true,
+            "one_line": true,
+            "reason": "늘어난 절·표·그림을 차례에 반영하고 차례 스타일·한 줄 입력을 다시 줌"
+          }
+        }
+      ]
+    },
+    "R1": {
+      "summary": "재수강 전후 평점 비교에서 주의할 평균회귀를 조사해, 추진 배경 뒤에 출처와 함께 「(해석 시 유의점)」 문단을 넣는 제안을 남겼습니다.",
+      "instructionSummary": "주제 조사 — 해석 시 유의점 문단",
+      "calls": [
+        {
+          "name": "propose_insert",
+          "args": {
+            "after_ref": "@para:(필요성) 재수강 신청 건수는",
+            "text": "(해석 시 유의점) 처음 잰 값이 유난히 낮았던 집단은 아무 처치가 없어도 다음 측정에서 평균 쪽으로 돌아오는 경향(평균회귀)이 있음(Barnett et al., 2005). 따라서 원 성적이 낮은 과목의 재수강 후 평점 상승만으로 재수강의 효과를 판단하기 어렵고, 처치가 없는 비교 기준과 함께 보아야 함.",
+            "format": {
+              "styleId": "1"
+            },
+            "reason": "평균회귀의 뜻과 다루는 방법(비교 기준 두기)을 조사해 배경에 보탬. 출처: Barnett, A. G., van der Pols, J. C., & Dobson, A. J. (2005). Regression to the mean: what it is and how to deal with it. International Journal of Epidemiology — 이 문서 참고문헌에 이미 있어 새 항목은 넣지 않음."
+          }
+        }
+      ]
+    }
+  },
+  "curated": "2026-11-04 검수 — scripts/tutorial-advanced/curate-answers.mjs",
+  "reviewed": "2026-11-04: B1·B4 소수 자릿수·끝자리 0 및 p값 보고 기준 검수"
+}

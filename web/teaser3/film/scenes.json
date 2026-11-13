@@ -1,0 +1,59 @@
+{
+  "title": "hwpx-cowork 소개 — 여백의 손글씨",
+  "width": 1920,
+  "height": 1080,
+  "background": "#FFFFFF",
+  "scenes": [
+    {
+      "id": "page",
+      "name": "한 장의 보고서",
+      "dur": 4.5
+    },
+    {
+      "id": "hands",
+      "name": "여백의 손글씨",
+      "dur": 6
+    },
+    {
+      "id": "meet",
+      "name": "문장 위에서",
+      "dur": 4
+    },
+    {
+      "id": "demo",
+      "name": "실제 화면에서",
+      "dur": 10
+    },
+    {
+      "id": "end",
+      "name": "마무리",
+      "dur": 5
+    }
+  ],
+  "modules": [
+    "shared.js",
+    "scene-page.js",
+    "scene-hands.js",
+    "scene-meet.js",
+    "scene-demo.js",
+    "scene-end.js"
+  ],
+  "fonts": [
+    {
+      "family": "Supermagic",
+      "file": "Supermagic.woff2"
+    },
+    {
+      "family": "GowunBatang-Regular",
+      "file": "GowunBatang-Regular.woff2"
+    }
+  ],
+  "assets": [
+    "app-a0.webp",
+    "app-a1.webp",
+    "app-a2.webp",
+    "app-a3.webp",
+    "app-a4.webp",
+    "app-a5.webp"
+  ]
+}

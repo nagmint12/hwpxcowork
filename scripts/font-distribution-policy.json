@@ -1,0 +1,5413 @@
+{
+  "format": "cowork.font-distribution-policy",
+  "schema": 1,
+  "policy": "Offline FontDB/HFT/decoded outlines are not distributable inputs; only reviewed ordinary font assets may ship.",
+  "excludedFingerprints": [
+    {
+      "name": "ENBASKVL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBASKVL.otf",
+      "bytes": 12412,
+      "sha256": "b10cd76a0efdb1ddb89cff45bf6bbf7f11335d86abc114fa3fa3606132be280a"
+    },
+    {
+      "name": "ENBERNF.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBERNF.otf",
+      "bytes": 10044,
+      "sha256": "0669c671a305165db178916ca0f859f0623b958cc91621ee8790d0610936c09a"
+    },
+    {
+      "name": "ENBLBK.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBLBK.otf",
+      "bytes": 7356,
+      "sha256": "813e013748920bc2fcd59d6740e3eb4780a89f201e11a0cbbf8b435579f75c55"
+    },
+    {
+      "name": "ENBODB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBODB.otf",
+      "bytes": 8888,
+      "sha256": "651dd24d424d65d7b856d984fea7e4a7021e7fa57e95b517ecc9e69b4c70266d"
+    },
+    {
+      "name": "ENBODBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBODBI.otf",
+      "bytes": 9876,
+      "sha256": "bb3d9cbbb22fb0d76d4d5a7e6c1b5e80d7f77a56c6ca943cf0ae4c3824d1c078"
+    },
+    {
+      "name": "ENBODBK.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBODBK.otf",
+      "bytes": 8424,
+      "sha256": "9b0fde38f82f5dbb611718dca528b417e0f728a47f450462619cdd54c8d4f921"
+    },
+    {
+      "name": "ENBODBKI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBODBKI.otf",
+      "bytes": 9696,
+      "sha256": "0065e0ce488a93106186e99852a373d0e93e6549d923eaa181d4f7b7c4713c3d"
+    },
+    {
+      "name": "ENBRODWY.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBRODWY.otf",
+      "bytes": 10940,
+      "sha256": "dca999a0497954be66ce8cd353f1c62462c321488cd9176ac80d5c028dc817db"
+    },
+    {
+      "name": "ENBRUSH.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENBRUSH.otf",
+      "bytes": 12536,
+      "sha256": "8508d801c2b1e199e35da984fb180c27578cafbad651e12f59e066308da5124e"
+    },
+    {
+      "name": "ENCOBK.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCOBK.otf",
+      "bytes": 12444,
+      "sha256": "e531afdda952d6044305e2b14463d351f6e327683635400f2e5eabeedf14ecda"
+    },
+    {
+      "name": "ENCOBKI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCOBKI.otf",
+      "bytes": 13132,
+      "sha256": "a067e9e3d5f052765af41be6d6427ede6dd0a57d0dde1e7c4251ed49f2ed1720"
+    },
+    {
+      "name": "ENCORN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCORN.otf",
+      "bytes": 12716,
+      "sha256": "916f485a8e57a74ed324c06980b39ebecf4a415408426cd2017de374ae512992"
+    },
+    {
+      "name": "ENCOSCPT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCOSCPT.otf",
+      "bytes": 14284,
+      "sha256": "5081054fed1be3b332cd7ab655fe78f669aa46e72c2c5d9a309b4b8e05e5db65"
+    },
+    {
+      "name": "ENCR10B.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCR10B.otf",
+      "bytes": 10436,
+      "sha256": "3d7fe3ff2706ed9ca25e21e02e72209d68fa080db0fdebc9b840530a300fa2d6"
+    },
+    {
+      "name": "ENCR10BI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCR10BI.otf",
+      "bytes": 11136,
+      "sha256": "4aecfa0959cf123b01aac48997979ffcdbdc731e24eadd55d20238c765fc8aed"
+    },
+    {
+      "name": "ENCSCH.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCSCH.otf",
+      "bytes": 9864,
+      "sha256": "9567946eca22d0074454387fcb6f6a1f39d544b2ba9b1a0afa4305593ef71d1b"
+    },
+    {
+      "name": "ENCSCHB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCSCHB.otf",
+      "bytes": 9908,
+      "sha256": "8e9a3046602567f0d33b15cf97f6586bd72765bd8cca376fe3f5db69808255c0"
+    },
+    {
+      "name": "ENCSCHBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCSCHBI.otf",
+      "bytes": 10808,
+      "sha256": "27875e93d63ccfe0bab4a7bbe5e44da79d3b74f93b79ffb0da07f2236e67f473"
+    },
+    {
+      "name": "ENCSCHI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCSCHI.otf",
+      "bytes": 10892,
+      "sha256": "114d33a1a0e484315c5e362e8cf7758bd9e4f6028c4439bf15dd4a905f1908c8"
+    },
+    {
+      "name": "ENCUCMBR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENCUCMBR.otf",
+      "bytes": 11144,
+      "sha256": "83fd302595b5349ce6e13b05368ae2c36cc5a70d89cf7f29736b73f6ca3e5fcb"
+    },
+    {
+      "name": "ENDOMCA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENDOMCA.otf",
+      "bytes": 13644,
+      "sha256": "3a598051e28f40b0a5b098ed96890575164119ee55a0996978a1837d5ddb3a84"
+    },
+    {
+      "name": "ENFREEHD.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENFREEHD.otf",
+      "bytes": 12136,
+      "sha256": "af22091af0f7775c9bd56bf7987e6f904509d38ec42cb857c1dccdc28419b6f2"
+    },
+    {
+      "name": "ENFUTUBK.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENFUTUBK.otf",
+      "bytes": 6736,
+      "sha256": "6264a05829181b38db83b63a602fe3410ca51959b13725d7c899954929eb4337"
+    },
+    {
+      "name": "ENGARM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGARM.otf",
+      "bytes": 14368,
+      "sha256": "ed3fc60dfe50e0589225736b459af415b7e519eea1c5a8bbe40572d26ec9f849"
+    },
+    {
+      "name": "ENGARMB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGARMB.otf",
+      "bytes": 14112,
+      "sha256": "dd7959b89d5e7a2b24434acd361bfad068e7c9968a24d79df3b1291e8e6ba2d3"
+    },
+    {
+      "name": "ENGARMBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGARMBI.otf",
+      "bytes": 14200,
+      "sha256": "29f5bee732093d9eb6747d680c9ef1247a5a41dcfd43be91f29f14cd697fd8b0"
+    },
+    {
+      "name": "ENGARMI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGARMI.otf",
+      "bytes": 14000,
+      "sha256": "df9c6cba37517a35bb1c9ba454a8795e6f7185ea66a35710cf2352a8fa83b553"
+    },
+    {
+      "name": "ENGDOS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGDOS.otf",
+      "bytes": 13064,
+      "sha256": "4914c9455c76bd62c77830f534687ccc43982bd2b4feb08076c18817fe28127b"
+    },
+    {
+      "name": "ENGDOSB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGDOSB.otf",
+      "bytes": 12880,
+      "sha256": "76e6d9b28026f2357bade1b36a8c634697a535609fa08a9d0f4fb8b99adc4346"
+    },
+    {
+      "name": "ENGDOSBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGDOSBI.otf",
+      "bytes": 13012,
+      "sha256": "782ee3439ecb908cb6f89cd69dbde749e4b850faf59c750dde47ed9d6c7effcd"
+    },
+    {
+      "name": "ENGDOSI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGDOSI.otf",
+      "bytes": 13292,
+      "sha256": "e537d481beec61108a59a94d33f96675e4110c7efb4805bdb52278f08cfbe38f"
+    },
+    {
+      "name": "ENGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGGT.otf",
+      "bytes": 7480,
+      "sha256": "7512172e73db07e939f9c6eb886a1682b68204f341b3c172e61ce3e9b4f4375b"
+    },
+    {
+      "name": "ENGGTI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGGTI.otf",
+      "bytes": 8424,
+      "sha256": "6e54a57ba55b18b4bd0bd3c1f574935ae57f5a3aec46c9fe503f5554fcffb4ca"
+    },
+    {
+      "name": "ENGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGMJ.otf",
+      "bytes": 9312,
+      "sha256": "03767e698ccf34e1f064461132dfca3736acff5f64b1bfda54b4350a6276735f"
+    },
+    {
+      "name": "ENGMJI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGMJI.otf",
+      "bytes": 10340,
+      "sha256": "17271b933c143202dfc37a0805838007ddbe5a4d71fde0a0d39933259e4985a8"
+    },
+    {
+      "name": "ENGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGRP.otf",
+      "bytes": 7612,
+      "sha256": "7aae4ae9da6f0c9cc739907631500306d91be2e8a5f97ca588553dbc6e3590bd"
+    },
+    {
+      "name": "ENGRPI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGRPI.otf",
+      "bytes": 8352,
+      "sha256": "c62ec3d3df75cce64a0297cf97c7c3d6ce321c2edd168fdf2c893d9181302797"
+    },
+    {
+      "name": "ENGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGS.otf",
+      "bytes": 11140,
+      "sha256": "4fad4d9606e1f16ab058d3eef4accaf17d0e0c235ef7831cc20fb7e0a21cf4e6"
+    },
+    {
+      "name": "ENGSI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENGSI.otf",
+      "bytes": 11700,
+      "sha256": "64f3917721ad44cf145359c0d83501a7022ae4232931a0485add39826623b449"
+    },
+    {
+      "name": "ENHOBO.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENHOBO.otf",
+      "bytes": 11112,
+      "sha256": "4e5a1c24bfda1b6021fcfbfe56ebe0bd2f6eca356529685eee77a0e8f63aefeb"
+    },
+    {
+      "name": "ENITCNBK.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENITCNBK.otf",
+      "bytes": 9840,
+      "sha256": "8ebf91622cd9af1747b21dfd6bb0313a5c3a8902b78a71b674795c680283d613"
+    },
+    {
+      "name": "ENJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENJGT.otf",
+      "bytes": 65624,
+      "sha256": "47715fc3574858401e2f7a8c2c618cf647699152b51a20af3f71f70c236f24ec"
+    },
+    {
+      "name": "ENJGTI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENJGTI.otf",
+      "bytes": 8532,
+      "sha256": "b2add4e3f45e748069cad4ed6746bd56c4ebdd1831f5c85c09ce65581ed32faf"
+    },
+    {
+      "name": "ENLIBRTY.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENLIBRTY.otf",
+      "bytes": 13356,
+      "sha256": "c075581e72c2033621961685abbd6655cdd4a9aeca97252a088e6b4c03c94182"
+    },
+    {
+      "name": "ENMUHB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENMUHB.otf",
+      "bytes": 13968,
+      "sha256": "a6f3166eabc80db1b711c83775e6d13395f6940cb94a94b6e4499aefc52bf0d4"
+    },
+    {
+      "name": "ENOCRA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENOCRA.otf",
+      "bytes": 9804,
+      "sha256": "7662b47d99f6a9f2db4f732dfa06cf003984aadfb1ad50b0daa317726a509252"
+    },
+    {
+      "name": "ENOCRB10.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENOCRB10.otf",
+      "bytes": 6672,
+      "sha256": "94a89acac21e766a23fef18ad8eed38698f5f2d3f0b033d6731e63f325b2f75e"
+    },
+    {
+      "name": "ENORAT10.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENORAT10.otf",
+      "bytes": 7296,
+      "sha256": "811e0bed5eb3183545bb4e8466b4957a65f5b2b2f290803dcf36611a9a387d98"
+    },
+    {
+      "name": "ENORBITB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENORBITB.otf",
+      "bytes": 10948,
+      "sha256": "f0a4be34f8c556a8acfbeeddf6094843a237630cafebca4f7667b6984fb3a52b"
+    },
+    {
+      "name": "ENPENHL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENPENHL.otf",
+      "bytes": 13176,
+      "sha256": "13fe04af35f25a9a52777addeae5c4f4b2de6875ff22dc70f671fb4130b6c651"
+    },
+    {
+      "name": "ENPG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENPG.otf",
+      "bytes": 13520,
+      "sha256": "4572c59ce15417714e4289ac2b0cac0dca9300a83b2de36485e1720c3cf7921f"
+    },
+    {
+      "name": "ENPKAV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENPKAV.otf",
+      "bytes": 12004,
+      "sha256": "9eacc5dacb48d4bb46d77c286ec33f938f3a2087a0474e61d5f4d3cb7c448141"
+    },
+    {
+      "name": "ENS721LI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENS721LI.otf",
+      "bytes": 7432,
+      "sha256": "b03292e96e5bc5668fd9e1f864cd8e9f16b3855788b8c2741a54f8afe1414be1"
+    },
+    {
+      "name": "ENSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSMJ.otf",
+      "bytes": 90956,
+      "sha256": "9c9666f2017d2eb06bb04be890a20ce7350fb278bf202fc2ebdb780c1aeac199"
+    },
+    {
+      "name": "ENSMJI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSMJI.otf",
+      "bytes": 10668,
+      "sha256": "e1e8efe599bcd1fc050c4fe8a04a6ab2ff95b9bfb5c61d1ab586ba0001333f10"
+    },
+    {
+      "name": "ENSS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSS.otf",
+      "bytes": 6980,
+      "sha256": "96065afd5fa825e8beb4a688a110ec8bc675f59e686fb477215f53f600ed08b1"
+    },
+    {
+      "name": "ENSTEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSTEN.otf",
+      "bytes": 11868,
+      "sha256": "548a67c56ddefa8da57aebe5dc3391ad767c56145135bdfd601095f17981d972"
+    },
+    {
+      "name": "ENSW721L.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSW721L.otf",
+      "bytes": 6956,
+      "sha256": "4610cb5282738bd4e6f1c9759b44a9df145c23ed1bf40069669f59c928c0d088"
+    },
+    {
+      "name": "ENSYS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENSYS.otf",
+      "bytes": 8868,
+      "sha256": "028ebb0713bc8f087283eea6d36dd1c728bd7ef4ca1357d7adadeac418f931cb"
+    },
+    {
+      "name": "ENTYPE.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/ENTYPE.otf",
+      "bytes": 9244,
+      "sha256": "f0903471702d4e4d49e4b29fa102f96bdc8646113c1487ebd8d9c035662519f0"
+    },
+    {
+      "name": "FLSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/FLSMJ.otf",
+      "bytes": 17968,
+      "sha256": "42c3df1362ea6304e980d5f4f0f58a23d8e999ecb22df5fb0af8e234f3817770"
+    },
+    {
+      "name": "HANENGB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HANENGB.otf",
+      "bytes": 7372,
+      "sha256": "76ab78ff24d6ccce471a49f143171d0478cf7408f8abfa5f141b8385c1efa306"
+    },
+    {
+      "name": "HANENGL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HANENGL.otf",
+      "bytes": 7436,
+      "sha256": "af9097b391cca2a939d75d19f337a643184e2ace47cb3a1d345668a0ed5dc22b"
+    },
+    {
+      "name": "HANENGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HANENGM.otf",
+      "bytes": 7388,
+      "sha256": "0953656e10ab8c3467818d8089e9a3b132d7970f0091a0f9dbc5f76837386942"
+    },
+    {
+      "name": "HCENBIG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENBIG.otf",
+      "bytes": 7180,
+      "sha256": "ca292292557072c0843cd9bba192fa4b3aa6cfbc8ed56d31021b975da8c27f86"
+    },
+    {
+      "name": "HCENDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENDNR.otf",
+      "bytes": 10108,
+      "sha256": "cfdc23c63c1bad3b88680b48d988b0a7ddfd23c918e75f07c594b862860a3a25"
+    },
+    {
+      "name": "HCENGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENGGT.otf",
+      "bytes": 7428,
+      "sha256": "55cc4604e9737b7d2c7fef8ea8030598458adf6499b6aab14711853ab16f132b"
+    },
+    {
+      "name": "HCENGJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENGJ.otf",
+      "bytes": 7260,
+      "sha256": "d894a48e0980fbd675a95001d042eb35c23018a431ebd362f0561f66662dd0ba"
+    },
+    {
+      "name": "HCENGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENGMJ.otf",
+      "bytes": 11992,
+      "sha256": "390d2a0dba945e62fc9dd299dfb2535e4b51a9815e88e99c992d30643ca79ed6"
+    },
+    {
+      "name": "HCENGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENGRP.otf",
+      "bytes": 7840,
+      "sha256": "0274749c437c25c6a7e4ca96bb4f7723fdceef7969e57048cf245465df848200"
+    },
+    {
+      "name": "HCENGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENGS.otf",
+      "bytes": 9232,
+      "sha256": "6c4a89fbe65bb184a18590a796fe01be50f28d3f4bf6e096a2e9abb316088f44"
+    },
+    {
+      "name": "HCENHEDA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENHEDA.otf",
+      "bytes": 7120,
+      "sha256": "bc1452af4e101d3f23ff3895fd6d84938490fe04bc8eb03d76fdfd45326f2188"
+    },
+    {
+      "name": "HCENHEDB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENHEDB.otf",
+      "bytes": 7120,
+      "sha256": "ff764d69c247032416eaa572ffc1b091121d6cc06fdf061920b626d6dde53b70"
+    },
+    {
+      "name": "HCENHMJA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENHMJA.otf",
+      "bytes": 9860,
+      "sha256": "9c971479ee372e81d809bb03fbeeaa54f681d819f4aa111c4f323f7a3b611632"
+    },
+    {
+      "name": "HCENHMJB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENHMJB.otf",
+      "bytes": 9860,
+      "sha256": "ee6ad3983305a4a2b7e252c063407667456c9ca629f8a56293e5c79e678effe5"
+    },
+    {
+      "name": "HCENJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENJGT.otf",
+      "bytes": 7248,
+      "sha256": "82088057d2ff9b21c1a971d677bc376759b2f3c97c9e5d9b5ee8592d5fef6ca7"
+    },
+    {
+      "name": "HCENJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENJMJ.otf",
+      "bytes": 9848,
+      "sha256": "8e3d57bb8eed79677eb0665468359f257d742b53e749fa7ae38f9978384aec1f"
+    },
+    {
+      "name": "HCENPG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENPG.otf",
+      "bytes": 11468,
+      "sha256": "a5950d302279f071142e51e4682c046473cf55cc2472cc44ca352b007034ef28"
+    },
+    {
+      "name": "HCENSDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSDNR.otf",
+      "bytes": 10108,
+      "sha256": "be1c704f62e91d85251088542af3d444150ea28ddd9f6f2ec163426b70cb7a0b"
+    },
+    {
+      "name": "HCENSEGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSEGT.otf",
+      "bytes": 7128,
+      "sha256": "d8a01fc3636830876b73b31718f660f873c2e9c5aab598f35bc7628857e43f75"
+    },
+    {
+      "name": "HCENSEMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSEMJ.otf",
+      "bytes": 11828,
+      "sha256": "76e69e03acef83577f9ced2937fef61e04fe701adb645a992cc113b441d740c8"
+    },
+    {
+      "name": "HCENSGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSGRP.otf",
+      "bytes": 8324,
+      "sha256": "9f8d95ccfcbaa40a6fcca1e2e7f19868cfea877d3d88e83a700f7b77fb757ee2"
+    },
+    {
+      "name": "HCENSJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSJMJ.otf",
+      "bytes": 9860,
+      "sha256": "96ea99fe9643a21cfc847103019897e0a9fc81f0ba33b94e687c35feea88f816"
+    },
+    {
+      "name": "HCENSMA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMA.otf",
+      "bytes": 6844,
+      "sha256": "ecbed478ef2ff737721927ef5055c487bd24985776345a54508855cd25dca648"
+    },
+    {
+      "name": "HCENSMB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMB.otf",
+      "bytes": 6844,
+      "sha256": "770d5670bc754f99a93a313fee3e49b3287531cce57e62e8ee12482aacef52c2"
+    },
+    {
+      "name": "HCENSMGG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMGG.otf",
+      "bytes": 7440,
+      "sha256": "1537e9b87da8124c49a0069afb9a7177392489421d8fa867d24f8cd3b961f0ec"
+    },
+    {
+      "name": "HCENSMGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMGM.otf",
+      "bytes": 11996,
+      "sha256": "62ba5080ce50aeda008191a8d1b501941741718d317946e50dc2863be2e7c981"
+    },
+    {
+      "name": "HCENSMGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMGT.otf",
+      "bytes": 7068,
+      "sha256": "a2582cc0312201aa01d107cf356f0e39bc52b3cd02fc71cb11d7e50cd82e1e6a"
+    },
+    {
+      "name": "HCENSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMJ.otf",
+      "bytes": 11768,
+      "sha256": "483486c3ffdb3d1631606158f1b481f234fe5df3ec980bf223d7eec92a10229c"
+    },
+    {
+      "name": "HCENSMMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMMJ.otf",
+      "bytes": 10120,
+      "sha256": "396210cf807e50cb2e685599992b3edb1ea821597d62b1c9b683a215d1b1e2f0"
+    },
+    {
+      "name": "HCENSMTG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMTG.otf",
+      "bytes": 7236,
+      "sha256": "0c11218e8f6c2c7db62554e3786d1eb05c9fbade1ad7906379c1989eb455a3fe"
+    },
+    {
+      "name": "HCENSMTM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSMTM.otf",
+      "bytes": 10520,
+      "sha256": "3ebb49f2ad73f98c5486b0e8596a1da016b983e0c24f747dd406ac48155a8f79"
+    },
+    {
+      "name": "HCENSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSNR.otf",
+      "bytes": 10232,
+      "sha256": "a3c9e82240e1b8135a66b00f4e2ba9683926630bb2f6f37e6e5a51fe7c6ed01e"
+    },
+    {
+      "name": "HCENSSGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSSGT.otf",
+      "bytes": 7128,
+      "sha256": "ea9b284dbcbcb6e48fadbc8f03432174501fad5848c1c058f1dabcbc24d01609"
+    },
+    {
+      "name": "HCENSSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSSNR.otf",
+      "bytes": 10248,
+      "sha256": "fd7d8c2bad92be366a3d9099c8b933cd835887ee271eb336c4f246c3caf08216"
+    },
+    {
+      "name": "HCENSTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENSTMJ.otf",
+      "bytes": 10524,
+      "sha256": "8b4453818ed75189f5cf5322e8a1267b92da3cb4cd5b3e7564e9cbc2925cb322"
+    },
+    {
+      "name": "HCENTGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENTGRP.otf",
+      "bytes": 8832,
+      "sha256": "c664b3395f05f0bc8bced768134a067d36110e3dca8df38be963f35136c9e816"
+    },
+    {
+      "name": "HCENTGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENTGT.otf",
+      "bytes": 7224,
+      "sha256": "db9706fa200ade6aa99f85d63633bc3482fd9cb1fedad0f799a651e1130dabb5"
+    },
+    {
+      "name": "HCENTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENTMJ.otf",
+      "bytes": 10456,
+      "sha256": "eaceb80d7b491d94f2a1ff274a1169f934885b4644be1572f54743a85eb6da67"
+    },
+    {
+      "name": "HCENTSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCENTSMJ.otf",
+      "bytes": 10440,
+      "sha256": "dd6394caec9a562b61b856831cc34b0b656e63c09e3264e9d1fd9296a9c60609"
+    },
+    {
+      "name": "HCHGBIG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGBIG.otf",
+      "bytes": 333080,
+      "sha256": "015e4d0bec39951d51339f42ee44c1bfafbeea3f741996f9f0390356c33f3358"
+    },
+    {
+      "name": "HCHGDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGDNR.otf",
+      "bytes": 557752,
+      "sha256": "6fb02d6f0cfe079d6c1cc129a67f45efb21f0fd823da24eb7a97a38f853f7696"
+    },
+    {
+      "name": "HCHGGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGGGT.otf",
+      "bytes": 356340,
+      "sha256": "6393c7df50c16955c19f466af5da6bf313e78bdd5f1d2fb0e6a18ce2d31c1231"
+    },
+    {
+      "name": "HCHGGJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGGJ.otf",
+      "bytes": 321320,
+      "sha256": "6d1f0f9511f3121fff4fa73d19b63591904cf48e582e5565d8bbf14688869625"
+    },
+    {
+      "name": "HCHGGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGGMJ.otf",
+      "bytes": 760976,
+      "sha256": "cc07f32ee65378262d91755da6ec0d3722a8f7d10deecff5ecb69c930f954bbd"
+    },
+    {
+      "name": "HCHGGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGGRP.otf",
+      "bytes": 351204,
+      "sha256": "930156a4d735331c26d91b296d211ef7f983f8d05575ee4496c3b2da7f1b6c79"
+    },
+    {
+      "name": "HCHGGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGGS.otf",
+      "bytes": 780644,
+      "sha256": "4c4473074558efc040420387014ad64b73b764c232821131cb1d3badd703c1a3"
+    },
+    {
+      "name": "HCHGHMJA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGHMJA.otf",
+      "bytes": 828272,
+      "sha256": "9411aec15bf39d64e9e294179a3a82c89e44dae0cea301f07105533d421d3221"
+    },
+    {
+      "name": "HCHGHMJB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGHMJB.otf",
+      "bytes": 831484,
+      "sha256": "cb8d0af7cf2922e49db5ef9d1221a460d6649f82f099b37874cc2aa70b6d2f1a"
+    },
+    {
+      "name": "HCHGJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGJGT.otf",
+      "bytes": 351636,
+      "sha256": "f603b92534d81699df07d636f94bec7fd24484a3ebdfe62cf95fc547aa2c795a"
+    },
+    {
+      "name": "HCHGJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGJMJ.otf",
+      "bytes": 800544,
+      "sha256": "aab4ee80b37b44d9a057fc1f4d9c70ce148149f0f775f1e8dfb55b94589c6a02"
+    },
+    {
+      "name": "HCHGSDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSDNR.otf",
+      "bytes": 558092,
+      "sha256": "0e00522afe573526e9674d1c271029ff28102b52440ef7af3cfd49f2fdceea25"
+    },
+    {
+      "name": "HCHGSEGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSEGT.otf",
+      "bytes": 292856,
+      "sha256": "0bac43838468bb19b57567a464568a994e4b72f5856825ae5cbfc878772766ac"
+    },
+    {
+      "name": "HCHGSEMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSEMJ.otf",
+      "bytes": 799096,
+      "sha256": "85248940b5eb45e238960078d73b63f3e6a9aebe173f3a54ca2b13ab6ed7a584"
+    },
+    {
+      "name": "HCHGSGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSGRP.otf",
+      "bytes": 425068,
+      "sha256": "19cef294ab415b177f7388c05abad209e271cab957605cc3c050622667eeda8a"
+    },
+    {
+      "name": "HCHGSJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSJMJ.otf",
+      "bytes": 780916,
+      "sha256": "3ba57b7338afc99cf3c7791d385509925d8c95ebcebb2f00fed0baae8661d380"
+    },
+    {
+      "name": "HCHGSMA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMA.otf",
+      "bytes": 240568,
+      "sha256": "182a8e5e3d246a64fe87d7eee7c613063c41f2849040d893abde269d2ac432b0"
+    },
+    {
+      "name": "HCHGSMB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMB.otf",
+      "bytes": 240612,
+      "sha256": "a5a4957c5d5bfb3268eaf5ab8eb7e349e61cd3be1e6a38587c442d47fd8793a5"
+    },
+    {
+      "name": "HCHGSMGG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMGG.otf",
+      "bytes": 329720,
+      "sha256": "410318df0af5c61ca0271110bdd950a2cb993a16abf96fe19412edb09585a20a"
+    },
+    {
+      "name": "HCHGSMGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMGM.otf",
+      "bytes": 666952,
+      "sha256": "6717e7bcde9f61210a0afa05b7395cadd4379b023a5efa095df20285aa5f2eeb"
+    },
+    {
+      "name": "HCHGSMGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMGT.otf",
+      "bytes": 311304,
+      "sha256": "077fa66420b2b1d0f8394f3a9bf2ad5f069a88c8e041bb1383f973138e50b8fb"
+    },
+    {
+      "name": "HCHGSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMJ.otf",
+      "bytes": 781016,
+      "sha256": "adec6b722fef181cf0e14cb311b08cc02312f1d78f4fffd927622e40d73c46db"
+    },
+    {
+      "name": "HCHGSMMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMMJ.otf",
+      "bytes": 846328,
+      "sha256": "b05f4ce1fd0c58e5f148a9bcf50ad5ec19a34adaacbb6a314cb10eab7c790c44"
+    },
+    {
+      "name": "HCHGSMTG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMTG.otf",
+      "bytes": 293864,
+      "sha256": "f88dc5092bc63533d14f616c7409a8a957e5f02b5947f3c6804b583e4723f157"
+    },
+    {
+      "name": "HCHGSMTM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSMTM.otf",
+      "bytes": 790980,
+      "sha256": "066e7a11b93cbc16adc023207f053d3a65e2336ce3b7488883956f7d61caccb5"
+    },
+    {
+      "name": "HCHGSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSNR.otf",
+      "bytes": 554708,
+      "sha256": "d5cbce37adbbb0459150504226ec8a44622bc1ac9ab5aca38e09c6a3ed5bcd48"
+    },
+    {
+      "name": "HCHGSSGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSSGT.otf",
+      "bytes": 292520,
+      "sha256": "5379baee81352fac0a01d44a0c48121406c129161eadd30c216ae57f63de83a9"
+    },
+    {
+      "name": "HCHGSSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSSNR.otf",
+      "bytes": 471184,
+      "sha256": "5079385cad41d8014a3d47e90df58aa4b21468d2b6d6b2e340c614750b58e76d"
+    },
+    {
+      "name": "HCHGSTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGSTMJ.otf",
+      "bytes": 785224,
+      "sha256": "820a5a49ec741df0d92b9cd7020499e932bc3cdf65654b3ce9fb21b8010e7780"
+    },
+    {
+      "name": "HCHGTGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGTGRP.otf",
+      "bytes": 361140,
+      "sha256": "ba27209a5f576138a26b2c4e44d59941e45582ccfc17729e959dfc86bef23369"
+    },
+    {
+      "name": "HCHGTGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGTGT.otf",
+      "bytes": 373860,
+      "sha256": "ad6ef5c8c791deb66bd2176a5d56c20a3c98136e762202c231ec73ccd9d63f30"
+    },
+    {
+      "name": "HCHGTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGTMJ.otf",
+      "bytes": 763588,
+      "sha256": "f8fa1ab415f447f4670a73b6eb7b6f8ea24f39199c2aee885f6ca773dd09b102"
+    },
+    {
+      "name": "HCHGTSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHGTSMJ.otf",
+      "bytes": 573392,
+      "sha256": "6403eb8ec5cfcf12e4ae7face4fa75e6cda10b526fe8839b5e5c9393137f3a4a"
+    },
+    {
+      "name": "HCHJGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJGGT.otf",
+      "bytes": 1252956,
+      "sha256": "e2e862ae34cafd610fa585b77f6256b28759dba4972fd54f2b0b83e0f4229811"
+    },
+    {
+      "name": "HCHJGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJGMJ.otf",
+      "bytes": 1943624,
+      "sha256": "5cb0bde07d02ab2460ded7b0866897c93a6b3f40ef1f0931b82468aee7b4fa4d"
+    },
+    {
+      "name": "HCHJGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJGS.otf",
+      "bytes": 2846780,
+      "sha256": "6724fdb326b1f6cb5adef1faec04705404fa75596944a5328005e9afd7caba0e"
+    },
+    {
+      "name": "HCHJJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJJGT.otf",
+      "bytes": 1055232,
+      "sha256": "a480510ac22d8750b9140c68293f9a08a65376d22d510bc9eec220de61bdb5eb"
+    },
+    {
+      "name": "HCHJJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJJMJ.otf",
+      "bytes": 1627060,
+      "sha256": "e3a032cf607f253d4af03fafd4e64d49f7386ad2279c4898a9f0afcc5d3d4e05"
+    },
+    {
+      "name": "HCHJSDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSDNR.otf",
+      "bytes": 1756760,
+      "sha256": "6c56d37a439484964fc722efd19d5cee192948481d8e8fe1e2f25f1bac4b69ba"
+    },
+    {
+      "name": "HCHJSMGG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSMGG.otf",
+      "bytes": 1144260,
+      "sha256": "9881656ad62356ee8ed4166c3ea5883a5334cf981f7eaeb302dd1225db9a91c3"
+    },
+    {
+      "name": "HCHJSMGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSMGM.otf",
+      "bytes": 1934624,
+      "sha256": "baa82b932c44862e4cc2c97f051b9674f75bb57be335a9efccedbc94a7d4543b"
+    },
+    {
+      "name": "HCHJSMGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSMGT.otf",
+      "bytes": 1209788,
+      "sha256": "b9c79f39634f2ea9144581daac9d0c5e5e1cd530fc147aba78fddb56c7776845"
+    },
+    {
+      "name": "HCHJSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSMJ.otf",
+      "bytes": 1644256,
+      "sha256": "577363dc6f6f71655173870115fd3ecba0323c0d0d4414ca1181e65c5b675969"
+    },
+    {
+      "name": "HCHJSMMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSMMJ.otf",
+      "bytes": 1878224,
+      "sha256": "b6c3f26575c40e182dc4c7e785f71b9d3d005e9a2058f1fac74123f1a90250d5"
+    },
+    {
+      "name": "HCHJSSGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSSGT.otf",
+      "bytes": 1095064,
+      "sha256": "5bd83b293377807e6bb18072b2a9fb1eb496b65c460475ac847b9633f16c989f"
+    },
+    {
+      "name": "HCHJSSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJSSNR.otf",
+      "bytes": 1736776,
+      "sha256": "8e3740bc3951bc6edb32d1e98e0eabc3dce21357b8b6b4f0730058e664b6655b"
+    },
+    {
+      "name": "HCHJTGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJTGT.otf",
+      "bytes": 1218244,
+      "sha256": "d8587319b3832a28a8eb13636b9ba6f3f4a86fcdeb5232d1d6fe8c876e1a5f5d"
+    },
+    {
+      "name": "HCHJTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCHJTMJ.otf",
+      "bytes": 2320392,
+      "sha256": "7b5be77cfd7d1eb5d69114a55b5ee2bc0b9c50d3474f3fccde6d042d950178ea"
+    },
+    {
+      "name": "HCJPJGTV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCJPJGTV.otf",
+      "bytes": 27856,
+      "sha256": "20de38bcef294d5f3eaab5df6d983afd5fd036df82849e4e174c3b089936cdd7"
+    },
+    {
+      "name": "HCJPSEGV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCJPSEGV.otf",
+      "bytes": 27604,
+      "sha256": "6763e8f2920ed6a1af9fbbdffad4025c2b63f45b8d9abc235f85cd9cdb939f6c"
+    },
+    {
+      "name": "HCJPSEMV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCJPSEMV.otf",
+      "bytes": 34880,
+      "sha256": "660cc1def10dd1d377c62f93a4bcd7b9b1367a889be40004d2f324b411c449ea"
+    },
+    {
+      "name": "HCJPTGTV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCJPTGTV.otf",
+      "bytes": 27368,
+      "sha256": "d2e4ed2230e8c10b0fd5452cd84b2566684dbd7d57b15925fd6336247b80f868"
+    },
+    {
+      "name": "HCJPTMJV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCJPTMJV.otf",
+      "bytes": 33152,
+      "sha256": "ea7128e9793f7910c82d86d3da3863ed3bd34da1e6a413d9d3b8e9996b72cfe2"
+    },
+    {
+      "name": "HCSPBIG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPBIG.otf",
+      "bytes": 58680,
+      "sha256": "40f7e27b66b17225058e9ed4edac9d42efcf9fd1d354dcb60bc336204e0a3c1d"
+    },
+    {
+      "name": "HCSPDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPDNR.otf",
+      "bytes": 66024,
+      "sha256": "3af0205818be379730b7dc11235bcb07ef046bec2c944c3f53ff2162c4fedb7c"
+    },
+    {
+      "name": "HCSPGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPGGT.otf",
+      "bytes": 58908,
+      "sha256": "4a819decd68bb03503c2da6fdbbf625cba1f42cc72e1cb195251050716f333f1"
+    },
+    {
+      "name": "HCSPGJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPGJ.otf",
+      "bytes": 58884,
+      "sha256": "47e545fb42f2f995d29d2d6b845580006baf22b1a2e50315323bb28a2f742b84"
+    },
+    {
+      "name": "HCSPGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPGMJ.otf",
+      "bytes": 73936,
+      "sha256": "fb632058ee60ba7030e62883a6663c1d77cf76f23379f28fb94e91d9e1639063"
+    },
+    {
+      "name": "HCSPGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPGRP.otf",
+      "bytes": 61052,
+      "sha256": "20b4b8a3f96ae9b76fd781f9209ca6572d42d5e5ee817efae38feffe75d63789"
+    },
+    {
+      "name": "HCSPGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPGS.otf",
+      "bytes": 66072,
+      "sha256": "1fbdb6171b26cc36a539cfad7861264871ce9da4b28f1049670e7d6cc8393abc"
+    },
+    {
+      "name": "HCSPJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPJGT.otf",
+      "bytes": 58568,
+      "sha256": "e4cb3f52c34efb8f297a39b2c289276d6e7c0d1e8c98dd32c4b77e709abf584b"
+    },
+    {
+      "name": "HCSPJMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPJMJ.otf",
+      "bytes": 71024,
+      "sha256": "98cd0ca7c032137658f15b350a1c6ac359c3ebf0737b1c4b05c133566aabb021"
+    },
+    {
+      "name": "HCSPPG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPPG.otf",
+      "bytes": 62248,
+      "sha256": "7b22508e112c0c80c8e86353a2ef2545728a495091ad5472a97152726e6b01a1"
+    },
+    {
+      "name": "HCSPSDNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSDNR.otf",
+      "bytes": 66220,
+      "sha256": "b69304ce56b035904bcebabb5c3da225d719d9d5009af82aadd40ee3d30b5de5"
+    },
+    {
+      "name": "HCSPSEGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSEGT.otf",
+      "bytes": 58412,
+      "sha256": "1a61f4e91d8a311d4c10e9935bc3b819d14c11bd060b3d63fb502c805a0e2046"
+    },
+    {
+      "name": "HCSPSEMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSEMJ.otf",
+      "bytes": 74032,
+      "sha256": "f39123309a7ed7723533d12ae299f6978fcee750e519ae4ea42903e3a35d4724"
+    },
+    {
+      "name": "HCSPSGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSGRP.otf",
+      "bytes": 61716,
+      "sha256": "350558d1cc8b6c0e10d823ea7c32ae355ef13e5a1dec9d4415a926d3795d1ae1"
+    },
+    {
+      "name": "HCSPSMA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSMA.otf",
+      "bytes": 54720,
+      "sha256": "817272d27f45c1af438983c35999c70d5ea76bedd9eca70d48f03447700b1c03"
+    },
+    {
+      "name": "HCSPSMGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSMGT.otf",
+      "bytes": 59208,
+      "sha256": "a003b21b8868f5a213fac362669b1bbc5b886692cf9ac2bfd0325a81e014cee4"
+    },
+    {
+      "name": "HCSPSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSMJ.otf",
+      "bytes": 73888,
+      "sha256": "7d61e3296350b0c1e80a8dc7fa3dfe9e3dd9c5db05f78721816eac25b8743743"
+    },
+    {
+      "name": "HCSPSMMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSMMJ.otf",
+      "bytes": 70540,
+      "sha256": "c61ac80500a41a9775721811a380e784ffc7244d2ed626f00c18740e6e7faf02"
+    },
+    {
+      "name": "HCSPSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSNR.otf",
+      "bytes": 66664,
+      "sha256": "614444f5eae5e7dfbd330fabfb30d4ee6d5a60a57d384882806408e283f7415f"
+    },
+    {
+      "name": "HCSPSSGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSSGT.otf",
+      "bytes": 58644,
+      "sha256": "d73174461ad2c7f5982e8f95d5a33579d9c9f4859c9687f782fa7810f6903f23"
+    },
+    {
+      "name": "HCSPSSNR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSSNR.otf",
+      "bytes": 62292,
+      "sha256": "29715039ae72585a3044745222cda85149c74ab1f20f88f57b708f8562c21fe9"
+    },
+    {
+      "name": "HCSPSTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPSTMJ.otf",
+      "bytes": 72440,
+      "sha256": "d94c85bdcdf6ec6f8da19db6c2a687d7bf6fda3fa524e77a78615dacb67091ed"
+    },
+    {
+      "name": "HCSPTGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPTGRP.otf",
+      "bytes": 60540,
+      "sha256": "a81ba0ae2c4bdf6964e171e54bc49a13f6cd3878010320f27cb33520d36ee465"
+    },
+    {
+      "name": "HCSPTGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPTGT.otf",
+      "bytes": 58560,
+      "sha256": "23b09001a0ff02668f79b119d56e14f2fad9c7fe26e11db5dc8548ee0a611875"
+    },
+    {
+      "name": "HCSPTMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPTMJ.otf",
+      "bytes": 72516,
+      "sha256": "cc31c570d9a770b1aedd7b31e4c732d5dab8bc9088d2874e5c0c4927c4b63ca3"
+    },
+    {
+      "name": "HCSPTSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HCSPTSMJ.otf",
+      "bytes": 72324,
+      "sha256": "0664e62b788db406b58884fca9217f4d78feb2b2fe8ebd5ab7a0463313c2088a"
+    },
+    {
+      "name": "HGBTJM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGBTJM.otf",
+      "bytes": 762260,
+      "sha256": "d56b90625254588b6d2d6b8d2bc5156247d3fea2841849b07beb9e467ad2f99c"
+    },
+    {
+      "name": "HGCORN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGCORN.otf",
+      "bytes": 2165840,
+      "sha256": "186afceb3d1ecdbcfefbc5188d531d9081a5da335f9a113bc1759d20735d48c7"
+    },
+    {
+      "name": "HGCUCMBR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGCUCMBR.otf",
+      "bytes": 655472,
+      "sha256": "8da51207a122a48325d02c8e0ed177b4c120a3e2ea00744302855949496306a4"
+    },
+    {
+      "name": "HGDU.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGDU.otf",
+      "bytes": 296804,
+      "sha256": "4edc65d507f59d160d9c4779fb4fdcf201ad13b2c3418bfba2045d0a6d1c54b6"
+    },
+    {
+      "name": "HGDUJM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGDUJM.otf",
+      "bytes": 306396,
+      "sha256": "627c103e259b85888a798dec9f564d9f7a780f49299e9756fb0cb18e62d5128d"
+    },
+    {
+      "name": "HGEGPLNT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGEGPLNT.otf",
+      "bytes": 634432,
+      "sha256": "e16b346067686509205f7f1c9e7247475c641a7ba790bf184cb313d8fa7be1e0"
+    },
+    {
+      "name": "HGGGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGGGT.otf",
+      "bytes": 331680,
+      "sha256": "a1c71915248f179f648008060f3064056b3861c740c6d75c87bcec036fac472d"
+    },
+    {
+      "name": "HGGMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGGMJ.otf",
+      "bytes": 647712,
+      "sha256": "c3f56d5c7b8e42af8500f9b24de9852c02c9e4445660c8d8d0d2eeaf95d0a20b"
+    },
+    {
+      "name": "HGGRP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGGRP.otf",
+      "bytes": 329780,
+      "sha256": "1910a076b15a249726559285f5dcf1814b504bdb8881d978e14fc697db2ae436"
+    },
+    {
+      "name": "HGGS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGGS.otf",
+      "bytes": 625568,
+      "sha256": "e951300997aba5e3e7303480723c68309f8d4d4f23dedd60038dc59d993c61a6"
+    },
+    {
+      "name": "HGJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGJGT.otf",
+      "bytes": 314212,
+      "sha256": "4e3397124b7554bd77ceb0f5740f446fce64a49815ccb9e511e9ed50554e66f2"
+    },
+    {
+      "name": "HGKDNYBN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGKDNYBN.otf",
+      "bytes": 654480,
+      "sha256": "3487d2229a90bbb0f6b836909bc6ba35587b40893c309a79c784685f95fa3622"
+    },
+    {
+      "name": "HGPENHL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGPENHL.otf",
+      "bytes": 841812,
+      "sha256": "bbf79a55ea57b995f6f0c33c9a38fc7b79168e6b758b3d0601cf875d33690e5a"
+    },
+    {
+      "name": "HGSTRBRY.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HGSTRBRY.otf",
+      "bytes": 671532,
+      "sha256": "6c96fea5f44bd7f803ac543fc1e4930070fe9d05f01d952327823bd4663f451d"
+    },
+    {
+      "name": "HJGHS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJGHS.otf",
+      "bytes": 8265608,
+      "sha256": "5cbfe3fb1868dba5502c85d06bff0abf436181dff516b7c798a5da6884e6f014"
+    },
+    {
+      "name": "HJGJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJGJGT.otf",
+      "bytes": 3628168,
+      "sha256": "66905fdece23defadc43f88d304dc768dbbf400757293f5bc6528823046352ec"
+    },
+    {
+      "name": "HJGSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJGSMJ.otf",
+      "bytes": 6276312,
+      "sha256": "a9277b04465550ca207950dd98618d34d151d5254aa278342f1b1c395d428925"
+    },
+    {
+      "name": "HJJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJJGT.otf",
+      "bytes": 1216188,
+      "sha256": "91a96c505268aef4765a7f41ffe83aac9bfabcfc5b7b9ae16f878c1fd5ddd990"
+    },
+    {
+      "name": "HJSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJSMJ.otf",
+      "bytes": 6107712,
+      "sha256": "f6814d1e3aa8e4fcc30b9f932290a41ad62ff8ffd2680bfc850c4e2fbaa4740a"
+    },
+    {
+      "name": "HJYHS.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJYHS.otf",
+      "bytes": 9624212,
+      "sha256": "ac01d9daef38260a94c3b96de6d470479b7d1038d232c400eff5b7b05d7c9b8c"
+    },
+    {
+      "name": "HJYSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HJYSMJ.otf",
+      "bytes": 513920,
+      "sha256": "b5025ec7914bf32c2299247716cb4935d52547ea3fb488f7cdc2c4955ae8e284"
+    },
+    {
+      "name": "HMEAC.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEAC.otf",
+      "bytes": 6944,
+      "sha256": "858849d81d945d8fe1ac31a4ce43b734123fdeb86b568ae4a4a5eb7d55509c71"
+    },
+    {
+      "name": "HMEACB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEACB.otf",
+      "bytes": 7120,
+      "sha256": "4a1a7a540fc07f1532fdcc914267a34c8895dec282c1ab1f6b1a409bbb647b1d"
+    },
+    {
+      "name": "HMEACBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEACBI.otf",
+      "bytes": 7916,
+      "sha256": "5b8a48d1fb62e17fc1237dac0868ef314f260f48422fb1e7d5d41369497fa96a"
+    },
+    {
+      "name": "HMEACI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEACI.otf",
+      "bytes": 7728,
+      "sha256": "60171c9711d172c83f9db3cb3f12433f592de33cbea568a35bc15f9dd06356d5"
+    },
+    {
+      "name": "HMEAHNB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEAHNB.otf",
+      "bytes": 5036,
+      "sha256": "32017e5564e16e9dfce53b29d7372c3203ea117a42f6e6d586937564910f8376"
+    },
+    {
+      "name": "HMEAHNL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEAHNL.otf",
+      "bytes": 5044,
+      "sha256": "cb85ce3bb8ae330a8a1fa8a94e852f739cf7ef47a3a50b636feabe30980b3415"
+    },
+    {
+      "name": "HMEAHNM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEAHNM.otf",
+      "bytes": 5000,
+      "sha256": "94f5043d5b746c4e1768d51a50679c919460f735d45f39fe25496639414060a3"
+    },
+    {
+      "name": "HMEBF.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEBF.otf",
+      "bytes": 9420,
+      "sha256": "aaa511654aaecc9ed95a62b58f1d9ef577d94940eaa1b36f9ebee4849ca6bca5"
+    },
+    {
+      "name": "HMEBFB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEBFB.otf",
+      "bytes": 9032,
+      "sha256": "0588cfaaca6abd9fbc00aff503ca557045ea7d94472f49278892c9e183feb221"
+    },
+    {
+      "name": "HMEBFBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEBFBI.otf",
+      "bytes": 9556,
+      "sha256": "23d611db130179e9427acfdbe2ed01b02da58c6a0ef8926fb1c82d364a7b42bb"
+    },
+    {
+      "name": "HMEBFI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEBFI.otf",
+      "bytes": 9768,
+      "sha256": "ef21941b1b3d2803fe3ef6370f6c3585961300877afd42bf8478833fe8f21f71"
+    },
+    {
+      "name": "HMECENT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMECENT.otf",
+      "bytes": 10364,
+      "sha256": "5601a493e0fc0d2cc42dc47909308ddabafbcad73beb648f0676c7814bec7194"
+    },
+    {
+      "name": "HMECR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMECR.otf",
+      "bytes": 7220,
+      "sha256": "15218bda2e00ab46baa70ee074249f88547a92c113e5eafb2e4899f36a147d19"
+    },
+    {
+      "name": "HMECRB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMECRB.otf",
+      "bytes": 7104,
+      "sha256": "b67e2dd21704b6956fa8665d56f405938b67991eb9988fcb1cff47f8fa7ce328"
+    },
+    {
+      "name": "HMECRBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMECRBI.otf",
+      "bytes": 8124,
+      "sha256": "26697dea95f6f261c7ad68f3991ac2f69b70d830ff47259a9fa50ca6debd3df1"
+    },
+    {
+      "name": "HMECRI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMECRI.otf",
+      "bytes": 8320,
+      "sha256": "94252c45064606be52b501aebcb4bc0a7d22f82f6ac31b6c75082c410cb222c7"
+    },
+    {
+      "name": "HMEHL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHL.otf",
+      "bytes": 6996,
+      "sha256": "4f793e3eba76c3ee6ffb19ca0b5dc70a587542033ac86d485402c0374c249397"
+    },
+    {
+      "name": "HMEHLB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLB.otf",
+      "bytes": 7088,
+      "sha256": "8bba66b3da14b9781560389e5f22099416744a262a2d4bdb2b5aa21d75edd24f"
+    },
+    {
+      "name": "HMEHLBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLBI.otf",
+      "bytes": 7944,
+      "sha256": "142760e2faa8eaa6b893f18eb19c9b31e6e1076c1031cc27a8f652679a19b32d"
+    },
+    {
+      "name": "HMEHLI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLI.otf",
+      "bytes": 7868,
+      "sha256": "fe73f7f916ca2b949939c8923a024a01e1a1b19cf5aab366923df28cb84ee610"
+    },
+    {
+      "name": "HMEHLN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLN.otf",
+      "bytes": 6908,
+      "sha256": "89e0f99ac2fdf0aa8e53006e7af0a3d376eb7b5e9ddf398659a8afd162cca0cc"
+    },
+    {
+      "name": "HMEHLNB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLNB.otf",
+      "bytes": 7012,
+      "sha256": "7d6366b9dc78a6982d46e305ddb97f621b64a0f0f7f3c471d93f53b8544cf086"
+    },
+    {
+      "name": "HMEHLNBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLNBI.otf",
+      "bytes": 7840,
+      "sha256": "1f8f43c1a8e20c3f70e10ecc0125c643577f7ebd5da9a0da83968f82b1fa8487"
+    },
+    {
+      "name": "HMEHLNI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEHLNI.otf",
+      "bytes": 7768,
+      "sha256": "386158cd44010fb2fdabd89ed3c21bacaf8b80cb99ff63ed54f9213493f70855"
+    },
+    {
+      "name": "HMEMO.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEMO.otf",
+      "bytes": 9232,
+      "sha256": "54bd8f960517c829d5b0852768f24bf54398dd3abdaa0c73df99bf499189a36e"
+    },
+    {
+      "name": "HMEMOB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEMOB.otf",
+      "bytes": 9376,
+      "sha256": "222e04d7422d97969874a4b65bbdaa1027e13e6903037f4646884f65aeb1bee2"
+    },
+    {
+      "name": "HMEMOBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEMOBI.otf",
+      "bytes": 9900,
+      "sha256": "c629909a2cb836b5024b9fe206f7f7cd48e1ff0ed68ee15536e9dbb2079053cf"
+    },
+    {
+      "name": "HMEMOI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEMOI.otf",
+      "bytes": 9924,
+      "sha256": "d25536fdc1b39f6e8d2540b0c0c5d3703444d2cb6d19f84d37a4fb25f0cbb26e"
+    },
+    {
+      "name": "HMEPO.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEPO.otf",
+      "bytes": 9104,
+      "sha256": "f7ed870219de65047f7829cf9400b9bfceb453439ba092ee971d492a0470b71e"
+    },
+    {
+      "name": "HMEPOB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEPOB.otf",
+      "bytes": 9164,
+      "sha256": "166dc0b571fc4033e2affe0f9fd2fc5be756b8f422a24462b7d9e2c3b0b42442"
+    },
+    {
+      "name": "HMEPOBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEPOBI.otf",
+      "bytes": 9800,
+      "sha256": "1953a4cddc818935e8343f92f8abd88ae86a71118ed6d25c055001e0eb43f7c0"
+    },
+    {
+      "name": "HMEPOI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMEPOI.otf",
+      "bytes": 9772,
+      "sha256": "1b671ee024483c8039536a32abed641aa1b6d588bea45033f8cb2690a450588f"
+    },
+    {
+      "name": "HMETR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMETR.otf",
+      "bytes": 9072,
+      "sha256": "59a49c0d003afa785163eac260d869675c6672c9e0724c33cffbd31785fc51fa"
+    },
+    {
+      "name": "HMETRB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMETRB.otf",
+      "bytes": 8916,
+      "sha256": "871d418a93e6ecf8f84bb35477a9b7b1181c24b71c12fb223474cd111a6ef45e"
+    },
+    {
+      "name": "HMETRBI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMETRBI.otf",
+      "bytes": 9436,
+      "sha256": "fb0f0508fe50a87e61ba5284a94a1b498c6acedccac3119a1ce413e810ffb5f6"
+    },
+    {
+      "name": "HMETRI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMETRI.otf",
+      "bytes": 9392,
+      "sha256": "5bb3bd9b5cc5859f735836cf78ab7391092e22a764165b0205a32c3ef87ea1e7"
+    },
+    {
+      "name": "HMKMG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMKMG.otf",
+      "bytes": 318024,
+      "sha256": "63ca878d0f1debf303f2faa304e80326467f4fa6bb44e74137436c862f48114d"
+    },
+    {
+      "name": "HMKOLD.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMKOLD.otf",
+      "bytes": 689108,
+      "sha256": "4da76ba7b24fb3e68f0b6e3ea931b0fa4a065e10c81270705c6c970c2e480d82"
+    },
+    {
+      "name": "HMKSM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HMKSM.otf",
+      "bytes": 667960,
+      "sha256": "3994c6a89e817439ecbb5a7838b646b698e2bc5959e420ca362bc5643269d359"
+    },
+    {
+      "name": "HSUSFL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HSUSFL.otf",
+      "bytes": 11812,
+      "sha256": "4ac368d687c7920169b62159f09b261df9f031189632e1d109d78efe778b6e3e"
+    },
+    {
+      "name": "HSUSR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HSUSR.otf",
+      "bytes": 10192,
+      "sha256": "7494dbc8eeb0eca67840edae752d1dd6a59083171e76fcf1720e126cd1187fda"
+    },
+    {
+      "name": "HSUSRI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HSUSRI.otf",
+      "bytes": 10648,
+      "sha256": "1f1150df3a1d67d0d1ab319b423022b882c6f6fe4b9e066c33c0d240f128bb04"
+    },
+    {
+      "name": "HSUSSP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/HSUSSP.otf",
+      "bytes": 22756,
+      "sha256": "46126ba75180ef52c334f1489f11c069cc14fbbcd97dee9027aa6010e721ab03"
+    },
+    {
+      "name": "JPJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/JPJGT.otf",
+      "bytes": 20504,
+      "sha256": "251fa70b7b2cb6c6f84ac896c5a6d502509c513364b1672991d3ec1aae0bba77"
+    },
+    {
+      "name": "JPJGTV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/JPJGTV.otf",
+      "bytes": 20928,
+      "sha256": "8ff660338886fd78e2bba873fcfa6b60391e849ecadef189077331ca205bc132"
+    },
+    {
+      "name": "JPSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/JPSMJ.otf",
+      "bytes": 41436,
+      "sha256": "c8d3d3bd259ff486f48f0ce41e91932862ec7463e4ce7a2ddb46a1eaff856301"
+    },
+    {
+      "name": "KHANENGB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/KHANENGB.otf",
+      "bytes": 8496,
+      "sha256": "680d8605689762e52b19f8c65c01fa6aa1c8cc828fd469d697d2f0cc79fd72ea"
+    },
+    {
+      "name": "KHANENGL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/KHANENGL.otf",
+      "bytes": 8240,
+      "sha256": "308d6933af27c641654cefe66ae63c40750de3d4e40e0a4942b036aaedad2efa"
+    },
+    {
+      "name": "KHANENGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/KHANENGM.otf",
+      "bytes": 8556,
+      "sha256": "f21634b01d525576acf64f43258909ee0c273b495cd3f4b9869d3e19c233bc32"
+    },
+    {
+      "name": "SPJGT.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/SPJGT.otf",
+      "bytes": 47660,
+      "sha256": "0466dd2de14072edfdb98e24865b43c6df001de7e7ef19d6b37bfa36cd897530"
+    },
+    {
+      "name": "SPMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/SPMJ.otf",
+      "bytes": 224076,
+      "sha256": "1f8a03d9bf6a6529610c434f243334d58ced6da85bb063dd486f3c81a3970359"
+    },
+    {
+      "name": "SPSMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/SPSMJ.otf",
+      "bytes": 64400,
+      "sha256": "20e7b47c71d6c6bb900a7774ffebafc24ace4f530c05f916d7703c19b91cc3d1"
+    },
+    {
+      "name": "TAENMREN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TAENMREN.otf",
+      "bytes": 10320,
+      "sha256": "03ae83ced89b9719714ca42387bc542c1ae07c6b5f0ccc8a2c3dba84f97ea322"
+    },
+    {
+      "name": "TAENMRKR.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TAENMRKR.otf",
+      "bytes": 545864,
+      "sha256": "ce4bb485006d755eaac9babdb171b600a98706ad749f95b9cd28810b55d95bd0"
+    },
+    {
+      "name": "TEDNREN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEDNREN.otf",
+      "bytes": 9172,
+      "sha256": "0a560dafa54fe4b22cc002f691104ed5bbb4063fff6b006d4364e53351ba8242"
+    },
+    {
+      "name": "TEDNRHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEDNRHG.otf",
+      "bytes": 631680,
+      "sha256": "6b64c3ab6ce52b02a6bf1cd6ea4d9f3c8c1e63dbcfd8eeaa8a13ff4838fa7b54"
+    },
+    {
+      "name": "TEGGTEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGGTEN.otf",
+      "bytes": 7872,
+      "sha256": "8004d08ed642798bc4ec713d1693994877a3eafe52fd06f28c242e8aa1d687d0"
+    },
+    {
+      "name": "TEGGTHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGGTHG.otf",
+      "bytes": 462436,
+      "sha256": "c8c8d3ff5376c126aadc078b215e86988e46e1655e78ad97493402ff85945971"
+    },
+    {
+      "name": "TEGGTHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGGTHJ.otf",
+      "bytes": 1499612,
+      "sha256": "9ed86b10538c992c5aa5b9a6d12f5540878a969623d103e42eba98683ad0931a"
+    },
+    {
+      "name": "TEGGTSP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGGTSP.otf",
+      "bytes": 55600,
+      "sha256": "4b17923f61fce04b8ca6d36b08a9c4391dc81e73383ab66327315ea97ed378ac"
+    },
+    {
+      "name": "TEGMJEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGMJEN.otf",
+      "bytes": 10340,
+      "sha256": "1bfff526eb8c08271920fee93c02c1b628044fa81bfa314ec0f9572e0cda3e4c"
+    },
+    {
+      "name": "TEGMJHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGMJHG.otf",
+      "bytes": 831528,
+      "sha256": "cee95afb6ac0b8e9cbb066b827265ea4992dcaf27bcbfa944413042923ce2d1b"
+    },
+    {
+      "name": "TEGMJHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGMJHJ.otf",
+      "bytes": 1957160,
+      "sha256": "433ac512383dc8862db6622ff48cfc80adfa5f89386e33489d81a808ce586cdb"
+    },
+    {
+      "name": "TEGMJJPV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGMJJPV.otf",
+      "bytes": 40640,
+      "sha256": "ace0edbc14ee6e8eccc61ad402419b08f598580862fce5c17fc8e6697aeffeda"
+    },
+    {
+      "name": "TEGMJSP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGMJSP.otf",
+      "bytes": 65508,
+      "sha256": "8625ce76782011c1897cf5b16b8e06a4f667789b2a147ab2c7e0ee4150ddcf4c"
+    },
+    {
+      "name": "TEGNSEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGNSEN.otf",
+      "bytes": 12488,
+      "sha256": "24374e1733f96f59b7cd5ac928857480f0209b0ad3646e5b515d4039f5629a31"
+    },
+    {
+      "name": "TEGNSHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGNSHG.otf",
+      "bytes": 875956,
+      "sha256": "452521cbead8d60a8f562fd9c776e3cf1b3a33d3267061af24fae8985ba321a0"
+    },
+    {
+      "name": "TEGNSHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEGNSHJ.otf",
+      "bytes": 4561172,
+      "sha256": "16125cd9e553a711b5721d3d7b5f42639ca858e3d8eff324beee7250406ce8e8"
+    },
+    {
+      "name": "TEHDDHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEHDDHG.otf",
+      "bytes": 286280,
+      "sha256": "d5191592e6483ecdb219cb37ed14e76b38c900a355ff1dffe918579647fffdd7"
+    },
+    {
+      "name": "TEHDDRHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEHDDRHG.otf",
+      "bytes": 284372,
+      "sha256": "e6938826a197fee0661fbe7993c5cc4ea43817230eb09f8f11b0c6c2e65a44ae"
+    },
+    {
+      "name": "TEHDTHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEHDTHG.otf",
+      "bytes": 284216,
+      "sha256": "b672511ba2ca3197e450c83980738b083bca226e3efb676bb99ae2711bba824f"
+    },
+    {
+      "name": "TEHDTRHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEHDTRHG.otf",
+      "bytes": 284460,
+      "sha256": "c6ab1fb368105ed2d60bcfe3171f91e07dac0e833af93bbd79932424648d3d34"
+    },
+    {
+      "name": "TEJGTEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJGTEN.otf",
+      "bytes": 7776,
+      "sha256": "7326286df5cf00fe272b0a799b24ff472966a5897da1bfad55216fc4545044f2"
+    },
+    {
+      "name": "TEJGTHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJGTHG.otf",
+      "bytes": 522244,
+      "sha256": "a4d538fa63670cb667bbab01eebcfc73b52a9b283b2a962ab4e7fe7578e59f78"
+    },
+    {
+      "name": "TEJGTHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJGTHJ.otf",
+      "bytes": 1762140,
+      "sha256": "1ee6cc50c7f19aedf1a75bfb02bfe9bd82eb7dd060155b1df96fa3878410e7e9"
+    },
+    {
+      "name": "TEJGTJPV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJGTJPV.otf",
+      "bytes": 22840,
+      "sha256": "49d14ea9ac7c70b18d7f0a623bb509a94e91ef02634c6457f69238bdb908cd3d"
+    },
+    {
+      "name": "TEJMJEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJMJEN.otf",
+      "bytes": 10236,
+      "sha256": "045d152f831a72aa04eb3070d73630388dd555cc12ad840d9194ac636c6f8501"
+    },
+    {
+      "name": "TEJMJHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJMJHG.otf",
+      "bytes": 902216,
+      "sha256": "f828c54b4a2f31a778e815d1f9d6df52e4aac190917da71be3c1ed7e8fb18d55"
+    },
+    {
+      "name": "TEJMJHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TEJMJHJ.otf",
+      "bytes": 2571732,
+      "sha256": "24fd065323949ae7beadecdba6a7fba4828ec635ae6a93c2393e84aacf6561be"
+    },
+    {
+      "name": "TESEGEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEGEN.otf",
+      "bytes": 7928,
+      "sha256": "8644f1cefb195f1b3d8f048e9b4996490bf4465d8cf90e618d749487b2c0ef26"
+    },
+    {
+      "name": "TESEGHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEGHG.otf",
+      "bytes": 581476,
+      "sha256": "d73cfa5d44ae3c46c93ec5443f0c5609c510804309538110d44e4e0ba6ee22b9"
+    },
+    {
+      "name": "TESEGHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEGHJ.otf",
+      "bytes": 1254848,
+      "sha256": "b330012e6fbf13c22cd9a63a10e722e7d03b04fe3f91592b42b0ab6d31b40472"
+    },
+    {
+      "name": "TESEMEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEMEN.otf",
+      "bytes": 9912,
+      "sha256": "8af7f7ce33c2d2aec87cd43755623d2f24cd563b92f45cd07a21e02a7192eb4a"
+    },
+    {
+      "name": "TESEMHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEMHG.otf",
+      "bytes": 901844,
+      "sha256": "ce3120854752302560656732b051d72dc6b9b9881ce102513b60dd64016ab832"
+    },
+    {
+      "name": "TESEMHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESEMHJ.otf",
+      "bytes": 2665428,
+      "sha256": "ea3a14150c1ec3ee4dceb411846a3a3a39dd6a0d525012ddf3d23ea92f40f424"
+    },
+    {
+      "name": "TESENEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESENEN.otf",
+      "bytes": 9672,
+      "sha256": "7b8250f50cdc378cd585daf3aa492063e470231dbf7b31fce4b0d99059a252e1"
+    },
+    {
+      "name": "TESENHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESENHG.otf",
+      "bytes": 643260,
+      "sha256": "31f4c777fd91750fe6bde9e94e711eada865869e4fa4ecce309cce0097704ec6"
+    },
+    {
+      "name": "TESGREN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESGREN.otf",
+      "bytes": 7936,
+      "sha256": "f300f9cc56f126da7500d0e1705654c69fec1415b80d7270d14f1aaa0ffa8c63"
+    },
+    {
+      "name": "TESGRHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESGRHG.otf",
+      "bytes": 402384,
+      "sha256": "e424afd58477afefecac060ac844fe6e432e14ce18b73413744159fc2dfaab17"
+    },
+    {
+      "name": "TESMGEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMGEN.otf",
+      "bytes": 8284,
+      "sha256": "c3ed3f640f89ef261ca42bcdfae6a8dcd35905652de342b17fbebfdd00ec66eb"
+    },
+    {
+      "name": "TESMJEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMJEN.otf",
+      "bytes": 10220,
+      "sha256": "4cbe33c2cf8c74835dd78325b239c424b13e6bca942df30ff160135b1da87ecf"
+    },
+    {
+      "name": "TESMJHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMJHG.otf",
+      "bytes": 894828,
+      "sha256": "24d87c88e9717031bd4cb8fd25c4461b9ad77e464a825e80a89790024688b8b3"
+    },
+    {
+      "name": "TESMJJPV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMJJPV.otf",
+      "bytes": 36360,
+      "sha256": "11ae6daf181c20c855aba885d0e83b58bdf68d31a429b1353449ab2ea23e7f2d"
+    },
+    {
+      "name": "TESMMEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMMEN.otf",
+      "bytes": 11372,
+      "sha256": "2f3751b4a22a84cad81bde081f33585757b91e9c60ae77f8188a703fa78f2104"
+    },
+    {
+      "name": "TESMMHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMMHG.otf",
+      "bytes": 951920,
+      "sha256": "639b93dad174dfd09a64fe78975e8ebfec0c136904a6f2dedf4c29e2f885a94a"
+    },
+    {
+      "name": "TESMMHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESMMHJ.otf",
+      "bytes": 2165220,
+      "sha256": "3fb79036f625ecc379112d704bcde24ee61ba070c095667d5d674dc010dffed8"
+    },
+    {
+      "name": "TESSMEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESSMEN.otf",
+      "bytes": 10164,
+      "sha256": "4b5fcccadb2f2b1405e20b25a1644597f6563fcb3454a6183de97b52225d8dfd"
+    },
+    {
+      "name": "TESSMHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESSMHG.otf",
+      "bytes": 736544,
+      "sha256": "2e22911313386f8b060f028972784642a5c9ee291d533f6f6b1f7c38da027ecd"
+    },
+    {
+      "name": "TESUNEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESUNEN.otf",
+      "bytes": 10300,
+      "sha256": "c3ae11c6b4306d3ddf14908a477788d9e41d8fada441f80a0ff85e5b148f81ee"
+    },
+    {
+      "name": "TESUNHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TESUNHG.otf",
+      "bytes": 676016,
+      "sha256": "6d6f813d3c9145f386b092b02943afe57dd8093b67581a21c85d9602e13aa751"
+    },
+    {
+      "name": "TETGREN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGREN.otf",
+      "bytes": 7888,
+      "sha256": "6e7730338e26e58839722deb197c67ba570fb21f75551bf5010658cbf2c3bc29"
+    },
+    {
+      "name": "TETGRHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGRHG.otf",
+      "bytes": 340120,
+      "sha256": "381740cace8692e79bd4ead6d1f2dd59964a5ddd4bd182b4aa9e4000239f7c1e"
+    },
+    {
+      "name": "TETGRSP.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGRSP.otf",
+      "bytes": 54240,
+      "sha256": "b66a4a588eda08512cc088b6cdd796dd75fe5b559815559ebb015ed713c328e7"
+    },
+    {
+      "name": "TETGTEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGTEN.otf",
+      "bytes": 7780,
+      "sha256": "4cf8cace5f0d618090401e26fb9e5084edf820a55b2c92c4b09f9c70fe07ef57"
+    },
+    {
+      "name": "TETGTHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGTHG.otf",
+      "bytes": 424448,
+      "sha256": "13ff210b3ce831ddda5cbbeabbaed90bc780778ce92b2a933efbee11993df489"
+    },
+    {
+      "name": "TETGTHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGTHJ.otf",
+      "bytes": 1933532,
+      "sha256": "c4addfcde630ed2489f466fe6952de234951a42818c56411144dff19c0021c67"
+    },
+    {
+      "name": "TETGTJPV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETGTJPV.otf",
+      "bytes": 22992,
+      "sha256": "5677010736db86926fe9bd10a7de88d0613b8dfb5dfd956975d85d9779dfed5d"
+    },
+    {
+      "name": "TETMJEN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETMJEN.otf",
+      "bytes": 10304,
+      "sha256": "0e7f9c2270f32fc4864180941850ee807356b32a6d8b221a68c4064ffddd0d59"
+    },
+    {
+      "name": "TETMJHG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETMJHG.otf",
+      "bytes": 866360,
+      "sha256": "2a072087136be8d5526de1f7e1b1b87f0e172ac017d7f66131bd9b6aa3a4fe5d"
+    },
+    {
+      "name": "TETMJHJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETMJHJ.otf",
+      "bytes": 2586812,
+      "sha256": "f09d20f0b0516543d3c7bbd7f809275501d71cfe43fa26239126d78c60f9a0d3"
+    },
+    {
+      "name": "TETMJJPV.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/TETMJJPV.otf",
+      "bytes": 44468,
+      "sha256": "004f4d50562a28d1d960501926673a50e165e0b4047d42a6d2c158da99912eba"
+    },
+    {
+      "name": "YJENBMGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENBMGM.otf",
+      "bytes": 7112,
+      "sha256": "3bf699376a73a9b8453550f85871d0d3387b6ee2cbdd32df976e74e19c1dde10"
+    },
+    {
+      "name": "YJENCHM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENCHM.otf",
+      "bytes": 16068,
+      "sha256": "a81591802d815d49155694650ba528ac913c753ee374665fbf91add8176b3865"
+    },
+    {
+      "name": "YJENDNMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENDNMJ.otf",
+      "bytes": 12828,
+      "sha256": "1f2ab7b08df0f077ca310fce6be837e66bd918d0d146c1a86af799c043dfb847"
+    },
+    {
+      "name": "YJENDUG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENDUG.otf",
+      "bytes": 11924,
+      "sha256": "bb6128e308ef9cc60f1d713c3564e220e386ffcd7b6643b360c4c7a4681890e7"
+    },
+    {
+      "name": "YJENINI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENINI.otf",
+      "bytes": 118252,
+      "sha256": "19bf423e2cfc2e5e0080f3034539e0566a417d8901d977d9512084c8b2b42f75"
+    },
+    {
+      "name": "YJENMAE.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENMAE.otf",
+      "bytes": 10856,
+      "sha256": "f072b67aeefe06a9b08213d74ebbdef3675ecb2ce6139b62a82814c485a2eda6"
+    },
+    {
+      "name": "YJENSHN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENSHN.otf",
+      "bytes": 16024,
+      "sha256": "b9b0bb4308c72e4dec9727751b53a58ecc72e537db65b144faa78c8c197dbbb3"
+    },
+    {
+      "name": "YJENSOSL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENSOSL.otf",
+      "bytes": 20012,
+      "sha256": "1ba4ff0fe3c40b0ce60f38991eb2151c1a4ee4ab8c2b4f5a2eef53c99b81739a"
+    },
+    {
+      "name": "YJENTTB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENTTB.otf",
+      "bytes": 7236,
+      "sha256": "cb5da57e2608a751bd7fdbc975a2287664756b74677e4cd5108392f144e59da6"
+    },
+    {
+      "name": "YJENWDA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJENWDA.otf",
+      "bytes": 67696,
+      "sha256": "e2f0f289b44e5d4e8d13e5681b3f99d5e9d3102516f52e0e5c1b49cb85b2e659"
+    },
+    {
+      "name": "YJHGBMGM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGBMGM.otf",
+      "bytes": 567304,
+      "sha256": "a295db71fa3ced9592645a71e0ec5a96205689645d2ccc82344f8eb83b9088b9"
+    },
+    {
+      "name": "YJHGCHM.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGCHM.otf",
+      "bytes": 759792,
+      "sha256": "360a3d01d784a43d11f972a8bbed129c573c6c96f2b11870d73e530a9e040c46"
+    },
+    {
+      "name": "YJHGDNMJ.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGDNMJ.otf",
+      "bytes": 769964,
+      "sha256": "e34afd4c3386114dad779dd8be9e9653e574edc9df2461ec0e24bcd373ce66a3"
+    },
+    {
+      "name": "YJHGDUG.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGDUG.otf",
+      "bytes": 619060,
+      "sha256": "c8595a3e074ea88656717a2493f96a78222ee4c19d2eb7bf69ad25833e8fe1f8"
+    },
+    {
+      "name": "YJHGINI.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGINI.otf",
+      "bytes": 4297692,
+      "sha256": "7bb5756b33263c6092e329f0e4a038643bc9b0229fc8ff27e585f420f2746939"
+    },
+    {
+      "name": "YJHGSHN.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGSHN.otf",
+      "bytes": 963724,
+      "sha256": "9a5346ec8e896308e12cec524c49506792358f766518093c9c717ac783a04e04"
+    },
+    {
+      "name": "YJHGSOSL.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGSOSL.otf",
+      "bytes": 582912,
+      "sha256": "338cec12fed7d58729c622abce68e5b21be2ed76ba4c77104d1b12b4a4a8a592"
+    },
+    {
+      "name": "YJHGTTB.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGTTB.otf",
+      "bytes": 247652,
+      "sha256": "1b414da1b4ff12be16f62dce55974bf76118fbb800c7591968ca9e9760e7e545"
+    },
+    {
+      "name": "YJHGWDA.otf",
+      "source": "artifacts/hft-native-20261106/release-check/final-extracted/YJHGWDA.otf",
+      "bytes": 2664800,
+      "sha256": "9e8f94344ed45ce003338b11d794ec84ef257772f91744679f8b7b71d2f4c965"
+    },
+    {
+      "name": "fontinfo.dat",
+      "source": "fontdata/corrected-font-benchmark-2024/corrected-font-benchmark-2024/fontdb/fontinfo.dat",
+      "bytes": 72808,
+      "sha256": "1f4489a53c5f8a2e8ad5f1cdf99fc0b6111c7b2e457d55257ca4ecec4b634d6a"
+    },
+    {
+      "name": "hftinfo.dat",
+      "source": "fontdata/corrected-font-benchmark-2024/corrected-font-benchmark-2024/fontdb/hftinfo.dat",
+      "bytes": 65696,
+      "sha256": "f1462ff6e78c4dabc490968eec669f3c8de34f545b3f4a48e6a10fb7bd4c4aa5"
+    },
+    {
+      "name": "FontMap.dat",
+      "source": "fontdata/font-research-export/font-research-export/hancom2024-fontdb/FontMap.dat",
+      "bytes": 32130,
+      "sha256": "38077c84269a9f60a75808f55e08cccd2e95f9fe0b1f3034d10f5787723afd68"
+    },
+    {
+      "name": "u300_cjk.dat",
+      "source": "fontdata/구조해독/hft-native-decoder/character-tables/u300_cjk.dat",
+      "bytes": 57029,
+      "sha256": "607674cf5f819cb5c7f92c4a20883e64ff02276ffd79a6d05f12add0d191402f"
+    },
+    {
+      "name": "u300_com.dat",
+      "source": "fontdata/구조해독/hft-native-decoder/character-tables/u300_com.dat",
+      "bytes": 6861,
+      "sha256": "4f7ec788853285b9c4d7143cfc5cba1a29ae428326d7692946f5d7a9a1b94e8c"
+    },
+    {
+      "name": "u300_gen.dat",
+      "source": "fontdata/구조해독/hft-native-decoder/character-tables/u300_gen.dat",
+      "bytes": 32975,
+      "sha256": "09ddbee55a8f9a4ac9df25fa0484fdbab10921e576132b4c41874564904dd85a"
+    },
+    {
+      "name": "u300_h2u.dat",
+      "source": "fontdata/구조해독/hft-native-decoder/character-tables/u300_h2u.dat",
+      "bytes": 3176,
+      "sha256": "2f78ab7ec0765ea638324024b576e5937e36b42abba872b33dd4c90600abe857"
+    },
+    {
+      "name": "u300_u2h.dat",
+      "source": "fontdata/구조해독/hft-native-decoder/character-tables/u300_u2h.dat",
+      "bytes": 3496,
+      "sha256": "fc5fbf6cc1b28122822a9fe6b3863b2c8e31b3e6dc8735ef3a1e689c3ff8a062"
+    },
+    {
+      "name": "ENFUTUBK.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENFUTUBK.HFT",
+      "bytes": 7115,
+      "sha256": "2864068324e9d634fbcb79e9527ee76c902e38c02fa91fca0dda37d91c2b8a48"
+    },
+    {
+      "name": "ENJGT.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENJGT.HFT",
+      "bytes": 74218,
+      "sha256": "067cf9d952613a01de01290080016b1b8ffecb7c077e430d0f8c3aa2a71f0dd0"
+    },
+    {
+      "name": "ENJGTI.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENJGTI.HFT",
+      "bytes": 8955,
+      "sha256": "c4834d57cb084c700e25bac90c15345cc6e119651e44e14e0cd6b47c52522a71"
+    },
+    {
+      "name": "ENPENHL.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENPENHL.HFT",
+      "bytes": 14208,
+      "sha256": "3334015749e0bd2379b3c5ee46b7cd0fb4b838321a28f81c010f10bd49124cf9"
+    },
+    {
+      "name": "ENSMJ.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENSMJ.HFT",
+      "bytes": 107647,
+      "sha256": "1fd68a78e75c3214e422f116cd86f20e601fc5f577b223817ae8555a3304ec1c"
+    },
+    {
+      "name": "ENSMJI.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/ENSMJI.HFT",
+      "bytes": 11788,
+      "sha256": "90e72b94e6c4f896e4d6e047a7c7940ca257ade745724c8f3020b30618afe448"
+    },
+    {
+      "name": "FLSMJ.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/FLSMJ.HFT",
+      "bytes": 28508,
+      "sha256": "90f1037d5200087ed92c244951072ff643737c8f97562aa73e11872b0b0f9827"
+    },
+    {
+      "name": "HGJGT.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/HGJGT.HFT",
+      "bytes": 347156,
+      "sha256": "0b270e27df3889727dd70b4a62fb61c4379c8739b7e4a3b2f886bf3eb7e71568"
+    },
+    {
+      "name": "HJJGT.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/HJJGT.HFT",
+      "bytes": 1357654,
+      "sha256": "99681fe18030c8c6ed73aadd096393c7f583b298b37c060473acea5788c1645f"
+    },
+    {
+      "name": "HMEAC.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/HMEAC.HFT",
+      "bytes": 9496,
+      "sha256": "f61211818f24873c0a7926f3eacdddc8a378a01a65a0ecfebe30ab8e677e0f43"
+    },
+    {
+      "name": "JPJGT.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/JPJGT.HFT",
+      "bytes": 21176,
+      "sha256": "276a276bc154346c92e460dbe86ae479c92f629cd4ee9b680ac4268c6b9a771e"
+    },
+    {
+      "name": "SPJGT.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/SPJGT.HFT",
+      "bytes": 85292,
+      "sha256": "8c33c27f1c301fed311a7c18a24abd0a2eb07cfc02c0e2b04e186197510af908"
+    },
+    {
+      "name": "SPSMJ.HFT",
+      "source": "fontdata/구조해독/hft-native-decoder/original-fonts/SPSMJ.HFT",
+      "bytes": 180333,
+      "sha256": "7937877f3bbebd97159e6be6e2def84ec2ead2f65d510e61721a1aab4087b0c1"
+    },
+    {
+      "name": "fontinfo.dat",
+      "source": "FontDB/fontinfo.dat",
+      "bytes": 72744,
+      "sha256": "4fb092b5a99dbbe0299e72d1d99aeaac32e5f5e7634ca0b9ac630a45bc404d6a"
+    },
+    {
+      "name": "FslFonts.dat",
+      "source": "FontDB/FslFonts.dat",
+      "bytes": 4429328,
+      "sha256": "0658dfa299d4d785856185cf6ca57160df611621e48a1a810a95da84c3ec3b17"
+    },
+    {
+      "name": "0.data",
+      "source": "FontDB/FslFonts.dat!0.data",
+      "bytes": 4254,
+      "sha256": "5c7c7de929f5adddf8c2af950e3aad306454de49fdacecaaaa0f4c0698a92e54"
+    },
+    {
+      "name": "0.fsl",
+      "source": "FontDB/FslFonts.dat!0.fsl",
+      "bytes": 26764,
+      "sha256": "af9f31ccfd6872629600ec51513393ac3aefc512e548bf8c1b477c2c43887b00"
+    },
+    {
+      "name": "0b.data",
+      "source": "FontDB/FslFonts.dat!0b.data",
+      "bytes": 4170,
+      "sha256": "115184788b4be2920b51f4dd95a565ce0f14d10ac4b219b2a2138892749f4b36"
+    },
+    {
+      "name": "0b.fsl",
+      "source": "FontDB/FslFonts.dat!0b.fsl",
+      "bytes": 31444,
+      "sha256": "9cc4abed65934c5691112d8314701773cb778cfdc305e1b18b08999a0e5e0eba"
+    },
+    {
+      "name": "0bi.data",
+      "source": "FontDB/FslFonts.dat!0bi.data",
+      "bytes": 4212,
+      "sha256": "6c5e8cd04a1ea0b9b283bcb3b9f8be4d2cb2663e25398111ea4f7b54ed26fc65"
+    },
+    {
+      "name": "0bi.fsl",
+      "source": "FontDB/FslFonts.dat!0bi.fsl",
+      "bytes": 26764,
+      "sha256": "96e61e6a92e9e0196baf8f0ada0f789c4159bf13c22491e9bf00bdedbecb59e9"
+    },
+    {
+      "name": "0i.data",
+      "source": "FontDB/FslFonts.dat!0i.data",
+      "bytes": 4272,
+      "sha256": "1759425d022f2e11c3692054927497f38e770a7bdd2d31779879bb99c66cb923"
+    },
+    {
+      "name": "0i.fsl",
+      "source": "FontDB/FslFonts.dat!0i.fsl",
+      "bytes": 26764,
+      "sha256": "d5e43e96d297840bdf35aa57777b4a686725db978a483a68696c24fa8718573c"
+    },
+    {
+      "name": "1.data",
+      "source": "FontDB/FslFonts.dat!1.data",
+      "bytes": 2932,
+      "sha256": "b7c7c3c1aa138f366dbc104e25a8bd0009614e5ba32654295d807c3e49d5a36c"
+    },
+    {
+      "name": "1.fsl",
+      "source": "FontDB/FslFonts.dat!1.fsl",
+      "bytes": 26920,
+      "sha256": "c00c2dff23e369eb41518f3801b1f032b105bc0d96d2c7a94034d11bb40154c1"
+    },
+    {
+      "name": "10.data",
+      "source": "FontDB/FslFonts.dat!10.data",
+      "bytes": 356,
+      "sha256": "5873c75478ed612ae3803c04bbaf8599189331d9f1bc9a00a1c18c43ad109f7c"
+    },
+    {
+      "name": "10.fsl",
+      "source": "FontDB/FslFonts.dat!10.fsl",
+      "bytes": 9944,
+      "sha256": "c5926f30ce21326dfe9529bc9aaf4e99c959e60fe5a34fc4b5c5e65770f2a412"
+    },
+    {
+      "name": "10b.data",
+      "source": "FontDB/FslFonts.dat!10b.data",
+      "bytes": 356,
+      "sha256": "347e3d81e68ef4c3cc647a15e980475c2294598d9fbef3694fe4d7eaf747087f"
+    },
+    {
+      "name": "10bi.data",
+      "source": "FontDB/FslFonts.dat!10bi.data",
+      "bytes": 356,
+      "sha256": "941a8be163b99728b34efeeba74df0e295131909f1a643f9c670f55bdb00dc76"
+    },
+    {
+      "name": "10i.data",
+      "source": "FontDB/FslFonts.dat!10i.data",
+      "bytes": 356,
+      "sha256": "3322f70ad1469d3d2dcc67b0d44b65e3e5f739c38beed8dfe6db087d0eab32bd"
+    },
+    {
+      "name": "11.data",
+      "source": "FontDB/FslFonts.dat!11.data",
+      "bytes": 356,
+      "sha256": "d8fc68e227ff862019005df4356a84711634998b0f4f8841adaf8b565351299a"
+    },
+    {
+      "name": "11.fsl",
+      "source": "FontDB/FslFonts.dat!11.fsl",
+      "bytes": 9716,
+      "sha256": "eb2a8394c55347faa3bce05e6b6da2c3507a90bf93e67276ccbff59abcc1261b"
+    },
+    {
+      "name": "11b.data",
+      "source": "FontDB/FslFonts.dat!11b.data",
+      "bytes": 356,
+      "sha256": "7e6cefc2b27c4ebe57bef94d5731c9f67660f846513ba31490c6f7590fdcaf86"
+    },
+    {
+      "name": "11bi.data",
+      "source": "FontDB/FslFonts.dat!11bi.data",
+      "bytes": 356,
+      "sha256": "030e376bd16b07be5474ce6b9d8b175a054132ff7f1417e43c8b4bad971638b1"
+    },
+    {
+      "name": "11i.data",
+      "source": "FontDB/FslFonts.dat!11i.data",
+      "bytes": 356,
+      "sha256": "53da9243a78415107c34953eda9c7d7d00019defa2928bd89ec500ee82249748"
+    },
+    {
+      "name": "12.data",
+      "source": "FontDB/FslFonts.dat!12.data",
+      "bytes": 432,
+      "sha256": "dea35848fa560df3644f706d5225052e201eaf9c32e76d441c178728d8f7bdb6"
+    },
+    {
+      "name": "12.fsl",
+      "source": "FontDB/FslFonts.dat!12.fsl",
+      "bytes": 268972,
+      "sha256": "80f58ecde2cd985f1a8cc16804d6d0dd5ff888ab1bf76be07100bac84ffd75cc"
+    },
+    {
+      "name": "12b.data",
+      "source": "FontDB/FslFonts.dat!12b.data",
+      "bytes": 4144,
+      "sha256": "6a2480bf9377e58c76f93d138e4dd10fd1f1b5ecc8e259a20f7d680c72e20d66"
+    },
+    {
+      "name": "12bi.data",
+      "source": "FontDB/FslFonts.dat!12bi.data",
+      "bytes": 4144,
+      "sha256": "942e2cf7a7f5b44e5927f9697b96124b7075dfad56398d7706dc490f8019ec80"
+    },
+    {
+      "name": "12i.data",
+      "source": "FontDB/FslFonts.dat!12i.data",
+      "bytes": 432,
+      "sha256": "ca86e8dbd2a9c3ba5e069aeaf41d329b1eb9624cf278768b87124b93d0140bc6"
+    },
+    {
+      "name": "13.data",
+      "source": "FontDB/FslFonts.dat!13.data",
+      "bytes": 432,
+      "sha256": "c2567cf225c4d2a7250e32fd1b3719d4da632920c3737236adce9efac4ee4521"
+    },
+    {
+      "name": "13.fsl",
+      "source": "FontDB/FslFonts.dat!13.fsl",
+      "bytes": 268988,
+      "sha256": "9dbf04ca775b26140e7acb4618c2ecdc5672a998777e52e456b93871d3be2cc1"
+    },
+    {
+      "name": "13b.data",
+      "source": "FontDB/FslFonts.dat!13b.data",
+      "bytes": 4132,
+      "sha256": "98631b2e6d3d46a8a1e815141db4cae496e69fad3998573eea103decdca4c383"
+    },
+    {
+      "name": "13bi.data",
+      "source": "FontDB/FslFonts.dat!13bi.data",
+      "bytes": 4132,
+      "sha256": "b212543229852460cf1f6aef46195563c0666c922379c8999a5fea2d0dbf01b5"
+    },
+    {
+      "name": "13i.data",
+      "source": "FontDB/FslFonts.dat!13i.data",
+      "bytes": 432,
+      "sha256": "8088858baa5fbe1a3ee98f6af36e3b04da77c51ecdc9b933f7e7072262212576"
+    },
+    {
+      "name": "14.data",
+      "source": "FontDB/FslFonts.dat!14.data",
+      "bytes": 546,
+      "sha256": "21caffae66251dc410285520964df6ed44016677f23a23ec2d6ec53d14dc1234"
+    },
+    {
+      "name": "14.fsl",
+      "source": "FontDB/FslFonts.dat!14.fsl",
+      "bytes": 141960,
+      "sha256": "e70d2eb82bf7e4dc8e423cebbb7c59e26d3337d55788d26a4a2e0ff605a6bf6d"
+    },
+    {
+      "name": "14b.data",
+      "source": "FontDB/FslFonts.dat!14b.data",
+      "bytes": 586,
+      "sha256": "ba215da202f3657cc5100ab6bf4faef70fd9ea1ebd888077b875d1e449e0c2e0"
+    },
+    {
+      "name": "14bi.data",
+      "source": "FontDB/FslFonts.dat!14bi.data",
+      "bytes": 586,
+      "sha256": "f62ed61934eea2a75304df03d933b43ec8de11b8f36faeafd184e9568e80fb77"
+    },
+    {
+      "name": "14i.data",
+      "source": "FontDB/FslFonts.dat!14i.data",
+      "bytes": 546,
+      "sha256": "5125c43257850f6a4f91016b87a2d99749a791ee21775e1c39001ad64a995ad5"
+    },
+    {
+      "name": "15.data",
+      "source": "FontDB/FslFonts.dat!15.data",
+      "bytes": 550,
+      "sha256": "27a28229d9177bad0866fcf4839f2bc0bc116dd034b295ae21d808f1f7b1ee02"
+    },
+    {
+      "name": "15.fsl",
+      "source": "FontDB/FslFonts.dat!15.fsl",
+      "bytes": 133152,
+      "sha256": "8a3bf28ff30d6ad850a535909f812e762d16d22c31cd3db19603598c21a5d3c8"
+    },
+    {
+      "name": "15b.data",
+      "source": "FontDB/FslFonts.dat!15b.data",
+      "bytes": 590,
+      "sha256": "fc96d2c89f70b6383cc0daa95f7e698b44e1af276218ad173063299d90b3cbfe"
+    },
+    {
+      "name": "15bi.data",
+      "source": "FontDB/FslFonts.dat!15bi.data",
+      "bytes": 590,
+      "sha256": "2fc5cbcb92a45cd3156e6d5584126854445bc16ab4f26f9ec6f61440cbc1e970"
+    },
+    {
+      "name": "15i.data",
+      "source": "FontDB/FslFonts.dat!15i.data",
+      "bytes": 550,
+      "sha256": "b64c5cb90a6ac127ec0458441b6bf6a9170d35b9859b0896759060899870cb81"
+    },
+    {
+      "name": "16.data",
+      "source": "FontDB/FslFonts.dat!16.data",
+      "bytes": 574,
+      "sha256": "6853c52ad8693f346627451fbbde9e8c93ff28ccf679ecd3ff85c52e55145a65"
+    },
+    {
+      "name": "16.fsl",
+      "source": "FontDB/FslFonts.dat!16.fsl",
+      "bytes": 219612,
+      "sha256": "25123ae33e099cfd12595ce0a67e904b042924ff83bba8dbc394a4a0ee576cf3"
+    },
+    {
+      "name": "16b.data",
+      "source": "FontDB/FslFonts.dat!16b.data",
+      "bytes": 618,
+      "sha256": "1b7c9a38ec0abf03a1d2f1975ab197c29166fdd9cc9950dd73ae09d6e7e74926"
+    },
+    {
+      "name": "16bi.data",
+      "source": "FontDB/FslFonts.dat!16bi.data",
+      "bytes": 618,
+      "sha256": "0b1a06ee656e648e7c952740290a5373321f412f3c3ef364146f2ea8985b6570"
+    },
+    {
+      "name": "16i.data",
+      "source": "FontDB/FslFonts.dat!16i.data",
+      "bytes": 574,
+      "sha256": "ad32716c83a8c1c3d3b1b245b6e4031bc6565432199f2f9f259c447d7ec96f85"
+    },
+    {
+      "name": "17.data",
+      "source": "FontDB/FslFonts.dat!17.data",
+      "bytes": 432,
+      "sha256": "ce88538d28085c8fd5732a776ae0824f68b331eaf54a554dc6dd03138909f7d6"
+    },
+    {
+      "name": "17.fsl",
+      "source": "FontDB/FslFonts.dat!17.fsl",
+      "bytes": 116016,
+      "sha256": "b6296288a07ca0332490526a2ee795c4717c568cd796e19996a7530e0285c2b6"
+    },
+    {
+      "name": "17b.data",
+      "source": "FontDB/FslFonts.dat!17b.data",
+      "bytes": 6244,
+      "sha256": "49704fd42110f8d8524220daa6d97cdf5aed68c7a2dc72e40ca6ba817b38e9f0"
+    },
+    {
+      "name": "17bi.data",
+      "source": "FontDB/FslFonts.dat!17bi.data",
+      "bytes": 6244,
+      "sha256": "20a2cbd4d73382987a8d5f3775664b4f93d4fe2d1b0484dc0d8b8d622cce2241"
+    },
+    {
+      "name": "17i.data",
+      "source": "FontDB/FslFonts.dat!17i.data",
+      "bytes": 432,
+      "sha256": "9e3e2e5de85dd4c9855aaf13e91a76f5036c2e813eeb479e0b9711737ef7f025"
+    },
+    {
+      "name": "18.data",
+      "source": "FontDB/FslFonts.dat!18.data",
+      "bytes": 582,
+      "sha256": "8b4a7361d833965ae479033ffeeee7032b3986d7a464dae0421d4443e3e941a3"
+    },
+    {
+      "name": "18.fsl",
+      "source": "FontDB/FslFonts.dat!18.fsl",
+      "bytes": 147676,
+      "sha256": "2868f88209253d26d9b57868c45555732caadd8ad0f2d627ba4a1f26f8771353"
+    },
+    {
+      "name": "18b.data",
+      "source": "FontDB/FslFonts.dat!18b.data",
+      "bytes": 610,
+      "sha256": "7fc06c4a6297c20e57e03f8cb452b628b3026ffdf8431c52fb0ee0ab99bfae5b"
+    },
+    {
+      "name": "18bi.data",
+      "source": "FontDB/FslFonts.dat!18bi.data",
+      "bytes": 610,
+      "sha256": "8149685e5b57b557273ba5c6c4bde5203c6ca5165e49342c6f5e1391934a5333"
+    },
+    {
+      "name": "18i.data",
+      "source": "FontDB/FslFonts.dat!18i.data",
+      "bytes": 582,
+      "sha256": "3698f1e5b251a1aa06a4c96724e8ecf803bcccb778aa0ebf96b87f1117c40f37"
+    },
+    {
+      "name": "19.data",
+      "source": "FontDB/FslFonts.dat!19.data",
+      "bytes": 522,
+      "sha256": "d9e3f6e007c83c44a04157a9b2449867c5841a2c47208556d3289695d2e5e7a1"
+    },
+    {
+      "name": "19.fsl",
+      "source": "FontDB/FslFonts.dat!19.fsl",
+      "bytes": 252400,
+      "sha256": "31ad67b8a62823dbfaad897cd60b4b9cd6e29aaf15317084de0dca64127a4120"
+    },
+    {
+      "name": "19b.data",
+      "source": "FontDB/FslFonts.dat!19b.data",
+      "bytes": 85638,
+      "sha256": "43c82a488a6527e8941987034b58a569b84b09204a3b63cc965dd89318ff8752"
+    },
+    {
+      "name": "19bi.data",
+      "source": "FontDB/FslFonts.dat!19bi.data",
+      "bytes": 85638,
+      "sha256": "36d4b43f4b4c17147c89e79b6f736de95af0fa930aa5a3ae4ca2f01d0f86f737"
+    },
+    {
+      "name": "19i.data",
+      "source": "FontDB/FslFonts.dat!19i.data",
+      "bytes": 522,
+      "sha256": "0ef81857ffb135c9cf6b7e9b75e1193440b18a477678feba3e1645582c1d35b1"
+    },
+    {
+      "name": "1b.data",
+      "source": "FontDB/FslFonts.dat!1b.data",
+      "bytes": 2954,
+      "sha256": "60a1f07036bc4f8db214b1f02261e47e726720755e2054de2c150d4548663f62"
+    },
+    {
+      "name": "1b.fsl",
+      "source": "FontDB/FslFonts.dat!1b.fsl",
+      "bytes": 26776,
+      "sha256": "5349a9ce2d1133581a519259b220d97767053e541604a940c971e224428b0152"
+    },
+    {
+      "name": "1bi.data",
+      "source": "FontDB/FslFonts.dat!1bi.data",
+      "bytes": 3024,
+      "sha256": "0ab358c613e5b20680c39fc5393499db04ba2642e01c20072db85b539a8f9b75"
+    },
+    {
+      "name": "1bi.fsl",
+      "source": "FontDB/FslFonts.dat!1bi.fsl",
+      "bytes": 26776,
+      "sha256": "960c61e227d3439901738a746b038feb5d6f6c7ac03f4ada78b6978055238ab9"
+    },
+    {
+      "name": "1i.data",
+      "source": "FontDB/FslFonts.dat!1i.data",
+      "bytes": 2990,
+      "sha256": "a8c8708164628442ad61fff6db67780a4dea822cdcf6124009f2362def061aff"
+    },
+    {
+      "name": "1i.fsl",
+      "source": "FontDB/FslFonts.dat!1i.fsl",
+      "bytes": 26564,
+      "sha256": "96fc8aeae0fb8e303125ea8207afa603cfb8410931d433336b1fa2d6641c488c"
+    },
+    {
+      "name": "2.data",
+      "source": "FontDB/FslFonts.dat!2.data",
+      "bytes": 2998,
+      "sha256": "9f07f68066a28b85c8ba4342fc22279d1eab8d26c9801164bfacb4d66f73cc11"
+    },
+    {
+      "name": "2.fsl",
+      "source": "FontDB/FslFonts.dat!2.fsl",
+      "bytes": 26592,
+      "sha256": "094f4d3073c9a4559be938ed980e649f8cdcea282f1f8348e2aa086c5569a9db"
+    },
+    {
+      "name": "20.data",
+      "source": "FontDB/FslFonts.dat!20.data",
+      "bytes": 516,
+      "sha256": "e15fc0f5ecf5b86d91473282ab068e8d6728fe2479e8f7ea83d64469118f6f5c"
+    },
+    {
+      "name": "20.fsl",
+      "source": "FontDB/FslFonts.dat!20.fsl",
+      "bytes": 105068,
+      "sha256": "8c16f7e05b9a53b27d74ed0b768e47c553ff2063ccf18a292c0b6e6402f55154"
+    },
+    {
+      "name": "20b.data",
+      "source": "FontDB/FslFonts.dat!20b.data",
+      "bytes": 42568,
+      "sha256": "cb5accb0e1834daaccff89669d508f15328c2c1914f2ad53a6527348cd319656"
+    },
+    {
+      "name": "20bi.data",
+      "source": "FontDB/FslFonts.dat!20bi.data",
+      "bytes": 42568,
+      "sha256": "1104b80e165b0b28cfe30c99f9539d3a569a2a5777ab3d5c9e91c9a04c3f984d"
+    },
+    {
+      "name": "20i.data",
+      "source": "FontDB/FslFonts.dat!20i.data",
+      "bytes": 516,
+      "sha256": "03c7012fbdb925a9bc84b30e698b830023a7a9ee2b10b274baf71d9ac7af4c4c"
+    },
+    {
+      "name": "21.data",
+      "source": "FontDB/FslFonts.dat!21.data",
+      "bytes": 328,
+      "sha256": "14f2f1261418eb0ba0ae71312950da727909e4c7de8eb5cf7ad912d812e08cd9"
+    },
+    {
+      "name": "21.fsl",
+      "source": "FontDB/FslFonts.dat!21.fsl",
+      "bytes": 49112,
+      "sha256": "04532f5f4814c63aa443848a4eb436bdc00d66f48dcd9b85f061510cd08b0f3b"
+    },
+    {
+      "name": "21b.data",
+      "source": "FontDB/FslFonts.dat!21b.data",
+      "bytes": 428,
+      "sha256": "c8f0849f66a11ddd262ab7f49993a916a39ab7472719876e101ab21150245aec"
+    },
+    {
+      "name": "21bi.data",
+      "source": "FontDB/FslFonts.dat!21bi.data",
+      "bytes": 428,
+      "sha256": "817e688c3f51b8116958b8aae5e42c40fcd2839dbd45d028049f325cd59c694c"
+    },
+    {
+      "name": "21i.data",
+      "source": "FontDB/FslFonts.dat!21i.data",
+      "bytes": 328,
+      "sha256": "8933209552485b870fadd24e147746c88a24bea3b510ac636112d07da0dda83c"
+    },
+    {
+      "name": "22.data",
+      "source": "FontDB/FslFonts.dat!22.data",
+      "bytes": 484,
+      "sha256": "568b834864d64a65b1047b686cae351bfc5d0da03a116e3fb2878616e77bf77c"
+    },
+    {
+      "name": "22.fsl",
+      "source": "FontDB/FslFonts.dat!22.fsl",
+      "bytes": 218092,
+      "sha256": "907edfd5e7639dd6b696c39009b8f5caca70543d771b671b90d8bc7ca2d65175"
+    },
+    {
+      "name": "22b.data",
+      "source": "FontDB/FslFonts.dat!22b.data",
+      "bytes": 540,
+      "sha256": "083436b0dc58634c65f8da116656729d1d33bc5176316332a9ff5f3a386640bf"
+    },
+    {
+      "name": "22bi.data",
+      "source": "FontDB/FslFonts.dat!22bi.data",
+      "bytes": 540,
+      "sha256": "10ede317618fdb930d062ddddc5b103a57fa34f700569fd4521b26d5a05c97a9"
+    },
+    {
+      "name": "22i.data",
+      "source": "FontDB/FslFonts.dat!22i.data",
+      "bytes": 484,
+      "sha256": "39c39d497dd4f1ed06c16962672745018f770785d1c935602d8eb6420fe7ba68"
+    },
+    {
+      "name": "23.data",
+      "source": "FontDB/FslFonts.dat!23.data",
+      "bytes": 484,
+      "sha256": "87c1ccdedfb2267cde84221a9b4c99223a8920969c8fc094eb67017d1edae086"
+    },
+    {
+      "name": "23.fsl",
+      "source": "FontDB/FslFonts.dat!23.fsl",
+      "bytes": 229708,
+      "sha256": "693fbea62e6ebfa0321d4f58eda8560b6e5fd40c1683f48f1db60a58fd581ca5"
+    },
+    {
+      "name": "23b.data",
+      "source": "FontDB/FslFonts.dat!23b.data",
+      "bytes": 516,
+      "sha256": "8419caf557158076181505e4d1732e3d39b1cc8272b67eead9837b0c776b0836"
+    },
+    {
+      "name": "23bi.data",
+      "source": "FontDB/FslFonts.dat!23bi.data",
+      "bytes": 516,
+      "sha256": "744dc72fdd4cf9e629054c51d956332ad30f6c075253c2950e99c3e5e70aa23c"
+    },
+    {
+      "name": "23i.data",
+      "source": "FontDB/FslFonts.dat!23i.data",
+      "bytes": 484,
+      "sha256": "263457a9a8ae530cf978f5f4e215f3fd6a4acfb56aaa95116e8a942fd6cebc8b"
+    },
+    {
+      "name": "24.data",
+      "source": "FontDB/FslFonts.dat!24.data",
+      "bytes": 328,
+      "sha256": "3757b975246fa20c55564a980f4b144aacb2d61b1c7fce486519425305f9f945"
+    },
+    {
+      "name": "24.fsl",
+      "source": "FontDB/FslFonts.dat!24.fsl",
+      "bytes": 85804,
+      "sha256": "1855794886089e83f7f6e50eb2531a17c6071a5fd66a4c93b6aa30a471f06b3f"
+    },
+    {
+      "name": "24b.data",
+      "source": "FontDB/FslFonts.dat!24b.data",
+      "bytes": 408,
+      "sha256": "3b33fd30af648ccfb1b8652dfe70ffe520f0acfb289e1722980f83c600c7c4a9"
+    },
+    {
+      "name": "24bi.data",
+      "source": "FontDB/FslFonts.dat!24bi.data",
+      "bytes": 408,
+      "sha256": "0e0d6f13219b608c8664a75e80b6024ba99df2a37100fcf5d80b527e509a5889"
+    },
+    {
+      "name": "24i.data",
+      "source": "FontDB/FslFonts.dat!24i.data",
+      "bytes": 328,
+      "sha256": "bc859ff60191cc0abcda2bc554172eddd137ab7198db33facfca76446c0a403e"
+    },
+    {
+      "name": "25.data",
+      "source": "FontDB/FslFonts.dat!25.data",
+      "bytes": 328,
+      "sha256": "e860bcb9632f7701db42b3400685f420199e2085d65f1da88aa43ec0ea09e553"
+    },
+    {
+      "name": "25.fsl",
+      "source": "FontDB/FslFonts.dat!25.fsl",
+      "bytes": 118860,
+      "sha256": "220087c52b66cab216ea8983d87a49ce32ff3cd451f21ec22c80f906e9a28da5"
+    },
+    {
+      "name": "25b.data",
+      "source": "FontDB/FslFonts.dat!25b.data",
+      "bytes": 424,
+      "sha256": "73e1df738165b4d20b47b0e6331c901ef43cc0fa07094cf79be26cd645bc953a"
+    },
+    {
+      "name": "25bi.data",
+      "source": "FontDB/FslFonts.dat!25bi.data",
+      "bytes": 424,
+      "sha256": "c09bb8191b882b6c6ff052b153fdb08a987f1e85f8abbf3cf148ea87a51eee96"
+    },
+    {
+      "name": "25i.data",
+      "source": "FontDB/FslFonts.dat!25i.data",
+      "bytes": 328,
+      "sha256": "073df1e46611eae2ba2e9f320cd4a4fd7b76b183131ff75fb1e133fc1893773c"
+    },
+    {
+      "name": "26.data",
+      "source": "FontDB/FslFonts.dat!26.data",
+      "bytes": 4060,
+      "sha256": "ab01245f4dbe7f8cea44a4e8696ced858f4e0b521d193faeb4cf074d52f08e55"
+    },
+    {
+      "name": "26.fsl",
+      "source": "FontDB/FslFonts.dat!26.fsl",
+      "bytes": 790260,
+      "sha256": "5f3ea9757c592b32f4a7ed850ff64d15311cd14b1482e42827b0fc36954d28e0"
+    },
+    {
+      "name": "26bd.data",
+      "source": "FontDB/FslFonts.dat!26bd.data",
+      "bytes": 4058,
+      "sha256": "f9bcc609367db923186d34fb04ff0d33ea65197acf821a6b2b8ba404db2d2f72"
+    },
+    {
+      "name": "26bd.fsl",
+      "source": "FontDB/FslFonts.dat!26bd.fsl",
+      "bytes": 783400,
+      "sha256": "99bfc1ed7235f8fa2381493ab465965485eb69a76db6ed26d89a4ba10e0c2f74"
+    },
+    {
+      "name": "26bdi.data",
+      "source": "FontDB/FslFonts.dat!26bdi.data",
+      "bytes": 7046,
+      "sha256": "f38e181a5de7de336897bbd15ad15e280882a87a3d58be5e14295ad3512ff6f4"
+    },
+    {
+      "name": "26i.data",
+      "source": "FontDB/FslFonts.dat!26i.data",
+      "bytes": 4060,
+      "sha256": "4f098ebee1ac62cedbf8b39f4d2f013e07013f3a9233f5086fadc12f1aff87bf"
+    },
+    {
+      "name": "27.data",
+      "source": "FontDB/FslFonts.dat!27.data",
+      "bytes": 4094,
+      "sha256": "67defea18fbcb835d2dc207c9e70880602bdaad9c8a5118dde3f8f3d91095165"
+    },
+    {
+      "name": "27.fsl",
+      "source": "FontDB/FslFonts.dat!27.fsl",
+      "bytes": 790448,
+      "sha256": "591747ae433cb78e305e0da612a23b7f3b34fce449f82258d2c0b70e9a58680b"
+    },
+    {
+      "name": "27bd.data",
+      "source": "FontDB/FslFonts.dat!27bd.data",
+      "bytes": 240200,
+      "sha256": "a2f01cba767f1458b88c96942ab52e3d175f8bd1b6e06afdd7802131bc54b623"
+    },
+    {
+      "name": "27bd.fsl",
+      "source": "FontDB/FslFonts.dat!27bd.fsl",
+      "bytes": 783588,
+      "sha256": "ff04939af1db29fd9dec4d648aa580b071016a6b5f52760567d9e5babb6d4452"
+    },
+    {
+      "name": "27bdi.data",
+      "source": "FontDB/FslFonts.dat!27bdi.data",
+      "bytes": 240312,
+      "sha256": "3eb7a0a2bc4fc278d6c92194ee13385c92da5a81c20fca6f3d1b356707de2c09"
+    },
+    {
+      "name": "27i.data",
+      "source": "FontDB/FslFonts.dat!27i.data",
+      "bytes": 4094,
+      "sha256": "cc18cbb09bff5539c56675c0f878e6e642c296bd0fda7ebaec1a8d34bdbb84fa"
+    },
+    {
+      "name": "28.data",
+      "source": "FontDB/FslFonts.dat!28.data",
+      "bytes": 4066,
+      "sha256": "4d1a31ae33dd2ca7edcdd7612de2621a4516dbe85a12472b154ead881df19d78"
+    },
+    {
+      "name": "28.fsl",
+      "source": "FontDB/FslFonts.dat!28.fsl",
+      "bytes": 739636,
+      "sha256": "176557bb61d44a241aaf9d23ccdbb5429bef634b84c51a0a40406421772defa8"
+    },
+    {
+      "name": "28bd.data",
+      "source": "FontDB/FslFonts.dat!28bd.data",
+      "bytes": 7608,
+      "sha256": "6d7d834eefdae123d5c41c795276f515bb5ec80d77b3eae39713f1a70606d189"
+    },
+    {
+      "name": "28bd.fsl",
+      "source": "FontDB/FslFonts.dat!28bd.fsl",
+      "bytes": 799740,
+      "sha256": "b1dec11274507640cf30b08c0fe045d87f192329ba6d71266fb1415f57c1da28"
+    },
+    {
+      "name": "28bdi.data",
+      "source": "FontDB/FslFonts.dat!28bdi.data",
+      "bytes": 12644,
+      "sha256": "a56976177571876e77cfc6bb2c05565c62125add7316ed72cc128a43e60eee59"
+    },
+    {
+      "name": "28i.data",
+      "source": "FontDB/FslFonts.dat!28i.data",
+      "bytes": 4066,
+      "sha256": "2c364d07d6fdc9fae6f480f8fb0863c4423506eefff7cb6fd63460773103ead5"
+    },
+    {
+      "name": "29.data",
+      "source": "FontDB/FslFonts.dat!29.data",
+      "bytes": 4100,
+      "sha256": "e640831c71ecbb227e69d4b1d1d5b72966f6f56338e5ed782a07655feeb92dc4"
+    },
+    {
+      "name": "29.fsl",
+      "source": "FontDB/FslFonts.dat!29.fsl",
+      "bytes": 785176,
+      "sha256": "ceafdcc237186275335209425fc079590a2a39940d9dd491a1d151bfa22f7d70"
+    },
+    {
+      "name": "29bd.data",
+      "source": "FontDB/FslFonts.dat!29bd.data",
+      "bytes": 7642,
+      "sha256": "a8415218a0e064a1b3d50ba3be8e5a903933c221833f25336966e2b3680a2bb0"
+    },
+    {
+      "name": "29bd.fsl",
+      "source": "FontDB/FslFonts.dat!29bd.fsl",
+      "bytes": 789624,
+      "sha256": "651c8b4dcd4508c4c7339af69d65038794747629bd5799281713ca6d47790ade"
+    },
+    {
+      "name": "29bdi.data",
+      "source": "FontDB/FslFonts.dat!29bdi.data",
+      "bytes": 12694,
+      "sha256": "d7744d3d9ffa3655812288e88516e2ecf57eaa1d5dde11a2a598c1bcf5678917"
+    },
+    {
+      "name": "29i.data",
+      "source": "FontDB/FslFonts.dat!29i.data",
+      "bytes": 4100,
+      "sha256": "39a042d2ee3a74ad9e3ce6e1a62351b2b5caa55ec02a554fdcab84ebef77e588"
+    },
+    {
+      "name": "2b.data",
+      "source": "FontDB/FslFonts.dat!2b.data",
+      "bytes": 3016,
+      "sha256": "b4094e31f19a770913f6b61038a135e6dfac4bc824c94c80ba4059f97d7d144d"
+    },
+    {
+      "name": "2b.fsl",
+      "source": "FontDB/FslFonts.dat!2b.fsl",
+      "bytes": 26476,
+      "sha256": "c755780151e28e2f96b95fc3a0a8dc2fdd7680b38c4667ad1c795e0492824e5e"
+    },
+    {
+      "name": "2bi.data",
+      "source": "FontDB/FslFonts.dat!2bi.data",
+      "bytes": 3046,
+      "sha256": "255f68210af33cdc87d2fb4e8391b8d4fbd164a3eccfc0957cb74743a28d1c3e"
+    },
+    {
+      "name": "2bi.fsl",
+      "source": "FontDB/FslFonts.dat!2bi.fsl",
+      "bytes": 26372,
+      "sha256": "71fc7067c79756f28a17b715b93c4078614ee6fd933f0932d84b72fca6d12e2e"
+    },
+    {
+      "name": "2i.data",
+      "source": "FontDB/FslFonts.dat!2i.data",
+      "bytes": 3024,
+      "sha256": "06ba796da366193bb5054abe5ee9004d7e4523dceaa46d75c8a166d09cbae483"
+    },
+    {
+      "name": "2i.fsl",
+      "source": "FontDB/FslFonts.dat!2i.fsl",
+      "bytes": 26696,
+      "sha256": "cc4e390a7734ba817050ca4dfe64d638fd2460461fd320eac6e3f0ca9b4e7c99"
+    },
+    {
+      "name": "3.data",
+      "source": "FontDB/FslFonts.dat!3.data",
+      "bytes": 2984,
+      "sha256": "ebaeba436072833b908a5b3f05940e6cade6f33efc6788c93e85b1bd5f095511"
+    },
+    {
+      "name": "3.fsl",
+      "source": "FontDB/FslFonts.dat!3.fsl",
+      "bytes": 26784,
+      "sha256": "cc5a9a45813ede4de9171cd4ec68ee2e9b2d705afd85560b56da8ebba47d5832"
+    },
+    {
+      "name": "30.data",
+      "source": "FontDB/FslFonts.dat!30.data",
+      "bytes": 1374,
+      "sha256": "a71a51305f5f396db40f269b5262877fa07f2b42654eef61930a628c857baac6"
+    },
+    {
+      "name": "30.fsl",
+      "source": "FontDB/FslFonts.dat!30.fsl",
+      "bytes": 2160,
+      "sha256": "3b759c330fcca59755382ebaf2cd1f3e4c87e57796e52ce085b66dbf88568f47"
+    },
+    {
+      "name": "30b.data",
+      "source": "FontDB/FslFonts.dat!30b.data",
+      "bytes": 1374,
+      "sha256": "30474130bc94f7f9503d58d7316f698b14661aa0fd77e36debd87426ea9a5a21"
+    },
+    {
+      "name": "30bi.data",
+      "source": "FontDB/FslFonts.dat!30bi.data",
+      "bytes": 1374,
+      "sha256": "a0ee4d1c31d82b06c68490768e498447adeae5915e54ebf640112a0d139a0cba"
+    },
+    {
+      "name": "30i.data",
+      "source": "FontDB/FslFonts.dat!30i.data",
+      "bytes": 1374,
+      "sha256": "7ca8091f2c6760800b22126fa298cdc11e9c3f097d3ff2574b831a6d111831ae"
+    },
+    {
+      "name": "31.data",
+      "source": "FontDB/FslFonts.dat!31.data",
+      "bytes": 21100,
+      "sha256": "83ff2cdb6873fff8db59916ed1649c9f26caacfb5eb701171e55f07bbed138b8"
+    },
+    {
+      "name": "31.fsl",
+      "source": "FontDB/FslFonts.dat!31.fsl",
+      "bytes": 294844,
+      "sha256": "de695cf4538b084b0f590842df98f6d606c24641a2fcb20f961821aa32f29c22"
+    },
+    {
+      "name": "31b.data",
+      "source": "FontDB/FslFonts.dat!31b.data",
+      "bytes": 29952,
+      "sha256": "1aeb50986c553d86cb173df8f2e2797fa06a30adf76057c9321fe6ba23d2d8f6"
+    },
+    {
+      "name": "31bi.data",
+      "source": "FontDB/FslFonts.dat!31bi.data",
+      "bytes": 29994,
+      "sha256": "39a2cc55c5bb878cbcf5830d91c08748d7c5ba69d51c7f885e2fc8f7f94d5a74"
+    },
+    {
+      "name": "31i.data",
+      "source": "FontDB/FslFonts.dat!31i.data",
+      "bytes": 20958,
+      "sha256": "b2c680b78b24f56ac99321f84e0a9131a67ed436504eb43aa64f3267a0d1ad56"
+    },
+    {
+      "name": "31i.fsl",
+      "source": "FontDB/FslFonts.dat!31i.fsl",
+      "bytes": 278564,
+      "sha256": "8aad71177a9f2eb58ac6d48fb4bce4febce5778f904e458a052640bf67d8ecc2"
+    },
+    {
+      "name": "32.data",
+      "source": "FontDB/FslFonts.dat!32.data",
+      "bytes": 1282,
+      "sha256": "d424cff4264d7403800e6302015262a1429638c250459d5722d58b87d0954129"
+    },
+    {
+      "name": "32.fsl",
+      "source": "FontDB/FslFonts.dat!32.fsl",
+      "bytes": 11344,
+      "sha256": "72f903a5b977754e93b69ee95842914924a877cc35ba4c72c78fab1a4ba77468"
+    },
+    {
+      "name": "32b.data",
+      "source": "FontDB/FslFonts.dat!32b.data",
+      "bytes": 1354,
+      "sha256": "12ed679f1c9ed78270a704121e901d9001533147851413ffa3cd3965cd30c856"
+    },
+    {
+      "name": "32bi.data",
+      "source": "FontDB/FslFonts.dat!32bi.data",
+      "bytes": 1354,
+      "sha256": "896c1535d660828caeea8143473e93ed492712540346c83611d4bdaa27cf75ce"
+    },
+    {
+      "name": "32i.data",
+      "source": "FontDB/FslFonts.dat!32i.data",
+      "bytes": 1330,
+      "sha256": "20ce52d524ac80662b9d7e0f1ee4d3a77c96637c6172213b066ce1b66a9e6728"
+    },
+    {
+      "name": "33.data",
+      "source": "FontDB/FslFonts.dat!33.data",
+      "bytes": 2396,
+      "sha256": "0108484c61fc74ac8b456b711da21e01ab96aeca43da5d481e90d241a643259a"
+    },
+    {
+      "name": "33.fsl",
+      "source": "FontDB/FslFonts.dat!33.fsl",
+      "bytes": 2160,
+      "sha256": "49743084046bbfafdf713a3f9e4289720b10c3ec0f951f04a445c466e6bba9ca"
+    },
+    {
+      "name": "33b.data",
+      "source": "FontDB/FslFonts.dat!33b.data",
+      "bytes": 2404,
+      "sha256": "4af8b5440ae51075d6967f42cf4682bb320458660b8a50df3bf76c17832d3e7b"
+    },
+    {
+      "name": "33bi.data",
+      "source": "FontDB/FslFonts.dat!33bi.data",
+      "bytes": 2404,
+      "sha256": "7ecb8c306a4fb0a4f39c180ac958da9d5e7093e6436902a6d42d7d09acaba85a"
+    },
+    {
+      "name": "33i.data",
+      "source": "FontDB/FslFonts.dat!33i.data",
+      "bytes": 2400,
+      "sha256": "99349e24068b8b0c62239074897ce0cdcc6499516b1ceff2b008052962d3baca"
+    },
+    {
+      "name": "34.data",
+      "source": "FontDB/FslFonts.dat!34.data",
+      "bytes": 12886,
+      "sha256": "1418a1068872ada2bfe5f2cefbe25477ddcc8f70be650aa7bd6aa438bb583a7f"
+    },
+    {
+      "name": "34.fsl",
+      "source": "FontDB/FslFonts.dat!34.fsl",
+      "bytes": 26452,
+      "sha256": "285141f84da833ec257a7de501c95b1f241909acfc0b3f48053f21319a60ac4c"
+    },
+    {
+      "name": "34b.data",
+      "source": "FontDB/FslFonts.dat!34b.data",
+      "bytes": 13040,
+      "sha256": "158d243d8d71d7a4859bebdc73bbde113c508f647c136520d8feacafe7b0e5f5"
+    },
+    {
+      "name": "34b.fsl",
+      "source": "FontDB/FslFonts.dat!34b.fsl",
+      "bytes": 26452,
+      "sha256": "db12e6074b2409d61fd108372f5d6bd42ba30ab33822c9a695daa7b604828fa7"
+    },
+    {
+      "name": "34bi.data",
+      "source": "FontDB/FslFonts.dat!34bi.data",
+      "bytes": 16112,
+      "sha256": "d98e49e809272dac39329a3e7190d271fedc8f5f40229a35331c2ff84e564c55"
+    },
+    {
+      "name": "34i.data",
+      "source": "FontDB/FslFonts.dat!34i.data",
+      "bytes": 12886,
+      "sha256": "cda2a3912e5a052585dbc36967085d754a9a8b074b223816a451a366c9a3ed24"
+    },
+    {
+      "name": "35.data",
+      "source": "FontDB/FslFonts.dat!35.data",
+      "bytes": 1220,
+      "sha256": "66d4a221c1b9cdbab6fbfa119db4f4c5fd7552a9d831512947f184fec3e09071"
+    },
+    {
+      "name": "35.fsl",
+      "source": "FontDB/FslFonts.dat!35.fsl",
+      "bytes": 9540,
+      "sha256": "b341cd3b389aaa84268973b37639186fae837b55a935350bf40eafdd379f236a"
+    },
+    {
+      "name": "35b.data",
+      "source": "FontDB/FslFonts.dat!35b.data",
+      "bytes": 1268,
+      "sha256": "1e64f71b78e1b9fe11e72e1a45032e6695bf163967e987165e44840353a21650"
+    },
+    {
+      "name": "35bi.data",
+      "source": "FontDB/FslFonts.dat!35bi.data",
+      "bytes": 1268,
+      "sha256": "bc051a739d8eee478e81cee6aeac3126abbed78c8ffa2ac0823d28ec1181f2dc"
+    },
+    {
+      "name": "35i.data",
+      "source": "FontDB/FslFonts.dat!35i.data",
+      "bytes": 1256,
+      "sha256": "7af3f685576c94eadd7f5273d45cd5cf78696f861fb9ddfc1b8803e420aa3484"
+    },
+    {
+      "name": "36.data",
+      "source": "FontDB/FslFonts.dat!36.data",
+      "bytes": 4936,
+      "sha256": "d16dc38dfbb0ad3475079c4e38f6b6f620262b5b182d25b2724eacdeed9ee963"
+    },
+    {
+      "name": "36.fsl",
+      "source": "FontDB/FslFonts.dat!36.fsl",
+      "bytes": 9496,
+      "sha256": "1c03de3e360a8524f937f332829ca3a70d23cea5972af70a3decb7ca3de2926f"
+    },
+    {
+      "name": "36b.data",
+      "source": "FontDB/FslFonts.dat!36b.data",
+      "bytes": 4980,
+      "sha256": "86f27e2551a0ae587592222577227bc286438cb3dd82ad75810d940e7d9e4ed5"
+    },
+    {
+      "name": "36bi.data",
+      "source": "FontDB/FslFonts.dat!36bi.data",
+      "bytes": 4980,
+      "sha256": "ddbe9afc4daaa9e8f3c5b5b6d991fc7043a77c52e54d338ba9699cd8ec2851d4"
+    },
+    {
+      "name": "36i.data",
+      "source": "FontDB/FslFonts.dat!36i.data",
+      "bytes": 4956,
+      "sha256": "3d9755c3b231627d5a988bbe7d70d5e6c0e2207e1fd06cc2f0e2ff1ae71c2dc1"
+    },
+    {
+      "name": "37.data",
+      "source": "FontDB/FslFonts.dat!37.data",
+      "bytes": 1386,
+      "sha256": "32eb44daa8d4266f2fee74355920987e1e6a930d8e5ee3882f684d74d329d506"
+    },
+    {
+      "name": "37.fsl",
+      "source": "FontDB/FslFonts.dat!37.fsl",
+      "bytes": 11344,
+      "sha256": "bab0db6b3a720543003fa1a0cae3cf5b9cb0c2f43b69d3b3505f8dcb4da9c113"
+    },
+    {
+      "name": "37b.data",
+      "source": "FontDB/FslFonts.dat!37b.data",
+      "bytes": 1398,
+      "sha256": "8281e782ad87453315e212789a5cd2eff014f2ff7b1e0632337492d0438b5670"
+    },
+    {
+      "name": "37bi.data",
+      "source": "FontDB/FslFonts.dat!37bi.data",
+      "bytes": 1398,
+      "sha256": "6aaa9f44030ba4c360b9e348956663b9c1e9fdea5b046cc5d418b0b7f9d1fda6"
+    },
+    {
+      "name": "37i.data",
+      "source": "FontDB/FslFonts.dat!37i.data",
+      "bytes": 1390,
+      "sha256": "e06835ba868d6f986d9b2157ea539cb99082a5fe303fe44c17320a43d7f4553a"
+    },
+    {
+      "name": "38.data",
+      "source": "FontDB/FslFonts.dat!38.data",
+      "bytes": 2656,
+      "sha256": "34c125274b26a431fb6f414bbf0d7bf10a2eba4107858a34bf35ad7ba4c29d57"
+    },
+    {
+      "name": "38.fsl",
+      "source": "FontDB/FslFonts.dat!38.fsl",
+      "bytes": 19940,
+      "sha256": "cae0e1d45ce018b5322fed930ad21382309cd615472c0226ff50a70ef465b04b"
+    },
+    {
+      "name": "38b.data",
+      "source": "FontDB/FslFonts.dat!38b.data",
+      "bytes": 2724,
+      "sha256": "8cb59bf2bb6f28670730dc4384ecaac444abcbf2676ff9cf0a6b37c23f32fee5"
+    },
+    {
+      "name": "38bi.data",
+      "source": "FontDB/FslFonts.dat!38bi.data",
+      "bytes": 2724,
+      "sha256": "c7886590be98f14099f36bff6aa57417c98560958a2e22f3534a17c8e8a202c6"
+    },
+    {
+      "name": "38i.data",
+      "source": "FontDB/FslFonts.dat!38i.data",
+      "bytes": 2708,
+      "sha256": "68aef61056cfd1fbb757fc812c604dac5969e34c9a39893977648e14b25ced76"
+    },
+    {
+      "name": "39.data",
+      "source": "FontDB/FslFonts.dat!39.data",
+      "bytes": 2980,
+      "sha256": "6e87acc051720b2a5c5bf06462d5ccd4714b0aecf847ee9da12234f033e57d79"
+    },
+    {
+      "name": "39.fsl",
+      "source": "FontDB/FslFonts.dat!39.fsl",
+      "bytes": 26976,
+      "sha256": "fc5c787938194ebaceec8ffad419315eedd69f1716c9fb1cc4aed72ada798911"
+    },
+    {
+      "name": "39b.data",
+      "source": "FontDB/FslFonts.dat!39b.data",
+      "bytes": 1372,
+      "sha256": "b9f48682191adae03bde7962310c91cfd6fc6fa34986dd7ba44d820f6295bd24"
+    },
+    {
+      "name": "39bi.data",
+      "source": "FontDB/FslFonts.dat!39bi.data",
+      "bytes": 3012,
+      "sha256": "08fb7881d0d51b7a0db571a92b577096f937ba43ac416e3f5bc6a4fa41e03d28"
+    },
+    {
+      "name": "39i.data",
+      "source": "FontDB/FslFonts.dat!39i.data",
+      "bytes": 2992,
+      "sha256": "ce33fca3d087602c2f0a09bed40d127f93e2fea52dcbbf3e41a378f7d421747c"
+    },
+    {
+      "name": "3b.data",
+      "source": "FontDB/FslFonts.dat!3b.data",
+      "bytes": 2990,
+      "sha256": "5c6400f0205ad14d6bd3ffd7cd92af2f1c4067e6a15dc13dd252ffc87a1c187b"
+    },
+    {
+      "name": "3b.fsl",
+      "source": "FontDB/FslFonts.dat!3b.fsl",
+      "bytes": 26796,
+      "sha256": "64a841dff884cef61f325df27d8fc09920dc5768021713bbde966374a71493f3"
+    },
+    {
+      "name": "3bi.data",
+      "source": "FontDB/FslFonts.dat!3bi.data",
+      "bytes": 3036,
+      "sha256": "3c162ed1897bc1e2b5a56dbc39dfa17b8f3b7e2a6f23af758adb05318d34b684"
+    },
+    {
+      "name": "3bi.fsl",
+      "source": "FontDB/FslFonts.dat!3bi.fsl",
+      "bytes": 26136,
+      "sha256": "a42b96f9994795292a4c38729d66b17486cfdd9861650380e9c8d2186a6a46ff"
+    },
+    {
+      "name": "3i.data",
+      "source": "FontDB/FslFonts.dat!3i.data",
+      "bytes": 3006,
+      "sha256": "80abb6e6ab30397dee12675b5f1589b0deb3fa4b4d498a7221536a9c54aba3b9"
+    },
+    {
+      "name": "3i.fsl",
+      "source": "FontDB/FslFonts.dat!3i.fsl",
+      "bytes": 26776,
+      "sha256": "e486db123dfe80eb5f4c3c74faaca5320ac1652b33d10b0e5ae6882bdcc2e739"
+    },
+    {
+      "name": "4.data",
+      "source": "FontDB/FslFonts.dat!4.data",
+      "bytes": 2984,
+      "sha256": "37c65b8b156b7fdcb9551edc5dcc86f2a1d6862b3d78f76cde933adcfc2f1fa1"
+    },
+    {
+      "name": "4.fsl",
+      "source": "FontDB/FslFonts.dat!4.fsl",
+      "bytes": 26776,
+      "sha256": "d1eba46436585e674be1283096f8a8513b0f5274711a4470bc685c0bd80fab1c"
+    },
+    {
+      "name": "40.data",
+      "source": "FontDB/FslFonts.dat!40.data",
+      "bytes": 10322,
+      "sha256": "adb497593c092c827d0e0115bce5d8566a563c5dc59cb8d912c0a5d87fc19ac3"
+    },
+    {
+      "name": "40.fsl",
+      "source": "FontDB/FslFonts.dat!40.fsl",
+      "bytes": 251496,
+      "sha256": "f27951a372744fb62fbeb1b9ecf32dd08932c44c10bff46d997a2dd94da8cc76"
+    },
+    {
+      "name": "40b.data",
+      "source": "FontDB/FslFonts.dat!40b.data",
+      "bytes": 10350,
+      "sha256": "6f130e632e8e4ffd7863cbf4b7bf9720e49e2df8e08239551350702abab3c750"
+    },
+    {
+      "name": "40b.fsl",
+      "source": "FontDB/FslFonts.dat!40b.fsl",
+      "bytes": 250480,
+      "sha256": "f1ce6ca36415ead9bc30676dca7a28e28c04ebca77cd7e651d28cdfdcbb8c5e1"
+    },
+    {
+      "name": "40bi.data",
+      "source": "FontDB/FslFonts.dat!40bi.data",
+      "bytes": 13860,
+      "sha256": "e3ebd9df728fc89ba7d6823a576c47a1933ea363e5c6e18908565ec9a7af6771"
+    },
+    {
+      "name": "40i.data",
+      "source": "FontDB/FslFonts.dat!40i.data",
+      "bytes": 10042,
+      "sha256": "b1717a8193e631326fbcf880b8d55e4f0a55254a0b1eb766387e464c01c241db"
+    },
+    {
+      "name": "41.data",
+      "source": "FontDB/FslFonts.dat!41.data",
+      "bytes": 1312,
+      "sha256": "b574880782a5ccb25ab093c63058a7fef4362f683524afcc92bac45b4241fa1d"
+    },
+    {
+      "name": "41.fsl",
+      "source": "FontDB/FslFonts.dat!41.fsl",
+      "bytes": 11752,
+      "sha256": "5ff60ec570980ba5e7dc4718bfd7d4db2274d0661789e002305a0d69374a1558"
+    },
+    {
+      "name": "41b.data",
+      "source": "FontDB/FslFonts.dat!41b.data",
+      "bytes": 1312,
+      "sha256": "83a8f2b8a0f06d60309189c71239102fe0f86ce3644e1cba23a5b300ba35562b"
+    },
+    {
+      "name": "41bi.data",
+      "source": "FontDB/FslFonts.dat!41bi.data",
+      "bytes": 1312,
+      "sha256": "7018dec451314ebabc0dad282185feaa916c1161a35009722a39610efe268e0c"
+    },
+    {
+      "name": "41i.data",
+      "source": "FontDB/FslFonts.dat!41i.data",
+      "bytes": 1312,
+      "sha256": "49e50aa2ed0c8d21e280f2490d2f745e52421ad73fb75c9bdc0cdc589f3e89a4"
+    },
+    {
+      "name": "42.data",
+      "source": "FontDB/FslFonts.dat!42.data",
+      "bytes": 1114,
+      "sha256": "87ed06005eaa900de1de958c5ed55ac6ced478d26b0ef3e81afdea90cbf997b7"
+    },
+    {
+      "name": "42.fsl",
+      "source": "FontDB/FslFonts.dat!42.fsl",
+      "bytes": 2144,
+      "sha256": "a9d877d5b90aa7d0bacb984f48527d0bb2af228552b0b15be70f708658f2736e"
+    },
+    {
+      "name": "42b.data",
+      "source": "FontDB/FslFonts.dat!42b.data",
+      "bytes": 1162,
+      "sha256": "5bf1fc042e831ce289b96b24e12adfaca4aaa9169683de4d425bbdd334bbb5c8"
+    },
+    {
+      "name": "42bi.data",
+      "source": "FontDB/FslFonts.dat!42bi.data",
+      "bytes": 1162,
+      "sha256": "ffcfbcd3b4e31ee10e80d1f487312670880642a08811b99874c58a22e8ac4543"
+    },
+    {
+      "name": "42i.data",
+      "source": "FontDB/FslFonts.dat!42i.data",
+      "bytes": 1162,
+      "sha256": "ede135b3f7f024e6c02f78bb1d9257a23ca1e4fb68ff0cd5d098660cd93bbf87"
+    },
+    {
+      "name": "43.data",
+      "source": "FontDB/FslFonts.dat!43.data",
+      "bytes": 1330,
+      "sha256": "fcb41e3c54f2a9f3e5654a23a6aaee59f786d12a4f84edf30c631962b3f31887"
+    },
+    {
+      "name": "43.fsl",
+      "source": "FontDB/FslFonts.dat!43.fsl",
+      "bytes": 2224,
+      "sha256": "7d268df7a6b78a97e8473ccdf5896224c10b79cb50b6bd9f484011e1c4e05326"
+    },
+    {
+      "name": "43b.data",
+      "source": "FontDB/FslFonts.dat!43b.data",
+      "bytes": 1366,
+      "sha256": "7355dff0600d7c516775560de70d801019fa22c66bb22016b012643ac4adf606"
+    },
+    {
+      "name": "43bi.data",
+      "source": "FontDB/FslFonts.dat!43bi.data",
+      "bytes": 1366,
+      "sha256": "06b5ea60ee99f108fe6718bb486e0afd1d890938abc55972a57fb9872f9cd1b9"
+    },
+    {
+      "name": "43i.data",
+      "source": "FontDB/FslFonts.dat!43i.data",
+      "bytes": 1366,
+      "sha256": "e95ec9e1df4a42b00944c06acbfa60a961a1b65094bee82f9659911abea5b8b7"
+    },
+    {
+      "name": "44.data",
+      "source": "FontDB/FslFonts.dat!44.data",
+      "bytes": 1242,
+      "sha256": "1a078613b0e55ef78bd9c1de604a305eb94ab0dd0ab320001784fd45981042b6"
+    },
+    {
+      "name": "44.fsl",
+      "source": "FontDB/FslFonts.dat!44.fsl",
+      "bytes": 2220,
+      "sha256": "1ddebdda87d5d34fb9e269f03de1f22d16e9615996df5924df201d1fe576af24"
+    },
+    {
+      "name": "44b.data",
+      "source": "FontDB/FslFonts.dat!44b.data",
+      "bytes": 1302,
+      "sha256": "16cae2f241c319c4e1777ce8fc348a596a9c9f48a6bb6829ce49b2ac14823586"
+    },
+    {
+      "name": "44bi.data",
+      "source": "FontDB/FslFonts.dat!44bi.data",
+      "bytes": 1302,
+      "sha256": "bd55ffa6d74ec3fdb9cbcce491bcc3c1734b73c252ac0d652901b6424aa73be2"
+    },
+    {
+      "name": "44i.data",
+      "source": "FontDB/FslFonts.dat!44i.data",
+      "bytes": 1294,
+      "sha256": "9568ceab3d99db55be33218aeec2b54d86edcc4e9ae1809d8d15c145a32ba99c"
+    },
+    {
+      "name": "45.data",
+      "source": "FontDB/FslFonts.dat!45.data",
+      "bytes": 3636,
+      "sha256": "d363bc91cffafc98d301167abd3d4c9ddacbad34d79ee40f7b5e236c43c1bb1a"
+    },
+    {
+      "name": "45.fsl",
+      "source": "FontDB/FslFonts.dat!45.fsl",
+      "bytes": 14348,
+      "sha256": "e11208f9c621b670d9e8a685eda25ff142b4e3e366ae3eb52eeac6b0b6afda67"
+    },
+    {
+      "name": "45b.data",
+      "source": "FontDB/FslFonts.dat!45b.data",
+      "bytes": 3888,
+      "sha256": "edafff00779b74b67f2f2702f53105f19a0529b85448a858db21f752699a98a7"
+    },
+    {
+      "name": "45b.fsl",
+      "source": "FontDB/FslFonts.dat!45b.fsl",
+      "bytes": 14348,
+      "sha256": "65a7b7d80982d2c7eba0c75f3e9b8c0b683c36c890b0daf3d25d141d818eed12"
+    },
+    {
+      "name": "45bi.data",
+      "source": "FontDB/FslFonts.dat!45bi.data",
+      "bytes": 3892,
+      "sha256": "57d8dd4c7c12cda378cfa09ae747468181838c735f24338f469999e55026094d"
+    },
+    {
+      "name": "45i.data",
+      "source": "FontDB/FslFonts.dat!45i.data",
+      "bytes": 3854,
+      "sha256": "b221d0952d1861a2bd9906a65943b0b357a4bc4ac00a00cb7c7475e45a6a6dda"
+    },
+    {
+      "name": "45i.fsl",
+      "source": "FontDB/FslFonts.dat!45i.fsl",
+      "bytes": 11868,
+      "sha256": "c6a6816445697a8e787237f9b5e9fd06a968459db813e2a4b35314f3fcb3bd49"
+    },
+    {
+      "name": "46.data",
+      "source": "FontDB/FslFonts.dat!46.data",
+      "bytes": 1770,
+      "sha256": "4d5a071d7b6f4f0795a060bcd06bd4f6831a8cf75b0ea418d37af60cf7fde0ef"
+    },
+    {
+      "name": "46.fsl",
+      "source": "FontDB/FslFonts.dat!46.fsl",
+      "bytes": 14340,
+      "sha256": "a14a8600985c0377812c8115f895397340ee27d0d5c07fcaab3668b99cd180ad"
+    },
+    {
+      "name": "46b.data",
+      "source": "FontDB/FslFonts.dat!46b.data",
+      "bytes": 2650,
+      "sha256": "b5e6c80ea8561e42900fdb2cb1af60b228d48bf58069d6522efd63eed8ba81a1"
+    },
+    {
+      "name": "46bi.data",
+      "source": "FontDB/FslFonts.dat!46bi.data",
+      "bytes": 2658,
+      "sha256": "8d9792240999ceda136a41862cf7bdb9872b6f1d8ca4439cd9d906dc7eef7ced"
+    },
+    {
+      "name": "46i.data",
+      "source": "FontDB/FslFonts.dat!46i.data",
+      "bytes": 1786,
+      "sha256": "595a567e04cc04759b405bfb9d68ba83837d4fb4c524909012f66cf124c7db01"
+    },
+    {
+      "name": "47.data",
+      "source": "FontDB/FslFonts.dat!47.data",
+      "bytes": 1866,
+      "sha256": "526b814aa5aa1ed5f576b9fbe7afc1d26425004ceb8ada58137ccdbedc3609ab"
+    },
+    {
+      "name": "47.fsl",
+      "source": "FontDB/FslFonts.dat!47.fsl",
+      "bytes": 11980,
+      "sha256": "d8d2fcc93bcad0e6aa4a41e069983bd1c0ef4c4f6b340129c7ee50707c73e584"
+    },
+    {
+      "name": "47b.data",
+      "source": "FontDB/FslFonts.dat!47b.data",
+      "bytes": 1882,
+      "sha256": "aa55de6e3f1724aa8aff649bbac9002e856481c6a0958f4517b5e4bc7f8a9772"
+    },
+    {
+      "name": "47bi.data",
+      "source": "FontDB/FslFonts.dat!47bi.data",
+      "bytes": 1882,
+      "sha256": "49ad4e473c9326579aee34149d08c6a465f27634e478ecb4519d7db6d9c28198"
+    },
+    {
+      "name": "47i.data",
+      "source": "FontDB/FslFonts.dat!47i.data",
+      "bytes": 1878,
+      "sha256": "549ea79b09f3686ee512183b5b1aafb2b700ab231ac54c7fc344d5d79e4e0eb9"
+    },
+    {
+      "name": "48.data",
+      "source": "FontDB/FslFonts.dat!48.data",
+      "bytes": 1306,
+      "sha256": "e2b3880e0ca5fe3fb847a16c42b7e1de19898bd2ada6bb0566c9b62e64c53d9e"
+    },
+    {
+      "name": "48.fsl",
+      "source": "FontDB/FslFonts.dat!48.fsl",
+      "bytes": 2348,
+      "sha256": "15fb1b029a5824728cd959bfa1cd34a7302aa6d79cd619a1e86137e2c7dd764d"
+    },
+    {
+      "name": "48b.data",
+      "source": "FontDB/FslFonts.dat!48b.data",
+      "bytes": 1330,
+      "sha256": "30d963a5aeb2a338df00dea2957941f0c87f415d439d70d3e0cef5088b084034"
+    },
+    {
+      "name": "48bi.data",
+      "source": "FontDB/FslFonts.dat!48bi.data",
+      "bytes": 1330,
+      "sha256": "8b0bc9885a67aad070f4d167774f38f18aeb71b5af794d21b14f65a8ce975959"
+    },
+    {
+      "name": "48i.data",
+      "source": "FontDB/FslFonts.dat!48i.data",
+      "bytes": 1330,
+      "sha256": "0b26ef6b81bed73d05f6b79a93e5b5125850be362bf91789e61088552a163914"
+    },
+    {
+      "name": "49.data",
+      "source": "FontDB/FslFonts.dat!49.data",
+      "bytes": 1404,
+      "sha256": "c590461015d1eb14899d984b77ed4b373a204c3bc86604dbbaadee937dae7146"
+    },
+    {
+      "name": "49.fsl",
+      "source": "FontDB/FslFonts.dat!49.fsl",
+      "bytes": 15608,
+      "sha256": "a59cac6443d676f05e3562938eec58ea7ab763a41dc04e0f89db637245fff877"
+    },
+    {
+      "name": "49b.data",
+      "source": "FontDB/FslFonts.dat!49b.data",
+      "bytes": 1402,
+      "sha256": "c9332f0f3bd3d92ad9b4411a3b7e189677b1549ce54a8b8df2a4c79896ae207a"
+    },
+    {
+      "name": "49b.fsl",
+      "source": "FontDB/FslFonts.dat!49b.fsl",
+      "bytes": 15608,
+      "sha256": "abd4fede204c142b380449cfad2a828f3739914a9e564a9b4bc243e9fc92c870"
+    },
+    {
+      "name": "49bi.data",
+      "source": "FontDB/FslFonts.dat!49bi.data",
+      "bytes": 2322,
+      "sha256": "9fc4686f399c4ebbee8b33a1e7744839c1f562c913dc5c8b9ae773c1a83eeb16"
+    },
+    {
+      "name": "49i.data",
+      "source": "FontDB/FslFonts.dat!49i.data",
+      "bytes": 1412,
+      "sha256": "bbf7eb248aac6fbc41eeb29f1daecb18a962c7e7ae40cf36c3dc280878bfb43f"
+    },
+    {
+      "name": "4b.data",
+      "source": "FontDB/FslFonts.dat!4b.data",
+      "bytes": 3022,
+      "sha256": "a8caa97755f6e9c17a81783151fc68580346245e4f746fd8491d2dff090a5e85"
+    },
+    {
+      "name": "4b.fsl",
+      "source": "FontDB/FslFonts.dat!4b.fsl",
+      "bytes": 26768,
+      "sha256": "83706f4e36b9b2bcb123e94d112e462477fa6146a7b324197e56193ad08dfd98"
+    },
+    {
+      "name": "4bi.data",
+      "source": "FontDB/FslFonts.dat!4bi.data",
+      "bytes": 3060,
+      "sha256": "3f30ba4ad3ab21aab494048c9107cac9571bc39bb25e0d844581ac2d642b14d8"
+    },
+    {
+      "name": "4bi.fsl",
+      "source": "FontDB/FslFonts.dat!4bi.fsl",
+      "bytes": 26768,
+      "sha256": "a601b48a65cb6b75107e3fdf185ad802ebf58a7df73fb0a9d497f29998bd3fb6"
+    },
+    {
+      "name": "4i.data",
+      "source": "FontDB/FslFonts.dat!4i.data",
+      "bytes": 3030,
+      "sha256": "83dbb01a32a0e4d511fe1caadd52877199ff9da93f1a461be7285b05c10e3105"
+    },
+    {
+      "name": "4i.fsl",
+      "source": "FontDB/FslFonts.dat!4i.fsl",
+      "bytes": 26768,
+      "sha256": "9949970b20f43be42b564b44dc92884f363c9a44690946e0ab64f6bf17e34249"
+    },
+    {
+      "name": "5.data",
+      "source": "FontDB/FslFonts.dat!5.data",
+      "bytes": 9028,
+      "sha256": "d52db2194cae8faba59fe685e55f296f6d5a681bb7ba5d1640e470b9640a29f9"
+    },
+    {
+      "name": "5.fsl",
+      "source": "FontDB/FslFonts.dat!5.fsl",
+      "bytes": 26668,
+      "sha256": "a6f5269eda8a58902ec5eb86a3a1e73c832d505a43a715d3634e23a87042d49c"
+    },
+    {
+      "name": "50.data",
+      "source": "FontDB/FslFonts.dat!50.data",
+      "bytes": 1436,
+      "sha256": "31d337f4febda61fcfaaa5b34e5a298f9768fdf1bd5e1f102d0cd770d236c408"
+    },
+    {
+      "name": "50.fsl",
+      "source": "FontDB/FslFonts.dat!50.fsl",
+      "bytes": 15604,
+      "sha256": "e37edcbade2834a0bbb7a8ad83f370e6e5270596dddee46537809ae3f5cf3cd5"
+    },
+    {
+      "name": "50b.data",
+      "source": "FontDB/FslFonts.dat!50b.data",
+      "bytes": 2440,
+      "sha256": "c4d7fa7f01af32d57ae86ba4b064fdf478ea7236738b57ac2239e0ccbcb4f4ca"
+    },
+    {
+      "name": "50bi.data",
+      "source": "FontDB/FslFonts.dat!50bi.data",
+      "bytes": 2440,
+      "sha256": "5d94fe531e0364a2caf264ec512c0900aaf58f77a8682f70b5c249d5dd964a22"
+    },
+    {
+      "name": "50i.data",
+      "source": "FontDB/FslFonts.dat!50i.data",
+      "bytes": 1436,
+      "sha256": "c17bf02b3143418d50d54b53e5791fd5a20fc29ca3d0473f74f4a4c2779bb4bd"
+    },
+    {
+      "name": "51.data",
+      "source": "FontDB/FslFonts.dat!51.data",
+      "bytes": 7168,
+      "sha256": "bbcc5682984c37fb2de3e1e1eb15ec9585f77e914652e43998a89d58a4469476"
+    },
+    {
+      "name": "51.fsl",
+      "source": "FontDB/FslFonts.dat!51.fsl",
+      "bytes": 2108,
+      "sha256": "146d2ba21ef33f9da06f6cd39067c0fdc255f3b957274324eebab536e286c613"
+    },
+    {
+      "name": "51b.data",
+      "source": "FontDB/FslFonts.dat!51b.data",
+      "bytes": 7220,
+      "sha256": "30067825ad490e167a26386fb5e0636293961afdfa0b5e7cec3e37c8658a6247"
+    },
+    {
+      "name": "51bi.data",
+      "source": "FontDB/FslFonts.dat!51bi.data",
+      "bytes": 7204,
+      "sha256": "7a1d0f40608be2781d935f3e86f5c3b791a61ec1201bad62d99d65f475561f23"
+    },
+    {
+      "name": "51i.data",
+      "source": "FontDB/FslFonts.dat!51i.data",
+      "bytes": 7220,
+      "sha256": "e88b844e9c2e631a76be0d3da71599e68156b1b62882a79bed33525a50ab3af6"
+    },
+    {
+      "name": "52.data",
+      "source": "FontDB/FslFonts.dat!52.data",
+      "bytes": 2534,
+      "sha256": "732d44bfa5267a6de207516fdd0be3d9a29011f16929c40d2ccb699e7f313a1a"
+    },
+    {
+      "name": "52.fsl",
+      "source": "FontDB/FslFonts.dat!52.fsl",
+      "bytes": 2108,
+      "sha256": "09767eabbc34b740aa359eddd0f7162d9e9575cf68cdeb5f61fa053f5d29b8ef"
+    },
+    {
+      "name": "52b.data",
+      "source": "FontDB/FslFonts.dat!52b.data",
+      "bytes": 2550,
+      "sha256": "b5004b5b509a7bad1be3a4c1675e5cd94e1762711d34a8e7678b4223f48dbdfd"
+    },
+    {
+      "name": "52bi.data",
+      "source": "FontDB/FslFonts.dat!52bi.data",
+      "bytes": 2550,
+      "sha256": "2a496b7a6c1618fe9489cc2b4fe35073fcfb6db19627dd394f7275e4edaa7547"
+    },
+    {
+      "name": "52i.data",
+      "source": "FontDB/FslFonts.dat!52i.data",
+      "bytes": 2542,
+      "sha256": "9476b7c2600b91d1db2d2a0402667075fe88abfacdaefc390294a2f09b668a3f"
+    },
+    {
+      "name": "53.data",
+      "source": "FontDB/FslFonts.dat!53.data",
+      "bytes": 1378,
+      "sha256": "18f9e955400ae7b6f8b23ac8b4d83c319a251636316dcefc2e9faa6900739a1e"
+    },
+    {
+      "name": "53.fsl",
+      "source": "FontDB/FslFonts.dat!53.fsl",
+      "bytes": 14632,
+      "sha256": "84a24f20194b2a59c4095b804155dd65c3ce92f2f16ece7456cedde9104c8b14"
+    },
+    {
+      "name": "53b.data",
+      "source": "FontDB/FslFonts.dat!53b.data",
+      "bytes": 1352,
+      "sha256": "199bc1d0496a12c8299462852f58d82627870b9e8a2a430a4f488c3916d89f88"
+    },
+    {
+      "name": "53b.fsl",
+      "source": "FontDB/FslFonts.dat!53b.fsl",
+      "bytes": 11404,
+      "sha256": "b190f4f222d3f160f5d75133eba79d50909356228bebe6e310c082bbe9064c7a"
+    },
+    {
+      "name": "53bi.data",
+      "source": "FontDB/FslFonts.dat!53bi.data",
+      "bytes": 1376,
+      "sha256": "17760a252c9de8a9925fe0ef40b763f37e2135b77cc90dd8f7466a7860fbc8b9"
+    },
+    {
+      "name": "53i.data",
+      "source": "FontDB/FslFonts.dat!53i.data",
+      "bytes": 1388,
+      "sha256": "57b585c7cf7563819097a22bac019237974a3240c5eabb159a21c392747b3430"
+    },
+    {
+      "name": "53i.fsl",
+      "source": "FontDB/FslFonts.dat!53i.fsl",
+      "bytes": 15016,
+      "sha256": "68b8c50b5a620c7e174c055c6382de1fd31e78d76bccd91c0a7c84ae15337fcd"
+    },
+    {
+      "name": "54.data",
+      "source": "FontDB/FslFonts.dat!54.data",
+      "bytes": 3956,
+      "sha256": "1d106101d2011887299df9e2d7bd68ea440ebf538267fda36e9823ff57f08236"
+    },
+    {
+      "name": "54.fsl",
+      "source": "FontDB/FslFonts.dat!54.fsl",
+      "bytes": 11852,
+      "sha256": "2062f552c36b6e0c61d8dd8c49e60498bf98da48e5201be62cd500cb7f10ec94"
+    },
+    {
+      "name": "54b.data",
+      "source": "FontDB/FslFonts.dat!54b.data",
+      "bytes": 3976,
+      "sha256": "20fed9c45fb1008bb78ab70ea3d27a54fcf5d3e6b45caa164a2cd963802c966e"
+    },
+    {
+      "name": "54bi.data",
+      "source": "FontDB/FslFonts.dat!54bi.data",
+      "bytes": 3976,
+      "sha256": "3995c02b04839d3b852cac16d800dd7eb01c126f1cc6abdb9189b9e482e11455"
+    },
+    {
+      "name": "54i.data",
+      "source": "FontDB/FslFonts.dat!54i.data",
+      "bytes": 3968,
+      "sha256": "76e3f2ec8da746b464cbfed40900262ef589a3442a70e34ec98c155f0137c50e"
+    },
+    {
+      "name": "55.data",
+      "source": "FontDB/FslFonts.dat!55.data",
+      "bytes": 7174,
+      "sha256": "c5854e0e3675f8b614546b737bf878a7c2bc9bd3812915cce92d3f12d98dcea0"
+    },
+    {
+      "name": "55.fsl",
+      "source": "FontDB/FslFonts.dat!55.fsl",
+      "bytes": 8312,
+      "sha256": "0315872211c16ba0e3709905328262009bd792d15972e3a0310285fa818dd35b"
+    },
+    {
+      "name": "55b.data",
+      "source": "FontDB/FslFonts.dat!55b.data",
+      "bytes": 7226,
+      "sha256": "1e6d61b68c0fd75582d07902f20972c1720c82daa0f1e67ecf920d05dda6376c"
+    },
+    {
+      "name": "55bi.data",
+      "source": "FontDB/FslFonts.dat!55bi.data",
+      "bytes": 7226,
+      "sha256": "8b39e07ee7d79dce66427b03025d3bda351ccc3fad3ed6f29645ef70b37baa58"
+    },
+    {
+      "name": "55i.data",
+      "source": "FontDB/FslFonts.dat!55i.data",
+      "bytes": 7226,
+      "sha256": "95e87e299e3ff92912d6f51ef45c25e8cec38ac0f7b4f5ea0646dfada71d78b3"
+    },
+    {
+      "name": "56.data",
+      "source": "FontDB/FslFonts.dat!56.data",
+      "bytes": 3846,
+      "sha256": "19ab65db48974f083a19e83e2b6390d9173579c1c5fd3c8993dd7b8173bb8618"
+    },
+    {
+      "name": "56.fsl",
+      "source": "FontDB/FslFonts.dat!56.fsl",
+      "bytes": 14208,
+      "sha256": "9f270b87eede701ecd85a1302d8b17d16da0e02fd02e7d15407fdf5eed554b3e"
+    },
+    {
+      "name": "56b.data",
+      "source": "FontDB/FslFonts.dat!56b.data",
+      "bytes": 3866,
+      "sha256": "367cb935c5ce6897af91ad3da5a93de5de4fa44ce3d41c9a5b5c9f3d797fa4c3"
+    },
+    {
+      "name": "56bi.data",
+      "source": "FontDB/FslFonts.dat!56bi.data",
+      "bytes": 3866,
+      "sha256": "9e60632ec1b3478fe750c6bf085d5a9018cd4f98209c8ea1721e3eae660c1f21"
+    },
+    {
+      "name": "56i.data",
+      "source": "FontDB/FslFonts.dat!56i.data",
+      "bytes": 3858,
+      "sha256": "24946837379c6f5f76f291e78a423c4e503a426db1fd79a367692713095be1bb"
+    },
+    {
+      "name": "57.data",
+      "source": "FontDB/FslFonts.dat!57.data",
+      "bytes": 1394,
+      "sha256": "589e16c8fe1993baeb7fd856b4e533a11ea138c01135af79c7359efc50b7c9a5"
+    },
+    {
+      "name": "57.fsl",
+      "source": "FontDB/FslFonts.dat!57.fsl",
+      "bytes": 16308,
+      "sha256": "2daf8e3070d7d293316a2ce6906555a9485df09995b3082886b8ef8c25b4dd43"
+    },
+    {
+      "name": "57b.data",
+      "source": "FontDB/FslFonts.dat!57b.data",
+      "bytes": 1414,
+      "sha256": "53d22ef279073c01ff3165c79e56324b94c133a6d1760338999cd9fae4abade5"
+    },
+    {
+      "name": "57bi.data",
+      "source": "FontDB/FslFonts.dat!57bi.data",
+      "bytes": 1424,
+      "sha256": "3320b3068c843493095e4826b7fb298374a51193232d5d66ba8bb9268cea4eab"
+    },
+    {
+      "name": "57i.data",
+      "source": "FontDB/FslFonts.dat!57i.data",
+      "bytes": 1400,
+      "sha256": "825529e114b0eca302e535c8242c067f13d98944ec887fe086e3d54c501ff4e9"
+    },
+    {
+      "name": "57i.fsl",
+      "source": "FontDB/FslFonts.dat!57i.fsl",
+      "bytes": 10568,
+      "sha256": "98881cb9d260d59cc13042f9fac5627929679cb4ba1f43cbd4e29ba62a2353ee"
+    },
+    {
+      "name": "58.data",
+      "source": "FontDB/FslFonts.dat!58.data",
+      "bytes": 1238,
+      "sha256": "aaaea2c1bc6cd2eeaa63e982f268f7fc94f8bcea64debe6d811a4cc0ea27362d"
+    },
+    {
+      "name": "58.fsl",
+      "source": "FontDB/FslFonts.dat!58.fsl",
+      "bytes": 2352,
+      "sha256": "25463503e2eb4a0f39ba34cce4139ead54aa734cb4347e9202df555cc7d7be16"
+    },
+    {
+      "name": "58b.data",
+      "source": "FontDB/FslFonts.dat!58b.data",
+      "bytes": 1298,
+      "sha256": "b789736cc803c82cadedfd63fac0f0712c76c0780687f56048357beef7521a64"
+    },
+    {
+      "name": "58bi.data",
+      "source": "FontDB/FslFonts.dat!58bi.data",
+      "bytes": 1298,
+      "sha256": "4174077a08feaca2087e6376be649294c0391cbd8a52c446906e2dcb3bc1b2ef"
+    },
+    {
+      "name": "58i.data",
+      "source": "FontDB/FslFonts.dat!58i.data",
+      "bytes": 1298,
+      "sha256": "377b463cc5d8fcd7afda0f67ac49bef798f7e8b16169a63dd19f891ab71d6421"
+    },
+    {
+      "name": "59.data",
+      "source": "FontDB/FslFonts.dat!59.data",
+      "bytes": 1312,
+      "sha256": "5eac657e1f548278e0f24af54c8cdd5701ba0b55c3b27147d4e757651eef6de4"
+    },
+    {
+      "name": "59.fsl",
+      "source": "FontDB/FslFonts.dat!59.fsl",
+      "bytes": 10896,
+      "sha256": "41e4b3800c4c8433f41b8dd2826571881119be07d0ba3bdbea01967872fc5bc7"
+    },
+    {
+      "name": "59b.data",
+      "source": "FontDB/FslFonts.dat!59b.data",
+      "bytes": 1350,
+      "sha256": "616224d0911a75e7540c833eaa79478efc01459f126cd2134f3ae5d239e50988"
+    },
+    {
+      "name": "59b.fsl",
+      "source": "FontDB/FslFonts.dat!59b.fsl",
+      "bytes": 10668,
+      "sha256": "f031a60f53ffb051c10755ad3cf783f7a82df09676fa5db6b144289f323590df"
+    },
+    {
+      "name": "59bi.data",
+      "source": "FontDB/FslFonts.dat!59bi.data",
+      "bytes": 1396,
+      "sha256": "107baab7670104b4e40fdac17653fa6f83da0aa0232af06d0047c730dec41e6f"
+    },
+    {
+      "name": "59bi.fsl",
+      "source": "FontDB/FslFonts.dat!59bi.fsl",
+      "bytes": 10692,
+      "sha256": "09cd5ca64eaedc0ccc1a265676a46ea97f7e4c49720408aa43d77bc1c4bbcc0f"
+    },
+    {
+      "name": "59i.data",
+      "source": "FontDB/FslFonts.dat!59i.data",
+      "bytes": 1342,
+      "sha256": "1fa4260b4f14904924749bc6ef6f7d0dd269d272115d066f4ba115aad1e1f919"
+    },
+    {
+      "name": "59i.fsl",
+      "source": "FontDB/FslFonts.dat!59i.fsl",
+      "bytes": 10692,
+      "sha256": "a687634bad37aec0931bcb7748e28958c1ad76ff8130762896b0e75b8f5e1f68"
+    },
+    {
+      "name": "5b.data",
+      "source": "FontDB/FslFonts.dat!5b.data",
+      "bytes": 9060,
+      "sha256": "a46b3ba47704d9ffe818e7f8190e78d12b97fc191dc5723ab216ec5be19f6296"
+    },
+    {
+      "name": "5it.data",
+      "source": "FontDB/FslFonts.dat!5it.data",
+      "bytes": 9058,
+      "sha256": "685c5f8c34dec06b1ce333259735d296b7b605f9ff3334387707102a8ce25c2a"
+    },
+    {
+      "name": "5it.fsl",
+      "source": "FontDB/FslFonts.dat!5it.fsl",
+      "bytes": 26668,
+      "sha256": "074907eb9e0786ea823a0af62b2989fc099917f3cde60ec5f07e3b462284ddb3"
+    },
+    {
+      "name": "5itb.data",
+      "source": "FontDB/FslFonts.dat!5itb.data",
+      "bytes": 9070,
+      "sha256": "b91aebe0cf4a130e02e962b44274ae2708fce0f53b5243615d6d06112f37fafe"
+    },
+    {
+      "name": "6.data",
+      "source": "FontDB/FslFonts.dat!6.data",
+      "bytes": 4984,
+      "sha256": "2fe91baddbd3ea1dc9904123ac9ff23409e4bc743fe89c9f44369605e89093a0"
+    },
+    {
+      "name": "6.fsl",
+      "source": "FontDB/FslFonts.dat!6.fsl",
+      "bytes": 25264,
+      "sha256": "c9df19920f274d0849650d10d6189ed32d7102943688c1d16a530d56bb746aec"
+    },
+    {
+      "name": "60.data",
+      "source": "FontDB/FslFonts.dat!60.data",
+      "bytes": 1348,
+      "sha256": "6855226a4436c1a0f8158bddd89c65b186265abe277a6ff0e4a4437342bd172d"
+    },
+    {
+      "name": "60.fsl",
+      "source": "FontDB/FslFonts.dat!60.fsl",
+      "bytes": 10660,
+      "sha256": "63e7c70d96528663bf43210234dec0822197f709b566e4db7c5b213bf9f68181"
+    },
+    {
+      "name": "60b.data",
+      "source": "FontDB/FslFonts.dat!60b.data",
+      "bytes": 1354,
+      "sha256": "5d6702a5781716d1da891d74c22c484051c0a79969cb57e7fb235859da9b0871"
+    },
+    {
+      "name": "60b.fsl",
+      "source": "FontDB/FslFonts.dat!60b.fsl",
+      "bytes": 10660,
+      "sha256": "811a43c1fc70bf52b59e0db468e80c733caca01b398c2d948e06ec9474ff2204"
+    },
+    {
+      "name": "60bi.data",
+      "source": "FontDB/FslFonts.dat!60bi.data",
+      "bytes": 1400,
+      "sha256": "4d28f26d3cec6c403d687e6ed631a828cf04a87223bc66c78256e610fe0b5fab"
+    },
+    {
+      "name": "60bi.fsl",
+      "source": "FontDB/FslFonts.dat!60bi.fsl",
+      "bytes": 11100,
+      "sha256": "6fce380797443a852f465e750c5010a17ec1c1af5c41748f0fc594b6b773195a"
+    },
+    {
+      "name": "60i.data",
+      "source": "FontDB/FslFonts.dat!60i.data",
+      "bytes": 1342,
+      "sha256": "5598e36e4cdb27249d3f6cac02dee5ec6b57e0eb79380e790e60d1c1f3f66562"
+    },
+    {
+      "name": "60i.fsl",
+      "source": "FontDB/FslFonts.dat!60i.fsl",
+      "bytes": 10648,
+      "sha256": "faec9ade4f4d5862dd2d67a6fc704ad9c5e3d1f554d52acfa8a5817faed6fc28"
+    },
+    {
+      "name": "61.data",
+      "source": "FontDB/FslFonts.dat!61.data",
+      "bytes": 2476,
+      "sha256": "67aa8c3e401ed6a453ef8f32c2ff25c340304d990ffcadc002ead6aabc841d3c"
+    },
+    {
+      "name": "61.fsl",
+      "source": "FontDB/FslFonts.dat!61.fsl",
+      "bytes": 163356,
+      "sha256": "e407392ccb61bc348470c9cb8ada092001867b63e4f615ac3b8b7bca4cbd4388"
+    },
+    {
+      "name": "61b.data",
+      "source": "FontDB/FslFonts.dat!61b.data",
+      "bytes": 99908,
+      "sha256": "5e2d52412ce1b7490844a27c5db6139f41af440711ad680c7796a4cef415f03b"
+    },
+    {
+      "name": "61bi.data",
+      "source": "FontDB/FslFonts.dat!61bi.data",
+      "bytes": 99916,
+      "sha256": "574d6a82769c182052f599dcbbcaeca4f98e603da8154c1d76f8418b4b4f5ede"
+    },
+    {
+      "name": "61i.data",
+      "source": "FontDB/FslFonts.dat!61i.data",
+      "bytes": 49172,
+      "sha256": "0fba8155643663ca24546f6bbbf255321b1fed6a3c3907494c99d676d1b96107"
+    },
+    {
+      "name": "62.data",
+      "source": "FontDB/FslFonts.dat!62.data",
+      "bytes": 2452,
+      "sha256": "6d9cb69fab267f30a4a01d62b46cc21acdc97c96ddfce712b848b8705ec3b3da"
+    },
+    {
+      "name": "62.fsl",
+      "source": "FontDB/FslFonts.dat!62.fsl",
+      "bytes": 209116,
+      "sha256": "fa642719057d8c1de4ddf815f33bf80a26a2e514856c26374bd9ef6c986cd78f"
+    },
+    {
+      "name": "62b.data",
+      "source": "FontDB/FslFonts.dat!62b.data",
+      "bytes": 139000,
+      "sha256": "1885ac055cee5521a4cb9d5c5c71593d1142108f07937cc92c528bc18e1eca9a"
+    },
+    {
+      "name": "62bi.data",
+      "source": "FontDB/FslFonts.dat!62bi.data",
+      "bytes": 139012,
+      "sha256": "9c2b35e40b23bfe190e3b50c36f6e9e96ba4f64c3a4d87ea37a95f477aee5fde"
+    },
+    {
+      "name": "62i.data",
+      "source": "FontDB/FslFonts.dat!62i.data",
+      "bytes": 49376,
+      "sha256": "535481d6210e98d240b822e4217b7a69868ee93f8e0aacb833305dfedba58bf4"
+    },
+    {
+      "name": "63.data",
+      "source": "FontDB/FslFonts.dat!63.data",
+      "bytes": 2492,
+      "sha256": "9d2fb2e2a2f4649f41c7459f878049ac3ccf204ef7a7879950c410ab551e9a5c"
+    },
+    {
+      "name": "63.fsl",
+      "source": "FontDB/FslFonts.dat!63.fsl",
+      "bytes": 149840,
+      "sha256": "f134b3a96ca76b1598fd783693d684d4991bcec137e7a86d98f2648f5efc6dd2"
+    },
+    {
+      "name": "63b.data",
+      "source": "FontDB/FslFonts.dat!63b.data",
+      "bytes": 99916,
+      "sha256": "71bc82c40309c81b787fe69eab787e744fac89fa8c935b07a299a43ac9eaa2c7"
+    },
+    {
+      "name": "63bi.data",
+      "source": "FontDB/FslFonts.dat!63bi.data",
+      "bytes": 99924,
+      "sha256": "f5b6d8ee8b2a866cf39efede597f08c5e847cefb7d8bd67e63b140664dfc9975"
+    },
+    {
+      "name": "63i.data",
+      "source": "FontDB/FslFonts.dat!63i.data",
+      "bytes": 49176,
+      "sha256": "80c9337584f3e4c04dc96a44bcd4052f8715a07f3d7c0015a7a0acbb28d4d985"
+    },
+    {
+      "name": "64.data",
+      "source": "FontDB/FslFonts.dat!64.data",
+      "bytes": 322,
+      "sha256": "1f2a8fc2c3c83c74f305ceb175b1e6b4ed945934e5aa3ca81faaa393e06f938b"
+    },
+    {
+      "name": "64.fsl",
+      "source": "FontDB/FslFonts.dat!64.fsl",
+      "bytes": 62040,
+      "sha256": "d6fefd677e28f9307282eb5a977dbb4d0d58bfe51963a14c702da65f9bd401c2"
+    },
+    {
+      "name": "64b.data",
+      "source": "FontDB/FslFonts.dat!64b.data",
+      "bytes": 490,
+      "sha256": "e9d12650b3deafe6981d406cc7717b44e0c553f5498fad07de8a7581c40c4019"
+    },
+    {
+      "name": "64bi.data",
+      "source": "FontDB/FslFonts.dat!64bi.data",
+      "bytes": 490,
+      "sha256": "349cd799e9e902754bc3d3f87b01122d1dab700e785597a7cc92b46acb5b2214"
+    },
+    {
+      "name": "64i.data",
+      "source": "FontDB/FslFonts.dat!64i.data",
+      "bytes": 322,
+      "sha256": "ce5f4880bf669faf0e543f65880750e2086290a227359196c35b3059725fa3a2"
+    },
+    {
+      "name": "65.data",
+      "source": "FontDB/FslFonts.dat!65.data",
+      "bytes": 46944,
+      "sha256": "76227da2dc2260fadc1cd9b2757a213b807a7b27c3f95696db5b2bdb7396a0e0"
+    },
+    {
+      "name": "65.fsl",
+      "source": "FontDB/FslFonts.dat!65.fsl",
+      "bytes": 49128,
+      "sha256": "a5222b7df356096734b80b1736ec7f87ebb808b7f1b31dda665782760bdb9585"
+    },
+    {
+      "name": "65b.data",
+      "source": "FontDB/FslFonts.dat!65b.data",
+      "bytes": 98360,
+      "sha256": "044a06a4adefe52323d2cc431cb1e0fbd109493618ed043cfe55abd1ca95c30d"
+    },
+    {
+      "name": "65bi.data",
+      "source": "FontDB/FslFonts.dat!65bi.data",
+      "bytes": 98356,
+      "sha256": "a5f32d321a9902312aae85376c77f436c04442bf20a13123f2896c10db163e92"
+    },
+    {
+      "name": "65i.data",
+      "source": "FontDB/FslFonts.dat!65i.data",
+      "bytes": 92836,
+      "sha256": "270854153f80033e2143475f63ce4a32ea10a2c852779c04bb8978f1666bbec9"
+    },
+    {
+      "name": "66.data",
+      "source": "FontDB/FslFonts.dat!66.data",
+      "bytes": 2266,
+      "sha256": "66be7fa6df0a9a7d567355dd8bb96d5c0c13f61cfe7ce575151754a72e5dc230"
+    },
+    {
+      "name": "66.fsl",
+      "source": "FontDB/FslFonts.dat!66.fsl",
+      "bytes": 28064,
+      "sha256": "8ba5502f5f5838eb442a511a66310345a8606740a7826954e3b60a781172f96e"
+    },
+    {
+      "name": "66b.data",
+      "source": "FontDB/FslFonts.dat!66b.data",
+      "bytes": 98378,
+      "sha256": "f48b1f5c69d9ab74bd504994982321adc0a6d47325eef86392a49d779ca482bb"
+    },
+    {
+      "name": "66bi.data",
+      "source": "FontDB/FslFonts.dat!66bi.data",
+      "bytes": 98374,
+      "sha256": "91f5b3d52210aefa34eefb977c64fafb810bec43315922a4d1234c2b1e8fc82e"
+    },
+    {
+      "name": "66i.data",
+      "source": "FontDB/FslFonts.dat!66i.data",
+      "bytes": 48166,
+      "sha256": "e29eef3eab91d389b4841c30d0e61181e354af777077543739257e309bf2c589"
+    },
+    {
+      "name": "67.data",
+      "source": "FontDB/FslFonts.dat!67.data",
+      "bytes": 1320,
+      "sha256": "c0f9a443740b6fc4f8ae9df9a96df0cd3358455b33db6729c5a1781245896cdb"
+    },
+    {
+      "name": "67.fsl",
+      "source": "FontDB/FslFonts.dat!67.fsl",
+      "bytes": 9504,
+      "sha256": "604cc151cbd173f9171546eb8a222d02f91cb00584a491e0b344510bbf02ebd1"
+    },
+    {
+      "name": "67b.data",
+      "source": "FontDB/FslFonts.dat!67b.data",
+      "bytes": 1328,
+      "sha256": "36fbd3f8150fbbc367ae2a4d2552e32a66a52c2efc668748fac27b4937db58bd"
+    },
+    {
+      "name": "67bi.data",
+      "source": "FontDB/FslFonts.dat!67bi.data",
+      "bytes": 1328,
+      "sha256": "ed8d012b471e977fe7f569f3a6812b343805462781615a77cff87d31cf6ff1c4"
+    },
+    {
+      "name": "67i.data",
+      "source": "FontDB/FslFonts.dat!67i.data",
+      "bytes": 1324,
+      "sha256": "15108f28902f78433598ca6858227e8e3ff9c2d2007000a74cc9336ce749fcff"
+    },
+    {
+      "name": "68.data",
+      "source": "FontDB/FslFonts.dat!68.data",
+      "bytes": 1354,
+      "sha256": "923a797fcc1295e1774af7c8228eb680007bfa27320bc8d9f88378d6b5b0bc26"
+    },
+    {
+      "name": "68.fsl",
+      "source": "FontDB/FslFonts.dat!68.fsl",
+      "bytes": 16728,
+      "sha256": "e877091a6dd0f60a518651d1bf51ebf8489041f42f196f4de9171f04ec1ab139"
+    },
+    {
+      "name": "68b.data",
+      "source": "FontDB/FslFonts.dat!68b.data",
+      "bytes": 1386,
+      "sha256": "6220feb2aeb8c1165700a741c67e23e47336620972de2e154202d80a3674c931"
+    },
+    {
+      "name": "68bi.data",
+      "source": "FontDB/FslFonts.dat!68bi.data",
+      "bytes": 1386,
+      "sha256": "746ee38cdbf2ea96f1f02362d771537d0c4b5346354074f24996dd183c88e69b"
+    },
+    {
+      "name": "68i.data",
+      "source": "FontDB/FslFonts.dat!68i.data",
+      "bytes": 1362,
+      "sha256": "334f499c806073a8961f6aa6f17d6311e11149425dd27e6b203cafa34795a746"
+    },
+    {
+      "name": "69.data",
+      "source": "FontDB/FslFonts.dat!69.data",
+      "bytes": 1750,
+      "sha256": "2e8f4b81b8ebedf8b07e1d0261b14cef0da11b918bedfbc12aa2c2f101e4e174"
+    },
+    {
+      "name": "69.fsl",
+      "source": "FontDB/FslFonts.dat!69.fsl",
+      "bytes": 11756,
+      "sha256": "31421bf4c64b030f14184c1e463c8db7b384f23ff09b46c68c10479a2e252abd"
+    },
+    {
+      "name": "69b.data",
+      "source": "FontDB/FslFonts.dat!69b.data",
+      "bytes": 1762,
+      "sha256": "6a724687eb4d4ce344cefbf9b681ad1aa36dd32bc456ee595df0fb38d64cefff"
+    },
+    {
+      "name": "69bi.data",
+      "source": "FontDB/FslFonts.dat!69bi.data",
+      "bytes": 1762,
+      "sha256": "2095468683d36d508c337440049e7fb6d518a462e95019e9b3969b2523242d14"
+    },
+    {
+      "name": "69i.data",
+      "source": "FontDB/FslFonts.dat!69i.data",
+      "bytes": 1758,
+      "sha256": "c1d0479efdbd13ab255a08056ccd48faa0192ebc18b4a02c8f9252c1e00a3764"
+    },
+    {
+      "name": "6bd.data",
+      "source": "FontDB/FslFonts.dat!6bd.data",
+      "bytes": 4988,
+      "sha256": "8453e6bdd71a6c56521d8886716a30632b79dbc7b2656298649edee58174a1e6"
+    },
+    {
+      "name": "6bd.fsl",
+      "source": "FontDB/FslFonts.dat!6bd.fsl",
+      "bytes": 25264,
+      "sha256": "951ef9efc4d2bd9688a80e030ca7aa330bcfd25d5d2a38391d3f8ec3055b7f7e"
+    },
+    {
+      "name": "6bdi.data",
+      "source": "FontDB/FslFonts.dat!6bdi.data",
+      "bytes": 4996,
+      "sha256": "187761951e898a89459609a5d4e9eaa21eb3c2af315e883e7eeebcba56527061"
+    },
+    {
+      "name": "6it.data",
+      "source": "FontDB/FslFonts.dat!6it.data",
+      "bytes": 4872,
+      "sha256": "43727d7910c9c34a66c201207f94b44e220a6df51563c74901cc6065a48e36b4"
+    },
+    {
+      "name": "6it.fsl",
+      "source": "FontDB/FslFonts.dat!6it.fsl",
+      "bytes": 25264,
+      "sha256": "8a8d522e5da67a572cf95841cba83fbe766c97e2c92ece28a71e795c62502b55"
+    },
+    {
+      "name": "7.data",
+      "source": "FontDB/FslFonts.dat!7.data",
+      "bytes": 2722,
+      "sha256": "19f78eb241765c29ab5ee44d01015414b9e23fa61ab7f9396f8944793199fa36"
+    },
+    {
+      "name": "7.fsl",
+      "source": "FontDB/FslFonts.dat!7.fsl",
+      "bytes": 13436,
+      "sha256": "1a5737155bf2311c8af844232a70a765d21e060d18e1cea612463de636d57a55"
+    },
+    {
+      "name": "70.data",
+      "source": "FontDB/FslFonts.dat!70.data",
+      "bytes": 1294,
+      "sha256": "98d7cccd5b975303651fde71d0d607b409e1f12456c2fd0b4153fe877ebfd1d0"
+    },
+    {
+      "name": "70.fsl",
+      "source": "FontDB/FslFonts.dat!70.fsl",
+      "bytes": 11336,
+      "sha256": "b59082e5a2b505bf4a96ac2604ca4777dfd65e9d1cda6101c3858acd74106045"
+    },
+    {
+      "name": "70b.data",
+      "source": "FontDB/FslFonts.dat!70b.data",
+      "bytes": 1326,
+      "sha256": "a422468178311840c15329d3a965aa1cb2bed549c0e14fe4c69d25447724e48b"
+    },
+    {
+      "name": "70bi.data",
+      "source": "FontDB/FslFonts.dat!70bi.data",
+      "bytes": 1326,
+      "sha256": "ace1bde5011754f788e28e7575a9dfa41873143fd760c1c554d0422935d7d36e"
+    },
+    {
+      "name": "70i.data",
+      "source": "FontDB/FslFonts.dat!70i.data",
+      "bytes": 1322,
+      "sha256": "99da3b204484c942285399656a729eb2024ef378a78b9bc8d305aa6d7a5b2de8"
+    },
+    {
+      "name": "71.data",
+      "source": "FontDB/FslFonts.dat!71.data",
+      "bytes": 1360,
+      "sha256": "463163a3678bfbe80628a8b5e29b93e889a44afe060b47e1b013eb500b0f49ab"
+    },
+    {
+      "name": "71.fsl",
+      "source": "FontDB/FslFonts.dat!71.fsl",
+      "bytes": 2308,
+      "sha256": "ee85d585b6aefcc52c8e2d74c4c791cea9207b18b62d2314a1211a7e9dd22113"
+    },
+    {
+      "name": "71b.data",
+      "source": "FontDB/FslFonts.dat!71b.data",
+      "bytes": 1372,
+      "sha256": "b8865103d2ba77638cb42ef0f9243abe97b40c8d5b8fdeb61b8ce6583130d829"
+    },
+    {
+      "name": "71bi.data",
+      "source": "FontDB/FslFonts.dat!71bi.data",
+      "bytes": 1368,
+      "sha256": "f85644221025c3b70dbbe1e441dd24fb510abd3fa3c8c3a211df1b3430e20e3d"
+    },
+    {
+      "name": "71i.data",
+      "source": "FontDB/FslFonts.dat!71i.data",
+      "bytes": 1372,
+      "sha256": "6f9a6a41bea8922d08632648cbd5ad01702e4d1987965eebd1aa1e1f737cee43"
+    },
+    {
+      "name": "72.data",
+      "source": "FontDB/FslFonts.dat!72.data",
+      "bytes": 1310,
+      "sha256": "ac77c8a49d35aaa80686b3d06834fdcc731b61d56b6aacee973608620d314050"
+    },
+    {
+      "name": "72.fsl",
+      "source": "FontDB/FslFonts.dat!72.fsl",
+      "bytes": 11504,
+      "sha256": "bad344a8a9bc93fcf18eba646172b3db58df256760054a4ef4b9d0afe36c1385"
+    },
+    {
+      "name": "72b.data",
+      "source": "FontDB/FslFonts.dat!72b.data",
+      "bytes": 1322,
+      "sha256": "161e2dab40d424f8f29e719e0bb9f3a3758cb7f31e93109c2be86d327ea8159d"
+    },
+    {
+      "name": "72bi.data",
+      "source": "FontDB/FslFonts.dat!72bi.data",
+      "bytes": 1322,
+      "sha256": "ee8fdaab8dab1496f8123d95280a7a6af5b8d0e993d51f62807b34b953a87fdd"
+    },
+    {
+      "name": "72i.data",
+      "source": "FontDB/FslFonts.dat!72i.data",
+      "bytes": 1318,
+      "sha256": "5d0e87d979b213e118dc8fe6ddb230333c4b431e6cd0df434bfe9248a9e61c7d"
+    },
+    {
+      "name": "73.data",
+      "source": "FontDB/FslFonts.dat!73.data",
+      "bytes": 1312,
+      "sha256": "7f1e37c6f67c9d3cd482702dea6ad9917ba55ca4d56fbf06e64e0d85c439dbc7"
+    },
+    {
+      "name": "73.fsl",
+      "source": "FontDB/FslFonts.dat!73.fsl",
+      "bytes": 2160,
+      "sha256": "362edc861d8b0f8bfeccacb077484e26255a05e3401fb52b0ff549fc0331165a"
+    },
+    {
+      "name": "73b.data",
+      "source": "FontDB/FslFonts.dat!73b.data",
+      "bytes": 1364,
+      "sha256": "11fbff04fef0dc81d5d3c931a768c0551f92cd76ff64d1c8c0415b1da9e5da85"
+    },
+    {
+      "name": "73bi.data",
+      "source": "FontDB/FslFonts.dat!73bi.data",
+      "bytes": 1360,
+      "sha256": "7834670c307c5a437173ce43de3c1599c09ed8e3de5bc723020bd11d912b7f3c"
+    },
+    {
+      "name": "73i.data",
+      "source": "FontDB/FslFonts.dat!73i.data",
+      "bytes": 1360,
+      "sha256": "20293d561df2708dcc17b92e693394a10aba5251ed3a4316b39a2ae669ff882c"
+    },
+    {
+      "name": "74.data",
+      "source": "FontDB/FslFonts.dat!74.data",
+      "bytes": 4044,
+      "sha256": "2133a97c0d58caaa4e95c8cc14df67cbe2097e142b47797c6fd1007404367557"
+    },
+    {
+      "name": "74.fsl",
+      "source": "FontDB/FslFonts.dat!74.fsl",
+      "bytes": 26788,
+      "sha256": "9d19df27ad14a2bbf0776d3fb46619b8e5e995dcd04e22497622bd853132a9f1"
+    },
+    {
+      "name": "74b.data",
+      "source": "FontDB/FslFonts.dat!74b.data",
+      "bytes": 4136,
+      "sha256": "6c674aa2324125c1420df4d956328ec42df3eb6c2dd20f75e9bf0819745e08b8"
+    },
+    {
+      "name": "74bi.data",
+      "source": "FontDB/FslFonts.dat!74bi.data",
+      "bytes": 4136,
+      "sha256": "e5b32d8806e5a88dcc10f2e9b88e68473d30d498e8d4d7afb19b3f4cab29cd78"
+    },
+    {
+      "name": "74i.data",
+      "source": "FontDB/FslFonts.dat!74i.data",
+      "bytes": 4116,
+      "sha256": "7d3b4b928a521d50428504c9b57c5166840ae99a4a9c001958d369b945d13535"
+    },
+    {
+      "name": "75.data",
+      "source": "FontDB/FslFonts.dat!75.data",
+      "bytes": 1326,
+      "sha256": "f61be7ae94346e3c6d29f92880a6b7c3ba6da8136cf8d1cf64c3140e97683de9"
+    },
+    {
+      "name": "75.fsl",
+      "source": "FontDB/FslFonts.dat!75.fsl",
+      "bytes": 2160,
+      "sha256": "0a25955ef3be0295138cb66519f6b7f54d80f853e5c0934653b337da08c2182c"
+    },
+    {
+      "name": "75b.data",
+      "source": "FontDB/FslFonts.dat!75b.data",
+      "bytes": 1370,
+      "sha256": "a750a89b38bb30c8f362b1c9d772e8a29666319a974336ca537cb78768f0b462"
+    },
+    {
+      "name": "75bi.data",
+      "source": "FontDB/FslFonts.dat!75bi.data",
+      "bytes": 1370,
+      "sha256": "3b528c9e5a652900fcd0bb5d7093178b7563cbece11877638e141055ebb926b1"
+    },
+    {
+      "name": "75i.data",
+      "source": "FontDB/FslFonts.dat!75i.data",
+      "bytes": 1366,
+      "sha256": "544ed08e9f4ae2f0bd080c05097d5eacb4f1c9349a851d800f3576b2d2221268"
+    },
+    {
+      "name": "76.data",
+      "source": "FontDB/FslFonts.dat!76.data",
+      "bytes": 1182,
+      "sha256": "1d54e14afb776ded602b3e11567ffa90d99fafae8991295e196ab8efdb495f46"
+    },
+    {
+      "name": "76.fsl",
+      "source": "FontDB/FslFonts.dat!76.fsl",
+      "bytes": 2220,
+      "sha256": "243fe1ad15b69f5a28711536465b1e8002761d1b837839f7421d114147d06a1a"
+    },
+    {
+      "name": "76b.data",
+      "source": "FontDB/FslFonts.dat!76b.data",
+      "bytes": 1230,
+      "sha256": "51046060f243c26ea2d703248581dd982166918ef05c89d3b657d8ef27d519e4"
+    },
+    {
+      "name": "76bi.data",
+      "source": "FontDB/FslFonts.dat!76bi.data",
+      "bytes": 1230,
+      "sha256": "ff66b14139abef26275e5c019a176901b5d5aff51d84966c0a4abb401105c1b4"
+    },
+    {
+      "name": "76i.data",
+      "source": "FontDB/FslFonts.dat!76i.data",
+      "bytes": 1230,
+      "sha256": "8705b2674d373fb8bc6f4e7a74580ba156eb7dc5fa1115ca262f25489cc7dde7"
+    },
+    {
+      "name": "77.data",
+      "source": "FontDB/FslFonts.dat!77.data",
+      "bytes": 1232,
+      "sha256": "312db617545f685c491c29956e512de1cd2def76dc7101eb50b755d2eac510f7"
+    },
+    {
+      "name": "77.fsl",
+      "source": "FontDB/FslFonts.dat!77.fsl",
+      "bytes": 2148,
+      "sha256": "f811f6a9b9281ef891cb45895abbebdb6cd88b325b100fd63dc3fb4d91487872"
+    },
+    {
+      "name": "77b.data",
+      "source": "FontDB/FslFonts.dat!77b.data",
+      "bytes": 1280,
+      "sha256": "4e3207c1eea4a9179c4932b9e9016a05b74d8d664be95d4b26fc52ce4d3d9958"
+    },
+    {
+      "name": "77bi.data",
+      "source": "FontDB/FslFonts.dat!77bi.data",
+      "bytes": 1280,
+      "sha256": "ff8a84413369b18a352fc2f904ed32d8aeca24af327b88b27dd9442808e8b2d6"
+    },
+    {
+      "name": "77i.data",
+      "source": "FontDB/FslFonts.dat!77i.data",
+      "bytes": 1280,
+      "sha256": "860f93c32d965735f8b7b27c35aab3d011e57b22c07895eef52838e732ed536d"
+    },
+    {
+      "name": "78.data",
+      "source": "FontDB/FslFonts.dat!78.data",
+      "bytes": 1224,
+      "sha256": "e09a2954c55f46bd18be01deb84cf7963b80cebb6b96126498f74adf146cf962"
+    },
+    {
+      "name": "78.fsl",
+      "source": "FontDB/FslFonts.dat!78.fsl",
+      "bytes": 9348,
+      "sha256": "c061c3e5c3e19581e6ecb49a639f7756bbe386e6da4709800bd71ba6f5977c7f"
+    },
+    {
+      "name": "78b.data",
+      "source": "FontDB/FslFonts.dat!78b.data",
+      "bytes": 1228,
+      "sha256": "1dc5bb9fa80b16309118f51bb02a2bb0bfab28b5c2cf771d66e01bd2a3fbe1ef"
+    },
+    {
+      "name": "78bi.data",
+      "source": "FontDB/FslFonts.dat!78bi.data",
+      "bytes": 1228,
+      "sha256": "d1cb60c705d81fb224338c0dadfaf60188e653f765cfaf85d700bcf6beda6962"
+    },
+    {
+      "name": "78i.data",
+      "source": "FontDB/FslFonts.dat!78i.data",
+      "bytes": 1228,
+      "sha256": "e58104a2ab9ca475b5300dfcd6ea24c37a1400f8694e757ab7b0990753d03e12"
+    },
+    {
+      "name": "79.data",
+      "source": "FontDB/FslFonts.dat!79.data",
+      "bytes": 4106,
+      "sha256": "d0ceaad6f566960b952e226eb438d7f0d4cc4dca57ce225a668a02005534e745"
+    },
+    {
+      "name": "79.fsl",
+      "source": "FontDB/FslFonts.dat!79.fsl",
+      "bytes": 2108,
+      "sha256": "9f2e2904a0a56b5a7d73ab39fb9411122c1911f5b02f4999aba3d2169d4181dc"
+    },
+    {
+      "name": "79b.data",
+      "source": "FontDB/FslFonts.dat!79b.data",
+      "bytes": 4190,
+      "sha256": "83ee12bea8b3ce5574381e999050287e49aa802ef7af00e095d2e3fb0956e249"
+    },
+    {
+      "name": "79bi.data",
+      "source": "FontDB/FslFonts.dat!79bi.data",
+      "bytes": 4190,
+      "sha256": "15d4a9584d148fe8fac07f7754b29025d265a78f3d4a0290f980da27178973de"
+    },
+    {
+      "name": "79i.data",
+      "source": "FontDB/FslFonts.dat!79i.data",
+      "bytes": 4150,
+      "sha256": "033a377b31af28bec4303736b40921ee016284b546411790ce4a0a4461e6592c"
+    },
+    {
+      "name": "7b.data",
+      "source": "FontDB/FslFonts.dat!7b.data",
+      "bytes": 2860,
+      "sha256": "f3d3fed4c37489c4fd367c7e3c7da83bfcd56af6823d1a1ff70c89a5c9cc6303"
+    },
+    {
+      "name": "7b.fsl",
+      "source": "FontDB/FslFonts.dat!7b.fsl",
+      "bytes": 13432,
+      "sha256": "f1c7f5d726dcb05f2acd70d1be8462b01fccf7541bc67b69090bd7328fc73fac"
+    },
+    {
+      "name": "7bi.data",
+      "source": "FontDB/FslFonts.dat!7bi.data",
+      "bytes": 2780,
+      "sha256": "67b0dc98d14c28acc1fe7f081dc0175306b1ad588f829f038574ad028636edec"
+    },
+    {
+      "name": "7bi.fsl",
+      "source": "FontDB/FslFonts.dat!7bi.fsl",
+      "bytes": 13436,
+      "sha256": "0596da12927ba1981b09c2148347a65018b608718a3973a30b1f677423b23448"
+    },
+    {
+      "name": "7i.data",
+      "source": "FontDB/FslFonts.dat!7i.data",
+      "bytes": 2754,
+      "sha256": "c36bef4b207c82a7de8d375514c47d69edd560631ddecfb103e1cd461c4feffe"
+    },
+    {
+      "name": "7i.fsl",
+      "source": "FontDB/FslFonts.dat!7i.fsl",
+      "bytes": 13436,
+      "sha256": "36a76ff40ee25562e1a0cfb10730a91b14c5e2f175ee499f70c2115663a9b3de"
+    },
+    {
+      "name": "8.data",
+      "source": "FontDB/FslFonts.dat!8.data",
+      "bytes": 2628,
+      "sha256": "e5a66f87d63021a0f1ec58f3aca8c6b016813c543ad7c298462d8f9998e58450"
+    },
+    {
+      "name": "8.fsl",
+      "source": "FontDB/FslFonts.dat!8.fsl",
+      "bytes": 14336,
+      "sha256": "1483c7c1355cc2d1cfb62a178b29160b96f20b51c337b081a3f885c5d1ee9a3b"
+    },
+    {
+      "name": "80.data",
+      "source": "FontDB/FslFonts.dat!80.data",
+      "bytes": 1190,
+      "sha256": "9c04f1864b90703a2b1fc9c11a39816a71c9c50ec99111d54cc925e4fa525804"
+    },
+    {
+      "name": "80.fsl",
+      "source": "FontDB/FslFonts.dat!80.fsl",
+      "bytes": 2220,
+      "sha256": "0d107bc3118ca5de39942172f3c1e9cd534f862750d0225c617b65e834e32882"
+    },
+    {
+      "name": "80b.data",
+      "source": "FontDB/FslFonts.dat!80b.data",
+      "bytes": 1238,
+      "sha256": "8cb6cb5291e664cab5ec4f9f607fc1026455fec66570f2093ed664626e57ec2b"
+    },
+    {
+      "name": "80bi.data",
+      "source": "FontDB/FslFonts.dat!80bi.data",
+      "bytes": 1238,
+      "sha256": "988353e647ef50d754cb38764df5e32767a95f8c0f833491b5b649b990ac6479"
+    },
+    {
+      "name": "80i.data",
+      "source": "FontDB/FslFonts.dat!80i.data",
+      "bytes": 1238,
+      "sha256": "7786a2b636ee80e90216396e67f8804294994fe3cef7eb4f03d2e0f1ce5e44f4"
+    },
+    {
+      "name": "81.data",
+      "source": "FontDB/FslFonts.dat!81.data",
+      "bytes": 1206,
+      "sha256": "ae22abb6bc329100635894b96bbba83b3ddfc8dbdf6a7bacc8a7c4299084c44b"
+    },
+    {
+      "name": "81.fsl",
+      "source": "FontDB/FslFonts.dat!81.fsl",
+      "bytes": 2160,
+      "sha256": "4d7447e54d06d05f9257b2d211a8a5da9e8d9d362c7ed5eca2fb231245359b12"
+    },
+    {
+      "name": "81b.data",
+      "source": "FontDB/FslFonts.dat!81b.data",
+      "bytes": 1210,
+      "sha256": "0b52ddde98537522d3f275acdc71abc89e281be775d7af43029d8efcbcc75fa0"
+    },
+    {
+      "name": "81bi.data",
+      "source": "FontDB/FslFonts.dat!81bi.data",
+      "bytes": 1210,
+      "sha256": "24916eece03337e66329fca8b2593f2b2d3b0dfc5219c6e492a01fc3948ab917"
+    },
+    {
+      "name": "81i.data",
+      "source": "FontDB/FslFonts.dat!81i.data",
+      "bytes": 1202,
+      "sha256": "e6ddbd03371a9a58dcfadaea08062201f96977a139160f9e9887920089aae14d"
+    },
+    {
+      "name": "82.data",
+      "source": "FontDB/FslFonts.dat!82.data",
+      "bytes": 1374,
+      "sha256": "e3332b0375bcf2ffee004e404818d3e008faaaf4a1acf6ebf8385e0626e3dbb1"
+    },
+    {
+      "name": "82.fsl",
+      "source": "FontDB/FslFonts.dat!82.fsl",
+      "bytes": 12532,
+      "sha256": "1dd4341118713c7798fdf3a704cd9ec9fa1ea8bf52c29ad2e70831466fa51f2e"
+    },
+    {
+      "name": "82b.data",
+      "source": "FontDB/FslFonts.dat!82b.data",
+      "bytes": 1418,
+      "sha256": "72bf39b2be746d6fe1209344b3935e26c1df3d73703196583e52c435975cceb1"
+    },
+    {
+      "name": "82bi.data",
+      "source": "FontDB/FslFonts.dat!82bi.data",
+      "bytes": 1418,
+      "sha256": "e3f323fb60d3a03de9adaf86a096081c90c0f8d5b7a142f9aecb0c3185bda01e"
+    },
+    {
+      "name": "82i.data",
+      "source": "FontDB/FslFonts.dat!82i.data",
+      "bytes": 1390,
+      "sha256": "1fc93490dbc093dedcb9cae61a91ac7306e853e562caebe9aa49fd4871764d3a"
+    },
+    {
+      "name": "83.data",
+      "source": "FontDB/FslFonts.dat!83.data",
+      "bytes": 1350,
+      "sha256": "07807138391f1430b7d59c74a5f4e8767c96ecb3a90f536d2626c3c1c9961efe"
+    },
+    {
+      "name": "83.fsl",
+      "source": "FontDB/FslFonts.dat!83.fsl",
+      "bytes": 9748,
+      "sha256": "1787e9a546ae6e87b63ecc39a2f5c9554da8e0a48326d95866f3ba75016ef3d5"
+    },
+    {
+      "name": "83b.data",
+      "source": "FontDB/FslFonts.dat!83b.data",
+      "bytes": 1350,
+      "sha256": "f9cbf61d65aeed3a2bd39d4804c9b24dc97657f9dce9865000f92c58a226f550"
+    },
+    {
+      "name": "83bi.data",
+      "source": "FontDB/FslFonts.dat!83bi.data",
+      "bytes": 1346,
+      "sha256": "b7ef55bbb0bf2001a9953660a53f4b733e7b289b95ef9c86edc02054b63457ac"
+    },
+    {
+      "name": "83i.data",
+      "source": "FontDB/FslFonts.dat!83i.data",
+      "bytes": 1350,
+      "sha256": "4b5a0c63363af97da7aa050a8f3e2aefbb3c6432383e090d13927eb695fbb439"
+    },
+    {
+      "name": "84.data",
+      "source": "FontDB/FslFonts.dat!84.data",
+      "bytes": 1232,
+      "sha256": "c26f7d307df96f79559cd19678631a6427730268fc729c4930cb9f1c68b6b986"
+    },
+    {
+      "name": "84.fsl",
+      "source": "FontDB/FslFonts.dat!84.fsl",
+      "bytes": 2148,
+      "sha256": "0c08f5428dfe0f31711822a62e3f79053ec71d59a9cf12b71c9d6a026bf12ab9"
+    },
+    {
+      "name": "84b.data",
+      "source": "FontDB/FslFonts.dat!84b.data",
+      "bytes": 1280,
+      "sha256": "da28b8ef97cd5c544a01ae264d224c32d11441d427295f77fb1f7750c9b1c554"
+    },
+    {
+      "name": "84bi.data",
+      "source": "FontDB/FslFonts.dat!84bi.data",
+      "bytes": 1280,
+      "sha256": "f949eeee6f1088afe88ca16995dc9ade90f8abd741dafccae730d0ee60b25e7d"
+    },
+    {
+      "name": "84i.data",
+      "source": "FontDB/FslFonts.dat!84i.data",
+      "bytes": 1280,
+      "sha256": "dcbafeefa61306f04ab7cb2a8864b317e86179b9bf4c3c1a3ce5e4d853952f41"
+    },
+    {
+      "name": "85.data",
+      "source": "FontDB/FslFonts.dat!85.data",
+      "bytes": 1328,
+      "sha256": "0aa9239e23fe30dc0750c1fe6cbaf991fcb1aed3102508fb9dbb76af6a56526d"
+    },
+    {
+      "name": "85.fsl",
+      "source": "FontDB/FslFonts.dat!85.fsl",
+      "bytes": 16728,
+      "sha256": "66f450bcbf4ab2355ba3ba7a01fa1cb0ba42496267a0f8e65495a1cc5afa1268"
+    },
+    {
+      "name": "85b.data",
+      "source": "FontDB/FslFonts.dat!85b.data",
+      "bytes": 1360,
+      "sha256": "dd75c57e0faaa0cf2bc462910b9a865a5b1d77a218dfe2146c28fb7ce78c9af0"
+    },
+    {
+      "name": "85bi.data",
+      "source": "FontDB/FslFonts.dat!85bi.data",
+      "bytes": 1360,
+      "sha256": "59ffc8aa99269d2dd49c8a62eb02f7d4372054298ba2d620d73246b6ce855dfe"
+    },
+    {
+      "name": "85i.data",
+      "source": "FontDB/FslFonts.dat!85i.data",
+      "bytes": 1336,
+      "sha256": "b8cb21cf59c84c3efa1611e617736c7856fc65c866656e7cb9f9d70d44ba0133"
+    },
+    {
+      "name": "86.data",
+      "source": "FontDB/FslFonts.dat!86.data",
+      "bytes": 1278,
+      "sha256": "f1199c50b522f93fd8f663119e58a019a18f8ef02d30193dba9dcf4161942c69"
+    },
+    {
+      "name": "86.fsl",
+      "source": "FontDB/FslFonts.dat!86.fsl",
+      "bytes": 2372,
+      "sha256": "f6bf80d57e0aa580ec03b609526fa85e534a256cb942614100071a89e5c389c3"
+    },
+    {
+      "name": "86b.data",
+      "source": "FontDB/FslFonts.dat!86b.data",
+      "bytes": 1294,
+      "sha256": "d8bb6ef5244215a5f599528738e755ee21ef22771b0e13d2069ac12775b48049"
+    },
+    {
+      "name": "86bi.data",
+      "source": "FontDB/FslFonts.dat!86bi.data",
+      "bytes": 1294,
+      "sha256": "c88a1b7abcbd8cdaf6bc47a3b381a74cc34d211b8e7c2a7c5c88ebf3336d8a27"
+    },
+    {
+      "name": "86i.data",
+      "source": "FontDB/FslFonts.dat!86i.data",
+      "bytes": 1294,
+      "sha256": "f8db8154f1918dfabfc6dbafdeb0d53fb6897a8633f6c74bf537463c1b608a69"
+    },
+    {
+      "name": "8b.data",
+      "source": "FontDB/FslFonts.dat!8b.data",
+      "bytes": 2602,
+      "sha256": "6c59399d1035a57a4f6624fbec810ea53ac1b16284ce197a48ead43b4d8be0e5"
+    },
+    {
+      "name": "8b.fsl",
+      "source": "FontDB/FslFonts.dat!8b.fsl",
+      "bytes": 14336,
+      "sha256": "404283ce550e89614bf9288e4fea5d720e660cc6db40106e7b441d4f35813afd"
+    },
+    {
+      "name": "8bi.data",
+      "source": "FontDB/FslFonts.dat!8bi.data",
+      "bytes": 2458,
+      "sha256": "e94b68f9be3f5d0144894934267c220e2bd0f4bc3ab9a5de7e4503f5b3688746"
+    },
+    {
+      "name": "8bi.fsl",
+      "source": "FontDB/FslFonts.dat!8bi.fsl",
+      "bytes": 16268,
+      "sha256": "0309065b7d1e18211651863a595a400786086dc4f0512109d0afbb3255557bb7"
+    },
+    {
+      "name": "8i.data",
+      "source": "FontDB/FslFonts.dat!8i.data",
+      "bytes": 2718,
+      "sha256": "70d1d0896dccd90af07c03e161f5a48fec03f150acc71d961455cc509f9603e3"
+    },
+    {
+      "name": "8i.fsl",
+      "source": "FontDB/FslFonts.dat!8i.fsl",
+      "bytes": 14336,
+      "sha256": "8e501a1d9b7a1d9750fcbae71d2e89579e60bc67e9afc9a9555a539a6db612d9"
+    },
+    {
+      "name": "9.data",
+      "source": "FontDB/FslFonts.dat!9.data",
+      "bytes": 3728,
+      "sha256": "056783e4ea7f936bca75b2a7ee121a6383e94b6b41a0ed936816dec18d8ea349"
+    },
+    {
+      "name": "9.fsl",
+      "source": "FontDB/FslFonts.dat!9.fsl",
+      "bytes": 13292,
+      "sha256": "e4c13cc4e52d68f844d347374ef9076065af9d872855206d7d743bd297b0b1a8"
+    },
+    {
+      "name": "9b.data",
+      "source": "FontDB/FslFonts.dat!9b.data",
+      "bytes": 3724,
+      "sha256": "107cd2d02e138371e079114410de952fed40a770a0bf81199cdf689c5b515ebd"
+    },
+    {
+      "name": "9b.fsl",
+      "source": "FontDB/FslFonts.dat!9b.fsl",
+      "bytes": 13292,
+      "sha256": "6493475ed1b72c0cfbc799ded2c8d130da09d5a7d033263ff98b2c70779e74b3"
+    },
+    {
+      "name": "9bi____.data",
+      "source": "FontDB/FslFonts.dat!9bi____.data",
+      "bytes": 3872,
+      "sha256": "db832bdc8e479262ec6205dc433fad782cfc6b09ca9bd6bbd0f03a1336d98042"
+    },
+    {
+      "name": "9bi____.fsl",
+      "source": "FontDB/FslFonts.dat!9bi____.fsl",
+      "bytes": 13292,
+      "sha256": "c5b562eb33e23c1b86b42ef6367ee1cd9aeb5e14b6c3172a0c2cc991b667d34f"
+    },
+    {
+      "name": "9i____.data",
+      "source": "FontDB/FslFonts.dat!9i____.data",
+      "bytes": 3812,
+      "sha256": "24de3bd6e519b3c405924bef9bdf2fea5ab2b450b53401a7d96b1a0e33f0c2a2"
+    },
+    {
+      "name": "9i____.fsl",
+      "source": "FontDB/FslFonts.dat!9i____.fsl",
+      "bytes": 13288,
+      "sha256": "bdfa4dfec035e3f23085b11089944a0001159e1227cde508e454e944f21cdb60"
+    },
+    {
+      "name": "V100",
+      "source": "FontDB/FslFonts.dat!V100",
+      "bytes": 4,
+      "sha256": "1b741d3aa74c0d4e559ac9ba075761df7c4543f9095cee9b80157b63bd1da55a"
+    },
+    {
+      "name": "OrgListFnt.ini",
+      "source": "FontDB/OrgListFnt.ini",
+      "bytes": 35270,
+      "sha256": "6b5a5e44857050086cb5d973693fa73f8cf1bb65375716ff355512e03df73ad7"
+    },
+    {
+      "name": "OrgListFnt_en-US.ini",
+      "source": "FontDB/OrgListFnt_en-US.ini",
+      "bytes": 35752,
+      "sha256": "4a50e6bb5a3756d6bf14e5ff97eb097bd700acd78d64ae99d7cd99ba11862335"
+    },
+    {
+      "name": "PrivateFont.dat",
+      "source": "FontDB/PrivateFont.dat",
+      "bytes": 88068,
+      "sha256": "8cc2eb2e26e59fe1964875e1d547b57788b748b645c53afecd44b33bdbafc875"
+    },
+    {
+      "name": "PrivateFont_enu.dat",
+      "source": "FontDB/PrivateFont_enu.dat",
+      "bytes": 86692,
+      "sha256": "a04c2d09f9996eaa244d02784032dfe6c09aed6682dd44b3b13428a06d4b3d4a"
+    },
+    {
+      "name": "PrivateFont_ko-KR.dat",
+      "source": "FontDB/PrivateFont_ko-KR.dat",
+      "bytes": 88068,
+      "sha256": "4daee6e7be713d3c6051335d82bfc8f71da28829c27480684758eb2dae7b6bed"
+    },
+    {
+      "name": "PrivateFontList.ini",
+      "source": "FontDB/PrivateFontList.ini",
+      "bytes": 6014,
+      "sha256": "8fcbc7c56499277561e08762def01526bd4365f8237038f73602d4410e905043"
+    },
+    {
+      "name": "PrivateFontList_en-US.ini",
+      "source": "FontDB/PrivateFontList_en-US.ini",
+      "bytes": 6752,
+      "sha256": "ccf85ea58e60a1875362fd902a731344172fbc6df3080edb8deb728c69af48d3"
+    },
+    {
+      "name": "UnlicenseFontList.ini",
+      "source": "FontDB/UnlicenseFontList.ini",
+      "bytes": 1868,
+      "sha256": "436ecb62054ef35b5da7f1c59851ae093135b7fe839fa89c9f863b9c807613a2"
+    },
+    {
+      "name": "세명조.hwpx",
+      "source": "FontDB/세명조.hwpx",
+      "bytes": 15634,
+      "sha256": "b72103a4be23db73eed83058006f72413d15e38b849493a539fe6aae24585095"
+    },
+    {
+      "name": "세명조_다시저장.hwpx",
+      "source": "FontDB/세명조_다시저장.hwpx",
+      "bytes": 15489,
+      "sha256": "cd722c9ac82253178d851dc52927d7b25b95478cab9bbd05cd32c7846a30b1fc"
+    },
+    {
+      "name": "세명조_대표글꼴적용_2022.hwpx",
+      "source": "FontDB/세명조_대표글꼴적용_2022.hwpx",
+      "bytes": 15489,
+      "sha256": "5ca9f69c3a3900319384cb33f52c91ec7715c3f3c61cd8a177b104b092b90699"
+    }
+  ],
+  "approvedAssets": [
+    {
+      "file": "Cafe24Ssurround-v2.0.woff2",
+      "bytes": 391868,
+      "sha256": "2d726dbf8863d66e6d5cf56e2532c5d14d8a4b514461b565c513c1da6ae2f41a",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Cafe24Supermagic-Regular-v1.0.woff2",
+      "bytes": 765684,
+      "sha256": "65434a217b9532867a1fe41417d0ad51210a60027a51dca40748aafed48ef0ba",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "D2Coding-Bold.woff2",
+      "bytes": 1579172,
+      "sha256": "41273810f9aed2775c6f1b9eb7e4f12997da644002872b20a31d3d3144e0cc0a",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "D2Coding-Regular.woff2",
+      "bytes": 1485508,
+      "sha256": "358df12fdf9b65d0fd31554a826f97af4eeefd96a047297a28a856315fe872c1",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "GowunBatang-Bold.woff2",
+      "bytes": 447856,
+      "sha256": "aef1b91ea9ea4688fb296044959b38dfeeaa3e1650af5d543a2b5c160fa30b36",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "GowunBatang-Regular.woff2",
+      "bytes": 495092,
+      "sha256": "0c6a288aa0c12081dccde769c312f71f290b353243747dd24fb8c57f94f01d72",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "GowunDodum-Regular.woff2",
+      "bytes": 406476,
+      "sha256": "349c098a6181952dab564bf891b8efcacfbf855adc28d40b4aa2e5937c101c56",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Happiness-Sans-Bold.woff2",
+      "bytes": 336604,
+      "sha256": "54becdfd4f7f58e872eba8fbc67778e29cff94c1cd03f9a0ebadfbe482b4aba0",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Happiness-Sans-Regular.woff2",
+      "bytes": 291556,
+      "sha256": "4fc37e7663c3d440b5a6af6938bde0c6618b666553ed521745f3362050bd4988",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Happiness-Sans-Title.woff2",
+      "bytes": 348700,
+      "sha256": "057e6821a062d9192964d99cf058fe6608230e9e4a464c9652b3756e02460e22",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "HappinessSansVF.woff2",
+      "bytes": 613412,
+      "sha256": "cd29de60acf8c466938400561fcbfb14812dd5981f4f78b0c8da74609682423c",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "LatinModernMath-Regular.woff2",
+      "bytes": 391760,
+      "sha256": "1177d9025d1e797c54b3c7676976365abd90f903423091de7f0f4e7a4b372162",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumGothic-Bold.woff2",
+      "bytes": 417252,
+      "sha256": "0bd36842cc218a7b0e1c0f5ec796d90152a02e4cd487b2d868f1130708fe551a",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumGothic-ExtraBold.woff2",
+      "bytes": 376972,
+      "sha256": "cffea22fa5791731b3de9f9c48b58f4c9eff52581f29377d364a751e63b81ca3",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumGothic-Regular.woff2",
+      "bytes": 340688,
+      "sha256": "4a000e3bca1298c43c70dc97447e537a27e0a8c1585f410be57dfeff06d3f713",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumGothicCoding-Bold.woff2",
+      "bytes": 534060,
+      "sha256": "2fe66da1c9c3f8beca2c618a139e7edabd36a26dd810a324ced06f8b214b2ccd",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumGothicCoding-Regular.woff2",
+      "bytes": 521332,
+      "sha256": "87ab32ebaf4e1f803099ad1d096744092c8f985b2e08a24e2304f5ac05d81d6a",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumMyeongjo-Bold.woff2",
+      "bytes": 575580,
+      "sha256": "f2c95c35d72782f71cb60e3cc537c461ae3f5ee7e7504db9653ba7a7024dd548",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumMyeongjo-ExtraBold.woff2",
+      "bytes": 694516,
+      "sha256": "b3d23b3f93f4bdad6c9b7f69b11156f90f1576b8383f6117448ee79e27609e56",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NanumMyeongjo-Regular.woff2",
+      "bytes": 502068,
+      "sha256": "561e9193a6e848b3f7ce9f8f5907310a13e175bc9d69e77da2842a7517a97c16",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NotoSansKR-Bold.woff2",
+      "bytes": 559192,
+      "sha256": "dab3d492daa687386292cff1499225db580f931f800ee0d124eb0636378c6020",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NotoSansKR-ExtraLight.woff2",
+      "bytes": 592496,
+      "sha256": "3b5cac6af73fd94fa91ded10f6cfc54c7ce52189986fe7ca6fd457208f1d3673",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NotoSansKR-Regular.woff2",
+      "bytes": 562220,
+      "sha256": "d1bf8649914a4fe9477a8735bf056383e44e466141fb3d61897252e06d900c1a",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NotoSerifKR-Bold.woff2",
+      "bytes": 1033556,
+      "sha256": "504d6af6abb882acd912d47bafa383c4512a6c8c33635e4e8fb37111d9310941",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "NotoSerifKR-Regular.woff2",
+      "bytes": 971428,
+      "sha256": "c9a1e3ac69994d680883b53b1fd83d520733b704792522a932bfaa276117de45",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Black.woff2",
+      "bytes": 800404,
+      "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Bold.woff2",
+      "bytes": 791156,
+      "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-ExtraBold.woff2",
+      "bytes": 793540,
+      "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-ExtraLight.woff2",
+      "bytes": 734392,
+      "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Light.woff2",
+      "bytes": 757000,
+      "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Medium.woff2",
+      "bytes": 778432,
+      "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Regular.woff2",
+      "bytes": 765892,
+      "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-SemiBold.woff2",
+      "bytes": 785856,
+      "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "Pretendard-Thin.woff2",
+      "bytes": 694804,
+      "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "SourceHanSerifK-OldHangul-subset.woff2",
+      "bytes": 239628,
+      "sha256": "9e419cd16df2ea3b220aa7751320d956ac2493440ba412484d98325078f09d43",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "SpoqaHanSans-Regular.woff2",
+      "bytes": 275144,
+      "sha256": "6568bf80b50c14f2e54f56f2c07e668416f39f880baf5ea2825d315767f98f69",
+      "notice": "vendor/rhwp/assets/fonts/FONTS.md"
+    },
+    {
+      "file": "D2Coding-Bold.woff2",
+      "bytes": 1579776,
+      "sha256": "cf59ac9e719ce9888870ec012cdf8cbc8ffdb632f823652d5b3ba3236ce6b7c8",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "D2Coding-Regular.woff2",
+      "bytes": 1485480,
+      "sha256": "4d3fa8ed66fedcb1787f200bd75637b816b09057fc06da0aa783e3b305a726d8",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "LatinModernMath-Regular.woff2",
+      "bytes": 391676,
+      "sha256": "b11060f37967c090457580275129d0d7da1d5fbfc82b04e78c91aa31977f547c",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "GUST-Font-License-1.0 AND LPPL-1.3c-or-later"
+    },
+    {
+      "file": "LatinModernMath-VariableOutline-subset.otf",
+      "bytes": 13488,
+      "sha256": "c3b70b3a6ad5d7b03fb9c86067b6fc212b3a084870a9acff13238190137bf260",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "GUST-Font-License-1.0 AND LPPL-1.3c-or-later"
+    },
+    {
+      "file": "NanumGothic-Bold.woff2",
+      "bytes": 440012,
+      "sha256": "f1a3a97599e73746b1af08f88bc542c0f6b091818ffa67b31efb5b88d49ebc2e",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumGothic-ExtraBold.woff2",
+      "bytes": 402288,
+      "sha256": "a1961b5f8820d1c03519e21858508bedd32ea9f748805db5cad11536404c1801",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumGothic-Regular.woff2",
+      "bytes": 363844,
+      "sha256": "b2b25ce9c9179e0a4c867bd2610e1db5595965345aa1cdb857964ab802c4ee3e",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumGothicCoding-Bold.woff2",
+      "bytes": 698148,
+      "sha256": "81c3ae9d714c4b31fb0fac7596e4a472e1a19776193a4a595e6f7e5b23daeeb3",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumGothicCoding-Regular.woff2",
+      "bytes": 670036,
+      "sha256": "6bd0831252dc3bd96f3257ec4eaf794d88ffb185346eb5d3f889248a7a3c6239",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumMyeongjo-Bold.woff2",
+      "bytes": 608768,
+      "sha256": "65c47ec072dd91cbaac538f4482be3185fb0896b5f3909aa8a9834604b1eec08",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumMyeongjo-ExtraBold.woff2",
+      "bytes": 728364,
+      "sha256": "dda2e9b5d670b63dd66a9a83468ee0ee9e64bef09d4fc24771865a7ab2529332",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NanumMyeongjo-Regular.woff2",
+      "bytes": 536732,
+      "sha256": "52d27bf4ee205020a4aa9eb19ef4835e4aa04a94f7742b13e69e5c8b9a74072a",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NotoSansMath-Regular.woff2",
+      "bytes": 226456,
+      "sha256": "6836027b99d29fd0e6f668cf0c2e89107de4131b91116cd96516ad4a7e19d66d",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "NotoSansSymbols2-Regular.ttf",
+      "bytes": 656852,
+      "sha256": "876598db5f1e3bef2bc77c4d94c5b0d5d2c1620be4878a06f18fb5434e331688",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "RHWPOldHangul-Regular.woff2",
+      "bytes": 239732,
+      "sha256": "1a45a61e9a320c1bc62ca1401f7b23ceffffe8133dc2a9650ad4e12524f8dcab",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "RHWPPublicBatang-Regular.woff2",
+      "bytes": 2832012,
+      "sha256": "20d454f45cdf29cc4619e769f1f59f3b8920941b6b274a530e82d3b75e24dbfb",
+      "notice": "research/rhwp_upstream/assets/fonts/licenses/font-notices.json",
+      "license": "OFL-1.1"
+    }
+  ]
+}

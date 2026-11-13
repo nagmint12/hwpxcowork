@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hwpx-cowork 관리자</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+  :root { --bg: #f6f7f9; --card: #ffffff; --ink: #1f2933; --muted: #5f6b7a; --line: #dfe3e8; --accent: #2457c5; --accent-ink: #ffffff;
+          --ok: #1e7f4f; --ok-bg: #e5f4ec; --wait: #9a6200; --wait-bg: #fdf1dc; --off: #5f6b7a; --off-bg: #eceff3; --info: #2457c5; --info-bg: #e6edfb; --danger: #b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15181d; --card: #1d2128; --ink: #e6e9ee; --muted: #9aa5b3; --line: #2e343d; --accent: #6c9cff; --accent-ink: #0d1117;
+            --ok: #6fd3a0; --ok-bg: #173527; --wait: #f0b85a; --wait-bg: #3a2d14; --off: #9aa5b3; --off-bg: #272c34; --info: #8fb2ff; --info-bg: #1c2a47; --danger: #ff8a7a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+  h1 { font-size: 18px; margin: 0; }
+  .chip { padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--off-bg); color: var(--off); white-space: nowrap; }
+  .chip.running { background: var(--ok-bg); color: var(--ok); }
+  .chip.starting, .chip.stopping { background: var(--wait-bg); color: var(--wait); }
+  .chip.external { background: var(--info-bg); color: var(--info); }
+  .chip.conflict { background: var(--wait-bg); color: var(--danger); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  h2 { font-size: 13px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .label { color: var(--muted); }
+  .value { font-family: Consolas, "D2Coding", monospace; font-size: 13px; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 7px; padding: 5px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  .big button { padding: 8px 18px; font-size: 15px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; min-height: 18px; }
+  input[type=text] { font: inherit; width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre { margin: 10px 0 0; max-height: 280px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  footer { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; padding: 4px 2px 16px; }
+  .hidden { display: none !important; }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>hwpx-cowork 관리자</h1>
+    <span id="chip" class="chip">확인 중</span>
+  </header>
+
+  <p id="nokey" class="hidden">관리자 앱(admin-app)으로 여세요.</p>
+
+  <section id="setup" class="hidden">
+    <h2>처음 실행 — 관리자 토큰</h2>
+    <div class="row"><span class="label" id="setup-rule-label">토큰</span><span class="value"><input type="text" id="setup-token" spellcheck="false" autocomplete="off" maxlength="200" placeholder="편집 화면에 로그인할 때 쓸 토큰"></span>
+      <span class="actions"><button id="setup-save" class="primary">정하고 켜기</button><button id="setup-auto" title="무작위 토큰을 만들어 씁니다">자동으로</button></span></div>
+    <div id="setup-msg" class="note"></div>
+  </section>
+
+  <div id="app">
+    <section>
+      <h2>서버</h2>
+      <div class="actions big">
+        <button id="start" class="primary">켜기</button>
+        <button id="stop">끄기</button>
+        <button id="restart">다시 켜기</button>
+        <button id="web" title="편집 화면(사용자 앱)을 엽니다">편집 화면 열기</button>
+        <button id="freeport" class="hidden" title="지금 포트를 다른 프로그램(다른 hwpx-cowork 서버 포함)이 쓰고 있어 비어 있는 포트로 바꿔 켭니다. MCP·참여자 주소도 바뀝니다">빈 포트로 켜기</button>
+      </div>
+      <div id="msg" class="note"></div>
+    </section>
+
+    <section>
+      <h2>주소</h2>
+      <div class="row"><span class="label">이 PC</span><span class="value" id="local"></span><span class="actions"><button data-copy="local">복사</button></span></div>
+      <div class="row"><span class="label" title="같은 네트워크의 다른 PC가 접속할 주소. 편집 화면의 [관리자]에서 접속 범위를 LAN 으로 바꾸고 저장·재시작하면 생깁니다">같은 망</span><span class="value" id="lan"></span><span class="actions"><button data-copy="lan">복사</button></span></div>
+      <div class="row"><span class="label" title="HTTPS 외부 공유 주소. 편집 화면의 [관리자] → 외부 공유 주소에서 정합니다. ChatGPT 연결에 필요합니다">외부</span><span class="value" id="public"></span><span class="actions"><button data-copy="public">복사</button></span></div>
+      <div class="row"><span class="label" title="AI(ChatGPT·Codex·Claude Code)에 등록할 MCP 주소. 각자 본인 토큰으로 연결합니다">MCP</span><span class="value" id="mcp"></span><span class="actions"><button data-copy="mcp">복사</button></span></div>
+    </section>
+
+    <section>
+      <h2>관리</h2>
+      <div class="row"><span class="label" title="편집 화면에서 관리자로 로그인할 때 씁니다. 참여자 계정은 편집 화면의 [관리자]에서 만듭니다">관리자 토큰</span><span class="value" id="token">••••••••</span><span class="actions"><button id="showtoken">보기</button><button id="copytoken">복사</button><button id="edittoken">바꾸기</button></span></div>
+      <div class="row hidden" id="tokenrow"><span class="label">새 토큰</span><span class="value"><input type="text" id="newtoken" spellcheck="false" autocomplete="off" maxlength="200"></span><span class="actions"><button id="autotoken" title="무작위 토큰을 채웁니다">자동</button><button id="savetoken" class="primary">저장</button><button id="canceltoken">취소</button></span></div>
+      <div class="row"><span class="label" title="계정·설정(config.json)과 문서(data)가 있는 폴더. 백업은 서버를 끄고 이 폴더를 통째로 복사합니다">설정·문서</span><span class="value" id="userdir"></span><span class="actions"><button id="folder">열기</button></span></div>
+      <div class="row" id="shortcutrow"><span class="label" title="관리자 앱과 편집 화면(사용자 앱) 바로 가기를 바탕 화면에 만듭니다">바로 가기</span><span class="value">바탕 화면</span><span class="actions"><button id="shortcuts">만들기</button></span></div>
+      <div class="row"><span class="label" title="참여자 PC 에서 편집 화면을 앱 창으로 여는 작은 ZIP(설치 없음). 아래 서버 주소가 들어갑니다">참여자용 앱</span><span class="value"><input type="text" id="participant" spellcheck="false"></span><span class="actions"><button id="userapp">내려받기</button></span></div>
+      <div id="msg2" class="note"></div>
+    </section>
+
+    <section>
+      <details id="logbox">
+        <summary>기록</summary>
+        <pre id="logs"></pre>
+      </details>
+    </section>
+
+    <footer>
+      <span id="meta"></span>
+      <button id="quit" class="danger" title="서버를 끄고 관리자 앱을 끝냅니다">관리자 앱 끝내기</button>
+    </footer>
+  </div>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get('k');
+  if (fromHash) { try { sessionStorage.setItem('hwpx.manager.key', fromHash); } catch (e) {} history.replaceState(null, '', location.pathname); }
+  let key = fromHash;
+  if (!key) { try { key = sessionStorage.getItem('hwpx.manager.key'); } catch (e) {} }
+  if (!key) { $('app').classList.add('hidden'); $('nokey').classList.remove('hidden'); $('chip').textContent = '열쇠 없음'; return; }
+
+  const PHASE = { stopped: '꺼짐', starting: '켜는 중', running: '켜짐', stopping: '끄는 중', external: '다른 창에서 켜짐', conflict: '포트 사용 중', setup: '처음 설정' };
+  const randomToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  let state = null;
+  let tokenValue = null;
+  let participantTouched = false;
+
+  async function api(path, { method = 'GET', body } = {}) {
+    const res = await fetch(path, { method, headers: { 'X-Manager-Key': key, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    if (res.status === 403) throw new Error('관리자 앱을 다시 실행해 주세요(열쇠가 바뀜)');
+    const type = res.headers.get('content-type') || '';
+    const data = type.includes('json') ? await res.json() : await res.blob();
+    if (!res.ok) throw new Error((data && data.error) || `오류 ${res.status}`);
+    return data;
+  }
+  const say = (text, where = 'msg') => { $(where).textContent = text || ''; };
+
+  function render(s) {
+    state = s;
+    const chip = $('chip');
+    chip.textContent = PHASE[s.phase] || s.phase;
+    chip.className = `chip ${s.phase}`;
+    // 첫 실행: 관리자 토큰을 직접 정하는 칸만 보인다(자동은 선택)
+    $('setup').classList.toggle('hidden', !s.needsSetup);
+    $('app').classList.toggle('hidden', !!s.needsSetup);
+    if (s.needsSetup) { $('setup-token').title = s.tokenRule; $('setup-rule-label').title = s.tokenRule; return; }
+    $('newtoken').title = s.tokenRule;
+    const on = s.phase === 'running' || s.phase === 'external';
+    const moving = s.phase === 'starting' || s.phase === 'stopping';
+    $('start').disabled = on || moving || s.phase === 'conflict';
+    $('stop').disabled = !on || moving;
+    $('freeport').classList.toggle('hidden', s.phase !== 'conflict');
+    if (s.phase === 'conflict') say(`포트 ${s.port} 을 다른 프로그램(다른 hwpx-cowork 서버 포함)이 쓰고 있습니다`);
+    $('restart').disabled = s.phase !== 'running';
+    $('web').disabled = !on;
+    $('local').textContent = s.local;
+    $('lan').textContent = s.lan.length ? s.lan.join('  ') : '이 PC만';
+    $('public').textContent = s.publicUrl || '—';
+    $('mcp').textContent = s.mcp;
+    $('userdir').textContent = s.userDir;
+    $('shortcutrow').classList.toggle('hidden', !s.shortcuts);
+    if (!participantTouched) $('participant').value = s.participantUrl;
+    if (s.lastError && s.phase === 'stopped') say(`켜지 못했습니다: ${s.lastError}`);
+    const up = s.startedAt ? `켜진 지 ${Math.max(1, Math.round((Date.now() - s.startedAt) / 60000))}분 · ` : '';
+    $('meta').textContent = `${up}v${s.version} · Node ${s.node}`;
+  }
+
+  async function refresh() {
+    try { render(await api('/api/status')); } catch (e) { $('chip').textContent = '연결 끊김'; $('chip').className = 'chip'; say(e.message); }
+    if ($('logbox').open) { try { const { lines } = await api('/api/logs'); const pre = $('logs'); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4; pre.textContent = lines.join('\n'); if (atEnd) pre.scrollTop = pre.scrollHeight; } catch (e) {} }
+  }
+
+  async function act(path, pending) {
+    for (const id of ['start', 'stop', 'restart']) $(id).disabled = true;
+    say(pending);
+    try { render(await api(path, { method: 'POST' })); if (!state.lastError) say(''); } catch (e) { say(e.message); }
+  }
+  $('start').onclick = () => act('/api/start', '켜는 중…');
+  $('stop').onclick = () => act('/api/stop', '저장 중인 작업을 마치고 끄는 중…');
+  $('restart').onclick = () => act('/api/restart', '다시 켜는 중…');
+  $('freeport').onclick = () => act('/api/use-free-port', '빈 포트로 바꿔 켜는 중…');
+  $('web').onclick = async () => { try { await api('/api/open', { method: 'POST', body: { what: 'web' } }); } catch (e) { say(e.message); } };
+  $('folder').onclick = async () => { try { await api('/api/open', { method: 'POST', body: { what: 'folder' } }); } catch (e) { say(e.message, 'msg2'); } };
+
+  async function getToken() { if (!tokenValue) tokenValue = (await api('/api/admin-token')).token; return tokenValue; }
+  $('showtoken').onclick = async () => {
+    try {
+      const shown = $('showtoken').textContent === '숨기기';
+      $('token').textContent = shown ? '••••••••' : (await getToken()) || '(관리자 계정 없음)';
+      $('showtoken').textContent = shown ? '보기' : '숨기기';
+    } catch (e) { say(e.message, 'msg2'); }
+  };
+  async function copy(text, label) {
+    try { await navigator.clipboard.writeText(text); say(`${label} 복사함`, 'msg2'); }
+    catch (e) { say('복사하지 못했습니다 — 글을 직접 선택해 복사하세요', 'msg2'); }
+  }
+  $('copytoken').onclick = async () => { try { await copy(await getToken(), '관리자 토큰'); } catch (e) { say(e.message, 'msg2'); } };
+  $('edittoken').onclick = () => { $('tokenrow').classList.remove('hidden'); $('newtoken').value = ''; $('newtoken').focus(); };
+  $('canceltoken').onclick = () => { $('tokenrow').classList.add('hidden'); };
+  $('autotoken').onclick = () => { $('newtoken').value = randomToken(); };
+  $('savetoken').onclick = async () => {
+    const value = $('newtoken').value.trim();
+    if (!value) { say('새 토큰을 적거나 [자동]을 누르세요', 'msg2'); return; }
+    try {
+      tokenValue = (await api('/api/admin-token', { method: 'POST', body: { token: value } })).token;
+      $('tokenrow').classList.add('hidden');
+      $('token').textContent = '••••••••'; $('showtoken').textContent = '보기';
+      say('관리자 토큰을 바꿨습니다 — 편집 화면에서 새 토큰으로 다시 로그인하세요', 'msg2');
+    } catch (e) { say(e.message, 'msg2'); }
+  };
+  async function setup(token) {
+    $('setup-save').disabled = true; $('setup-auto').disabled = true; say('켜는 중…', 'setup-msg');
+    try { render(await api('/api/setup', { method: 'POST', body: { token } })); say(''); }
+    catch (e) { say(e.message, 'setup-msg'); }
+    finally { $('setup-save').disabled = false; $('setup-auto').disabled = false; }
+  }
+  $('setup-save').onclick = () => {
+    const value = $('setup-token').value.trim();
+    if (!value) { say('토큰을 적거나 [자동으로]를 누르세요', 'setup-msg'); return; }
+    setup(value);
+  };
+  $('setup-auto').onclick = () => setup('');
+  for (const button of document.querySelectorAll('[data-copy]')) {
+    button.onclick = () => {
+      const id = button.dataset.copy;
+      const text = id === 'lan' ? (state && state.lan[0]) : $(id).textContent;
+      if (!text || text === '—' || text === '이 PC만') { say('복사할 주소가 없습니다', 'msg2'); return; }
+      copy(text, '주소');
+    };
+  }
+  $('shortcuts').onclick = async () => {
+    say('만드는 중…', 'msg2');
+    try { await api('/api/shortcuts', { method: 'POST' }); say('바탕 화면에 바로 가기 2개를 만들었습니다', 'msg2'); } catch (e) { say(e.message, 'msg2'); }
+  };
+  $('participant').oninput = () => { participantTouched = true; };
+  $('userapp').onclick = async () => {
+    const url = $('participant').value.trim();
+    try {
+      const blob = await api(`/api/user-app.zip?url=${encodeURIComponent(url)}`);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'hwpx-cowork-user-app.zip';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      say(url.includes('localhost') ? '받았습니다 — 주소가 localhost 라 이 PC 에서만 열립니다' : '받았습니다 — 참여자에게 전달하세요', 'msg2');
+    } catch (e) { say(e.message, 'msg2'); }
+  };
+  $('quit').onclick = async () => {
+    if (!confirm('서버를 끄고 관리자 앱을 끝낼까요?')) return;
+    say('끄는 중…');
+    try { await api('/api/quit', { method: 'POST' }); } catch (e) {}
+    $('chip').textContent = '끝남'; $('chip').className = 'chip';
+    document.body.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    say('관리자 앱을 끝냈습니다. 이 창을 닫으세요.');
+    clearInterval(timer);
+  };
+  $('logbox').ontoggle = refresh;
+  refresh();
+  const timer = setInterval(refresh, 1500);
+})();
+</script>
+</body>
+</html>

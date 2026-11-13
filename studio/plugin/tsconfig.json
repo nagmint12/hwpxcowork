@@ -1,0 +1,30 @@
+{
+  // cowork 플러그인 형 검사(node scripts/build-studio.mjs --typecheck — vendor/rhwp/rhwp-studio 의 TypeScript 로 돈다).
+  // 엄격도는 vendor 원본 tsconfig 와 같다. studio 형은 vendor 원본 소스('@/…')에서, web/·engine/ 의 순수 JS 모듈은
+  // allowJs(JSDoc 형만 읽음, checkJs 끔)로 가져온다 — 별칭은 scripts/build-studio.mjs 의 vite 별칭과 같은 자리.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@/*": ["../../vendor/rhwp/rhwp-studio/src/*"],
+      "@wasm/*": ["../../vendor/rhwp/pkg/*"],
+      "@rhwp/hwpctrl/studio-plugin": ["../../vendor/rhwp/rhwp-studio/types/rhwp-hwpctrl-plugin.d.ts"],
+      "@cowork/web/*": ["../../web/*"],
+      "@cowork/engine/*": ["../../engine/*"]
+    }
+  },
+  "include": ["./**/*.ts", "../../vendor/rhwp/rhwp-studio/src/vite-env.d.ts"]
+}

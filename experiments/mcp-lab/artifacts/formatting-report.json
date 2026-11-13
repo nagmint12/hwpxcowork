@@ -1,0 +1,794 @@
+{
+  "version": 1,
+  "execution": "real MCP gateway calls with deterministic inputs and persisted HWPX re-open checks",
+  "paidApiCalls": 0,
+  "modelReasoningEvaluated": false,
+  "modelTokens": null,
+  "measurement": "serialized request/result bytes and file bytes; no invented token estimate",
+  "scenarios": [
+    {
+      "id": "heading_role_and_direct_overrides",
+      "status": "passed",
+      "source": "controlled repository fixture; synthetic extra heading and deliberate style drift",
+      "before": {
+        "path": "artifacts/formatting-documents/heading-before.hwpx",
+        "bytes": 13211,
+        "sha256": "9f8fdd7615f738144474b05c4c41f5a7b736994fd7c7f20a92f41dd2a5ece6b3",
+        "sections": 1,
+        "paragraphs": 4,
+        "tables": 0,
+        "figures": 0,
+        "tocFields": 0
+      },
+      "after": {
+        "path": "artifacts/formatting-documents/heading-after.hwpx",
+        "bytes": 13627,
+        "sha256": "e75a718d21f3352175b6c4c2bc279e9d7a7ed9444352d17ffa003580ff000dba",
+        "sections": 1,
+        "paragraphs": 4,
+        "tables": 0,
+        "figures": 0,
+        "tocFields": 0
+      },
+      "beforeAudit": {
+        "inspected": 2,
+        "mismatched": 2,
+        "repairable": 2,
+        "groups": [
+          {
+            "kind": "semantic_style",
+            "actual": "0",
+            "expected": "22",
+            "name": "실험 제목 1",
+            "role": "section_heading",
+            "count": 1,
+            "refs": [
+              "s0/p3"
+            ],
+            "refs_from": 0
+          },
+          {
+            "kind": "character_override",
+            "expected": "7",
+            "actual": [
+              "0"
+            ],
+            "fields": [
+              "bold"
+            ],
+            "count": 1,
+            "refs": [
+              "s0/p3"
+            ],
+            "refs_from": 0
+          },
+          {
+            "kind": "paragraph_override",
+            "actual": "20",
+            "expected": "0",
+            "fields": [
+              "align"
+            ],
+            "count": 1,
+            "refs": [
+              "s0/p2"
+            ],
+            "refs_from": 0
+          },
+          {
+            "kind": "character_override",
+            "expected": "0",
+            "actual": [
+              "8"
+            ],
+            "fields": [
+              "sizePt"
+            ],
+            "count": 1,
+            "refs": [
+              "s0/p2"
+            ],
+            "refs_from": 0
+          }
+        ]
+      },
+      "afterAudit": {
+        "inspected": 2,
+        "mismatched": 0,
+        "repairable": 0,
+        "groups": []
+      },
+      "receipts": [
+        {
+          "ok": true,
+          "pid": 1,
+          "status": "pending",
+          "ref": "s0/p3",
+          "type": "format"
+        },
+        {
+          "ok": true,
+          "pid": 2,
+          "status": "pending",
+          "ref": "s0/p2",
+          "type": "format"
+        }
+      ],
+      "verification": {
+        "pendingDidNotApply": true,
+        "fullTextPreserved": true,
+        "textSha256": "98f6643fe3ed073b7ab626c99a4cb0865ec4cb77fa804ecb2c0b402bdff70bbb",
+        "heading": {
+          "ref": "s0/p3",
+          "expectedStyleId": "22",
+          "actualStyleId": "22"
+        },
+        "body": {
+          "ref": "s0/p2",
+          "expectedStyleId": "0",
+          "actualStyleId": "0",
+          "paragraphMatchesStyle": true,
+          "allCharactersMatchStyle": true
+        },
+        "savedPackageReopened": true
+      },
+      "calls": [
+        {
+          "kind": "tools/call",
+          "name": "audit_formatting",
+          "inputChars": 126,
+          "inputBytes": 126,
+          "resultChars": 1071,
+          "resultBytes": 1249,
+          "textChars": 902,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 20.6,
+          "isError": false,
+          "originalResultChars": 1071
+        },
+        {
+          "kind": "tools/call",
+          "name": "propose_format_normalization",
+          "inputChars": 149,
+          "inputBytes": 195,
+          "resultChars": 406,
+          "resultBytes": 488,
+          "textChars": 319,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 48.71,
+          "isError": false,
+          "originalResultChars": 406
+        },
+        {
+          "kind": "tools/call",
+          "name": "apply_proposal",
+          "inputChars": 43,
+          "inputBytes": 43,
+          "resultChars": 5295,
+          "resultBytes": 5743,
+          "textChars": 4519,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 27.75,
+          "isError": false,
+          "originalResultChars": 5295
+        },
+        {
+          "kind": "tools/call",
+          "name": "apply_proposal",
+          "inputChars": 43,
+          "inputBytes": 43,
+          "resultChars": 5302,
+          "resultBytes": 5764,
+          "textChars": 4526,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 17,
+          "isError": false,
+          "originalResultChars": 5302
+        },
+        {
+          "kind": "tools/call",
+          "name": "audit_formatting",
+          "inputChars": 126,
+          "inputBytes": 126,
+          "resultChars": 475,
+          "resultBytes": 645,
+          "textChars": 406,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 9.78,
+          "isError": false,
+          "originalResultChars": 475
+        }
+      ]
+    },
+    {
+      "id": "toc_output_style_and_direct_overrides",
+      "status": "passed",
+      "source": "controlled TOC fixture; deliberately corrupted title style and overrides",
+      "before": {
+        "path": "artifacts/formatting-documents/toc-before.hwpx",
+        "bytes": 14812,
+        "sha256": "f55edf3ee190ceae4568c4430826c6f7f4d3e193f8fd4dec0d1a8ed2651ea336",
+        "sections": 1,
+        "paragraphs": 37,
+        "tables": 1,
+        "figures": 1,
+        "tocFields": 1
+      },
+      "after": {
+        "path": "artifacts/formatting-documents/toc-after.hwpx",
+        "bytes": 15251,
+        "sha256": "944746ae4dd1700ef5dc4a9988b4bdaf29b8434e04d19d8929fd29f1f3e8ccda",
+        "sections": 1,
+        "paragraphs": 37,
+        "tables": 1,
+        "figures": 1,
+        "tocFields": 1
+      },
+      "beforeAudit": {
+        "fields": [
+          {
+            "field_id": "1",
+            "start_ref": "s0/p1",
+            "end_ref": "s0/p14",
+            "options": {
+              "recognized": true,
+              "title": true,
+              "outline": true,
+              "use_styles": false,
+              "table": true,
+              "picture": true,
+              "equation": false,
+              "collected_styles": [],
+              "level": 2
+            },
+            "missing_styles": [],
+            "ambiguous_styles": [],
+            "heading_styles_not_collected_by_style": [],
+            "formatting": {
+              "configured": true,
+              "resolved_styles": {
+                "title": "차례 제목",
+                "level1": "차례 1",
+                "level3": "차례 3",
+                "level2": "차례 2",
+                "captions": "차례 1"
+              },
+              "mapping_issues": [],
+              "mismatched": 11,
+              "groups": [
+                {
+                  "role": "title",
+                  "kind": "toc_semantic_style",
+                  "actual": "0",
+                  "expected": "17",
+                  "name": "차례 제목",
+                  "count": 1,
+                  "refs": [
+                    "s0/p1"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "title",
+                  "kind": "toc_paragraph_override",
+                  "actual": "25",
+                  "expected": "12",
+                  "count": 1,
+                  "refs": [
+                    "s0/p1"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "title",
+                  "kind": "toc_character_override",
+                  "actual": [
+                    "8"
+                  ],
+                  "expected": "5",
+                  "count": 1,
+                  "refs": [
+                    "s0/p1"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level1",
+                  "kind": "toc_paragraph_override",
+                  "actual": "21",
+                  "expected": "13",
+                  "count": 3,
+                  "refs": [
+                    "s0/p2",
+                    "s0/p4",
+                    "s0/p7"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level1",
+                  "kind": "toc_character_override",
+                  "actual": [
+                    "7"
+                  ],
+                  "expected": "6",
+                  "count": 3,
+                  "refs": [
+                    "s0/p2",
+                    "s0/p4",
+                    "s0/p7"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level3",
+                  "kind": "toc_semantic_style",
+                  "actual": "19",
+                  "expected": "20",
+                  "name": "차례 3",
+                  "count": 2,
+                  "refs": [
+                    "s0/p3",
+                    "s0/p6"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level3",
+                  "kind": "toc_paragraph_override",
+                  "actual": "22",
+                  "expected": "15",
+                  "count": 2,
+                  "refs": [
+                    "s0/p3",
+                    "s0/p6"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level3",
+                  "kind": "toc_character_override",
+                  "actual": [
+                    "7"
+                  ],
+                  "expected": "6",
+                  "count": 2,
+                  "refs": [
+                    "s0/p3",
+                    "s0/p6"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level2",
+                  "kind": "toc_semantic_style",
+                  "actual": "20",
+                  "expected": "19",
+                  "name": "차례 2",
+                  "count": 1,
+                  "refs": [
+                    "s0/p5"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level2",
+                  "kind": "toc_paragraph_override",
+                  "actual": "23",
+                  "expected": "14",
+                  "count": 1,
+                  "refs": [
+                    "s0/p5"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "level2",
+                  "kind": "toc_character_override",
+                  "actual": [
+                    "7"
+                  ],
+                  "expected": "6",
+                  "count": 1,
+                  "refs": [
+                    "s0/p5"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "title",
+                  "kind": "toc_paragraph_override",
+                  "actual": "20",
+                  "expected": "12",
+                  "count": 2,
+                  "refs": [
+                    "s0/p9",
+                    "s0/p12"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "captions",
+                  "kind": "toc_paragraph_override",
+                  "actual": "21",
+                  "expected": "13",
+                  "count": 2,
+                  "refs": [
+                    "s0/p10",
+                    "s0/p13"
+                  ],
+                  "refs_from": 0
+                },
+                {
+                  "role": "captions",
+                  "kind": "toc_character_override",
+                  "actual": [
+                    "7"
+                  ],
+                  "expected": "6",
+                  "count": 2,
+                  "refs": [
+                    "s0/p10",
+                    "s0/p13"
+                  ],
+                  "refs_from": 0
+                }
+              ],
+              "remedy": "propose_safe_toc_refresh(apply_styles=true, styles=검사한 실제 스타일 이름)로 차례 영역만 갱신합니다. 직접 서식 초기화가 포함됩니다."
+            },
+            "remedy": "본문·제목 스타일 제안을 반영한 뒤 기존 차례 전용 갱신을 제안할 수 있습니다."
+          }
+        ],
+        "heading_issues": [],
+        "pending_prerequisites": []
+      },
+      "afterAudit": {
+        "fields": [
+          {
+            "field_id": "1",
+            "start_ref": "s0/p1",
+            "end_ref": "s0/p14",
+            "options": {
+              "recognized": true,
+              "title": true,
+              "outline": true,
+              "use_styles": false,
+              "table": true,
+              "picture": true,
+              "equation": false,
+              "collected_styles": [],
+              "level": 2
+            },
+            "missing_styles": [],
+            "ambiguous_styles": [],
+            "heading_styles_not_collected_by_style": [],
+            "formatting": {
+              "configured": true,
+              "resolved_styles": {
+                "title": "차례 제목",
+                "level1": "차례 1",
+                "level3": "차례 3",
+                "level2": "차례 2",
+                "captions": "차례 1"
+              },
+              "mapping_issues": [],
+              "mismatched": 0,
+              "groups": [],
+              "remedy": "검사한 차례 역할 스타일과 직접 서식 기준을 충족합니다."
+            },
+            "remedy": "본문·제목 스타일 제안을 반영한 뒤 기존 차례 전용 갱신을 제안할 수 있습니다."
+          }
+        ],
+        "heading_issues": [],
+        "pending_prerequisites": []
+      },
+      "receipt": {
+        "pid": 1,
+        "initialStatus": "pending",
+        "finalStatus": "applied"
+      },
+      "verification": {
+        "pendingDidNotApply": true,
+        "bodyTextPreserved": true,
+        "fullTextPreserved": true,
+        "expectedGeneratedChanges": "TOC entry text and page numbers may be recomputed; all text outside TOC fields is preserved.",
+        "fullTextSha256": "a2205419b86b59e868a718204b1950eac53bee3ef66a5feb9517fe09c746d8bc",
+        "bodyTextSha256": "59aa397512958c9235bdb9321c79f17caf05721daf799deda5a8b0d0d49835a1",
+        "roleChecks": [
+          {
+            "ref": "s0/p1",
+            "role": "title",
+            "expectedStyleId": "17",
+            "actualStyleId": "17"
+          },
+          {
+            "ref": "s0/p2",
+            "role": "level1",
+            "expectedStyleId": "18",
+            "actualStyleId": "18"
+          },
+          {
+            "ref": "s0/p3",
+            "role": "level3",
+            "expectedStyleId": "20",
+            "actualStyleId": "20"
+          },
+          {
+            "ref": "s0/p4",
+            "role": "level1",
+            "expectedStyleId": "18",
+            "actualStyleId": "18"
+          },
+          {
+            "ref": "s0/p5",
+            "role": "level2",
+            "expectedStyleId": "19",
+            "actualStyleId": "19"
+          },
+          {
+            "ref": "s0/p6",
+            "role": "level3",
+            "expectedStyleId": "20",
+            "actualStyleId": "20"
+          },
+          {
+            "ref": "s0/p7",
+            "role": "level1",
+            "expectedStyleId": "18",
+            "actualStyleId": "18"
+          },
+          {
+            "ref": "s0/p9",
+            "role": "title",
+            "expectedStyleId": "17",
+            "actualStyleId": "17"
+          },
+          {
+            "ref": "s0/p10",
+            "role": "captions",
+            "expectedStyleId": "18",
+            "actualStyleId": "18"
+          },
+          {
+            "ref": "s0/p12",
+            "role": "title",
+            "expectedStyleId": "17",
+            "actualStyleId": "17"
+          },
+          {
+            "ref": "s0/p13",
+            "role": "captions",
+            "expectedStyleId": "18",
+            "actualStyleId": "18"
+          }
+        ],
+        "titleParagraphMatchesStyle": true,
+        "titleCharactersMatchStyle": true,
+        "savedPackageReopened": true
+      },
+      "calls": [
+        {
+          "kind": "tools/call",
+          "name": "inspect_toc",
+          "inputChars": 124,
+          "inputBytes": 148,
+          "resultChars": 3245,
+          "resultBytes": 3438,
+          "textChars": 2736,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 22.69,
+          "isError": false,
+          "originalResultChars": 3245
+        },
+        {
+          "kind": "tools/call",
+          "name": "propose_safe_toc_refresh",
+          "inputChars": 239,
+          "inputBytes": 311,
+          "resultChars": 695,
+          "resultBytes": 771,
+          "textChars": 542,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 67.36,
+          "isError": false,
+          "originalResultChars": 695
+        },
+        {
+          "kind": "tools/call",
+          "name": "apply_proposal",
+          "inputChars": 43,
+          "inputBytes": 43,
+          "resultChars": 13327,
+          "resultBytes": 13698,
+          "textChars": 11723,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 165.2,
+          "isError": false,
+          "originalResultChars": 13327
+        },
+        {
+          "kind": "tools/call",
+          "name": "inspect_toc",
+          "inputChars": 124,
+          "inputBytes": 148,
+          "resultChars": 1001,
+          "resultBytes": 1156,
+          "textChars": 860,
+          "imageBlocks": 0,
+          "imageBytes": 0,
+          "elapsedMs": 13.88,
+          "isError": false,
+          "originalResultChars": 1001
+        }
+      ]
+    }
+  ],
+  "passed": true,
+  "metrics": {
+    "measurement": "serialized payload size, not model tokens",
+    "modelTokens": null,
+    "records": [
+      {
+        "kind": "tools/call",
+        "name": "enable_tools",
+        "inputChars": 42,
+        "inputBytes": 42,
+        "resultChars": 558,
+        "resultBytes": 558,
+        "textChars": 457,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 7.15,
+        "isError": false,
+        "originalResultChars": 558
+      },
+      {
+        "kind": "tools/list",
+        "tools": 29,
+        "schemaChars": 35431,
+        "schemaBytes": 41832
+      },
+      {
+        "kind": "tools/call",
+        "name": "audit_formatting",
+        "inputChars": 126,
+        "inputBytes": 126,
+        "resultChars": 1071,
+        "resultBytes": 1249,
+        "textChars": 902,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 20.6,
+        "isError": false,
+        "originalResultChars": 1071
+      },
+      {
+        "kind": "tools/call",
+        "name": "propose_format_normalization",
+        "inputChars": 149,
+        "inputBytes": 195,
+        "resultChars": 406,
+        "resultBytes": 488,
+        "textChars": 319,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 48.71,
+        "isError": false,
+        "originalResultChars": 406
+      },
+      {
+        "kind": "tools/call",
+        "name": "apply_proposal",
+        "inputChars": 43,
+        "inputBytes": 43,
+        "resultChars": 5295,
+        "resultBytes": 5743,
+        "textChars": 4519,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 27.75,
+        "isError": false,
+        "originalResultChars": 5295
+      },
+      {
+        "kind": "tools/call",
+        "name": "apply_proposal",
+        "inputChars": 43,
+        "inputBytes": 43,
+        "resultChars": 5302,
+        "resultBytes": 5764,
+        "textChars": 4526,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 17,
+        "isError": false,
+        "originalResultChars": 5302
+      },
+      {
+        "kind": "tools/call",
+        "name": "audit_formatting",
+        "inputChars": 126,
+        "inputBytes": 126,
+        "resultChars": 475,
+        "resultBytes": 645,
+        "textChars": 406,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 9.78,
+        "isError": false,
+        "originalResultChars": 475
+      },
+      {
+        "kind": "tools/call",
+        "name": "inspect_toc",
+        "inputChars": 124,
+        "inputBytes": 148,
+        "resultChars": 3245,
+        "resultBytes": 3438,
+        "textChars": 2736,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 22.69,
+        "isError": false,
+        "originalResultChars": 3245
+      },
+      {
+        "kind": "tools/call",
+        "name": "propose_safe_toc_refresh",
+        "inputChars": 239,
+        "inputBytes": 311,
+        "resultChars": 695,
+        "resultBytes": 771,
+        "textChars": 542,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 67.36,
+        "isError": false,
+        "originalResultChars": 695
+      },
+      {
+        "kind": "tools/call",
+        "name": "apply_proposal",
+        "inputChars": 43,
+        "inputBytes": 43,
+        "resultChars": 13327,
+        "resultBytes": 13698,
+        "textChars": 11723,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 165.2,
+        "isError": false,
+        "originalResultChars": 13327
+      },
+      {
+        "kind": "tools/call",
+        "name": "inspect_toc",
+        "inputChars": 124,
+        "inputBytes": 148,
+        "resultChars": 1001,
+        "resultBytes": 1156,
+        "textChars": 860,
+        "imageBlocks": 0,
+        "imageBytes": 0,
+        "elapsedMs": 13.88,
+        "isError": false,
+        "originalResultChars": 1001
+      }
+    ],
+    "toolCalls": 10
+  },
+  "counters": {
+    "toolCalls": 10,
+    "serializedArgumentBytes": 1225,
+    "serializedResultBytes": 33510,
+    "imageBlocks": 0
+  }
+}

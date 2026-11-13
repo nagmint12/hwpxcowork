@@ -1,0 +1,1210 @@
+//! HWPX 파일 파서 모듈
+//!
+//! HWPX(XML 기반 HWP) 파일을 파싱하여 Document 모델로 변환한다.
+//! HWPX는 ZIP 패키지 내 XML 파일로 구성된 KS X 6101:2024 표준 포맷이다.
+//!
+//! ## 파싱 순서
+//! 1. ZIP 컨테이너 열기 (reader)
+//! 2. content.hpf → 섹션 파일 목록 추출 (content)
+//! 3. header.xml → DocInfo 변환 (header)
+//! 4. section*.xml → Section 변환 (section)
+//! 5. BinData → 이미지 로딩
+
+pub mod content;
+mod contract_streams;
+mod crypto;
+pub mod header;
+pub mod reader;
+pub mod section;
+mod tracked_changes;
+pub mod utils;
+
+use std::collections::{HashMap, HashSet};
+
+use crate::model::bin_data::{BinData, BinDataContent, BinDataType, MAX_BIN_DATA_BYTES};
+use crate::model::document::{Document, FileHeader, HwpVersion, Section};
+
+fn is_internal_bin_data_href(href: &str) -> bool {
+    let href = href.to_ascii_lowercase();
+    href.starts_with("bindata/") || href.contains("/bindata/")
+}
+
+fn is_internal_ole_package_item(item: &content::PackageItem) -> bool {
+    let href = item.href.to_ascii_lowercase();
+    is_internal_bin_data_href(&href)
+        && (item.media_type.eq_ignore_ascii_case("application/ole") || href.ends_with(".ole"))
+}
+
+fn hwpx_bin_data_extension(item: &content::PackageItem) -> String {
+    if is_internal_ole_package_item(item) {
+        "OLE".to_string()
+    } else {
+        item.href.rsplit('.').next().unwrap_or("dat").to_string()
+    }
+}
+
+fn normalize_internal_ole_data(item: &content::PackageItem, data: Vec<u8>) -> Vec<u8> {
+    if !is_internal_ole_package_item(item) {
+        return data;
+    }
+    normalize_ole_bytes(data)
+}
+
+/// 내부 OLE 바이트에서 선두 4-byte LE size prefix 를 제거한다.
+///
+/// [Task #2263] 지연 로딩 시점에도 동일 정규화를 적용해야 하므로
+/// `PackageItem` 의존 없는 바이트 전용 함수로 분리했다.
+fn normalize_ole_bytes(mut data: Vec<u8>) -> Vec<u8> {
+    if data.len() < 12 {
+        return data;
+    }
+
+    const CFB_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    if data[..8] != CFB_MAGIC && data[4..12] == CFB_MAGIC {
+        data.drain(..4);
+    }
+    data
+}
+
+/// [Task #2263] HWPX ZIP 원본을 보유하고 요청 시점에 BinData 엔트리를 압축 해제한다.
+///
+/// 파싱 시점에 모든 내장 이미지를 풀어 IR 에 상주시키면 원본 파일 크기의
+/// 수십 배 메모리를 쓰게 된다 (무손실 비트맵 다수 내장 시 특히). ZIP 안의
+/// 이미지는 deflate 압축 상태이므로, 원본 컨테이너만 들고 있다가 실제로
+/// 렌더·직렬화되는 항목만 그때 푼다.
+struct HwpxBinResolver {
+    reader: std::sync::Mutex<reader::HwpxReader>,
+    /// 선두 size prefix 정규화가 필요한 내부 OLE 엔트리 경로
+    ole_hrefs: HashSet<String>,
+}
+
+impl std::fmt::Debug for HwpxBinResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HwpxBinResolver")
+            .field("ole_hrefs", &self.ole_hrefs.len())
+            .finish()
+    }
+}
+
+impl crate::model::bin_data::BinDataResolver for HwpxBinResolver {
+    fn resolve(&self, key: &str) -> Vec<u8> {
+        let mut reader = match self.reader.lock() {
+            Ok(r) => r,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match reader.read_file_bytes(key) {
+            Ok(data) => {
+                if self.ole_hrefs.contains(key) {
+                    normalize_ole_bytes(data)
+                } else {
+                    data
+                }
+            }
+            Err(e) => {
+                // [#1917] 로드 실패 시에도 엔트리는 등록된 상태를 유지한다
+                // (manifest·binaryItemIDRef 보존). 이미지 데이터만 소실.
+                eprintln!(
+                    "경고: BinData '{}' 로드 실패: {} — 이미지 데이터 소실",
+                    key, e
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    fn resolve_limited(&self, key: &str, max_bytes: usize) -> Option<Vec<u8>> {
+        let mut reader = match self.reader.lock() {
+            Ok(reader) => reader,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match reader.read_file_bytes_limited(key, max_bytes) {
+            Ok(data) => Some(if self.ole_hrefs.contains(key) {
+                normalize_ole_bytes(data)
+            } else {
+                data
+            }),
+            Err(error) => {
+                eprintln!("경고: BinData '{}' bounded 로드 실패: {}", key, error);
+                None
+            }
+        }
+    }
+
+    /// [#2550] HWPX BinData의 길이·존재 질의는 ZIP 중앙 디렉터리의 비압축 크기로
+    /// 판정한다. 종전 trait 기본 구현은 `resolve()`를 호출해 256MB 초과 엔트리도
+    /// materialize했으므로 DocLang·외부 이미지 확인만으로 deflate bomb가 풀렸다.
+    ///
+    /// 내부 OLE은 size prefix 제거 뒤 실제 길이가 최대 4 byte 작을 수 있다. 빈 값
+    /// 판정과 상한 적용에는 원본 size가 충분하며, `load_limited()`가 실제 바이트를
+    /// 요청할 때 정확한 정규화 길이를 다시 확인한다.
+    fn resolved_len(&self, key: &str) -> usize {
+        let mut reader = match self.reader.lock() {
+            Ok(reader) => reader,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        reader
+            .file_size_limited(key, MAX_BIN_DATA_BYTES)
+            .unwrap_or(0)
+    }
+
+    fn resolved_is_empty(&self, key: &str) -> bool {
+        self.resolved_len(key) == 0
+    }
+
+    fn resolve_deflated_zip_entry(
+        &self,
+        key: &str,
+    ) -> Option<crate::model::bin_data::DeflatedZipEntry> {
+        let mut reader = match self.reader.lock() {
+            Ok(reader) => reader,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        reader.raw_deflated_entry(key)
+    }
+}
+
+/// HWPX 파싱 에러
+#[derive(Debug)]
+pub enum HwpxError {
+    /// ZIP 컨테이너 오류
+    ZipError(String),
+    /// XML 파싱 오류
+    XmlError(String),
+    /// Incomplete owned drawing text structure must reach the document caller.
+    DrawingTextStructure(String),
+    /// 필수 파일 누락
+    MissingFile(String),
+    /// 데이터 변환 오류
+    ConversionError(String),
+    /// [Issue #1946] 비밀번호 암호화 HWPX(ODF encryption-data, AES-256-CBC).
+    /// 비밀번호 없이 열었으므로 암호문을 UTF-8 로 오독하지 않고 명확히 분류한다.
+    Encrypted(String),
+    /// ODF 암호화 방식이 현재 지원 계약과 다르거나 manifest가 손상됐다.
+    UnsupportedEncryption(String),
+    /// 비밀번호 불일치 또는 암호문/압축 payload 손상.
+    WrongPasswordOrCorruptPayload,
+    /// 복호화 뒤 raw-deflate payload가 HWPX 기존 엔트리 상한을 넘었다.
+    DecryptedEntryLimitExceeded { path: String, max_bytes: usize },
+    /// Cumulative XML text decompression policy (including failed reads).
+    XmlReadBudgetExceeded { path: String, max_bytes: usize },
+}
+
+impl HwpxError {
+    /// 암호화 문서 여부 — 배치 게이트의 ENCRYPTED_SKIP 분류에 사용.
+    pub fn is_encrypted(&self) -> bool {
+        matches!(self, HwpxError::Encrypted(_))
+    }
+}
+
+impl std::fmt::Display for HwpxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HwpxError::ZipError(e) => write!(f, "ZIP 오류: {}", e),
+            HwpxError::XmlError(e) => write!(f, "XML 파싱 오류: {}", e),
+            HwpxError::DrawingTextStructure(e) => write!(f, "그리기 내부 영역 구조 오류: {}", e),
+            HwpxError::MissingFile(e) => write!(f, "필수 파일 누락: {}", e),
+            HwpxError::ConversionError(e) => write!(f, "변환 오류: {}", e),
+            HwpxError::Encrypted(e) => write!(f, "암호화된 문서: {}", e),
+            HwpxError::UnsupportedEncryption(e) => {
+                write!(f, "지원하지 않는 HWPX 암호화 방식: {}", e)
+            }
+            HwpxError::WrongPasswordOrCorruptPayload => {
+                write!(
+                    f,
+                    "비밀번호가 일치하지 않거나 암호화 데이터가 손상되었습니다"
+                )
+            }
+            HwpxError::DecryptedEntryLimitExceeded { path, max_bytes } => write!(
+                f,
+                "HWPX 암호화 엔트리 '{}'의 복호화 결과가 {} byte 제한을 넘었습니다",
+                path, max_bytes
+            ),
+            HwpxError::XmlReadBudgetExceeded { path, max_bytes } => write!(
+                f,
+                "HWPX XML read budget ({} bytes) exceeded at '{}'",
+                max_bytes, path
+            ),
+        }
+    }
+}
+
+impl std::error::Error for HwpxError {}
+
+/// [Issue #1946] META-INF/manifest.xml 바이트에서 ODF 암호화 표식을 감지한다.
+/// 암호화면 알고리즘 요약을, 아니면 None 을 반환한다. manifest 자체는 평문이므로
+/// UTF-8 손실 없이 검사 가능하나, 안전을 위해 lossy 로 읽어 부분 손상에도 동작한다.
+fn detect_odf_encryption(manifest_bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(manifest_bytes);
+    if !text.contains("encryption-data") {
+        return None;
+    }
+    let algo = if text.contains("aes256-cbc") {
+        "AES-256-CBC"
+    } else if text.contains("aes128-cbc") {
+        "AES-128-CBC"
+    } else {
+        "미상 알고리즘"
+    };
+    let kdf = if text.contains("pbkdf2") {
+        " + PBKDF2"
+    } else {
+        ""
+    };
+    Some(format!(
+        "ODF encryption-data 감지 ({}{}) — 비밀번호 보호 문서",
+        algo, kdf
+    ))
+}
+
+impl From<zip::result::ZipError> for HwpxError {
+    fn from(e: zip::result::ZipError) -> Self {
+        HwpxError::ZipError(e.to_string())
+    }
+}
+
+impl From<quick_xml::Error> for HwpxError {
+    fn from(e: quick_xml::Error) -> Self {
+        HwpxError::XmlError(e.to_string())
+    }
+}
+
+fn resolve_master_page_hrefs<'a, 'b>(
+    id_refs: &'b [String],
+    master_page_items: &'a [content::PackageItem],
+) -> (Vec<&'a str>, Vec<&'b str>) {
+    let href_by_id: HashMap<&str, &str> = master_page_items
+        .iter()
+        .map(|item| (item.id.as_str(), item.href.as_str()))
+        .collect();
+    let mut seen_hrefs = HashSet::new();
+    let mut hrefs = Vec::new();
+    let mut missing_refs = Vec::new();
+
+    for id_ref in id_refs {
+        match href_by_id.get(id_ref.as_str()).copied() {
+            Some(href) if seen_hrefs.insert(href) => hrefs.push(href),
+            Some(_) => {}
+            None => missing_refs.push(id_ref.as_str()),
+        }
+    }
+
+    (hrefs, missing_refs)
+}
+
+/// [#3460] `binaryItemIDRef` 를 매니페스트 위치 기준 정규 이름(`image{N}`)으로 통일한다.
+///
+/// 섹션 파서는 `binaryItemIDRef` 에서 **숫자만 뽑아** `bin_data_id` 로 쓰고(숫자 불변식,
+/// 직렬화 쪽 `context.rs` 도 같은 규약으로 `image{N}` 을 방출한다), BinData 는 매니페스트
+/// 순서대로 `id = 위치+1` 로 적재된다. 그래서 두 가지가 깨진다.
+///
+/// - 숫자가 없는 ID(예: `BINHDR`): 추출 결과가 빈 문자열 → `bin_data_id = 0` → 매칭 실패로
+///   그림이 통째로 사라진다(머리말 SVG 밴드가 빈 공간이 되던 원인).
+/// - 숫자가 위치와 어긋나는 ID(예: 두 번째 항목이 `BIN0007`): 다른 그림을 가리킨다.
+///
+/// 파서 내부 호출 사슬 전체에 매니페스트 맵을 배선하는 대신, 진입 시점에 참조 문자열만
+/// 정규화한다. 실제 바이트 적재(`id = 위치+1`)와 같은 기준을 쓰므로 결과가 일치하고,
+/// 이미 정규형인 문서는 문자열이 바뀌지 않아 무영향이다.
+/// [#5747] 치환은 **단일 패스**여야 한다. 종전에는 항목마다 전체 XML 을 순차
+/// 문자열 치환했는데, 산출 이름공간(`image1`, `image2`, …)이 아직 처리하지 않은
+/// 입력 이름과 겹쳐 앞 회차가 바꾼 참조를 뒤 회차가 또 바꿨다 — 매니페스트
+/// 이름 번호와 위치가 어긋난 문서(156532835: `image15, image14, image4, …`)에서
+/// 참조 19개 중 12개가 다른 BinData 로 착지해 그림이 통째로 뒤바뀌었다
+/// (10k HWPX 2,283건 중 34건 오배선 실측). id → 위치+1 맵을 먼저 만들고 각
+/// `binaryItemIDRef` 값을 정확히 한 번만 다시 쓴다. 맵에 없는 참조(BinData
+/// 항목이 아닌 것)는 그대로 둔다.
+fn canonicalize_bin_item_refs(xml: &str, bin_data_items: &[content::PackageItem]) -> String {
+    canonicalize_bin_item_refs_where(xml, bin_data_items, |_| true)
+}
+
+/// header.xml 은 그림 참조(`img`/`image`: 테두리·배경의 그림 채우기, 그림 글머리표)만 정규화한다.
+/// 이 참조도 숫자만 뽑아 쓰므로 매니페스트 이름 번호가 위치와 어긋나면(rhwp 가 내보낸
+/// `image2`…`image12` 처럼 구멍이 있는 이름 포함) 다른 그림을 가리키거나 사라진다.
+/// 글꼴 참조는 매니페스트 ID 를 그대로 찾으므로(`resolve_embedded_font_references`) 두지 않는다.
+fn canonicalize_header_image_refs(xml: &str, bin_data_items: &[content::PackageItem]) -> String {
+    canonicalize_bin_item_refs_where(xml, bin_data_items, |tag| {
+        matches!(tag.rsplit(':').next(), Some("img" | "image"))
+    })
+}
+
+/// `binaryItemIDRef` 를 담은 요소 이름이 `rewrite_tag` 를 만족할 때만 다시 쓴다.
+fn canonicalize_bin_item_refs_where(
+    xml: &str,
+    bin_data_items: &[content::PackageItem],
+    rewrite_tag: impl Fn(&str) -> bool,
+) -> String {
+    let canonical: HashMap<&str, String> = bin_data_items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (item.id.as_str(), format!("image{}", i + 1)))
+        .collect();
+    if canonical.is_empty() {
+        return xml.to_string();
+    }
+    const KEY: &str = "binaryItemIDRef=\"";
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(pos) = rest.find(KEY) {
+        let value_start = pos + KEY.len();
+        out.push_str(&rest[..value_start]);
+        rest = &rest[value_start..];
+        let Some(end) = rest.find('"') else {
+            break;
+        };
+        let value = &rest[..end];
+        let tag = out.rfind('<').map_or("", |start| {
+            out[start + 1..]
+                .split(|c: char| c.is_ascii_whitespace())
+                .next()
+                .unwrap_or("")
+        });
+        match canonical.get(value).filter(|_| rewrite_tag(tag)) {
+            Some(canon) => out.push_str(canon),
+            None => out.push_str(value),
+        }
+        rest = &rest[end..]; // 닫는 따옴표부터 이어 붙인다.
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 그림 글머리표의 manifest 참조도 본문 그림과 같은 BinData 순번으로 정규화한다.
+/// 글꼴 등의 다른 header 참조는 원본 ID로 별도 해석하므로 글머리표 구간만 바꾼다.
+fn canonicalize_bullet_image_refs(xml: &str, items: &[content::PackageItem]) -> String {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut ranges = Vec::new();
+    let mut start = None;
+    loop {
+        let before = reader.buffer_position() as usize;
+        match reader.read_event() {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == "bullet" => start = Some(before),
+            Ok(Event::End(e)) if e.local_name().as_ref() == "bullet" => {
+                if let Some(begin) = start.take() {
+                    ranges.push((begin, reader.buffer_position() as usize));
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    let mut out = String::with_capacity(xml.len());
+    let mut last = 0;
+    for (begin, end) in ranges {
+        if begin < last
+            || end > xml.len()
+            || !xml.is_char_boundary(begin)
+            || !xml.is_char_boundary(end)
+        {
+            return xml.to_string();
+        }
+        out.push_str(&xml[last..begin]);
+        out.push_str(&canonicalize_bin_item_refs(&xml[begin..end], items));
+        last = end;
+    }
+    out.push_str(&xml[last..]);
+    out
+}
+
+fn attach_hwpx_master_page(
+    reader: &mut reader::HwpxReader,
+    section: &mut Section,
+    master_page_href: &str,
+    bin_data_items: &[content::PackageItem],
+) -> Result<bool, HwpxError> {
+    match reader.read_file(master_page_href) {
+        Ok(master_page_xml) => match section::parse_hwpx_master_page(&canonicalize_bin_item_refs(
+            &master_page_xml,
+            bin_data_items,
+        )) {
+            Ok(master_page) => {
+                section.section_def.master_pages.push(master_page);
+                Ok(true)
+            }
+            Err(e @ HwpxError::DrawingTextStructure(_)) => Err(e),
+            Err(e) => {
+                eprintln!("경고: {} 파싱 실패: {}", master_page_href, e);
+                Ok(false)
+            }
+        },
+        Err(e @ HwpxError::XmlReadBudgetExceeded { .. }) => Err(e),
+        Err(e) => {
+            eprintln!("경고: {} 읽기 실패: {}", master_page_href, e);
+            Ok(false)
+        }
+    }
+}
+
+/// HWPX 파일 바이트 데이터를 파싱하여 Document IR로 변환
+/// [Issue #6208] HWPX `settings.xml` 의 인쇄 방식.
+///
+/// ```xml
+/// <config:config-item-set name="PrintInfo">
+///   <config:config-item name="PrintMethod" type="short">4</config:config-item>
+/// ```
+///
+/// HWP5 `HWPTAG_DOC_DATA` 키 `0x0006_4006` 과 같은 값이다. 항목이 없으면 `None`.
+fn parse_settings_print_method(xml: &str) -> Option<u32> {
+    let at = xml.find(r#"name="PrintMethod""#)?;
+    let close = xml[at..].find('>')? + at + 1;
+    let end = xml[close..].find('<')? + close;
+    xml[close..end].trim().parse().ok()
+}
+
+pub fn parse_hwpx(data: &[u8]) -> Result<Document, HwpxError> {
+    parse_hwpx_with_reservation(data, None)
+}
+
+pub(crate) fn parse_hwpx_with_reservation(
+    data: &[u8],
+    reservation: Option<std::sync::Arc<dyn crate::storage::Reservation>>,
+) -> Result<Document, HwpxError> {
+    // 1. ZIP 컨테이너 열기
+    let mut reader = reader::HwpxReader::open_with_reservation(data, reservation.clone())?;
+
+    // [Issue #1946] 암호화 HWPX 조기 감지. META-INF/manifest.xml 은 암호화 문서에서도
+    // 평문이며, 암호화된 엔트리마다 <odf:encryption-data> 블록을 갖는다. 감지하면
+    // 암호문(Contents/*.xml)을 UTF-8 로 오독하기 전에 명확한 Encrypted 에러로 반환한다
+    // (종전엔 "UTF-8 변환 실패" 오진단). manifest 부재/평문 문서는 종전 경로 유지.
+    match reader.read_xml_bytes_limited("META-INF/manifest.xml", reader::MAX_XML_SIZE) {
+        Ok(manifest) => {
+            if let Some(detail) = detect_odf_encryption(&manifest) {
+                return Err(HwpxError::Encrypted(detail));
+            }
+        }
+        Err(e @ HwpxError::XmlReadBudgetExceeded { .. }) => return Err(e),
+        Err(_) => {}
+    }
+
+    // 1-1. 보조 엔트리 원본 보존 (라운드트립 무손실).
+    //   IR 로 모델링되지 않는 엔트리(version.xml/settings.xml/Preview/*)는
+    //   직렬화기가 하드코딩 상수로 재생성하면서 원본 플랫폼/인쇄설정/미리보기를
+    //   잃는다. 여기서 원본 바이트를 그대로 보존해 직렬화 시 passthrough 한다.
+    const HWPX_AUX_PATHS: &[&str] = &[
+        "version.xml",
+        "settings.xml",
+        "Preview/PrvText.txt",
+        "Preview/PrvImage.png",
+        crate::model::document::HWP5_ORIGIN_HWPX_MARKER_PATH,
+        crate::model::document::HWP3_ORIGIN_HWPX_MARKER_PATH,
+        crate::model::document::HWP3_ORIGIN_HWPX_PARAGRAPH_AXIS_PATH,
+        crate::model::document::HWP3_EXTERNAL_REALIGN_HWPX_PATH,
+    ];
+    let mut hwpx_aux_entries: Vec<(String, Vec<u8>)> = Vec::new();
+    for path in HWPX_AUX_PATHS {
+        let entry = if matches!(*path, "version.xml" | "settings.xml") {
+            reader.read_xml_bytes_limited(path, reader::MAX_XML_SIZE)
+        } else if *path == "Preview/PrvImage.png" {
+            reader.read_file_bytes_limited(path, super::MAX_THUMBNAIL_BYTES)
+        } else {
+            reader.read_file_bytes(path)
+        };
+        match entry {
+            Ok(bytes) => hwpx_aux_entries.push((path.to_string(), bytes)),
+            Err(e @ HwpxError::XmlReadBudgetExceeded { .. }) => return Err(e),
+            Err(_) => {}
+        }
+    }
+    // [#3557] Scripts/* — IR 로 모델링되지 않는 패키지 스크립트를 원본 그대로
+    // 보존한다. 소실되면 문서 동작이 조용히 사라지는데 --verify(IR 대조)로는
+    // 잡히지 않는다. content.hpf 의 opf:item/spine 참조는 write_content_hpf 가
+    // 원본 블록에서 그대로 splice 하고, ZIP 방출은 serializer/hwpx/mod.rs 가
+    // 이 aux 엔트리를 통과시킨다.
+    let script_paths: Vec<String> = reader
+        .file_names()
+        .into_iter()
+        .filter(|n| n.starts_with("Scripts/"))
+        .collect();
+    for path in script_paths {
+        let entry = if path.to_ascii_lowercase().ends_with(".xml") {
+            reader.read_xml_bytes_limited(&path, reader::MAX_XML_SIZE)
+        } else {
+            reader.read_file_bytes(&path)
+        };
+        match entry {
+            Ok(bytes) => hwpx_aux_entries.push((path, bytes)),
+            Err(e @ HwpxError::XmlReadBudgetExceeded { .. }) => return Err(e),
+            Err(_) => {}
+        }
+    }
+
+    // 2. content.hpf → 섹션 파일 목록 + BinData 목록
+    let content_xml = reader.read_file("Contents/content.hpf")?;
+    // content.hpf 의 manifest/spine 은 본문 의존(섹션/BinData)이라 재생성하지만,
+    // <opf:metadata>(저작자/생성·수정일자/주제 등)는 본문과 무관하므로 직렬화 시
+    // 원본 블록을 그대로 splice 하기 위해 원본 바이트를 보존한다.
+    hwpx_aux_entries.push((
+        "Contents/content.hpf".to_string(),
+        content_xml.clone().into_bytes(),
+    ));
+    let package_info = content::parse_content_hpf(&content_xml)?;
+
+    // 3. header.xml → DocInfo, DocProperties
+    let header_xml = reader.read_file("Contents/header.xml")?;
+    let header_xml = canonicalize_bullet_image_refs(&header_xml, &package_info.bin_data_items);
+    let tracking_visibility = tracked_changes::Visibility::from_header(&header_xml)?;
+    // 평문 여백의 단위 전환은 header.xml이 아닌 패키지 xmlVersion에 따른다.
+    let physical_plain_margin = hwpx_aux_entries
+        .iter()
+        .find(|(path, _)| path == "version.xml")
+        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+        .is_some_and(physical_para_margin_units_from_version);
+    let (mut doc_info, doc_properties) = header::parse_hwpx_header_with_plain_margin_units(
+        &canonicalize_header_image_refs(&header_xml, &package_info.bin_data_items),
+        physical_plain_margin,
+    )?;
+    let default_para_shape_id = u16::try_from(doc_info.para_shapes.len()).ok();
+    let default_para_shape_scope = section::DefaultParaShapeScope::enter(default_para_shape_id);
+    if let Ok(bytes) = reader.read_file_bytes_limited(
+        crate::model::native_font_program::HWPX_ENTRY,
+        crate::model::native_font_program::MAX_BYTES,
+    ) {
+        crate::model::native_font_program::decode(&mut doc_info, header_xml.as_bytes(), &bytes);
+    }
+    resolve_embedded_font_references(&mut doc_info, &package_info.bin_data_items);
+
+    // [Task #1608] head version("1.4")은 HWPML **스키마 버전**일 뿐 HWP3→HWPX 변환 지표가
+    // 아니다. 네이티브 한글2022 HWPX(version.xml: major=5 minor=1 "Hancom Office Hangul")도
+    // head version 1.4 라, 과거 `is_hwp3_origin = (head version == "1.4")` (Task #554) 판정은
+    // 거의 모든 모던 HWPX 를 HWP3-origin 으로 오탐지해 부당한 "마지막 줄" tolerance(1600 HU)를
+    // 부여했고, 이것이 경계 문서를 1쪽 적게 렌더하는 −1쪽 갭의 한 요인이었다(Task #1600 요인 A).
+    // 메타데이터로 진짜 변환본과 네이티브를 구별할 판별자가 없어(조사 확정), 파싱 시점의 HWP3
+    // tolerance 부여를 제거한다.
+    let hwpml_version = header::parse_hwpx_hwpml_version(&header_xml);
+    // 무손실: 원본 HWPML 버전을 보존해 직렬화 때 그대로 재방출(하드코딩 금지).
+    doc_info.hwpml_version = hwpml_version.clone();
+    // [Issue #6208] 인쇄 방식(모아 찍기 등)을 **파생**으로 읽는다 — 보존은 위
+    // `settings.xml` aux passthrough 가 그대로 담당한다. HWP5 는 같은 값을
+    // `HWPTAG_DOC_DATA` 의 키 `0x0006_4006` 에 싣는다.
+    doc_info.print_method = hwpx_aux_entries
+        .iter()
+        .find(|(path, _)| path == "settings.xml")
+        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+        .and_then(parse_settings_print_method);
+
+    // HWP 저장에 사용하는 DOC_DATA 기본값을 실제 HWPX 인쇄 설정과 맞춘다.
+    // 원문 settings.xml은 그대로 보존하고 다른 인쇄 키도 변경하지 않는다.
+    let crop_mark = hwpx_aux_entries
+        .iter()
+        .find(|(path, _)| path == "settings.xml")
+        .and_then(|(_, bytes)| Document::hwpx_print_crop_mark(bytes));
+    if let Some(enabled) = crop_mark {
+        let mut found = false;
+        for record in &mut doc_info.extra_records {
+            if record.tag_id != crate::parser::tags::HWPTAG_DOC_DATA {
+                continue;
+            }
+            for pair in record.data.chunks_exact_mut(8) {
+                if u32::from_le_bytes(pair[..4].try_into().unwrap()) == 0x0006_401a {
+                    pair[4..].copy_from_slice(&u32::from(enabled).to_le_bytes());
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            // linkInfo가 없는 HWPX도 유효한 DOC_DATA 매개변수 집합을 만든다.
+            let mut data = Vec::with_capacity(24);
+            for word in [0x021c_u16, 1, 0, 0x0207, 0x8000, 0x0207, 1, 0] {
+                data.extend_from_slice(&word.to_le_bytes());
+            }
+            data.extend_from_slice(&0x0006_401a_u32.to_le_bytes());
+            data.extend_from_slice(&u32::from(enabled).to_le_bytes());
+            doc_info
+                .extra_records
+                .push(crate::model::document::RawRecord {
+                    tag_id: crate::parser::tags::HWPTAG_DOC_DATA,
+                    level: 0,
+                    data,
+                });
+        }
+    }
+
+    // BinData 목록을 DocInfo에 등록
+    // [Task #873] isEmbeded="0" 인 외부 file 참조 (예: HWP3 → HWPX 변환본 의 절대 경로)
+    // 는 BinDataType::Link + abs_path 로 등록. 이후 populate_link_image_paths (parser/mod.rs)
+    // 가 Picture.external_path 설정 → Task #741 fallback 로 같은 dir 영역 image load.
+    for (i, item) in package_info.bin_data_items.iter().enumerate() {
+        let ext = hwpx_bin_data_extension(item);
+        let (data_type, abs_path) = if is_internal_ole_package_item(item) {
+            (BinDataType::Storage, None)
+        } else if item.is_embedded {
+            (BinDataType::Embedding, None)
+        } else {
+            (BinDataType::Link, Some(item.href.clone()))
+        };
+        doc_info.bin_data_list.push(BinData {
+            data_type,
+            storage_id: (i + 1) as u16,
+            extension: Some(ext),
+            abs_path,
+            ..Default::default()
+        });
+    }
+
+    // 4. section*.xml → Section 변환
+    //
+    // [#4916 계열] rhwp 자기 산출 HWPX(HWP5-origin 마커)는 각주·미주 subList
+    // lineseg 의 vpos=0 보정(task 1692)을 건너뛴다 — HWP5 원본 저장값의 왕복
+    // 보존이 마커 계약(#1770)이다. 가드는 구역 파싱 동안만 유효(RAII).
+    let has_hwp5_origin = hwpx_aux_entries
+        .iter()
+        .any(|(path, _)| path == crate::model::document::HWP5_ORIGIN_HWPX_MARKER_PATH);
+    let has_hwp3_origin = hwpx_aux_entries
+        .iter()
+        .any(|(path, _)| path == crate::model::document::HWP3_ORIGIN_HWPX_MARKER_PATH);
+    // [#8303] HWP3 원본 산출물도 같은 문단 축 표지를 별도 엔트리로 싣는다.
+    let paragraph_axis = hwpx_aux_entries.iter().any(|(path, value)| {
+        (path == crate::model::document::HWP5_ORIGIN_HWPX_MARKER_PATH
+            || (has_hwp3_origin
+                && path == crate::model::document::HWP3_ORIGIN_HWPX_PARAGRAPH_AXIS_PATH))
+            && value == crate::model::document::HWP5_ORIGIN_HWPX_PARAGRAPH_AXIS
+    });
+    let _hwp5_origin_guard = section::Hwp5OriginSourceGuard::set(has_hwp5_origin, paragraph_axis);
+    // 원본 HWP3→HWPX 만 — 변환본 HWPX(hwp5-origin)는 8유닛 슬롯과 기존 HWP5
+    // TAC 계약을 쓴다.
+    let _hwp3_origin_guard =
+        section::Hwp3OriginSourceGuard::set(has_hwp3_origin && !has_hwp5_origin);
+    // 한/글은 header.xml `secCnt` 가 선언한 수만큼의 앞 구역만 읽는다. spine 이 더 많은
+    // 구역 파일을 나열하면(옛 rhwp 저장본, #1557 이전) 뒤 구역은 문서에 없다.
+    // 선언이 없거나 0 이거나 spine 보다 크면 spine 을 그대로 따른다.
+    let loaded_section_count = header::parse_hwpx_declared_section_count(&header_xml)
+        .filter(|&declared| declared >= 1 && declared < package_info.section_files.len())
+        .unwrap_or(package_info.section_files.len());
+    if loaded_section_count < package_info.section_files.len() {
+        eprintln!(
+            "경고: header.xml secCnt={} < spine 구역 {}개 — 한/글처럼 앞 {}개 구역만 읽는다",
+            loaded_section_count,
+            package_info.section_files.len(),
+            loaded_section_count
+        );
+    }
+    let hwp3_page_ownership = (!has_hwp5_origin)
+        .then(|| {
+            hwpx_aux_entries.iter().find_map(|(path, bytes)| {
+                (path == crate::model::document::HWP3_ORIGIN_HWPX_MARKER_PATH)
+                    .then(|| {
+                        crate::model::hwp3_page_ownership::PageOwnership::decode(
+                            bytes,
+                            header_xml.as_bytes(),
+                            loaded_section_count,
+                        )
+                    })
+                    .flatten()
+            })
+        })
+        .flatten();
+    let mut sections = Vec::new();
+    for (section_idx, section_href) in package_info
+        .section_files
+        .iter()
+        .take(loaded_section_count)
+        .enumerate()
+    {
+        let section_xml = reader.read_file(section_href)?;
+        let stored_xml_digest = hwp3_page_ownership
+            .as_ref()
+            .map(|_| crate::model::hwp3_page_ownership::digest(section_xml.as_bytes()));
+        let section_xml = canonicalize_bin_item_refs(&section_xml, &package_info.bin_data_items);
+        let projected_xml = tracking_visibility.project(&section_xml)?;
+        let can_restore_page_ownership = projected_xml.is_none();
+        let section_xml = projected_xml.unwrap_or(section_xml);
+        let master_page_refs = match section::collect_hwpx_section_master_page_refs(&section_xml) {
+            Ok(refs) => refs,
+            Err(e) => {
+                eprintln!("경고: {} masterPage 참조 파싱 실패: {}", section_href, e);
+                Vec::new()
+            }
+        };
+        match section::parse_hwpx_section(&section_xml) {
+            Ok(mut section) => {
+                if can_restore_page_ownership {
+                    if let (Some(ownership), Some(xml_digest)) =
+                        (&hwp3_page_ownership, &stored_xml_digest)
+                    {
+                        ownership.restore_section(section_idx, xml_digest, &mut section);
+                    }
+                }
+                let (master_page_hrefs, missing_master_page_refs) =
+                    resolve_master_page_hrefs(&master_page_refs, &package_info.master_page_items);
+                for missing_ref in missing_master_page_refs {
+                    eprintln!(
+                        "경고: {} masterPage idRef '{}' manifest 항목 없음",
+                        section_href, missing_ref
+                    );
+                }
+
+                let mut attached_master_page_count = 0usize;
+                for master_page_href in master_page_hrefs {
+                    if attach_hwpx_master_page(
+                        &mut reader,
+                        &mut section,
+                        master_page_href,
+                        &package_info.bin_data_items,
+                    )? {
+                        attached_master_page_count += 1;
+                    }
+                }
+
+                // [hwpx-cowork] masterPageCnt="0" 이라고 밝힌 구역에는 대체 규칙으로 바탕쪽을 붙이지 않는다
+                if attached_master_page_count == 0
+                    && !section::section_declares_no_master_pages(&section_xml)
+                {
+                    if let Some(master_page_files) =
+                        package_info.section_master_page_files.get(section_idx)
+                    {
+                        let mut fallback_seen = HashSet::new();
+                        for master_page_href in master_page_files {
+                            if fallback_seen.insert(master_page_href.as_str()) {
+                                attach_hwpx_master_page(
+                                    &mut reader,
+                                    &mut section,
+                                    master_page_href,
+                                    &package_info.bin_data_items,
+                                )?;
+                            }
+                        }
+                    }
+                }
+                sections.push(section);
+            }
+            Err(e @ HwpxError::DrawingTextStructure(_)) => return Err(e),
+            Err(e) => {
+                eprintln!("경고: {} 파싱 실패: {}", section_href, e);
+                sections.push(Section::default());
+            }
+        }
+    }
+
+    // [#6868 잔여] 구역 경계를 넘는 누름틀의 종료 마커를 잇는다 — 구역 하나를 파싱하는
+    // 동안에는 앞 구역에서 열린 필드를 볼 수 없다.
+    section::link_orphan_field_ends_across_sections(&mut sections);
+
+    // [hwpx-cowork] Runless empty HWPX paragraphs have an implicit 10pt character
+    // shape. Hancom's image output is unchanged when the named style, shape 0,
+    // or the preceding/following run is changed; an explicit empty run does
+    // change the advance. Materialize that XML default before composition so
+    // measurement, painting, editing and reserialization use one resolved value.
+    materialize_missing_paragraph_defaults(&mut sections, &mut doc_info)?;
+
+    // [Task #1608] (제거) 과거 Task #554 의 HWP3-origin tolerance 부여는
+    // head version == "1.4" 오탐지로 네이티브 HWPX 전반에 부당 적용되어 삭제했다.
+    // 상세 사유는 위 hwpml_version 파싱부 주석 참조.
+
+    // 5. BinData 이미지 등록 (지연 로딩)
+    //
+    // [Task #2263] 여기서 바이트를 미리 풀지 않는다. ZIP 원본을 보유한
+    // 리졸버만 등록하고, 실제로 렌더·직렬화되는 항목만 그 시점에 압축을 푼다.
+    // 로드 실패(상한 초과·엔트리 손상 등) 시에도 엔트리 자체는 등록되므로
+    // [#1917] 의 manifest·binaryItemIDRef 보존 의미는 그대로 유지된다
+    // (리졸버가 빈 바이트를 반환 → 이미지 데이터만 소실).
+    let ole_hrefs: HashSet<String> = package_info
+        .bin_data_items
+        .iter()
+        .filter(|item| is_internal_ole_package_item(item))
+        .map(|item| item.href.clone())
+        .collect();
+    let bin_resolver: std::sync::Arc<dyn crate::model::bin_data::BinDataResolver> =
+        std::sync::Arc::new(HwpxBinResolver {
+            reader: std::sync::Mutex::new(reader::HwpxReader::open_with_reservation(
+                data,
+                reservation.clone(),
+            )?),
+            ole_hrefs,
+        });
+
+    let mut bin_data_content = Vec::new();
+    for (i, item) in package_info.bin_data_items.iter().enumerate() {
+        // [Task #873] isEmbeded="0" (외부 file 참조) 는 ZIP 영역 영역 부재. skip.
+        // populate_link_image_paths + populate_external_images_from_dir 가 후처리.
+        //
+        // Issue #1283: 일부 HWPX는 ZIP 내부 OLE(`BinData/*.ole`)에도 isEmbeded="0"을
+        // 기록한다. 이 경우는 외부 링크가 아니므로 로드해야 기존 OLE `/Contents`
+        // 차트 렌더러가 동작한다.
+        if !item.is_embedded && !is_internal_ole_package_item(item) {
+            continue;
+        }
+        bin_data_content.push(BinDataContent {
+            id: (i + 1) as u16,
+            data: crate::model::bin_data::BinDataBytes::Lazy {
+                resolver: bin_resolver.clone(),
+                key: item.href.clone(),
+            },
+            extension: hwpx_bin_data_extension(item),
+        });
+    }
+
+    // 5-1. Chart/*.xml (OOXML 차트) 로딩 — bin_data_id = 60000+N, extension="ooxml_chart"
+    // section 파서에서 <hp:chart chartIDRef="Chart/chartN.xml">를 만나면 동일 ID의 OleShape 생성
+    // [hwpx-cowork] 번호에 구멍이 있어도(chart1 을 지우고 chart2 만 남은 꾸러미 등) 모두 읽는다 — 종전엔
+    // chart1..64 를 차례로 읽다 처음 빠진 번호에서 멈춰 뒤 차트가 빈 개체가 됐다. 번호는 1..=5535(60000+N ≤ u16).
+    let mut chart_nums: Vec<u16> = reader
+        .file_names()
+        .iter()
+        .filter_map(|name| {
+            let rest = name.strip_prefix("Chart/chart")?.strip_suffix(".xml")?;
+            rest.parse::<u16>().ok().filter(|n| *n >= 1 && *n <= 5535)
+        })
+        .collect();
+    chart_nums.sort_unstable();
+    chart_nums.dedup();
+    for n in chart_nums {
+        let path = format!("Chart/chart{}.xml", n);
+        if let Ok(data) = reader.read_file_bytes(&path) {
+            bin_data_content.push(BinDataContent {
+                id: 60000 + n,
+                data: data.into(),
+                extension: "ooxml_chart".to_string(),
+            });
+        }
+    }
+
+    // Document 조립
+    if default_para_shape_scope.used() {
+        // 한컴 2020 저장 대조: 참조 생략은 명시적 0번이 아닌 160% 기본 모양이다.
+        // 명시 참조는 그대로 보존하며 중첩 문단도 같은 모델 모양을 사용한다.
+        doc_info.para_shapes.push(crate::model::style::ParaShape {
+            attr1: 0x180,
+            line_spacing: 160,
+            line_spacing_v2: 160,
+            border_fill_id: u16::from(!doc_info.border_fills.is_empty()),
+            ..Default::default()
+        });
+    }
+    let model_header = FileHeader {
+        version: HwpVersion {
+            major: 5,
+            minor: 1,
+            build: 0,
+            revision: 0,
+        },
+        flags: 0,
+        compressed: false,
+        encrypted: false,
+        distribution: false,
+        raw_data: None,
+    };
+
+    // [Task #852 Stage 2.1] HWPX ZIP 컨테이너 → HWP OLE contract 스트림 변환.
+    // 한컴 HWP 정답지 contract (Preview/PrvText, Preview/PrvImage, Scripts/
+    // DefaultJScript) 를 HWPX 컨테이너 동등 파일 (Preview/PrvText.txt,
+    // Preview/PrvImage.png, Scripts/sourceScripts) 로부터 변환. HWPX 에
+    // 동등 데이터가 없는 contract 스트림 (HwpSummaryInformation, DocOptions/
+    // _LinkDoc, Scripts/JScriptVersion) 은 Stage 2.2 의 blank2010.hwp
+    // fallback 으로 보강. cfb_writer (`src/serializer/cfb_writer.rs:155`)
+    // 가 Document::extra_streams 를 그대로 OLE 스트림으로 작성.
+    let contract =
+        contract_streams::extract_contract_streams(&mut reader, super::MAX_THUMBNAIL_BYTES);
+
+    let mut doc = Document {
+        header: model_header,
+        doc_properties,
+        doc_info,
+        sections,
+        preview: None,
+        bin_data_content,
+        extra_streams: contract.streams,
+        hwpx_aux_entries,
+        is_hwp3_variant: false,
+        is_hwpx_variant: false,
+        provenance: crate::model::provenance::SourceProvenance {
+            format: crate::model::provenance::SourceFormat::Hwpx,
+            hwp3_lineage: false,
+            hwpx_lineage: false,
+            hft_ascii_halfwidth_witnessed: false,
+            stored_rows_before_hancom_2020: false,
+        },
+    };
+    // HWP3-origin 마커가 있으면 계보를 복원한다 — 직파싱 HWP3 와 같은
+    // 레이아웃 계약(저장-스텝)을 밟아 왕복 등식이 성립한다.
+    if doc
+        .hwpx_aux_entry(crate::model::document::HWP3_ORIGIN_HWPX_MARKER_PATH)
+        .is_some()
+    {
+        doc.provenance.hwp3_lineage = true;
+    }
+
+    // [Task #873] BinData Link 타입 의 외부 file path 영역 영역 Picture.external_path 영역
+    // 전달. 이후 model::document::populate_external_images_from_dir (Task #741) 가 같은
+    // dir 영역 basename 매칭 영역 image 영역 자동 load. HWP5 parser 와 동일 처리.
+    super::populate_link_image_paths(&mut doc);
+
+    // Restore the logical row owners before resolving paint ownership hashes.
+    if let Ok(bytes) = reader.read_file_bytes_limited(
+        crate::model::table_row_grid::HWPX_ENTRY,
+        crate::model::table_row_grid::MAX_BYTES,
+    ) {
+        crate::model::table_row_grid::decode(&mut doc, &bytes);
+    }
+    if let Ok(bytes) = reader.read_file_bytes_limited(
+        crate::model::border_paint::HWPX_ENTRY,
+        crate::model::border_paint::MAX_BYTES,
+    ) {
+        crate::model::border_paint::decode(&mut doc, &bytes);
+    }
+    if let Ok(bytes) = reader.read_file_bytes_limited(
+        crate::model::text_clip::HWPX_ENTRY,
+        crate::model::text_clip::MAX_BYTES,
+    ) {
+        crate::model::text_clip::decode(&mut doc, &bytes);
+    }
+    if let Ok(bytes) = reader.read_file_bytes_limited(
+        crate::model::text_paint::HWPX_ENTRY,
+        crate::model::text_paint::MAX_BYTES,
+    ) {
+        crate::model::text_paint::decode(&mut doc, &bytes);
+    }
+    if let Ok(bytes) =
+        reader.read_file_bytes_limited(crate::model::hyperlink_format::HWPX_ENTRY, 16 * 1024 * 1024)
+    {
+        crate::model::hyperlink_format::decode(&mut doc, &bytes);
+    }
+    // 개체 번호는 autoNum 필드의 저장 캐시나 필드 개수가 아니라 실제 소유 개체의
+    // numberingType과 순번에서 결정한다. 각주·쪽 번호의 별도 저장 계약은 유지한다.
+    super::auto_numbers::assign_object_numbers(&mut doc);
+    // [hwpx-cowork] 각주·미주의 구역/쪽별 번호 다시 매김은 별도로 보존한다.
+    let _ = super::assign_note_numbers(&mut doc);
+    Ok(doc)
+}
+
+/// 비밀번호와 함께 HWPX를 연다.
+///
+/// ODF `encryption-data`가 있는 패키지는 AES-256-CBC/PKDF2 복호화 뒤 기존
+/// `parse_hwpx` 경로로 들어간다. 비암호 HWPX에 비밀번호를 넘기면 원본 바이트를
+/// 다시 쓰지 않고 종전 파서 결과를 그대로 반환한다.
+pub fn parse_hwpx_with_password(data: &[u8], password: &[u8]) -> Result<Document, HwpxError> {
+    match crypto::decrypt_hwpx_package(data, password)? {
+        Some(decrypted) => parse_hwpx(&decrypted),
+        None => parse_hwpx(data),
+    }
+}
+
+/// [hwpx-cowork] Resolve absent XML references before any layout consumer sees
+/// them. Explicit paragraph refs/runs retain their indexed styles; a missing
+/// paraPrIDRef uses 160%/zero margins even if shape 0 or the named style differs.
+fn materialize_missing_paragraph_defaults(
+    sections: &mut [Section],
+    doc_info: &mut crate::model::document::DocInfo,
+) -> Result<(), HwpxError> {
+    use crate::model::identity::walk::{walk, Node};
+    use crate::model::paragraph::CharShapeRef;
+    use crate::model::style::{CharShape, ParaShape};
+
+    let implicit_shape = CharShape {
+        base_size: 1000,
+        ..CharShape::default()
+    };
+    let mut implicit_id = None;
+    // COM conflict probes and a Hancom resave agree on these paragraph defaults.
+    // border_fill_id 0 means no inherited border/fill, rather than a document's
+    // arbitrary indexed border style. The remaining defaults are zero/Justify.
+    let implicit_para_shape = ParaShape {
+        attr1: 1 << 8, // snapToGrid
+        line_spacing: 160,
+        line_spacing_v2: 160,
+        break_latin_word: Some("KEEP_WORD".to_string()),
+        ..ParaShape::default()
+    };
+    let mut implicit_para_id = None;
+    let mut resolve = |node: &mut Node<'_>| -> Result<(), crate::error::HwpError> {
+        if let Node::Paragraph(para) = node {
+            if para.hwpx_missing_para_shape {
+                let id = if let Some(id) = implicit_para_id {
+                    id
+                } else {
+                    let index = doc_info
+                        .para_shapes
+                        .iter()
+                        .position(|shape| shape == &implicit_para_shape)
+                        .unwrap_or(doc_info.para_shapes.len());
+                    let id = u16::try_from(index).map_err(|_| {
+                        crate::error::HwpError::InvalidFile(
+                            "Too many paragraph shapes for the missing HWPX default".to_string(),
+                        )
+                    })?;
+                    if index == doc_info.para_shapes.len() {
+                        doc_info.para_shapes.push(implicit_para_shape.clone());
+                    }
+                    implicit_para_id = Some(id);
+                    id
+                };
+                para.para_shape_id = id;
+                para.hwpx_missing_para_shape = false;
+            }
+            if para.text.is_empty() && para.controls.is_empty() && para.char_shapes.is_empty() {
+                let id = *implicit_id.get_or_insert_with(|| {
+                    doc_info
+                        .char_shapes
+                        .iter()
+                        .position(|shape| shape == &implicit_shape)
+                        .unwrap_or_else(|| {
+                            doc_info.char_shapes.push(implicit_shape.clone());
+                            doc_info.char_shapes.len() - 1
+                        }) as u32
+                });
+                para.char_shapes.push(CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: id,
+                });
+            }
+        }
+        Ok(())
+    };
+    for section in sections {
+        walk(&mut section.paragraphs, &mut resolve)
+            .map_err(|error| HwpxError::ConversionError(error.to_string()))?;
+        for master in &mut section.section_def.master_pages {
+            walk(&mut master.paragraphs, &mut resolve)
+                .map_err(|error| HwpxError::ConversionError(error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_embedded_font_references(
+    doc_info: &mut crate::model::document::DocInfo,
+    items: &[content::PackageItem],
+) {
+    let item_ids = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            u16::try_from(index + 1)
+                .ok()
+                .map(|id| (item.id.as_str(), id))
+        })
+        .collect::<HashMap<_, _>>();
+
+    for font in doc_info.font_faces.iter_mut().flatten() {
+        font.resolved_bin_data_id = font
+            .is_embedded
+            .then(|| item_ids.get(font.bin_item_id_ref.as_str()).copied())
+            .flatten();
+        if let Some(substitute) = font.subst_font.as_mut() {
+            substitute.resolved_bin_data_id = substitute
+                .is_embedded
+                .then(|| item_ids.get(substitute.bin_item_id_ref.as_str()).copied())
+                .flatten();
+        }
+    }
+}
+
+/// 패키지 판본이 문단 여백의 물리 단위를 사용하는지 판별한다.
+/// 구버전 입력의 저장 단위와 직렬화의 역변환이 같은 판본 규칙을 소비한다.
+pub(crate) fn physical_para_margin_units_from_version(xml: &str) -> bool {
+    let mut reader = quick_xml::Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Start(e) | quick_xml::events::Event::Empty(e)) => {
+                if let Some(value) = e.attributes().flatten().find_map(|attr| {
+                    (attr.key.as_ref() == "xmlVersion").then(|| attr.value.to_string())
+                }) {
+                    return value
+                        .split_once('.')
+                        .and_then(|(major, minor)| {
+                            Some((major.parse::<u32>().ok()?, minor.parse::<u32>().ok()?))
+                        })
+                        .is_some_and(|version| version >= (1, 4));
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) | Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../tests/cases/asan_empty_paragraph.rs"]
+mod asan_empty_paragraph;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hwpx_invalid_data() {
+        let result = parse_hwpx(&[0u8; 10]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_hwpx_not_zip() {
+        // CFB/HWP 데이터로 시도
+        let result = parse_hwpx(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_master_page_hrefs_uses_id_ref_order_and_dedups() {
+        let items = vec![
+            content::PackageItem {
+                id: "masterpage1".to_string(),
+                href: "Contents/masterpage1.xml".to_string(),
+                media_type: "application/xml".to_string(),
+                is_embedded: true,
+            },
+            content::PackageItem {
+                id: "masterpage0".to_string(),
+                href: "Contents/masterpage0.xml".to_string(),
+                media_type: "application/xml".to_string(),
+                is_embedded: true,
+            },
+        ];
+        let id_refs = vec![
+            "masterpage0".to_string(),
+            "missing".to_string(),
+            "masterpage1".to_string(),
+            "masterpage0".to_string(),
+        ];
+
+        let (hrefs, missing_refs) = resolve_master_page_hrefs(&id_refs, &items);
+
+        assert_eq!(
+            hrefs,
+            vec!["Contents/masterpage0.xml", "Contents/masterpage1.xml"]
+        );
+        assert_eq!(missing_refs, vec!["missing"]);
+    }
+
+    #[test]
+    fn embedded_font_reference_uses_exact_manifest_id() {
+        let mut parent = crate::model::style::Font {
+            name: "Embedded Parent".to_string(),
+            is_embedded: true,
+            bin_item_id_ref: "font-resource-alpha".to_string(),
+            ..Default::default()
+        };
+        parent.subst_font = Some(crate::model::style::SubstFont {
+            face: "Embedded Substitute".to_string(),
+            is_embedded: true,
+            bin_item_id_ref: "font-resource-beta".to_string(),
+            ..Default::default()
+        });
+        let mut doc_info = crate::model::document::DocInfo {
+            font_faces: vec![vec![parent]],
+            ..Default::default()
+        };
+        let items = vec![
+            content::PackageItem {
+                id: "font-resource-beta".to_string(),
+                href: "BinData/beta.ttf".to_string(),
+                media_type: "application/x-font-ttf".to_string(),
+                is_embedded: true,
+            },
+            content::PackageItem {
+                id: "font-resource-alpha".to_string(),
+                href: "BinData/alpha.ttf".to_string(),
+                media_type: "application/x-font-ttf".to_string(),
+                is_embedded: true,
+            },
+        ];
+
+        resolve_embedded_font_references(&mut doc_info, &items);
+
+        let font = &doc_info.font_faces[0][0];
+        assert_eq!(font.resolved_bin_data_id, Some(2));
+        assert_eq!(
+            font.subst_font.as_ref().unwrap().resolved_bin_data_id,
+            Some(1)
+        );
+        assert_eq!(font.bin_item_id_ref, "font-resource-alpha");
+    }
+}

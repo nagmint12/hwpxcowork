@@ -1,0 +1,33 @@
+# hwpx-cowork systemd 서비스 본보기(Ubuntu 22.04 등). 경로·사용자는 설치한 위치에 맞게 고친다.
+#   sudo cp deploy/hwpx-cowork.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hwpx-cowork
+#   journalctl -u hwpx-cowork -f
+[Unit]
+Description=hwpx-cowork HWPX 공동 검토 서버
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hwpx
+Group=hwpx
+# 프로그램(/opt/hwpx-cowork-server)과 설정·문서(/var/lib/hwpx-cowork)를 나눈다 — 업데이트는 프로그램 폴더만 바꾼다
+Environment=HWPX_COWORK_USERDATA=/var/lib/hwpx-cowork
+# 첫 실행의 관리자 토큰을 직접 정하려면(없으면 무작위, 이미 설정이 있으면 무시)
+# Environment=HWPX_COWORK_ADMIN_TOKEN=원하는-토큰
+# 차트 그림(선택): python3-matplotlib 설치 뒤 경로를 바꿀 때만
+# Environment=HWPX_COWORK_PYTHON=/usr/bin/python3
+ExecStart=/opt/hwpx-cowork-server/start-server.sh
+# launcher 가 SIGINT/SIGTERM 을 받으면 저장 중인 작업을 마치고 끈다
+KillSignal=SIGTERM
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hwpx-cowork
+
+[Install]
+WantedBy=multi-user.target

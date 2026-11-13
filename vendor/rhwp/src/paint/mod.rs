@@ -1,0 +1,127 @@
+//! 시각 레이어 IR 모듈
+//!
+//! semantic render tree를 backend-friendly layer tree로 변환한다.
+
+pub(crate) const MAX_POSITIONED_CONTROL_MARKS_PER_RUN: usize = 4096;
+pub(crate) const MAX_PORTABLE_FONT_BLOB_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) use font_size::MAX_GLYPH_FONT_SIZE_PX;
+pub(crate) const MAX_PORTABLE_GLYPHS_PER_RUN: usize = 4096;
+
+mod bitmap_fill_frame;
+pub mod builder;
+mod cell_clip;
+use crate::renderer::render_tree;
+pub mod color_glyph;
+pub(crate) mod device_clip;
+pub(crate) mod device_fill;
+pub(crate) mod device_image;
+pub(crate) mod dot_leader;
+mod equation_print_frame;
+pub mod font;
+pub mod font_glyph;
+mod font_size;
+mod group_picture;
+mod json;
+pub mod layer_tree;
+pub(crate) mod metafile;
+pub(crate) mod metafile_fonts;
+pub(crate) mod metafile_picture;
+pub(crate) mod metafile_print;
+mod metafile_print_coverage;
+mod metafile_surface;
+mod paint_bounds;
+pub mod paint_op;
+pub(crate) mod paper_viewport;
+mod parallel_shadow;
+mod print_coordinate;
+mod print_paper;
+pub mod profile;
+mod rectangle_fill;
+pub mod replay_order;
+pub mod resources;
+pub mod schema;
+mod shaped_measurement;
+pub(crate) mod shaping_glyph;
+pub(crate) mod shaping_glyph_vertical;
+mod table_fill_origin;
+pub mod text_shadow;
+pub mod text_shape;
+pub mod text_v2;
+mod text_v2_export;
+mod text_v2_slots;
+pub mod text_variants;
+
+pub use builder::LayerBuilder;
+pub use color_glyph::{
+    decode_colrv0_color_layers_payload, Colrv0ColorLayersDecodeError,
+    Colrv0ColorLayersDecodeOptions,
+};
+pub use font::{
+    BinaryResourceKind, BinaryResourceRef, FontBlobKey, FontBlobResource, FontDigest,
+    FontExternalRef, FontFaceKey, FontFaceResource, FontFallbackPolicyId, FontInstanceKey,
+    FontPortability, FontPortabilityKind, FontResourceSource, FontResourceTable,
+    GlyphRunReplayEligibility, LanguageTag, LocalizedName, OpenTypeFeatureSetting, ScriptTag,
+    ShapeKey, ShapingEngineId, TextDirection, VariationAxisValue, WritingMode,
+};
+pub use font_glyph::{
+    decode_font_bitmap_glyph_payload, decode_font_svg_glyph_payload,
+    lower_font_native_glyph_sidecars, resolve_embedded_font_face_index, EmbeddedFontFace,
+    FontBitmapGlyphDecodeError, FontBitmapGlyphDecodeOptions, FontGlyphLoweringReport,
+    FontSvgGlyphDecodeError, FontSvgGlyphDecodeOptions,
+};
+pub use json::LayerJsonOptions;
+pub use layer_tree::{
+    CacheHint, ClipKind, GroupKind, LayerNode, LayerNodeKind, LayerOutputOptions, PageLayerTree,
+    TextSourceAnnotation, TextSourceEntry, TextSourceId, TextSourceRange, TextSourceSpan,
+    TextSourceTable,
+};
+pub use paint_op::{
+    BitmapGlyphFiltering, BitmapGlyphPayload, BitmapGlyphScalingPolicy, ColorGlyphFormat,
+    ColorGradientStop, ColorLayerNode, ColorLayersPayload, ColorLinearGradient, ColorPaintClipNode,
+    ColorPaintCompositeMode, ColorPaintCompositeNode, ColorPaintGraphNode, ColorPaintGraphNodeKind,
+    ColorPaintGraphPayload, ColorPaintLinearGradientPathNode, ColorPaintRadialGradientPathNode,
+    ColorPaintSolidPathNode, ColorPaintSweepGradientPathNode, ColorPaintTransformNode,
+    ColorRadialGradient, ColorSweepGradient, FontColorGlyphRef, GlyphCluster, GlyphClusterFlag,
+    GlyphOutlineFillRule, GlyphOutlinePaintOrder, GlyphOutlinePayloadKind, GlyphOutlineStrokeCap,
+    GlyphOutlineStrokeJoin, GlyphOutlineStrokeStyle, GlyphRange, GlyphRunDiagnostics,
+    GlyphRunOrientation, GlyphTransform, LayerAffineTransform, LayerGlyphOutlinePaint,
+    LayerGlyphOutlinePath, LayerGlyphRunPaint, LayerPoint, LayerVector, PaintBounds, PaintOp,
+    PaintTextStyle, PaintVariantMeta, PaletteRef, ResolvedColor, ResolvedImageKind,
+    ResolvedImagePayload, SvgGlyphPayload, TextDecorationKind, TextDecorationPaintGeometry,
+    TextRunPlacement, TextVariantKind, TextVariantQuality,
+};
+pub use profile::RenderProfile;
+pub use replay_order::{
+    paint_op_replay_plane, paint_op_replay_plane_with_layer, render_layer_replay_plane,
+    FlowStaticOcclusion, PaintReplayPlane,
+};
+pub use resources::{
+    font_blob_resource_key, image_resource_key, parse_font_blob_resource_key,
+    parse_source_image_key, resource_digest_hex, source_image_key, svg_resource_key,
+    FontBlobResourceId, ImageResourceId, ResourceArena, SourceImageVariant, SvgResourceId,
+    RESOURCE_KEY_ALGORITHM,
+};
+pub use schema::{
+    LayerTreeSchema, LAYER_TREE_SCHEMA, PAGE_LAYER_TREE_COORDINATE_SYSTEM,
+    PAGE_LAYER_TREE_RESOURCE_TABLE_MINOR_VERSION, PAGE_LAYER_TREE_RESOURCE_TABLE_VERSION,
+    PAGE_LAYER_TREE_SCHEMA_MINOR_VERSION, PAGE_LAYER_TREE_SCHEMA_VERSION, PAGE_LAYER_TREE_UNIT,
+};
+pub use text_shape::{
+    FontRequest, FontResolver, GlyphRunQuality, JustificationMode, LineBreakChangeRisk,
+    LineBreakContextValue, LineBreakShadowReport, NoopFontResolver, ResolvedFontFace,
+    ResolvedGlyphRun, ShapedMeasurementLineReport, ShapedMeasurementPageSummary,
+    ShapedMeasurementParagraphSummary, ShapedMeasurementRunReport, TabStopSummary,
+    TableCellConstraintSummary, TextShapeDiagnostic, TextShapeLowerer, TextShapeReport,
+};
+pub use text_v2::{
+    TextV2CompatibilityProfile, TextV2Diagnostics, TextV2LineBreakRisk, TextV2LineBreakRiskLevel,
+    TextV2SlotDiagnostic, TextV2ValidationIssue, TextV2ValidationSeverity, TextV2VariantDiagnostic,
+};
+pub use text_v2_slots::{
+    downgrade_text_v2_op_to_v1_compat, LayerTextPaintOpV2, LayerTextVariantPart,
+    LayerTextVariantSet, TextFallbackPolicy,
+};
+pub use text_variants::{
+    text_visual_replay_role, validate_text_variant_scope, TextVariantScopeError,
+    TextVisualReplayRole,
+};

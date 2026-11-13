@@ -1,0 +1,439 @@
+use crate::model::control::Control;
+use crate::model::paragraph::Paragraph;
+use crate::renderer::composer::ComposedParagraph;
+
+#[derive(Debug, Clone)]
+pub(crate) struct EquationTacLineFlow {
+    tac_rows: Vec<(usize, usize)>,
+    pub extra_rows: usize,
+    visual_row_base: usize,
+}
+
+impl EquationTacLineFlow {
+    pub(crate) fn row_for_tac(&self, tac_index: usize) -> Option<usize> {
+        self.tac_rows
+            .iter()
+            .find_map(|(idx, row)| (*idx == tac_index).then_some(*row))
+    }
+
+    pub(crate) fn visual_line_idx_for_row(&self, row: usize) -> usize {
+        self.visual_row_base + row
+    }
+}
+
+/// 수식 전용 문단은 저장 줄 수가 같아도 너비에 맞춰 개체를 재배정한다.
+/// 저장 UTF-16 소유 줄 사영이 이 현재 줄 구성 결과를 덮어쓰면 안 된다.
+pub(crate) fn uses_equation_only_flow(para: &Paragraph, composed: &ComposedParagraph) -> bool {
+    !composed.tac_controls.is_empty()
+        && composed.lines.iter().all(|line| line.runs.is_empty())
+        && composed
+            .tac_controls
+            .iter()
+            .all(|(_, _, index)| matches!(para.controls.get(*index), Some(Control::Equation(_))))
+}
+
+pub(crate) fn compute_equation_only_tac_line_flow(
+    para: Option<&Paragraph>,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+    available_width: f64,
+    continuation_available_width: f64,
+) -> Option<EquationTacLineFlow> {
+    match compute_equation_only_tac_line_flow_with_storage(
+        para,
+        composed,
+        tac_offsets_px,
+        line_idx,
+        available_width,
+        continuation_available_width,
+        &crate::storage::Unbounded,
+    ) {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
+}
+
+pub(crate) fn compute_equation_only_tac_line_flow_with_storage<S: crate::storage::Storage>(
+    para: Option<&Paragraph>,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+    available_width: f64,
+    continuation_available_width: f64,
+    storage: &S,
+) -> Result<Option<EquationTacLineFlow>, S::Error> {
+    let Some(para) = para else {
+        return Ok(None);
+    };
+    if tac_offsets_px.is_empty()
+        || composed.lines.is_empty()
+        || line_idx >= composed.lines.len()
+        || available_width.is_nan()
+        || available_width <= 0.0
+    {
+        return Ok(None);
+    }
+    if !composed.lines.iter().all(|line| line.runs.is_empty()) {
+        return Ok(None);
+    }
+    if !tac_offsets_px.iter().all(|(_, _, control_index)| {
+        matches!(
+            para.controls.get(*control_index),
+            Some(Control::Equation(_))
+        )
+    }) {
+        return Ok(None);
+    }
+
+    let wrap_width = if available_width.is_finite() {
+        available_width
+    } else {
+        f64::INFINITY
+    };
+    let continuation_wrap_width =
+        if continuation_available_width.is_finite() && continuation_available_width > 0.0 {
+            continuation_available_width
+        } else {
+            wrap_width
+        };
+
+    let assignments =
+        equation_only_tac_line_assignment_with_storage(para, composed, tac_offsets_px, storage)?;
+    let mut assigned_lines: Vec<usize> = storage.collect(
+        assignments
+            .iter()
+            .copied()
+            .filter(|assigned_line| *assigned_line <= line_idx),
+    )?;
+    assigned_lines.sort_unstable();
+    assigned_lines.dedup();
+
+    let mut visual_row_base = 0usize;
+    for assigned_line in assigned_lines
+        .iter()
+        .copied()
+        .filter(|assigned_line| *assigned_line < line_idx)
+    {
+        let tacs = tacs_for_assigned_line_with_storage(
+            &assignments,
+            tac_offsets_px,
+            assigned_line,
+            storage,
+        )?;
+        let first_width = if visual_row_base == 0 {
+            wrap_width
+        } else {
+            continuation_wrap_width
+        };
+        let (_, visual_rows) = pack_equation_tac_rows_with_storage(
+            tacs,
+            first_width,
+            continuation_wrap_width,
+            storage,
+        )?;
+        visual_row_base += visual_rows;
+    }
+
+    let current_line_tacs =
+        tacs_for_assigned_line_with_storage(&assignments, tac_offsets_px, line_idx, storage)?;
+    let first_width = if visual_row_base == 0 {
+        wrap_width
+    } else {
+        continuation_wrap_width
+    };
+    let (tac_rows, visual_rows) = pack_equation_tac_rows_with_storage(
+        current_line_tacs,
+        first_width,
+        continuation_wrap_width,
+        storage,
+    )?;
+
+    Ok(Some(EquationTacLineFlow {
+        tac_rows,
+        extra_rows: visual_rows.saturating_sub(1),
+        visual_row_base,
+    }))
+}
+
+fn tacs_for_assigned_line_with_storage<S: crate::storage::Storage>(
+    assignments: &[usize],
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+    storage: &S,
+) -> Result<Vec<(usize, f64)>, S::Error> {
+    storage.collect(
+        assignments
+            .iter()
+            .enumerate()
+            .filter_map(|(tac_index, assigned_line)| {
+                (*assigned_line == line_idx)
+                    .then_some((tac_index, tac_offsets_px[tac_index].1.max(0.0)))
+            }),
+    )
+}
+
+fn pack_equation_tac_rows_with_storage<S: crate::storage::Storage>(
+    tacs: Vec<(usize, f64)>,
+    first_wrap_width: f64,
+    continuation_wrap_width: f64,
+    storage: &S,
+) -> Result<(Vec<(usize, usize)>, usize), S::Error> {
+    if tacs.is_empty() {
+        return Ok((Vec::new(), 0));
+    }
+
+    let mut row = 0usize;
+    let mut row_width = 0.0f64;
+    let mut current_wrap_width = first_wrap_width;
+    let mut tac_rows = storage.vec(tacs.len())?;
+    for (tac_index, tac_width) in tacs {
+        if row_width > 0.0 && row_width + tac_width > current_wrap_width + 0.5 {
+            row += 1;
+            row_width = 0.0;
+            current_wrap_width = continuation_wrap_width;
+        }
+        storage.push(&mut tac_rows, (tac_index, row))?;
+        row_width += tac_width;
+    }
+
+    Ok((tac_rows, row + 1))
+}
+
+/// [#7816] 들여쓰기·내어쓰기를 적용한 뒤 남는 줄 폭의 하한(HWPUNIT). 이보다 적게 남으면
+/// 한/글은 그 들여쓰기·내어쓰기를 버린다.
+///
+/// 한/글 2020 통제 실험(저장 줄 없는 합성 HWPX, 본문 폭 45,356 HU): 남는 폭 1,500 HU(20px)
+/// 이상은 적용하고 1,425 HU(19px) 이하는 버렸다. 글자 크기(10·20pt)·바탕글 크기·정렬·
+/// 짝수/홀수(글자 단위) 저장값과 무관한 고정 하한이다. 20pt 글자는 남는 폭 20px 에서도
+/// 들여쓰기를 적용한다 — 글자 폭 기준이 아니다. 한/글이 저장한 줄에서는 이 판정의 결과가
+/// `TAG_INDENTATION`(bit 20)이 꺼진 줄로 남는다.
+pub(crate) const MIN_INDENTED_LINE_WIDTH_HWP: i32 = 1500;
+
+/// [#7816] 줄 상자 폭(문단 여백을 뺀 폭)에서 들여쓰기를 빼도 [`MIN_INDENTED_LINE_WIDTH_HWP`]
+/// 이상 남는가. 조판(줄 나눔)과 배치가 같은 판정을 쓴다.
+pub(crate) fn indent_leaves_line_room_hwp(indent_hwp: i32, line_box_width_hwp: i32) -> bool {
+    line_box_width_hwp.saturating_sub(indent_hwp.saturating_abs()) >= MIN_INDENTED_LINE_WIDTH_HWP
+}
+
+/// 본문과 번호 있는 각주는 같은 원본 줄 번호와 저장 들여쓰기 플래그를 소비한다.
+/// 셀 또는 줄 수가 바뀐 재조판에서는 문단의 줄별 들여쓰기 규칙을 사용한다.
+///
+/// [#7816] 저장 플래그가 증언하지 않는 줄은 줄 상자 폭(`line_box_width_px`, 문단 여백을
+/// 뺀 폭)으로 [`indent_leaves_line_room_hwp`] 를 판정해, 남는 폭이 모자라면 들여쓰기를
+/// 버린다 — 재조판(`reflow_indentation_pattern`)이 줄을 나눌 때와 같은 판정이다.
+pub(crate) fn paragraph_line_indent_for_source(
+    indent: f64,
+    visual_line_idx: usize,
+    paragraph: Option<&Paragraph>,
+    composed_line_count: usize,
+    respect_stored_ladder: bool,
+    line_box_width_px: f64,
+    dpi: f64,
+) -> f64 {
+    use crate::model::paragraph::LineSeg;
+    let stored_seg_denies_indent = respect_stored_ladder
+        && paragraph.is_some_and(|para| para.line_segs.len() == composed_line_count)
+        && paragraph
+            .and_then(|para| para.line_segs.get(visual_line_idx))
+            .is_some_and(|seg| {
+                seg.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0
+                    && seg.tag & LineSeg::TAG_INDENTATION == 0
+            });
+    let to_hwp = |px: f64| crate::renderer::px_to_hwpunit(px, dpi);
+    if stored_seg_denies_indent
+        || !indent_leaves_line_room_hwp(to_hwp(indent), to_hwp(line_box_width_px))
+    {
+        0.0
+    } else {
+        paragraph_line_indent(indent, visual_line_idx)
+    }
+}
+
+pub(crate) fn paragraph_line_indent(indent: f64, visual_line_idx: usize) -> f64 {
+    if indent > 0.0 {
+        if visual_line_idx == 0 {
+            indent
+        } else {
+            0.0
+        }
+    } else if indent < 0.0 {
+        if visual_line_idx == 0 {
+            0.0
+        } else {
+            indent.abs()
+        }
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn paragraph_effective_margin_left(
+    margin_left: f64,
+    indent: f64,
+    visual_line_idx: usize,
+) -> f64 {
+    margin_left + paragraph_line_indent(indent, visual_line_idx)
+}
+
+pub(crate) fn equation_only_tac_line_assignment(
+    para: &Paragraph,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+) -> Vec<usize> {
+    match equation_only_tac_line_assignment_with_storage(
+        para,
+        composed,
+        tac_offsets_px,
+        &crate::storage::Unbounded,
+    ) {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
+}
+
+pub(crate) fn equation_only_tac_line_assignment_with_storage<S: crate::storage::Storage>(
+    para: &Paragraph,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    storage: &S,
+) -> Result<Vec<usize>, S::Error> {
+    let n_lines = composed.lines.len();
+    if n_lines == 0 {
+        return Ok(Vec::new());
+    }
+
+    let degenerate = n_lines > 1
+        && composed
+            .lines
+            .windows(2)
+            .any(|window| window[1].char_start <= window[0].char_start);
+
+    if !degenerate {
+        return storage.collect(tac_offsets_px.iter().map(|(pos, _, _)| {
+            (0..n_lines)
+                .find(|&line_idx| {
+                    let line_start = composed.lines[line_idx].char_start;
+                    let line_end = composed_line_char_end(composed, line_idx);
+                    char_pos_in_line(*pos, line_start, line_end)
+                })
+                .unwrap_or(n_lines - 1)
+        }));
+    }
+
+    let mut assignments = storage.filled(tac_offsets_px.len(), 0usize)?;
+    let mut tac_idx = 0usize;
+    let mut line_start = 0usize;
+    while tac_idx < tac_offsets_px.len() {
+        let pos = tac_offsets_px[tac_idx].0;
+        let group_start = tac_idx;
+        while tac_idx < tac_offsets_px.len() && tac_offsets_px[tac_idx].0 == pos {
+            tac_idx += 1;
+        }
+        let group_end = tac_idx;
+
+        let group_len = group_end - group_start;
+        let all_line_targets: Vec<usize> = storage
+            .collect((line_start..n_lines).filter(|&li| composed.lines[li].char_start == pos))?;
+        let filtered_line_targets: Vec<usize> =
+            storage.collect(all_line_targets.iter().copied().filter(|&li| {
+                !line_is_leading_empty_equation_tac_guide(para, composed, tac_offsets_px, li)
+            }))?;
+        let mut line_targets = if group_len > 1 && all_line_targets.len() >= group_len {
+            // 같은 char_start에 여러 TAC 수식이 있고 저장 LINE_SEG도 같은 수만큼 있으면
+            // 선행 빈 guide 줄도 한컴의 물리 수식 줄로 보존한다.
+            all_line_targets
+        } else {
+            filtered_line_targets
+        };
+
+        if line_targets.is_empty() {
+            let fallback = (line_start..n_lines)
+                .find(|&li| {
+                    let line_start_char = composed.lines[li].char_start;
+                    let line_end_char = composed_line_char_end(composed, li);
+                    char_pos_in_line(pos, line_start_char, line_end_char)
+                })
+                .unwrap_or_else(|| line_start.min(n_lines - 1));
+            storage.push(&mut line_targets, fallback)?;
+        }
+
+        for (group_offset, idx) in (group_start..group_end).enumerate() {
+            let target = line_targets
+                .get(group_offset)
+                .copied()
+                .unwrap_or_else(|| *line_targets.last().unwrap());
+            assignments[idx] = target;
+        }
+
+        line_start = line_targets.last().copied().unwrap_or(line_start) + 1;
+    }
+
+    Ok(assignments)
+}
+
+fn composed_line_char_end(composed: &ComposedParagraph, line_idx: usize) -> usize {
+    composed
+        .lines
+        .get(line_idx + 1)
+        .map(|line| line.char_start)
+        .unwrap_or(usize::MAX)
+}
+
+fn char_pos_in_line(pos: usize, line_start: usize, line_end: usize) -> bool {
+    if line_end == usize::MAX {
+        pos >= line_start
+    } else if line_end <= line_start {
+        pos == line_start
+    } else {
+        pos >= line_start && pos < line_end
+    }
+}
+
+fn line_is_leading_empty_equation_tac_guide(
+    para: &Paragraph,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+) -> bool {
+    if line_idx + 1 >= composed.lines.len() {
+        return false;
+    }
+    let line = &composed.lines[line_idx];
+    let next = &composed.lines[line_idx + 1];
+    if line.char_start != next.char_start {
+        return false;
+    }
+    !line_has_strict_tac_control(composed, tac_offsets_px, line_idx)
+        && line_has_strict_equation_tac_control(para, composed, tac_offsets_px, line_idx + 1)
+}
+
+fn line_has_strict_tac_control(
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+) -> bool {
+    let line_start = composed.lines[line_idx].char_start;
+    let line_end = composed_line_char_end(composed, line_idx);
+    tac_offsets_px
+        .iter()
+        .any(|(pos, _, _)| pos >= &line_start && *pos < line_end)
+}
+
+fn line_has_strict_equation_tac_control(
+    para: &Paragraph,
+    composed: &ComposedParagraph,
+    tac_offsets_px: &[(usize, f64, usize)],
+    line_idx: usize,
+) -> bool {
+    let line_start = composed.lines[line_idx].char_start;
+    let line_end = composed_line_char_end(composed, line_idx);
+    tac_offsets_px.iter().any(|(pos, _, control_index)| {
+        pos >= &line_start
+            && *pos < line_end
+            && matches!(
+                para.controls.get(*control_index),
+                Some(Control::Equation(_))
+            )
+    })
+}

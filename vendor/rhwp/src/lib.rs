@@ -1,0 +1,88 @@
+//! rhwp — Rust HWP 뷰어/에디터
+//!
+//! 본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.
+
+use wasm_bindgen::prelude::*;
+
+pub mod agent;
+pub mod agent_seal;
+pub mod capabilities_schema;
+pub mod diagnostics;
+pub mod docdiff;
+pub mod doclang;
+pub mod document_core;
+pub mod emf;
+pub mod eps;
+pub mod error;
+pub use rhwp_contracts::ir_schema;
+pub mod model;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native_host;
+pub mod ole_chart;
+pub(crate) mod storage;
+pub use rhwp_contracts::ontology;
+pub use rhwp_ooxml_chart as ooxml_chart;
+pub mod paint;
+pub mod parser;
+pub use rhwp_password_crypto as password_crypto;
+pub mod pdf_runtime;
+pub mod pdf_support;
+pub mod plan_schema;
+pub mod pq_sign;
+pub use rhwp_contracts::provenance;
+pub mod rag;
+pub mod render_backend;
+pub mod renderer;
+/// Experimental Native host supervision; request counters remain independent.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod resource_supervisor;
+pub mod scaffold;
+pub mod schema_registry;
+pub mod security_trailer;
+pub mod serializer;
+pub mod service;
+/// 핫패치 벤더(Dioxus subsecond) 어댑터. **rhwp 의 API 가 아니다** (#4580).
+///
+/// `pub` 인 이유는 `tools/rhwp-subsecond` 가 `link_wasm_exports()` 를 불러 wasm export 를 살려
+/// 둬야 하기 때문이지, 이 안의 함수들을 밖에서 쓰라는 뜻이 아니다. 격리 자체는 feature 가 이미
+/// 지킨다 — `subsecond-dev` 없이는 모듈이 존재하지 않으므로 릴리스 표면에는 처음부터 나오지
+/// 않는다. `#[doc(hidden)]` 은 그 사실을 문서에도 적는 것이다.
+#[doc(hidden)]
+#[cfg(feature = "subsecond-dev")]
+pub mod subsecond_dev;
+#[cfg(feature = "wasm-api")]
+pub mod wasm_api;
+pub mod wmf;
+
+pub use document_core::DocumentCore;
+#[cfg(feature = "pdf-import")]
+pub use document_core::PdfImportSession;
+pub use error::HwpError;
+pub use model::event::DocumentEvent;
+pub use parser::{parse_document, parse_document_with_password, DocumentParser};
+pub use serializer::{serialize_document, DocumentSerializer};
+
+// 아래 두 함수는 항상 Rust API로 남는다. `wasm-api`를 켰을 때만 JS export와 자동 start를
+// 등록하며, 끄면 소비 앱의 일반 Rust main이 자동 진입점으로 선택되는 것을 방해하지 않는다.
+
+/// WASM panic hook 초기화 (한 번만 실행)
+#[cfg_attr(feature = "wasm-api", wasm_bindgen(start))]
+pub fn init_panic_hook() {
+    #[cfg(feature = "console_error_panic_hook")]
+    console_error_panic_hook::set_once();
+}
+
+#[cfg_attr(feature = "wasm-api", wasm_bindgen)]
+pub fn version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version() {
+        assert_eq!(version(), env!("CARGO_PKG_VERSION"));
+    }
+}

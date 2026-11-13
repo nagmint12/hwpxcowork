@@ -1,0 +1,515 @@
+{
+ "source": "tests/fixtures/toc_source.hwpx",
+ "measured": "2026-10-29 한/글 2022 차례 만들기 대화상자(UI 자동화)",
+ "variants": {
+  "default": {
+   "options": {},
+   "command": "TableOfContents:set:140:ContentsMake:uint:31 ContentsStyles:wstring:0: ContentsLevel:int:2 ContentsAutoTabRight:int:0 ContentsLeader:int:3 ContentsHyperlink:bool:1  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 연구 목적\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 3",
+     "text": "1) 세부 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 개요2 표시\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6",
+     "link": 1
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<표 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표 1 표 캡션 가\t1",
+     "link": 2
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<그림 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "그림 1 그림 캡션 다\t5",
+     "link": 3
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<수식 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "수식 1 수식 캡션 나\t1",
+     "link": 4
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "outlineOnly": {
+   "options": {
+    "table": false,
+    "picture": false,
+    "equation": false,
+    "hyperlink": false
+   },
+   "command": "TableOfContents:set:140:ContentsMake:uint:17 ContentsStyles:wstring:0: ContentsLevel:int:2 ContentsAutoTabRight:int:0 ContentsLeader:int:3 ContentsHyperlink:bool:0  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1"
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 연구 목적\t1"
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5"
+    },
+    {
+     "style": "차례 3",
+     "text": "1) 세부 방법\t5"
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 개요2 표시\t5"
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "code": {
+   "options": {
+    "outline": false,
+    "code": true,
+    "table": false,
+    "picture": false,
+    "equation": false,
+    "hyperlink": false
+   },
+   "command": "TableOfContents:set:140:ContentsMake:uint:65 ContentsStyles:wstring:0: ContentsLevel:int:2 ContentsAutoTabRight:int:0 ContentsLeader:int:3 ContentsHyperlink:bool:0  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표시한 제목\t5"
+    },
+    {
+     "style": "차례 1",
+     "text": "나. 개요2 표시\t5"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "styles": {
+   "options": {
+    "outline": false,
+    "useStyles": true,
+    "styles": [
+     "본문",
+     "개요 1"
+    ],
+    "table": false,
+    "picture": false,
+    "equation": false,
+    "hyperlink": false
+   },
+   "command": "TableOfContents:set:148:ContentsMake:uint:33 ContentsStyles:wstring:8:본문;개요 1; ContentsLevel:int:2 ContentsAutoTabRight:int:0 ContentsLeader:int:3 ContentsHyperlink:bool:0  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1"
+    },
+    {
+     "style": "차례 1",
+     "text": "서론 본문입니다.\t1"
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5"
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "listsOnly": {
+   "options": {
+    "title": false,
+    "hyperlink": false
+   },
+   "command": "TableOfContents:set:140:ContentsMake:uint:14 ContentsStyles:wstring:0: ContentsLevel:int:2 ContentsAutoTabRight:int:0 ContentsLeader:int:3 ContentsHyperlink:bool:0  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<표 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표 1 표 캡션 가\t1"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<그림 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "그림 1 그림 캡션 다\t5"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<수식 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "수식 1 수식 캡션 나\t1"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "autoTab": {
+   "options": {
+    "autoTab": true
+   },
+   "command": "TableOfContents:set:140:ContentsMake:uint:31 ContentsStyles:wstring:0: ContentsLevel:int:2 ContentsAutoTabRight:int:1 ContentsLeader:int:3 ContentsHyperlink:bool:1  ",
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 연구 목적\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 3",
+     "text": "1) 세부 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 개요2 표시\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6",
+     "link": 1
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<표 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표 1 표 캡션 가\t1",
+     "link": 2
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<그림 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "그림 1 그림 캡션 다\t5",
+     "link": 3
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<수식 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "수식 1 수식 캡션 나\t1",
+     "link": 4
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "string": {
+   "options": {
+    "field": false
+   },
+   "command": null,
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 연구 목적\t1",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 3",
+     "text": "1) 세부 방법\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 개요2 표시\t5",
+     "link": 1
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6",
+     "link": 1
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<표 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표 1 표 캡션 가\t1",
+     "link": 2
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<그림 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "그림 1 그림 캡션 다\t5",
+     "link": 3
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<수식 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "수식 1 수식 캡션 나\t2",
+     "link": 4
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "stringOutline": {
+   "options": {
+    "field": false,
+    "table": false,
+    "picture": false,
+    "equation": false,
+    "hyperlink": false
+   },
+   "command": null,
+   "paragraphs": [
+    {
+     "style": "차례 제목",
+     "text": "<제목 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "1. 서론\t1"
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 연구 목적\t1"
+    },
+    {
+     "style": "차례 1",
+     "text": "2. 방법\t5"
+    },
+    {
+     "style": "차례 3",
+     "text": "1) 세부 방법\t5"
+    },
+    {
+     "style": "차례 2",
+     "text": "나. 개요2 표시\t5"
+    },
+    {
+     "style": "차례 1",
+     "text": "3. 결론\t6"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  },
+  "stringLists": {
+   "options": {
+    "field": false,
+    "title": false,
+    "hyperlink": false
+   },
+   "command": null,
+   "paragraphs": [
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<표 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "표 1 표 캡션 가\t1"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<그림 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "그림 1 그림 캡션 다\t5"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    },
+    {
+     "style": "차례 제목",
+     "text": "<수식 차례>"
+    },
+    {
+     "style": "차례 1",
+     "text": "수식 1 수식 캡션 나\t1"
+    },
+    {
+     "style": "바탕글",
+     "text": ""
+    }
+   ]
+  }
+ }
+}

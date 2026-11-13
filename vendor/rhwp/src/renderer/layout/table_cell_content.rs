@@ -1,0 +1,1793 @@
+//! 표 셀 내용 레이아웃 (세로쓰기, 셀 도형, 내장 표)
+
+use super::super::composer::{compose_paragraph, ComposedParagraph};
+use super::super::page_layout::LayoutRect;
+use super::super::render_tree::*;
+use super::super::style_resolver::ResolvedStyleSet;
+use super::super::{hwpunit_to_px, ShapeStyle, TextStyle};
+use super::border_rendering::{
+    build_row_col_x, collect_cell_borders, mark_cell_span_interior_covered, render_edge_borders,
+    render_spaced_cell_borders, render_transparent_borders, BorderEdge,
+};
+use super::text_measurement::{
+    is_cjk_char, is_vertical_rotate_char, resolved_to_text_style, vertical_substitute_char,
+};
+use super::utils::{extract_shape_transform, find_bin_data_bytes};
+use super::{CellContext, CellPathEntry, LayoutEngine};
+use crate::model::bin_data::BinDataContent;
+use crate::model::control::Control;
+use crate::model::paragraph::Paragraph;
+use crate::model::style::Alignment;
+use crate::model::table::VerticalAlign;
+use crate::renderer::kerning::ExactFontSlot;
+use crate::renderer::shaping_vertical::{
+    BoundedVerticalHwp5TableCellSidecar, TypedVerticalIntent, VerticalLatinOrientation,
+    VerticalLegacyGeometry, VerticalPoint, VerticalRect, VerticalShapingContextRequest,
+    VerticalShapingSidecarRejectReason, NOTO_SANS_KR_REGULAR_SHA256,
+};
+use std::sync::Arc;
+
+struct BoundedVerticalHwp5TableCellCommit {
+    first_node_id: NodeId,
+    node_count: u32,
+    line_node: RenderNode,
+    sidecar: Arc<BoundedVerticalHwp5TableCellSidecar>,
+}
+
+/// The only Q4-D2 mutation boundary. The page frame validates and attaches the
+/// sidecar before advancing its ID cursor; the cell receives the fully built
+/// line only after that infallible frame commit succeeds.
+fn commit_bounded_vertical_hwp5_table_cell(
+    tree: &mut PageLayoutContext,
+    cell_node: &mut RenderNode,
+    commit: BoundedVerticalHwp5TableCellCommit,
+) -> Result<(), VerticalShapingSidecarRejectReason> {
+    tree.commit_bounded_vertical_hwp5_table_cell_frame(
+        commit.first_node_id,
+        commit.node_count,
+        commit.sidecar,
+    )?;
+    cell_node.children.push(commit.line_node);
+    Ok(())
+}
+
+impl LayoutEngine {
+    /// 세로쓰기 셀의 텍스트를 수직 방향으로 배치한다.
+    ///
+    /// HWP 세로쓰기 규칙:
+    /// - 텍스트 방향: 위→아래, 열(column)은 오른쪽→왼쪽
+    /// - text_direction: 1=영문 눕힘(회전), 2=영문 세움(직립)
+    /// - 정렬 매핑: Top→오른쪽(첫 열), Center→중앙, Bottom→왼쪽
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn layout_vertical_cell_text(
+        &self,
+        tree: &mut PageLayoutContext,
+        cell_node: &mut RenderNode,
+        composed_paras: &[ComposedParagraph],
+        paragraphs: &[Paragraph],
+        styles: &ResolvedStyleSet,
+        inner_area: &LayoutRect,
+        vertical_align: VerticalAlign,
+        text_direction: u8,
+        section_index: usize,
+        table_meta: Option<(usize, usize)>,
+        cell_idx: usize,
+        table_cell_count: usize,
+        enclosing_cell_ctx: Option<CellContext>,
+    ) {
+        // 1. line_seg 기반으로 composed lines를 열(column)로 변환
+        //    세로쓰기에서 각 composed line = 하나의 열
+        //    line_seg.line_height = 열 폭, line_seg.line_spacing = 열 간격
+        struct CharInfo {
+            ch: char,
+            style: TextStyle,
+            char_style_id: u32,
+            lang_index: usize,
+            para_style_id: u16,
+            cell_para_index: usize,
+            char_offset: usize,
+            is_para_end: bool,
+        }
+
+        struct ColumnInfo {
+            start_idx: usize,
+            end_idx: usize,   // exclusive
+            col_width: f64,   // line_height + line_spacing (px), 마지막 칼럼은 line_height만
+            col_spacing: f64, // 항상 0 (line_spacing이 col_width에 흡수됨)
+            total_height: f64,
+            alignment: Alignment,
+            absorbed_spacing: f64, // 흡수된 line_spacing (px) — 마지막 칼럼 후처리용
+        }
+
+        let get_alignment = |para_style_id: u16| -> Alignment {
+            styles
+                .para_styles
+                .get(para_style_id as usize)
+                .map(|s| s.alignment)
+                .unwrap_or(Alignment::Left)
+        };
+
+        let mut chars: Vec<CharInfo> = Vec::new();
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+
+        // [#6029] 세로쓰기의 줄(세로줄) 예산은 **칸 높이**다. 호출자가 넘긴
+        // composed 는 가로쓰기 계약의 칸-너비 재분할(recompose, Task #671)을
+        // 이미 거쳤는데, 세로 칸의 저장 lineseg 는 세로줄 extent 를
+        // horzsize(=칸 높이 축)에 담으므로 그 재분할이 "가로로 넘친 한 줄"로
+        // 오인해 열을 2~3자마다 쪼갠다 — 3200477 "담당" 열(폭 ≈17pt)에서
+        // 직함 27자 중 18자가 칸 밖으로 밀려 소실됐다(한글 2020 은 칸 높이
+        // ~113pt 한 열에 11자). 여기서 원문으로 다시 compose 해(저장 lineseg
+        // 의 열 구조 보존) 칸 **높이** measure 로만 재분할한다.
+        let height_recomposed: Vec<Option<ComposedParagraph>> = paragraphs
+            .iter()
+            .map(|para| {
+                if !para.text.is_empty() {
+                    // 가로 축에서 합성한 줄은 원본 저장 줄이 아니다. 최종 칸 높이를
+                    // 소유한 공통 구성 경로가 다시 나누고 일반/부분 표가 함께 소비한다.
+                    Some(crate::renderer::composer::compose_vertical_cell_lines(
+                        para,
+                        styles,
+                        inner_area.height,
+                        self.dpi,
+                        self.profile.get().stored_geometry_policy(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let composed_paras: Vec<&ComposedParagraph> = composed_paras
+            .iter()
+            .enumerate()
+            .map(|(idx, comp)| {
+                height_recomposed
+                    .get(idx)
+                    .and_then(|o| o.as_ref())
+                    .unwrap_or(comp)
+            })
+            .collect();
+        for (cp_idx, &composed) in composed_paras.iter().enumerate() {
+            let para = paragraphs.get(cp_idx);
+            let alignment = get_alignment(composed.para_style_id);
+
+            if composed.lines.is_empty() {
+                // 빈 문단: 빈 열 추가 (개행)
+                // 칼럼 너비 = line_height + line_spacing (전체 피치를 칼럼에 흡수)
+                let ls = para.and_then(|p| p.line_segs.first());
+                let spacing = ls
+                    .map(|l| hwpunit_to_px(l.line_spacing, self.dpi))
+                    .unwrap_or(0.0);
+                columns.push(ColumnInfo {
+                    start_idx: chars.len(),
+                    end_idx: chars.len(),
+                    col_width: ls
+                        .map(|l| hwpunit_to_px(l.line_height + l.line_spacing, self.dpi))
+                        .unwrap_or(13.0),
+                    col_spacing: 0.0,
+                    total_height: 0.0,
+                    alignment,
+                    absorbed_spacing: spacing,
+                });
+                continue;
+            }
+
+            let mut char_offset = 0usize;
+            for (line_idx, line) in composed.lines.iter().enumerate() {
+                let ls = para.and_then(|p| p.line_segs.get(line_idx));
+                // 칼럼 너비 = line_height + line_spacing (전체 피치 흡수)
+                // 마지막 칼럼은 후처리로 line_spacing분 제거
+                let col_width = ls
+                    .map(|l| hwpunit_to_px(l.line_height + l.line_spacing, self.dpi))
+                    .unwrap_or(13.0);
+                let col_spacing = 0.0;
+                let absorbed_spacing = ls
+                    .map(|l| hwpunit_to_px(l.line_spacing, self.dpi))
+                    .unwrap_or(0.0);
+
+                let col_start = chars.len();
+                let mut col_height = 0.0;
+
+                for run in &line.runs {
+                    let text_style = run.text_style(styles);
+                    for ch in run.text.chars() {
+                        if ch == '\n' || ch == '\r' {
+                            char_offset += 1;
+                            continue;
+                        }
+                        let is_rotate = is_vertical_rotate_char(ch);
+                        let needs_rotation = is_rotate || (text_direction == 1 && !is_cjk_char(ch));
+                        // 세로쓰기에서 구두점/기호만 반칸 advance (영문/숫자는 캐릭터 높이)
+                        let half_advance =
+                            needs_rotation || (!is_cjk_char(ch) && !ch.is_ascii_alphanumeric());
+                        let advance = if half_advance {
+                            text_style.font_size * 0.5
+                        } else {
+                            text_style.font_size
+                        };
+                        chars.push(CharInfo {
+                            ch,
+                            style: text_style.clone(),
+                            char_style_id: run.char_style_id,
+                            lang_index: run.lang_index,
+                            para_style_id: composed.para_style_id,
+                            cell_para_index: cp_idx,
+                            char_offset,
+                            is_para_end: false,
+                        });
+                        col_height += advance;
+                        char_offset += 1;
+                    }
+                }
+
+                // 문단의 마지막 줄이면 마지막 글자에 is_para_end 표시
+                if line_idx == composed.lines.len() - 1 {
+                    if let Some(last) = chars.last_mut() {
+                        if last.cell_para_index == cp_idx {
+                            last.is_para_end = true;
+                        }
+                    }
+                }
+
+                columns.push(ColumnInfo {
+                    start_idx: col_start,
+                    end_idx: chars.len(),
+                    col_width,
+                    col_spacing,
+                    total_height: col_height,
+                    alignment,
+                    absorbed_spacing,
+                });
+            }
+        }
+
+        if chars.is_empty() && columns.iter().all(|c| c.start_idx == c.end_idx) {
+            return;
+        }
+
+        // 마지막 칼럼은 뒤에 간격이 불필요하므로 흡수된 line_spacing분 제거
+        if let Some(last_col) = columns.last_mut() {
+            last_col.col_width -= last_col.absorbed_spacing;
+        }
+
+        // 2. 열 배치 x좌표 계산 (오른쪽→왼쪽)
+        //    total = col[0].w + col[0].s + col[1].w + col[1].s + ... + col[n-1].w
+        let total_cols_width: f64 = if columns.is_empty() {
+            0.0
+        } else {
+            columns.iter().map(|c| c.col_width).sum::<f64>()
+                + columns[..columns.len() - 1]
+                    .iter()
+                    .map(|c| c.col_spacing)
+                    .sum::<f64>()
+        };
+
+        // 열이 셀보다 넓으면 첫 열이 오른쪽 가장자리에서 시작하도록 클램핑
+        let right_aligned = inner_area.x + inner_area.width - total_cols_width;
+        let cols_x_start = match vertical_align {
+            VerticalAlign::Top => right_aligned,
+            VerticalAlign::Center => {
+                let centered = inner_area.x + (inner_area.width - total_cols_width) / 2.0;
+                centered.min(right_aligned)
+            }
+            VerticalAlign::Bottom => inner_area.x.min(right_aligned),
+        };
+
+        // Q4-D2 first activation lane. Every target check, exact-source shape,
+        // geometry projection, ID preview, node build, and sidecar build happens
+        // before either the frame or cell tree is mutated. Any `None`/`Err`
+        // falls through to the byte-stable legacy per-character loop below.
+        let bounded_commit = (|| -> Option<BoundedVerticalHwp5TableCellCommit> {
+            if !self.profile.get().native_hwp5_layout()
+                || text_direction != 2
+                || table_cell_count != 1
+                || paragraphs.len() != 1
+                || composed_paras.len() != 1
+                || composed_paras[0].lines.len() != 1
+                || composed_paras[0].lines[0].runs.len() != 1
+                || columns.len() != 1
+                || chars.is_empty()
+                || !paragraphs[0].controls.is_empty()
+                || !paragraphs[0].range_tags.is_empty()
+            {
+                return None;
+            }
+            let source_run = &composed_paras[0].lines[0].runs[0];
+            if source_run.text.is_empty()
+                || source_run.char_overlap.is_some()
+                || source_run.footnote_marker.is_some()
+                || source_run.display_text.is_some()
+                || source_run.lang_index != 0
+                || source_run.text.chars().count() != chars.len()
+            {
+                return None;
+            }
+            let pure_cjk_upright = source_run.text.chars().all(|character| {
+                matches!(
+                    u32::from(character),
+                    0x1100..=0x11ff
+                        | 0x3130..=0x318f
+                        | 0x3400..=0x4dbf
+                        | 0x4e00..=0x9fff
+                        | 0xac00..=0xd7af
+                        | 0xf900..=0xfaff
+                )
+            });
+            if !pure_cjk_upright
+                || chars.iter().any(|character| {
+                    character.char_style_id != source_run.char_style_id
+                        || character.lang_index != source_run.lang_index
+                })
+            {
+                return None;
+            }
+            let resolved = styles.char_styles.get(source_run.char_style_id as usize)?;
+            if resolved.bold
+                || resolved.italic
+                || !matches!(resolved.underline, crate::model::style::UnderlineType::None)
+                || resolved.strikethrough
+                || resolved.border_fill_id != 0
+                || resolved.outline_type != 0
+                || resolved.shadow_type != 0
+                || resolved.emboss
+                || resolved.engrave
+                || resolved.superscript
+                || resolved.subscript
+                || resolved.font_position_for_lang(source_run.lang_index) != 0
+                || resolved.emphasis_dot != 0
+                || resolved
+                    .letter_spacing_for_lang(source_run.lang_index)
+                    .abs()
+                    > 1.0e-9
+                || (resolved.ratio_for_lang(source_run.lang_index) - 1.0).abs() > 1.0e-9
+            {
+                return None;
+            }
+
+            let column = &columns[0];
+            if column.start_idx != 0 || column.end_idx != chars.len() {
+                return None;
+            }
+            let col_x = cols_x_start + total_cols_width - column.col_width;
+            let free_space = (inner_area.height - column.total_height).max(0.0);
+            let y_start = inner_area.y
+                + match column.alignment {
+                    Alignment::Center | Alignment::Distribute => free_space / 2.0,
+                    Alignment::Right => free_space,
+                    _ => 0.0,
+                };
+            let origin = VerticalPoint {
+                x: col_x + column.col_width / 2.0,
+                y: y_start,
+            };
+            let legacy_bbox = VerticalRect {
+                x: col_x + (column.col_width - chars[0].style.font_size) / 2.0,
+                y: y_start,
+                width: chars[0].style.font_size,
+                height: column.total_height,
+            };
+            let fallback_geometry = VerticalLegacyGeometry {
+                bbox: legacy_bbox,
+                next_inline_origin: VerticalPoint {
+                    x: origin.x,
+                    y: y_start + column.total_height,
+                },
+                next_column_origin: VerticalPoint {
+                    x: origin.x - column.col_width,
+                    y: y_start,
+                },
+            };
+            let context = self.vertical_shaping_context_snapshot()?;
+            let certified = Arc::new(
+                context
+                    .prepare_dormant(VerticalShapingContextRequest {
+                        attempt_id: 4969,
+                        slot: ExactFontSlot::new(source_run.char_style_id, source_run.lang_index),
+                        text: &source_run.text,
+                        intent: TypedVerticalIntent::vertical_rl(VerticalLatinOrientation::Upright),
+                        font_size_px: chars[0].style.font_size,
+                        origin,
+                        column_pitch_px: column.col_width,
+                        fallback_geometry,
+                        script: Some("Hang"),
+                        language: Some("ko"),
+                        features: &[],
+                        variations: &[],
+                    })
+                    .ok()?,
+            );
+            if certified.certificate().font_source_sha256() != NOTO_SANS_KR_REGULAR_SHA256 {
+                return None;
+            }
+            let geometry = certified.transaction().line_geometry();
+            if !Arc::ptr_eq(geometry, certified.transaction().bbox_geometry())
+                || !Arc::ptr_eq(geometry, certified.transaction().next_origin_geometry())
+                || geometry.glyphs.len() != chars.len()
+            {
+                return None;
+            }
+            let mut expected_ranges = Vec::with_capacity(chars.len());
+            let mut byte_start = 0usize;
+            for character in source_run.text.chars() {
+                let byte_end = byte_start.checked_add(character.len_utf8())?;
+                expected_ranges.push(byte_start..byte_end);
+                byte_start = byte_end;
+            }
+            if geometry
+                .glyphs
+                .iter()
+                .zip(&expected_ranges)
+                .any(|(glyph, expected)| glyph.cluster_utf8_range != *expected)
+            {
+                return None;
+            }
+            let inside = |rect: VerticalRect| {
+                let epsilon = 0.5;
+                rect.x >= inner_area.x - epsilon
+                    && rect.y >= inner_area.y - epsilon
+                    && rect.x + rect.width <= inner_area.x + inner_area.width + epsilon
+                    && rect.y + rect.height <= inner_area.y + inner_area.height + epsilon
+            };
+            if !inside(geometry.bbox)
+                || geometry.glyphs.iter().any(|glyph| !inside(glyph.bbox))
+                || geometry.next_inline_origin.y > inner_area.y + inner_area.height + 0.5
+                || geometry.next_inline_origin.x < inner_area.x - 0.5
+                || geometry.next_inline_origin.x > inner_area.x + inner_area.width + 0.5
+                || geometry.next_column_origin.x < inner_area.x - 0.5
+                || geometry.next_column_origin.x > inner_area.x + inner_area.width + 0.5
+            {
+                return None;
+            }
+
+            let node_count = u32::try_from(geometry.glyphs.len().checked_add(1)?).ok()?;
+            let first_node_id = tree.preview_node_ids(node_count).ok()?;
+            let baseline = geometry
+                .glyphs
+                .first()
+                .map(|glyph| glyph.origin.y - geometry.bbox.y)
+                .unwrap_or(0.0);
+            let mut line_node = RenderNode::new(
+                first_node_id,
+                RenderNodeType::TextLine(TextLineNode::new(geometry.inline_advance_px, baseline)),
+                BoundingBox::new(
+                    geometry.bbox.x,
+                    geometry.bbox.y,
+                    geometry.bbox.width,
+                    geometry.bbox.height,
+                ),
+            );
+            let cell_context = if let Some(ref context) = enclosing_cell_ctx {
+                let mut context = context.clone();
+                if let Some(last) = context.path.last_mut() {
+                    last.cell_index = cell_idx;
+                    last.cell_para_index = 0;
+                    last.text_direction = text_direction;
+                }
+                Some(context)
+            } else {
+                table_meta.map(|(para_index, control_index)| CellContext {
+                    in_textbox: false,
+                    parent_para_index: para_index,
+                    path: vec![CellPathEntry {
+                        control_index,
+                        cell_index: cell_idx,
+                        cell_para_index: 0,
+                        text_direction,
+                    }],
+                })
+            };
+            for (index, (character, glyph)) in chars.iter().zip(&geometry.glyphs).enumerate() {
+                let run_id =
+                    first_node_id.checked_add(u32::try_from(index).ok()?.checked_add(1)?)?;
+                line_node.children.push(RenderNode::new(
+                    run_id,
+                    RenderNodeType::TextRun(TextRunNode {
+                        text: character.ch.to_string(),
+                        style: character.style.clone(),
+                        char_shape_id: Some(character.char_style_id),
+                        para_shape_id: Some(character.para_style_id),
+                        section_index: Some(section_index),
+                        para_index: Some(character.cell_para_index),
+                        char_start: Some(character.char_offset),
+                        cell_context: cell_context.clone(),
+                        is_para_end: character.is_para_end,
+                        is_line_break_end: false,
+                        rotation: 0.0,
+                        is_vertical: true,
+                        char_overlap: None,
+                        border_fill_id: 0,
+                        baseline: glyph.origin.y - glyph.bbox.y,
+                        field_marker: FieldMarkerType::None,
+                        layout_positions: None,
+                        display_text: None,
+                    }),
+                    BoundingBox::new(
+                        glyph.bbox.x,
+                        glyph.bbox.y,
+                        glyph.bbox.width,
+                        glyph.bbox.height,
+                    ),
+                ));
+            }
+            let sidecar = Arc::new(BoundedVerticalHwp5TableCellSidecar::new(
+                first_node_id,
+                certified,
+                &source_run.text,
+            ));
+            Some(BoundedVerticalHwp5TableCellCommit {
+                first_node_id,
+                node_count,
+                line_node,
+                sidecar,
+            })
+        })();
+        if let Some(commit) = bounded_commit {
+            if commit_bounded_vertical_hwp5_table_cell(tree, cell_node, commit).is_ok() {
+                return;
+            }
+        }
+
+        // 3. 각 글자를 TextLine + TextRun 노드로 생성
+        let mut col_x = cols_x_start + total_cols_width;
+
+        for col in &columns {
+            col_x -= col.col_width;
+
+            let free_space = (inner_area.height - col.total_height).max(0.0);
+            let y_start = inner_area.y
+                + match col.alignment {
+                    Alignment::Center | Alignment::Distribute => free_space / 2.0,
+                    Alignment::Right => free_space,
+                    _ => 0.0,
+                };
+            let mut char_y = y_start;
+            let col_bottom = inner_area.y + inner_area.height;
+
+            for i in col.start_idx..col.end_idx {
+                let ci = &chars[i];
+                let is_rotate = is_vertical_rotate_char(ci.ch);
+                let needs_rotation = is_rotate || (text_direction == 1 && !is_cjk_char(ci.ch));
+                // 세로쓰기에서 구두점/기호만 반칸 advance (영문/숫자는 캐릭터 높이)
+                let half_advance =
+                    needs_rotation || (!is_cjk_char(ci.ch) && !ci.ch.is_ascii_alphanumeric());
+                let advance = if half_advance {
+                    ci.style.font_size * 0.5
+                } else {
+                    ci.style.font_size
+                };
+
+                // 열 높이 초과 시 렌더링 중단
+                if char_y + advance > col_bottom + 0.5 {
+                    break;
+                }
+
+                // 세로쓰기: 모든 문자를 칼럼 중앙에 전각 배치 (영문눕힘과 동일)
+                let char_width = ci.style.font_size;
+
+                let char_x = col_x + (col.col_width - char_width) / 2.0;
+                // 기호 대체: 세로 형태 Unicode가 있으면 대체 문자를 사용 (회전 불필요)
+                let (render_ch, rotation) = if needs_rotation {
+                    if let Some(sub) = vertical_substitute_char(ci.ch) {
+                        (sub, 0.0)
+                    } else {
+                        (ci.ch, 90.0)
+                    }
+                } else {
+                    (ci.ch, 0.0)
+                };
+
+                let line_id = tree.next_id();
+                let mut line_node = RenderNode::new(
+                    line_id,
+                    RenderNodeType::TextLine(TextLineNode::new(advance, advance * 0.85)),
+                    BoundingBox::new(char_x, char_y, char_width, advance),
+                );
+
+                let run_id = tree.next_id();
+                // [hwpx-cowork] Vertical shade spans the column's logical width,
+                // including a small character sharing a column with a larger one.
+                let mut fill_style = ci.style.clone();
+                fill_style.logical_shade_box = Some((col_x, char_y, col.col_width, advance));
+                let run_node = RenderNode::new(
+                    run_id,
+                    RenderNodeType::TextRun(TextRunNode {
+                        text: render_ch.to_string(),
+                        style: fill_style,
+                        char_shape_id: Some(ci.char_style_id),
+                        para_shape_id: Some(ci.para_style_id),
+                        section_index: Some(section_index),
+                        para_index: Some(ci.cell_para_index),
+                        char_start: Some(ci.char_offset),
+                        cell_context: if let Some(ref ctx) = enclosing_cell_ctx {
+                            let mut new_ctx = ctx.clone();
+                            if let Some(last) = new_ctx.path.last_mut() {
+                                last.cell_index = cell_idx;
+                                last.cell_para_index = ci.cell_para_index;
+                                last.text_direction = text_direction;
+                            }
+                            Some(new_ctx)
+                        } else {
+                            table_meta.map(|(pi, ctrl_ci)| CellContext {
+                                in_textbox: false,
+                                parent_para_index: pi,
+                                path: vec![CellPathEntry {
+                                    control_index: ctrl_ci,
+                                    cell_index: cell_idx,
+                                    cell_para_index: ci.cell_para_index,
+                                    text_direction: 0,
+                                }],
+                            })
+                        },
+                        is_para_end: ci.is_para_end,
+                        is_line_break_end: false,
+                        rotation,
+                        is_vertical: true,
+                        char_overlap: None,
+                        border_fill_id: styles
+                            .char_styles
+                            .get(ci.char_style_id as usize)
+                            .map(|cs| cs.border_fill_id)
+                            .unwrap_or(0),
+                        baseline: advance * 0.85,
+                        field_marker: FieldMarkerType::None,
+                        layout_positions: None,
+                        display_text: None,
+                    }),
+                    BoundingBox::new(char_x, char_y, char_width, advance),
+                );
+
+                line_node.children.push(run_node);
+                cell_node.children.push(line_node);
+
+                char_y += advance;
+            }
+
+            col_x -= col.col_spacing;
+        }
+    }
+
+    /// 테이블 셀 내 도형(Shape) 컨트롤을 레이아웃한다.
+    #[allow(clippy::too_many_arguments)]
+    /// [hwpx-cowork] 칸 안 쪽·종이 기준 개체의 쪽 좌표 원점 — 한/글은 칸을 벗어나 본문 영역·용지에
+    /// 놓는다(`float_placement::nested_float_escapes_to_page`). 쪽 문맥(본문 영역)이 없으면 `None`.
+    pub(crate) fn nested_cell_page_float_origin(
+        &self,
+        common: &crate::model::shape::CommonObjAttr,
+        width: f64,
+        height: f64,
+    ) -> Option<(f64, f64)> {
+        if !crate::renderer::float_placement::nested_float_escapes_to_page(common)
+            || self.nested_float_frame.get().is_none()
+        {
+            return None;
+        }
+        let (bx, by, bw, bh) = self.current_body_area.get();
+        let paper_w = self.current_paper_width.get();
+        let paper_h = self.current_page_height.get();
+        if bh <= 0.0 || paper_w <= 0.0 || paper_h <= 0.0 {
+            return None;
+        }
+        let body = LayoutRect { x: bx, y: by, width: bw, height: bh };
+        let paper = LayoutRect { x: 0.0, y: 0.0, width: paper_w, height: paper_h };
+        Some(crate::renderer::float_placement::nested_page_float_origin(
+            common, width, height, &body, &paper, self.dpi,
+        ))
+    }
+
+    /// [hwpx-cowork] 칸 안 문단 기준 떠 있는 개체의 가로 원점(잉크 왼끝) — `vendor/README.md` 72 의
+    /// 한/글 규칙(`nested_float_origin_x`, 바깥 여백 포함). 칸 문맥이 아니면 `None`.
+    pub(crate) fn nested_cell_float_x(
+        &self,
+        common: &crate::model::shape::CommonObjAttr,
+        width: f64,
+    ) -> Option<f64> {
+        let frame = self.nested_float_frame.get()?;
+        crate::renderer::float_placement::nested_float_origin_x(
+            common,
+            width,
+            hwpunit_to_px(i32::from(common.margin.left), self.dpi),
+            hwpunit_to_px(i32::from(common.margin.right), self.dpi),
+            &frame,
+            self.dpi,
+        )
+    }
+
+    pub(crate) fn layout_cell_shape(
+        &self,
+        tree: &mut PageLayoutContext,
+        cell_node: &mut RenderNode,
+        shape: &crate::model::shape::ShapeObject,
+        inner_area: &LayoutRect,
+        para_y: f64,
+        para_alignment: Alignment,
+        para_shape_id: u16,
+        styles: &ResolvedStyleSet,
+        bin_data_content: &[BinDataContent],
+        clamp_header_negative_para_offset: bool,
+        // [Task #1138] 표 셀 컨텍스트: (section_idx, outer_para_idx, outer_table_ctrl_idx, cell_idx, cell_para_idx, inner_control_idx)
+        table_cell_ctx: Option<(usize, usize, usize, usize, usize, usize)>,
+    ) {
+        self.layout_cell_shape_with_parent_path(
+            tree,
+            cell_node,
+            shape,
+            inner_area,
+            para_y,
+            para_alignment,
+            para_shape_id,
+            styles,
+            bin_data_content,
+            clamp_header_negative_para_offset,
+            table_cell_ctx,
+            &[],
+            None,
+        );
+    }
+
+    /// 글상자/중첩 표 경로까지 가진 셀 도형을 레이아웃한다.
+    #[allow(clippy::too_many_arguments)]
+    fn layout_cell_shape_with_parent_path(
+        &self,
+        tree: &mut PageLayoutContext,
+        cell_node: &mut RenderNode,
+        shape: &crate::model::shape::ShapeObject,
+        inner_area: &LayoutRect,
+        para_y: f64,
+        para_alignment: Alignment,
+        para_shape_id: u16,
+        styles: &ResolvedStyleSet,
+        bin_data_content: &[BinDataContent],
+        clamp_header_negative_para_offset: bool,
+        table_cell_ctx: Option<(usize, usize, usize, usize, usize, usize)>,
+        parent_cell_path: &[CellPathEntry],
+        // [hwpx-cowork] 호출자가 이미 정한 자리(개체 왼쪽 위). 글상자 안 표 칸이 쓴다.
+        position_override: Option<(f64, f64)>,
+    ) {
+        let child_common = shape.common();
+
+        let child_w = hwpunit_to_px(child_common.width as i32, self.dpi);
+        let child_h = hwpunit_to_px(child_common.height as i32, self.dpi);
+
+        let (child_x, child_y) = if let Some(origin) = position_override {
+            origin
+        } else if child_common.treat_as_char {
+            // 인라인: 문단 정렬에 따라 배치
+            let x = match para_alignment {
+                Alignment::Center | Alignment::Distribute => {
+                    inner_area.x + (inner_area.width - child_w).max(0.0) / 2.0
+                }
+                Alignment::Right => inner_area.x + (inner_area.width - child_w).max(0.0),
+                _ => inner_area.x,
+            };
+            (x, para_y)
+        } else if let Some(origin) = self.nested_cell_page_float_origin(child_common, child_w, child_h)
+        {
+            // [hwpx-cowork] 쪽·종이 기준 칸 안 도형은 칸을 벗어나 쪽 좌표에 놓인다(한/글 실측).
+            origin
+        } else if let Some(nested_x) = self.nested_cell_float_x(child_common, child_w) {
+            // [hwpx-cowork] 칸 안 문단 기준 도형 — 가로는 칸 그릇 규칙(바깥 여백·종이 = 칸 상자),
+            // 세로는 문단 위 + 바깥 위 여백 + 오프셋. 음수 오프셋이 칸 글 영역 위로 내보내면 한/글은
+            // 글 영역 위끝에 붙인다(재저장본은 오프셋을 0 으로 고쳐 씀, 회귀 시험 v-offset--1000).
+            use crate::model::shape::{VertAlign, VertRelTo};
+            let mut vertical_offset = child_common.vertical_offset as i32;
+            if clamp_header_negative_para_offset
+                && matches!(child_common.vert_rel_to, VertRelTo::Para)
+                && matches!(child_common.vert_align, VertAlign::Top | VertAlign::Inside)
+                && vertical_offset < 0
+            {
+                vertical_offset = 0;
+            }
+            let v_offset = hwpunit_to_px(vertical_offset, self.dpi);
+            let m_top = hwpunit_to_px(i32::from(child_common.margin.top), self.dpi);
+            let m_bottom = hwpunit_to_px(i32::from(child_common.margin.bottom), self.dpi);
+            let ref_y = para_y;
+            let ref_h = (inner_area.y + inner_area.height - para_y).max(0.0);
+            let y = match child_common.vert_align {
+                VertAlign::Bottom | VertAlign::Outside => {
+                    ref_y + ref_h - child_h - m_bottom - v_offset
+                }
+                VertAlign::Center => ref_y + (ref_h - child_h) / 2.0 + v_offset,
+                _ => {
+                    let y = ref_y + m_top + v_offset;
+                    if v_offset < 0.0 {
+                        y.max(inner_area.y.min(ref_y + m_top))
+                    } else {
+                        y
+                    }
+                }
+            };
+            (nested_x, y)
+        } else {
+            // 셀 내 비-TAC 도형: horz_align/vert_align 속성 기반 배치
+            use crate::model::shape::{HorzAlign, HorzRelTo, VertAlign, VertRelTo};
+            let h_offset = hwpunit_to_px(child_common.horizontal_offset as i32, self.dpi);
+            let mut vertical_offset = child_common.vertical_offset as i32;
+            // 한컴은 머리말 안의 문단 기준 글상자에서 음수 `문단 내 위`를 0처럼 배치한다.
+            if clamp_header_negative_para_offset
+                && matches!(child_common.vert_rel_to, VertRelTo::Para)
+                && matches!(child_common.vert_align, VertAlign::Top | VertAlign::Inside)
+                && vertical_offset < 0
+            {
+                vertical_offset = 0;
+            }
+            let v_offset = hwpunit_to_px(vertical_offset, self.dpi);
+            // 셀은 개체의 소유 경로다. PAPER/PAGE 정렬의 기준 영역까지 셀로
+            // 바꾸면 용지에 붙인 글상자가 셀의 이동·크기에 따라 잘못 이동한다.
+            let (body_x, body_y, body_w, body_h) = self.current_body_area.get();
+            let (ref_x, ref_w) = match child_common.horz_rel_to {
+                HorzRelTo::Paper => (0.0, self.current_paper_width.get()),
+                HorzRelTo::Page => (body_x, body_w),
+                // 문단 기준 도형에는 문단 좌우 여백만 반영한다.
+                // 첫 줄 들여쓰기는 떠 있는 도형의 기준 원점에 포함하지 않는다.
+                HorzRelTo::Para => {
+                    let para_style = styles.para_styles.get(para_shape_id as usize);
+                    let left = para_style.map_or(0.0, |style| style.margin_left);
+                    let right = para_style.map_or(0.0, |style| style.margin_right);
+                    (inner_area.x + left, inner_area.width - left - right)
+                }
+                HorzRelTo::Column => (inner_area.x, inner_area.width),
+            };
+            let x = match child_common.horz_align {
+                HorzAlign::Right | HorzAlign::Outside => ref_x + ref_w - child_w - h_offset,
+                HorzAlign::Center => ref_x + (ref_w - child_w) / 2.0 + h_offset,
+                _ => ref_x + h_offset,
+            };
+            let (ref_y, ref_h) = match child_common.vert_rel_to {
+                VertRelTo::Paper => (0.0, self.current_page_height.get()),
+                VertRelTo::Page => (body_y, body_h),
+                VertRelTo::Para => (para_y, (inner_area.y + inner_area.height - para_y).max(0.0)),
+            };
+            let y = match child_common.vert_align {
+                VertAlign::Bottom | VertAlign::Outside => ref_y + ref_h - child_h - v_offset,
+                VertAlign::Center => ref_y + (ref_h - child_h) / 2.0 + v_offset,
+                _ => ref_y + v_offset,
+            };
+            (x, y)
+        };
+
+        let empty_map = std::collections::HashMap::new();
+        // [Task #1138] table_cell_ctx 가 Some 일 때 layout_shape_object 에
+        // section_index/outer_para_idx/inner_control_idx 를 셀 컨텍스트에서 추출하여 전달.
+        let (sec_idx, outer_para_idx, inner_ctrl_idx, shape_table_cell_ref) = match table_cell_ctx {
+            Some((sec, outer_para, outer_table_ci, cell_i, cell_para_i, inner_ci)) => (
+                sec,
+                outer_para,
+                inner_ci,
+                Some((cell_i, cell_para_i, outer_table_ci)),
+            ),
+            None => (0, 0, 0, None),
+        };
+        let children_before = cell_node.children.len();
+        self.layout_shape_object(
+            tree,
+            cell_node,
+            shape,
+            child_x,
+            child_y,
+            child_w,
+            child_h,
+            sec_idx,
+            outer_para_idx,
+            inner_ctrl_idx,
+            styles,
+            bin_data_content,
+            &empty_map,
+            parent_cell_path,
+            shape_table_cell_ref,
+            false,
+        );
+        // Cell-local paint order is settled after all paragraphs are assembled.
+        // BehindText must move below even the text emitted before its anchor.
+        if !child_common.treat_as_char {
+            let stable_index = table_cell_ctx
+                .map(|(_, _, _, _, cell_para_i, inner_ci)| {
+                    Self::object_stable_index(cell_para_i, inner_ci)
+                })
+                .unwrap_or(0);
+            let layer = RenderLayerInfo::new(
+                Some(child_common.text_wrap),
+                child_common.z_order,
+                stable_index,
+            );
+            for child in cell_node.children.iter_mut().skip(children_before) {
+                child.set_layer(layer);
+                child.cell_frame_paint =
+                    crate::model::border_paint::is_cell_frame_attributes(child_common);
+            }
+        }
+    }
+
+    /// TextBox 내부에 포함된 표를 레이아웃한다.
+    /// enclosing_ctx: (section_index, body_para_index, 상위 경로, 표의 컨트롤 인덱스)
+    pub(crate) fn layout_embedded_table(
+        &self,
+        tree: &mut PageLayoutContext,
+        parent: &mut RenderNode,
+        table: &crate::model::table::Table,
+        styles: &ResolvedStyleSet,
+        container: &LayoutRect,
+        y_start: f64,
+        enclosing_ctx: Option<(usize, usize, &[CellPathEntry], usize)>,
+        bin_data_content: &[BinDataContent],
+        host_alignment: Alignment,
+        inline_x: Option<f64>,
+    ) -> f64 {
+        if table.cells.is_empty() {
+            return y_start;
+        }
+
+        let col_count = table.col_count as usize;
+        let row_count = table.row_count as usize;
+        let cell_spacing = hwpunit_to_px(table.cell_spacing as i32, self.dpi);
+
+        // 본문 표와 같이 병합 셀의 선언 폭으로 미지 열 폭을 먼저 푼다.
+        // 컨테이너 균등 폭으로 채우면 뒤의 비례 축소가 정상 단일 셀까지 줄인다.
+        let mut col_widths = self.resolve_column_widths(table, col_count);
+
+        // 글상자 내부 표: 셀 너비 합이 컨테이너 폭을 초과하면 비례 축소
+        let col_sum: f64 = col_widths.iter().sum();
+        let _rows = self.table_rows_scope(table);
+        let max_w = {
+            let common_w = hwpunit_to_px(table.common.width as i32, self.dpi);
+            if common_w > 0.0 && common_w < container.width {
+                common_w
+            } else {
+                container.width
+            }
+        };
+        if col_sum > max_w + 1.0 {
+            let scale = max_w / col_sum;
+            for w in &mut col_widths {
+                *w *= scale;
+            }
+        }
+
+        // 행 높이 계산 (layout_table과 동일한 resolve_row_heights 사용)
+        // [hwpx-cowork] 2026-11-04 측정기 행 높이도 본문·칸 안 표와 같게 넘긴다 — 없으면 안 여백 위아래가
+        // '비정상 여백' 가드로 줄어 표가 낮게 그려졌다(inMargin 1000: 한/글 5100, 엔진 3218).
+        let measured = self.measure_table_for_layout(table, styles, 1);
+        let row_heights =
+            self.resolve_row_heights(table, col_count, row_count, Some(&measured), styles, true);
+
+        // 누적 위치 계산
+        let mut col_x = vec![cell_spacing; col_count + 1];
+        for i in 0..col_count {
+            col_x[i + 1] = col_x[i] + col_widths[i] + cell_spacing;
+        }
+        let mut row_y = vec![cell_spacing; row_count + 1];
+        for i in 0..row_count {
+            row_y[i + 1] = row_y[i] + row_heights[i] + cell_spacing;
+        }
+
+        // 행별 열 위치 계산 (셀별 독립 너비 지원)
+        let row_col_x = match build_row_col_x(
+            table,
+            &col_widths,
+            col_count,
+            row_count,
+            cell_spacing,
+            self.dpi,
+            self.render_table_width_scale(table),
+        ) {
+            Ok(grid) => grid,
+            Err(_) => return y_start,
+        };
+
+        let table_width = row_col_x
+            .iter()
+            .map(|rx| rx.last().copied().unwrap_or(0.0))
+            .fold(col_x.last().copied().unwrap_or(0.0), f64::max);
+        let table_height = row_y.last().copied().unwrap_or(0.0);
+        // TAC 표: 호스트 문단 정렬에 따라 배치
+        let table_x = inline_x.unwrap_or_else(|| match host_alignment {
+            Alignment::Center | Alignment::Distribute => {
+                container.x + (container.width - table_width).max(0.0) / 2.0
+            }
+            Alignment::Right => container.x + (container.width - table_width).max(0.0),
+            _ => container.x, // 왼쪽 정렬 (기본)
+        });
+        let table_y = y_start;
+
+        // 엣지 기반 테두리 수집을 위한 그리드 생성
+        use crate::model::style::BorderLine;
+        let mut h_edges: Vec<Vec<Option<BorderEdge>>> = vec![vec![None; col_count]; row_count + 1];
+        let mut v_edges: Vec<Vec<Option<BorderEdge>>> = vec![vec![None; row_count]; col_count + 1];
+        // 병합 등으로 편집되어 h_edges/v_edges에 기록되지 않는 span 내부 위치를
+        // 투명선 가이드에서 제외하기 위한 커버리지 그리드 (§투명선/셀 편집 정합성).
+        let mut h_span_covered: Vec<Vec<bool>> = vec![vec![false; col_count]; row_count + 1];
+        let mut v_span_covered: Vec<Vec<bool>> = vec![vec![false; row_count]; col_count + 1];
+
+        // 표 노드 생성
+        // [#4334] TAC(text-as-char) 중첩 표는 자기 자신의 (section, para, control) 을
+        // `enclosing_ctx`(호스트 글상자/셀의 경로 + 이 표 컨트롤의 호스트 문단 내
+        // 인덱스)에서 그대로 옮겨 담는다 — 이전에는 전부 None 이라 stableIndex 가
+        // next_id() 카운터 폴백에 전적으로 의존했다(#4334 stage3 실측).
+        let (table_section_index, table_para_index, table_control_index, table_cell_context) =
+            match enclosing_ctx {
+                Some((sec_idx, para_idx, parent_path, table_ci)) => (
+                    Some(sec_idx),
+                    Some(para_idx),
+                    Some(table_ci),
+                    if parent_path.is_empty() {
+                        None
+                    } else {
+                        Some(CellContext {
+                            in_textbox: false,
+                            parent_para_index: para_idx,
+                            path: parent_path.to_vec(),
+                        })
+                    },
+                ),
+                None => (None, None, None, None),
+            };
+        let table_id = tree.next_id();
+        let mut table_node = RenderNode::new(
+            table_id,
+            RenderNodeType::Table(TableNode {
+                row_count: table.row_count,
+                col_count: table.col_count,
+                border_fill_id: table.border_fill_id,
+                section_index: table_section_index,
+                para_index: table_para_index,
+                control_index: table_control_index,
+                cell_context: table_cell_context,
+            }),
+            BoundingBox::new(table_x, table_y, table_width, table_height),
+        );
+
+        // 표 배경 렌더링 (표 > 배경 > 색 > 면색)
+        if table.border_fill_id > 0 {
+            let tbl_idx = (table.border_fill_id as usize).saturating_sub(1);
+            if let Some(tbl_bs) = styles.border_styles.get(tbl_idx) {
+                self.render_cell_background(
+                    tree,
+                    &mut table_node,
+                    Some(tbl_bs),
+                    table_x,
+                    table_y,
+                    table_width,
+                    table_height,
+                    bin_data_content,
+                );
+            }
+        }
+
+        // 각 셀 레이아웃
+        for (cell_enum_idx, cell) in table.cells.iter().enumerate() {
+            let c = cell.col as usize;
+            let r = cell.row as usize;
+            if c >= col_count || r >= row_count {
+                continue;
+            }
+
+            let rcx = &row_col_x[r];
+            let cell_x = table_x + rcx[c];
+            let cell_y = table_y + row_y[r];
+            let end_col = (c + cell.col_span as usize).min(col_count);
+            let end_row = (r + cell.row_span as usize).min(row_count);
+            let cell_w = row_col_x.cell_width(r, c, end_col, cell_spacing);
+            let frame_cell_w = self
+                .paragraph_frame_width_override(cell, table)
+                .unwrap_or(cell_w);
+            let cell_h = row_y[end_row] - row_y[r] - cell_spacing;
+
+            let cell_id = tree.next_id();
+            let mut cell_node = RenderNode::new(
+                cell_id,
+                RenderNodeType::TableCell(TableCellNode {
+                    col: cell.col,
+                    row: cell.row,
+                    col_span: cell.col_span,
+                    row_span: cell.row_span,
+                    border_fill_id: cell.border_fill_id,
+                    text_direction: cell.text_direction,
+                    clip: false,
+                    closed_reflow_frame: false,
+                    page_fragment: false,
+                    model_cell_index: Some(cell_enum_idx as u32),
+                    model_para_range: None,
+                }),
+                BoundingBox::new(cell_x, cell_y, cell_w, cell_h),
+            );
+
+            // 셀 BorderFill
+            let border_style = if cell.border_fill_id > 0 {
+                let idx = (cell.border_fill_id as usize).saturating_sub(1);
+                styles.border_styles.get(idx)
+            } else {
+                None
+            };
+
+            // 셀 배경
+            let fill_color = border_style.and_then(|bs| bs.fill_color);
+            let gradient = border_style.and_then(|bs| bs.gradient.clone());
+            if fill_color.is_some() || gradient.is_some() {
+                let rect_id = tree.next_id();
+                let rect_node = RenderNode::new(
+                    rect_id,
+                    RenderNodeType::Rectangle(RectangleNode::new(
+                        0.0,
+                        ShapeStyle {
+                            fill_color,
+                            stroke_color: None,
+                            stroke_width: 0.0,
+                            ..Default::default()
+                        },
+                        gradient,
+                    )),
+                    BoundingBox::new(cell_x, cell_y, cell_w, cell_h),
+                );
+                cell_node.children.push(rect_node);
+            }
+
+            // 셀 테두리를 엣지 그리드에 수집
+            if let Some(bs) = border_style {
+                collect_cell_borders(
+                    &mut h_edges,
+                    &mut v_edges,
+                    c,
+                    r,
+                    cell.col_span as usize,
+                    cell.row_span as usize,
+                    &bs.borders,
+                );
+            }
+            mark_cell_span_interior_covered(
+                &mut h_span_covered,
+                &mut v_span_covered,
+                c,
+                r,
+                cell.col_span as usize,
+                cell.row_span as usize,
+            );
+
+            // 셀 패딩 (apply_inner_margin 고려)
+            let (mut pad_left, mut pad_right, pad_top, pad_bottom) =
+                self.resolve_stored_nested_cell_padding(cell, table, styles);
+
+            // 셀 내 문단 레이아웃
+            let composed_paras: Vec<_> = cell
+                .paragraphs
+                .iter()
+                .map(|p| crate::renderer::composer::compose_paragraph_in_context(p, styles))
+                .collect();
+
+            // 텍스트 오버플로우 시 좌우 패딩 축소
+            let (new_pl, new_pr) = self.shrink_cell_padding_for_overflow(
+                pad_left,
+                pad_right,
+                cell_w,
+                (cell_h - pad_top - pad_bottom).max(0.0),
+                &composed_paras,
+                &cell.paragraphs,
+                styles,
+                cell.apply_inner_margin,
+                cell.line_wrap == crate::model::table::CELL_LINE_WRAP_SQUEEZE,
+            );
+            pad_left = new_pl;
+            pad_right = new_pr;
+
+            let inner_x = cell_x + pad_left;
+            let inner_width = crate::renderer::composer::cell_inner_text_width(
+                frame_cell_w,
+                pad_left,
+                pad_right,
+                self.dpi,
+            );
+            let inner_height = (cell_h - pad_top - pad_bottom).max(0.0);
+            let has_nested = cell
+                .paragraphs
+                .iter()
+                .any(|p| p.controls.iter().any(|c| matches!(c, Control::Table(_))));
+            let total_content_height = if has_nested {
+                let last_seg_end: i32 = cell
+                    .paragraphs
+                    .iter()
+                    .flat_map(|p| p.line_segs.last())
+                    .map(|s| s.vertical_pos + s.line_height)
+                    .max()
+                    .unwrap_or(0);
+                hwpunit_to_px(last_seg_end, self.dpi)
+                    .max(self.calc_composed_paras_content_height(
+                        &composed_paras,
+                        &cell.paragraphs,
+                        styles,
+                    ))
+                    .max(self.calc_nested_controls_bottom_height(
+                        &composed_paras,
+                        &cell.paragraphs,
+                        styles,
+                    ))
+            } else {
+                self.calc_composed_paras_content_height(&composed_paras, &cell.paragraphs, styles)
+            };
+            // [#6630] 세로 가운데/아래 셀: 첫 문단의 위 여백(저장 vpos 상한)을 정렬 계산에 넣는다.
+            // 중첩 표가 있으면 저장 줄 끝(last_seg_end)이 그 값을 이미 품는다.
+            let first_para_lead = if has_nested || matches!(cell.vertical_align, VerticalAlign::Top)
+            {
+                0.0
+            } else {
+                cell.paragraphs
+                    .first()
+                    .map(|p| {
+                        let sb = styles
+                            .para_styles
+                            .get(p.para_shape_id as usize)
+                            .map(|s| s.spacing_before)
+                            .unwrap_or(0.0);
+                        crate::renderer::cell_first_para_stored_lead(p, sb, self.dpi)
+                    })
+                    .unwrap_or(0.0)
+            };
+            let text_y_start = match cell.vertical_align {
+                VerticalAlign::Top => cell_y + pad_top,
+                VerticalAlign::Center => {
+                    cell_y
+                        + pad_top
+                        + (inner_height - total_content_height - first_para_lead).max(0.0) / 2.0
+                }
+                VerticalAlign::Bottom => {
+                    cell_y
+                        + pad_top
+                        + (inner_height - total_content_height - first_para_lead).max(0.0)
+                }
+            };
+            let inner_area = LayoutRect {
+                x: inner_x,
+                y: text_y_start,
+                width: inner_width,
+                height: inner_height,
+            };
+
+            let mut para_y = text_y_start;
+            let para_count = composed_paras.len();
+            let cell_idx = cell_enum_idx;
+            for (pidx, (composed, para)) in composed_paras
+                .iter()
+                .zip(cell.paragraphs.iter())
+                .enumerate()
+            {
+                let para_y_before_compose = para_y;
+                // enclosing context가 있으면 글상자 경로 + 표 셀 경로를 합성
+                let cell_ctx = enclosing_ctx.map(|(sec_idx, para_idx, parent_path, table_ci)| {
+                    let mut path = parent_path.to_vec();
+                    path.push(CellPathEntry {
+                        control_index: table_ci,
+                        cell_index: cell_idx,
+                        cell_para_index: pidx,
+                        text_direction: cell.text_direction,
+                    });
+                    (
+                        sec_idx,
+                        para_idx,
+                        CellContext {
+                            in_textbox: false,
+                            parent_para_index: para_idx,
+                            path,
+                        },
+                    )
+                });
+                let (sec_for_layout, para_for_layout, ctx) = match cell_ctx {
+                    Some((s, p, c)) => (s, pidx, Some(c)),
+                    None => (0, 0, None),
+                };
+                let numbered_comp = self.apply_paragraph_numbering(Some(composed), para, styles, 0);
+                let composed_for_layout = numbered_comp.as_ref().unwrap_or(composed);
+                para_y = self.layout_composed_paragraph(
+                    tree,
+                    &mut cell_node,
+                    composed_for_layout,
+                    styles,
+                    &inner_area,
+                    para_y,
+                    0,
+                    composed.lines.len(),
+                    sec_for_layout,
+                    para_for_layout,
+                    ctx.clone(),
+                    // [#6630] 첫 문단에 위 여백(저장 vpos 상한)이 있으면 column-top 규칙을 허용해
+                    // 정렬 계산(`first_para_lead`)과 같은 값을 두게 한다.
+                    !matches!(cell.vertical_align, VerticalAlign::Top)
+                        && !(pidx == 0 && first_para_lead > 0.0),
+                    pidx + 1 == para_count,
+                    0.0,
+                    None,
+                    Some(para),
+                    Some(bin_data_content),
+                    None, // 셀 컨텍스트 — wrap zone 무관
+                );
+
+                // 셀 내 그림/도형 컨트롤 렌더링
+                for (ctrl_idx, ctrl) in para.controls.iter().enumerate() {
+                    match ctrl {
+                        Control::Picture(pic) => {
+                            let pic_w = hwpunit_to_px(pic.common.width as i32, self.dpi);
+                            let pic_h = hwpunit_to_px(pic.common.height as i32, self.dpi);
+                            // 셀 내부에 맞추어 크기 제한
+                            let fit_w = pic_w.min(inner_width);
+                            let fit_h = if pic_w > 0.0 {
+                                pic_h * (fit_w / pic_w)
+                            } else {
+                                pic_h
+                            };
+                            // TAC: 문단 시작 위치 (표의 왼쪽 상단)
+                            let pic_x = inner_x;
+                            // 셀 안의 빈-control stream은 control마다 8 unit을 보존한다.
+                            // 앞선 InFrontOfText 주석 뒤의 TAC 그림은 두 번째 저장 줄을
+                            // 소유할 수 있으므로, 첫 줄을 고정으로 쓰면 그림만 1600HU
+                            // 위로 올라간다(#7333 p40~47). 본문 TAC와 같은 사영으로 실제
+                            // control 소유 줄을 고른다.
+                            let picture_line = super::control_line_seg_index(para, ctrl_idx);
+                            // [hwpx-cowork] 떠 있는 문단 기준 그림이 첫 저장 줄을 밀어 내렸으면 그림 원점은
+                            // 그 줄이 아니라 문단 위다(`stored_head_float_pushdown_hu`).
+                            let head_pushdown_px = if !pic.common.treat_as_char
+                                && picture_line == Some(0)
+                                && matches!(
+                                    pic.common.vert_rel_to,
+                                    crate::model::shape::VertRelTo::Para
+                                ) {
+                                crate::renderer::layout::stored_head_float_pushdown_hu(
+                                    pidx.checked_sub(1).and_then(|i| cell.paragraphs.get(i)),
+                                    para,
+                                )
+                                .map(|hu| hwpunit_to_px(hu, self.dpi))
+                                .unwrap_or(0.0)
+                            } else {
+                                0.0
+                            };
+                            // [#8427] 문단 기준(vert=문단, 위 정렬) 비-TAC 그림은 줄이 아니라 문단
+                            // 원점(앞 간격 전)에서 세로 오프셋만큼 놓는다 — 같은 셀의 도형 경로
+                            // (`para_y_before_compose`)와 같은 기준이다.
+                            let para_relative_float = !pic.common.treat_as_char
+                                && matches!(
+                                    pic.common.vert_rel_to,
+                                    crate::model::shape::VertRelTo::Para
+                                )
+                                && matches!(
+                                    pic.common.vert_align,
+                                    crate::model::shape::VertAlign::Top
+                                        | crate::model::shape::VertAlign::Inside
+                                );
+                            let pic_y = if para_relative_float {
+                                para_y_before_compose
+                                    + hwpunit_to_px(pic.common.vertical_offset as i32, self.dpi)
+                            } else if let Some(line) =
+                                picture_line.and_then(|line| para.line_segs.get(line))
+                            {
+                                cell_y + pad_top + hwpunit_to_px(line.vertical_pos, self.dpi)
+                                    - head_pushdown_px
+                            } else {
+                                para_y - fit_h
+                            };
+                            // [hwpx-cowork] 글자처럼 취급하지 않는 그림은 줄 자리가 아니라 칸 안 떠 있는
+                            // 개체 규칙(vendor/README 72, `nested_float_origin_x`)으로 놓는다 — 가로는
+                            // 칸 글 영역·칸 상자 기준 정렬·오프셋·바깥 여백, 세로는 문단 위 + 오프셋 +
+                            // 바깥 위여백, 크기는 줄이지 않는다. 종전에는 글자처럼 문단 줄 끝 − 그림
+                            // 높이에 놓아 글상자 안 표 칸의 그림이 칸 위로 54px 떴다(조판 회귀 2026-11-03).
+                            let hc_float = (!pic.common.treat_as_char
+                                && !self.hc_is_page_escaped(&pic.common))
+                                .then(|| {
+                                    let ps = styles.para_styles.get(para.para_shape_id as usize);
+                                    let frame = crate::renderer::float_placement::NestedFloatFrame {
+                                        text_x: inner_x,
+                                        text_w: inner_width,
+                                        box_x: cell_x,
+                                        box_w: cell_w,
+                                        para_margin_left: ps.map(|s| s.margin_left).unwrap_or(0.0),
+                                        para_margin_right: ps
+                                            .map(|s| s.margin_right)
+                                            .unwrap_or(0.0),
+                                    };
+                                    crate::renderer::float_placement::nested_float_origin_x(
+                                        &pic.common,
+                                        pic_w,
+                                        hwpunit_to_px(i32::from(pic.common.margin.left), self.dpi),
+                                        hwpunit_to_px(i32::from(pic.common.margin.right), self.dpi),
+                                        &frame,
+                                        self.dpi,
+                                    )
+                                })
+                                .flatten()
+                                .map(|x| {
+                                    let y = para_y_before_compose
+                                        + crate::renderer::float_placement::nested_float_vertical_offset(
+                                            &pic.common,
+                                            self.dpi,
+                                        )
+                                        + hwpunit_to_px(i32::from(pic.common.margin.top), self.dpi);
+                                    (x, y)
+                                })
+                                // 세로 기준이 쪽·종이면 칸을 벗어나 쪽 좌표에 놓는다.
+                                .or_else(|| self.hc_page_escaped_origin(&pic.common, pic_w, pic_h));
+                            let (pic_x, pic_y, fit_w, fit_h) = match hc_float {
+                                Some((x, y)) => (x, y, pic_w, pic_h),
+                                None => (pic_x, pic_y, fit_w, fit_h),
+                            };
+
+                            let bin_id = pic.image_attr.bin_data_id;
+                            let img_data = find_bin_data_bytes(bin_data_content, bin_id);
+                            // [#5728] 그림 자르기(imgClip)를 본문/묶음 경로(#5568)와
+                            // 동일하게 싣는다 — 빠뜨리면 원본 전체가 대상 상자에
+                            // 압착된다(비율 파괴). 렌더러 crop 분기는 이 두 필드만
+                            // 소비한다.
+                            let crop = pic.render_crop_rect();
+                            let original_size_hu = pic.crop_reference_size();
+                            let img_node_id = tree.next_id();
+                            // [Task #1151 v4] 셀 안 inline picture 의 cell context + outer
+                            // 정보 보존. rendering.rs:1495 의 Image JSON 직렬화 에 cellIdx/
+                            // cellParaIdx 노출 → studio findPictureAtClick / cursor_rect hit-test
+                            // 가 인식. enclosing_ctx 에서 section / outer paragraph / outer table
+                            // control 인덱스 추출. ctrl_idx 는 셀 paragraph 안의 picture 인덱스.
+                            // [Task #1161] 전체 다단계 경로(중첩 표 포함)를 먼저 구성해
+                            // ImageNode.cell_context 와 inline_shape_position 등록에 공유.
+                            // 단일 레벨 스칼라(cell_index/cell_para_index/outer_table_control_index)
+                            // 는 이 경로의 innermost 투영으로 유지(하위호환).
+                            let cell_ctx =
+                                enclosing_ctx.map(|(_, outer_pi, parent_path, table_ci)| {
+                                    let mut path = parent_path.to_vec();
+                                    path.push(CellPathEntry {
+                                        control_index: table_ci,
+                                        cell_index: cell_idx,
+                                        cell_para_index: pidx,
+                                        text_direction: cell.text_direction,
+                                    });
+                                    CellContext {
+                                        in_textbox: false,
+                                        parent_para_index: outer_pi,
+                                        path,
+                                    }
+                                });
+                            // [#5727] 문단 레이아웃(빈 줄 TAC 경로 등)이 이미 그리고
+                            // 등록한 그림은 다시 밀어넣지 않는다 — 이중 렌더 방지.
+                            if let (Some((sec_idx, outer_pi, _, _)), Some(cctx)) =
+                                (enclosing_ctx, cell_ctx.as_ref())
+                            {
+                                if tree
+                                    .get_inline_shape_position(
+                                        sec_idx,
+                                        outer_pi,
+                                        ctrl_idx,
+                                        Some(cctx),
+                                    )
+                                    .is_some()
+                                {
+                                    continue;
+                                }
+                            }
+                            let img_node = RenderNode::new(
+                                img_node_id,
+                                RenderNodeType::Image(ImageNode {
+                                    bin_data_id: bin_id,
+                                    data: img_data,
+                                    hancom2024_print_bitmap: false,
+                                    section_index: enclosing_ctx.map(|(s, _, _, _)| s),
+                                    para_index: enclosing_ctx.map(|(_, p, _, _)| p),
+                                    control_index: Some(ctrl_idx),
+                                    fill_mode: None,
+                                    original_size: None,
+                                    transform: crate::renderer::image_geometry::picture_transform(
+                                        pic,
+                                    ),
+                                    crop,
+                                    original_size_hu,
+                                    effect: pic.image_attr.effect,
+                                    brightness: pic.image_attr.brightness,
+                                    contrast: pic.image_attr.contrast,
+                                    opacity: pic.image_attr.opacity(),
+                                    text_wrap: None,
+                                    external_path: pic.image_attr.external_path.clone(),
+                                    header_footer_ref: None,
+                                    cell_index: Some(cell_idx),
+                                    cell_para_index: Some(pidx),
+                                    outer_table_control_index: enclosing_ctx
+                                        .map(|(_, _, _, table_ci)| table_ci),
+                                    cell_context: cell_ctx.clone(),
+                                    pre_rotation_ratio:
+                                        crate::renderer::image_geometry::picture_pre_rotation_ratio(
+                                            pic,
+                                        ),
+                                    source_rect:
+                                        crate::renderer::image_geometry::picture_source_rect(pic),
+                                    content_inset:
+                                        crate::renderer::layout::utils::picture_content_inset(pic),
+                                }),
+                                BoundingBox::new(pic_x, pic_y, fit_w, fit_h),
+                            );
+                            cell_node.children.push(img_node);
+                            // [Task #1151 v4] 셀 안 inline picture 의 위치를 inline_shape_positions
+                            // 에 등록. cursor_rect.rs 의 hit-test 루프가 이 등록 없이는 picture 클릭을
+                            // 인식하지 못해 (키보드 입력으로 paragraph_layout 의 다른 path 가 등록할
+                            // 때까지) 첫 클릭 무반응. enclosing_ctx 가 Some 인 경우만 (셀 컨텍스트 있음).
+                            if let (Some((sec_idx, outer_pi, _, _)), Some(cell_ctx)) =
+                                (enclosing_ctx, cell_ctx.as_ref())
+                            {
+                                tree.set_inline_shape_position(
+                                    sec_idx,
+                                    outer_pi,
+                                    ctrl_idx,
+                                    Some(cell_ctx),
+                                    pic_x,
+                                    pic_y,
+                                );
+                            }
+                        }
+                        Control::Shape(shape) => {
+                            let para_alignment = styles
+                                .para_styles
+                                .get(para.para_shape_id as usize)
+                                .map(|style| style.alignment)
+                                .unwrap_or(Alignment::Left);
+                            let mut shape_y = if shape.common().treat_as_char {
+                                para.line_segs
+                                    .first()
+                                    .map_or(para_y_before_compose, |first_ls| {
+                                        cell_y
+                                            + pad_top
+                                            + hwpunit_to_px(first_ls.vertical_pos, self.dpi)
+                                    })
+                            } else if matches!(
+                                shape.common().vert_rel_to,
+                                crate::model::shape::VertRelTo::Para
+                            ) {
+                                para_y_before_compose
+                            } else {
+                                para_y
+                            };
+                            let mut shape_area = inner_area;
+                            let mut shape_alignment = para_alignment;
+                            if shape.common().treat_as_char {
+                                // Match the gap reserved by paragraph layout. Empty cell lines
+                                // defer TAC placement here, so retain their source-line ownership.
+                                let (shape_x, inline_y) = tree
+                                    .get_inline_shape_position(
+                                        sec_for_layout,
+                                        para_for_layout,
+                                        ctrl_idx,
+                                        ctx.as_ref(),
+                                    )
+                                    .unwrap_or_else(|| {
+                                        let line = super::control_line_seg_index(para, ctrl_idx)
+                                            .unwrap_or(0);
+                                        let mut preceding_width = 0.0;
+                                        let mut line_width = 0.0;
+                                        for &(_, width, ci) in &composed.tac_controls {
+                                            if super::control_line_seg_index(para, ci).unwrap_or(0)
+                                                == line
+                                            {
+                                                let width = hwpunit_to_px(width, self.dpi);
+                                                line_width += width;
+                                                if ci < ctrl_idx {
+                                                    preceding_width += width;
+                                                }
+                                            }
+                                        }
+                                        let align_offset = match para_alignment {
+                                            Alignment::Center | Alignment::Distribute => {
+                                                (inner_area.width - line_width).max(0.0) / 2.0
+                                            }
+                                            Alignment::Right => {
+                                                (inner_area.width - line_width).max(0.0)
+                                            }
+                                            _ => 0.0,
+                                        };
+                                        let y = para.line_segs.get(line).map_or(
+                                            para_y_before_compose,
+                                            |seg| {
+                                                cell_y
+                                                    + pad_top
+                                                    + hwpunit_to_px(seg.vertical_pos, self.dpi)
+                                            },
+                                        );
+                                        (inner_area.x + align_offset + preceding_width, y)
+                                    });
+                                shape_area.x = shape_x;
+                                shape_area.width =
+                                    hwpunit_to_px(shape.common().width as i32, self.dpi);
+                                shape_y = inline_y;
+                                shape_alignment = Alignment::Left;
+                            }
+                            let (table_cell_ctx, shape_parent_path) = match enclosing_ctx {
+                                Some((sec_idx, outer_pi, parent_path, table_ci)) => {
+                                    let mut path = parent_path.to_vec();
+                                    path.push(CellPathEntry {
+                                        control_index: table_ci,
+                                        cell_index: cell_idx,
+                                        cell_para_index: pidx,
+                                        text_direction: cell.text_direction,
+                                    });
+                                    (
+                                        Some((
+                                            sec_idx, outer_pi, table_ci, cell_idx, pidx, ctrl_idx,
+                                        )),
+                                        path,
+                                    )
+                                }
+                                None => (None, Vec::new()),
+                            };
+                            // [hwpx-cowork] 글상자 안 표 칸의 떠 있는 도형도 칸 안 떠 있는 개체 규칙
+                            // (`nested_float_origin_x`: 종이 = 칸 상자, 바깥 여백, 음수 오프셋 멈춤)과
+                            // 쪽·종이 기준 탈출(`hc_page_escaped_origin`)로 놓는다 — 그림과 같다.
+                            let hc_shape_escaped = self.hc_page_escaped_origin(
+                                shape.common(),
+                                hwpunit_to_px(shape.common().width as i32, self.dpi),
+                                hwpunit_to_px(shape.common().height as i32, self.dpi),
+                            );
+                            let hc_shape_origin = if shape.common().treat_as_char {
+                                None
+                            } else if hc_shape_escaped.is_some() {
+                                hc_shape_escaped
+                            } else {
+                                let sc = shape.common();
+                                let sw = hwpunit_to_px(sc.width as i32, self.dpi);
+                                let sh = hwpunit_to_px(sc.height as i32, self.dpi);
+                                let ps = styles.para_styles.get(para.para_shape_id as usize);
+                                let frame = crate::renderer::float_placement::NestedFloatFrame {
+                                    text_x: inner_x,
+                                    text_w: inner_width,
+                                    box_x: cell_x,
+                                    box_w: cell_w,
+                                    para_margin_left: ps.map(|s| s.margin_left).unwrap_or(0.0),
+                                    para_margin_right: ps.map(|s| s.margin_right).unwrap_or(0.0),
+                                };
+                                crate::renderer::float_placement::nested_float_origin_x(
+                                    sc,
+                                    sw,
+                                    hwpunit_to_px(i32::from(sc.margin.left), self.dpi),
+                                    hwpunit_to_px(i32::from(sc.margin.right), self.dpi),
+                                    &frame,
+                                    self.dpi,
+                                )
+                                .map(|x| {
+                                    (
+                                        x,
+                                        para_y_before_compose
+                                            + crate::renderer::float_placement::nested_float_vertical_offset(
+                                                sc, self.dpi,
+                                            )
+                                            + hwpunit_to_px(i32::from(sc.margin.top), self.dpi),
+                                    )
+                                })
+                                .or_else(|| self.hc_page_escaped_origin(sc, sw, sh))
+                            };
+                            self.layout_cell_shape_with_parent_path(
+                                tree,
+                                &mut cell_node,
+                                shape,
+                                &shape_area,
+                                shape_y,
+                                shape_alignment,
+                                para.para_shape_id,
+                                styles,
+                                bin_data_content,
+                                false,
+                                table_cell_ctx,
+                                &shape_parent_path,
+                                hc_shape_origin,
+                            );
+                        }
+                        Control::Table(nested) => {
+                            // [hwpx-cowork] 글상자 안 표 칸 속 표도 그린다 — 종전에는 이 갈래가 없어
+                            // 칸 안 표가 통째로 빠졌다(조판 회귀 2026-11-03: 글상자 안 '표 속 표'
+                            // 99회 모두 안쪽 표 없음). 글자처럼 표는 그 줄 위·문단 정렬 자리,
+                            // 떠 있는 표는 칸 안 떠 있는 개체 규칙(`nested_float_origin_x`)·쪽 탈출.
+                            let nested_path = enclosing_ctx.map(|(_, _, parent_path, table_ci)| {
+                                let mut path = parent_path.to_vec();
+                                path.push(CellPathEntry {
+                                    control_index: table_ci,
+                                    cell_index: cell_idx,
+                                    cell_para_index: pidx,
+                                    text_direction: cell.text_direction,
+                                });
+                                path
+                            });
+                            let nested_ctx = match (enclosing_ctx, nested_path.as_ref()) {
+                                (Some((sec_idx, outer_pi, _, _)), Some(path)) => {
+                                    Some((sec_idx, outer_pi, path.as_slice(), ctrl_idx))
+                                }
+                                _ => None,
+                            };
+                            let para_alignment = styles
+                                .para_styles
+                                .get(para.para_shape_id as usize)
+                                .map(|style| style.alignment)
+                                .unwrap_or(Alignment::Left);
+                            let tw = hwpunit_to_px(nested.common.width as i32, self.dpi);
+                            let th = hwpunit_to_px(nested.common.height as i32, self.dpi);
+                            let ml = hwpunit_to_px(nested.outer_margin_left as i32, self.dpi);
+                            let (nx, ny) = if nested.common.treat_as_char {
+                                let line_y = super::control_line_seg_index(para, ctrl_idx)
+                                    .and_then(|line| para.line_segs.get(line))
+                                    .map(|seg| {
+                                        cell_y + pad_top + hwpunit_to_px(seg.vertical_pos, self.dpi)
+                                    })
+                                    .unwrap_or(para_y_before_compose);
+                                let free = (inner_width - tw).max(0.0);
+                                let ax = match para_alignment {
+                                    Alignment::Center | Alignment::Distribute => free / 2.0,
+                                    Alignment::Right => free,
+                                    _ => 0.0,
+                                };
+                                (inner_x + ax + ml, line_y)
+                            } else if let Some(o) = self.hc_page_escaped_origin(&nested.common, tw, th) {
+                                o
+                            } else {
+                                let ps = styles.para_styles.get(para.para_shape_id as usize);
+                                let frame = crate::renderer::float_placement::NestedFloatFrame {
+                                    text_x: inner_x,
+                                    text_w: inner_width,
+                                    box_x: cell_x,
+                                    box_w: cell_w,
+                                    para_margin_left: ps.map(|s| s.margin_left).unwrap_or(0.0),
+                                    para_margin_right: ps.map(|s| s.margin_right).unwrap_or(0.0),
+                                };
+                                let x = crate::renderer::float_placement::nested_float_origin_x(
+                                    &nested.common,
+                                    tw,
+                                    ml,
+                                    hwpunit_to_px(nested.outer_margin_right as i32, self.dpi),
+                                    &frame,
+                                    self.dpi,
+                                )
+                                .unwrap_or(inner_x + ml);
+                                let y = para_y_before_compose
+                                    + crate::renderer::float_placement::nested_float_vertical_offset(
+                                        &nested.common,
+                                        self.dpi,
+                                    )
+                                    + hwpunit_to_px(nested.outer_margin_top as i32, self.dpi);
+                                (x, y)
+                            };
+                            self.layout_embedded_table(
+                                tree,
+                                &mut cell_node,
+                                nested,
+                                styles,
+                                &inner_area,
+                                ny,
+                                nested_ctx,
+                                bin_data_content,
+                                para_alignment,
+                                Some(nx),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            table_node.children.push(cell_node);
+        }
+
+        // 엣지 기반 테두리 렌더링
+        if table.cell_spacing > 0 {
+            let borders = render_spaced_cell_borders(
+                tree,
+                table,
+                styles,
+                &table_node.children,
+                None,
+                self.show_transparent_borders.get(),
+            );
+            table_node.children.extend(borders);
+        } else {
+            table_node.children.extend(render_edge_borders(
+                tree, &h_edges, &v_edges, &row_col_x, &row_y, table_x, table_y, None,
+            ));
+            if self.show_transparent_borders.get() {
+                table_node.children.extend(render_transparent_borders(
+                    tree,
+                    &h_edges,
+                    &v_edges,
+                    &h_span_covered,
+                    &v_span_covered,
+                    &row_col_x,
+                    &row_y,
+                    table_x,
+                    table_y,
+                ));
+            }
+        }
+
+        parent.children.push(table_node);
+        table_y + table_height
+    }
+}

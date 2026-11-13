@@ -1,0 +1,2142 @@
+//! 페이지 분할 (Pagination)
+//!
+//! IR(Document Model)의 문단 목록을 페이지 단위로 분할한다.
+//! 각 페이지에 어떤 문단(또는 문단의 일부)이 배치되는지 결정한다.
+//!
+//! 2-패스 페이지네이션:
+//! 1. HeightMeasurer로 모든 콘텐츠의 실제 렌더링 높이를 측정
+//! 2. 측정된 높이를 기반으로 정확한 페이지 분할 수행
+
+use super::composer::ComposedParagraph;
+use super::height_measurer::{HeightMeasurer, MeasuredSection};
+use super::page_layout::PageLayoutInfo;
+use super::style_resolver::ResolvedStyleSet;
+use crate::model::control::Control;
+use crate::model::footnote::{Endnote, Footnote, FootnoteShape};
+use crate::model::header_footer::HeaderFooterApply;
+use crate::model::page::{ColumnDef, PageDef};
+use crate::model::paragraph::Paragraph;
+
+/// 쪽 시작의 숨김 표식은 본문 점유가 아니다. 빈 컨트롤 호스트는 제외한다.
+pub(crate) fn page_starts_with_hidden_empty_lines(
+    para: &Paragraph,
+    items: &[PageItem],
+    hidden: &std::collections::HashSet<usize>,
+) -> bool {
+    // 저장 줄이 없는 빈 문단은 실제 줄 상자를 소유할 수 있다. 저장 쪽의
+    // 숨김 표식으로 추정하지 않고 기존 빈 문단 배치에 맡긴다.
+    !para.line_segs.is_empty()
+        // 명시 쪽·구역 나누기를 소유한 문단은 사용자가 만든 줄 상자를
+        // 유지한다. 저장 조판에서 추정한 자동 경계만 숨김 대상이 될 수 있다.
+        && (!matches!(
+            para.column_type,
+            crate::model::paragraph::ColumnBreakType::Page
+                | crate::model::paragraph::ColumnBreakType::Section
+        ) || para.page_break_synthesized)
+        && para.controls.is_empty()
+        && para
+            .text
+            .chars()
+            .all(|c| c.is_control() || c.is_whitespace())
+        && page_has_only_hidden_empty_lines(items, hidden)
+}
+
+pub(crate) fn page_has_only_hidden_empty_lines(
+    items: &[PageItem],
+    hidden: &std::collections::HashSet<usize>,
+) -> bool {
+    items.iter().all(|item| match item {
+        PageItem::FullParagraph { para_index } => hidden.contains(para_index),
+        _ => false,
+    })
+}
+
+/// 쪽 첫 빈 줄을 감춰 공간이 바뀌면 이전 조판의 자동 경계는 fit으로 재판정한다.
+/// 명시적 쪽 나누기와 개체를 소유한 문단은 저장된 경계를 유지한다.
+pub(crate) fn reconsider_synthetic_text_page_break(
+    para: &Paragraph,
+    items: &[PageItem],
+    hidden: &std::collections::HashSet<usize>,
+    hide_empty_line: bool,
+    reflow_active: bool,
+    remaining_height: f64,
+    dpi: f64,
+) -> bool {
+    hide_empty_line
+        && para.page_break_synthesized
+        && para.controls.is_empty()
+        && para.line_segs.first().is_some_and(|line| {
+            line.line_height > 0 && super::hwpunit_to_px(line.line_height, dpi) <= remaining_height
+        })
+        && (reflow_active
+            || matches!(items.first(), Some(PageItem::FullParagraph { para_index }) if hidden.contains(para_index)))
+}
+
+pub fn estimate_footnote_note_height(footnote: &Footnote, dpi: f64) -> f64 {
+    let mut height = 0.0;
+    for para in &footnote.paragraphs {
+        if para.line_segs.is_empty() {
+            height += super::hwpunit_to_px(400, dpi);
+        } else {
+            for seg in &para.line_segs {
+                height += super::hwpunit_to_px(seg.line_height, dpi);
+            }
+        }
+    }
+    if height <= 0.0 {
+        super::hwpunit_to_px(400, dpi)
+    } else {
+        height
+    }
+}
+
+pub fn footnote_separator_overhead_px(shape: &FootnoteShape, dpi: f64) -> f64 {
+    super::hwpunit_to_px(shape.separator_above_margin_hu() as i32, dpi)
+        + super::layout::border_width_to_px(shape.separator_line_width).max(0.5)
+        + super::hwpunit_to_px(shape.separator_below_margin_hu() as i32, dpi)
+}
+
+pub fn footnote_between_notes_margin_px(shape: &FootnoteShape, dpi: f64) -> f64 {
+    super::hwpunit_to_px(shape.between_notes_margin_hu() as i32, dpi)
+}
+
+/// 저장 줄이 없는 문단의 기존 inline field reset 경계를 두 엔진이 공유한다.
+/// HWP3 계보는 field reset 인코딩의 근거가 아니므로 경계를 합성하지 않는다.
+/// 해당 문단은 실제 구성 줄과 가용 공간에 따른 일반 fit/분할을 소비한다.
+pub(crate) fn missing_lineseg_fragment_boundary(
+    para: &Paragraph,
+    line_count: usize,
+    current_height: f64,
+    available: f64,
+    _trailing_line_spacing: f64,
+    source_uses_inline_field_reset: bool,
+    hwp3_converted_missing_lineseg: bool,
+) -> Option<usize> {
+    // 줄 부재와 채움 비율로 HWP5 문단의 절반을 다른 쪽 소유로 바꾸지 않는다.
+    if hwp3_converted_missing_lineseg {
+        return None;
+    }
+    let minimum_fill_ratio = 0.75;
+    let fill_height = current_height;
+    let has_visible_text = para
+        .text
+        .chars()
+        .any(|ch| ch > '\u{001F}' && ch != '\u{FFFC}');
+    let controls_are_inline_text_metadata = para
+        .controls
+        .iter()
+        .all(|control| matches!(control, Control::Field(_) | Control::Hyperlink(_)));
+    if !para.line_segs.is_empty()
+        || line_count < 4
+        || fill_height < available * minimum_fill_ratio
+        || !has_visible_text
+        || !source_uses_inline_field_reset
+        || !controls_are_inline_text_metadata
+    {
+        return None;
+    }
+
+    Some(line_count - 1)
+}
+
+/// 미주 참조
+#[derive(Debug, Clone)]
+pub struct EndnoteRef {
+    /// 미주 번호 (1-based)
+    pub number: u16,
+    /// 소속 구역 인덱스
+    pub section_index: usize,
+    /// 본문 문단 인덱스
+    pub para_index: usize,
+    /// 문단 내 컨트롤 인덱스. `cell_path` 가 비면 미주 컨트롤, 아니면 미주를 품은
+    /// 최상위 표 컨트롤이다.
+    pub control_index: usize,
+    /// [#7860] 표 셀 안 미주의 소유 경로. 비면 본문 문단의 미주다. 마지막 단계의
+    /// `control_index` 가 미주 컨트롤, 앞 단계들은 중첩 표 컨트롤을 가리킨다
+    /// (`FootnoteSource::NestedTableCell` 과 같은 규약).
+    pub cell_path: Vec<TableFootnotePathEntry>,
+}
+crate::storage::clone_fields!(EndnoteRef, {number, section_index, para_index, control_index, cell_path});
+
+impl EndnoteRef {
+    /// 같은 미주 컨트롤을 가리키는가. 한 표 셀들의 미주는 host 주소가 같으므로
+    /// 셀 경로까지 비교한다.
+    pub fn same_note(&self, other: &EndnoteRef) -> bool {
+        self.section_index == other.section_index
+            && self.para_index == other.para_index
+            && self.control_index == other.control_index
+            && same_cell_path(&self.cell_path, &other.cell_path)
+    }
+
+    /// 이 참조가 가리키는 미주 본문. `paragraphs` 는 참조가 속한 구역의 본문 문단이다.
+    pub fn resolve<'a>(&self, paragraphs: &'a [Paragraph]) -> Option<&'a Endnote> {
+        resolve_endnote_at(
+            paragraphs.get(self.para_index)?,
+            self.control_index,
+            &self.cell_path,
+        )
+    }
+}
+
+fn same_cell_path(a: &[TableFootnotePathEntry], b: &[TableFootnotePathEntry]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.cell_index == y.cell_index
+                && x.cell_para_index == y.cell_para_index
+                && x.control_index == y.control_index
+        })
+}
+
+fn resolve_endnote_at<'a>(
+    host: &'a Paragraph,
+    control_index: usize,
+    cell_path: &[TableFootnotePathEntry],
+) -> Option<&'a Endnote> {
+    let mut control = host.controls.get(control_index)?;
+    for step in cell_path {
+        let Control::Table(table) = control else {
+            return None;
+        };
+        control = table
+            .cells
+            .get(step.cell_index)?
+            .paragraphs
+            .get(step.cell_para_index)?
+            .controls
+            .get(step.control_index)?;
+    }
+    match control {
+        Control::Endnote(endnote) => Some(&**endnote),
+        _ => None,
+    }
+}
+
+/// [#7860] 본문 문단 하나가 소유한 미주를 문서 순서로 모은다. 본문 컨트롤의 미주와
+/// 표 셀(중첩 표 포함) 안 미주를 컨트롤 순서대로 내려가며 모은다. 글상자 안 미주는
+/// 아직 다루지 않는다.
+pub(crate) fn paragraph_endnote_refs(
+    section_index: usize,
+    para_index: usize,
+    para: &Paragraph,
+) -> Vec<(EndnoteRef, &Endnote)> {
+    match paragraph_endnote_refs_with_storage(
+        section_index,
+        para_index,
+        para,
+        &crate::storage::Unbounded,
+    ) {
+        Ok(v) => v,
+        Err(never) => match never {},
+    }
+}
+pub(crate) fn paragraph_endnote_refs_with_storage<'a, S: crate::storage::Storage>(
+    section_index: usize,
+    para_index: usize,
+    para: &'a Paragraph,
+    storage: &S,
+) -> Result<Vec<(EndnoteRef, &'a Endnote)>, S::Error> {
+    fn walk_with_storage<'a, S: crate::storage::Storage>(
+        controls: &'a [Control],
+        path: &mut Vec<TableFootnotePathEntry>,
+        top_control_index: Option<usize>,
+        out: &mut Vec<(usize, Vec<TableFootnotePathEntry>, &'a Endnote)>,
+        storage: &S,
+    ) -> Result<(), S::Error> {
+        for (control_index, control) in controls.iter().enumerate() {
+            match control {
+                Control::Endnote(endnote) => match top_control_index {
+                    None => storage.push(out, (control_index, Vec::new(), &**endnote))?,
+                    Some(top) => {
+                        let mut cell_path = crate::storage::try_clone(path, storage)?;
+                        if let Some(last) = cell_path.last_mut() {
+                            last.control_index = control_index;
+                        }
+                        storage.push(out, (top, cell_path, &**endnote))?;
+                    }
+                },
+                Control::Table(table) => {
+                    // 앞 단계(바깥 셀)는 이 중첩 표 컨트롤을 가리킨다.
+                    if let Some(last) = path.last_mut() {
+                        last.control_index = control_index;
+                    }
+                    let top = top_control_index.unwrap_or(control_index);
+                    for (cell_index, cell) in table.cells.iter().enumerate() {
+                        for (cell_para_index, cell_para) in cell.paragraphs.iter().enumerate() {
+                            storage.push(
+                                path,
+                                TableFootnotePathEntry {
+                                    cell_index,
+                                    cell_para_index,
+                                    control_index: usize::MAX,
+                                },
+                            )?;
+                            walk_with_storage(&cell_para.controls, path, Some(top), out, storage)?;
+                            path.pop();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    let mut found = Vec::new();
+    walk_with_storage(&para.controls, &mut Vec::new(), None, &mut found, storage)?;
+    storage.collect(
+        found
+            .into_iter()
+            .map(|(control_index, cell_path, endnote)| {
+                (
+                    EndnoteRef {
+                        number: endnote.number,
+                        section_index,
+                        para_index,
+                        control_index,
+                        cell_path,
+                    },
+                    endnote,
+                )
+            }),
+    )
+}
+
+/// [미주 배치 — END_OF_DOCUMENT] 문서 끝으로 미룬, 앞선 구역의 미주 하나.
+/// Hancom 의 `EndnoteEndOfDocument` 배치를 정합: 참조 표시(위첨자 번호)는 원래
+/// 구역 본문 흐름에 남고, 본문(body)만 마지막 구역 끝(=문서 끝)에서 렌더된다.
+/// `reff` 는 원래 참조 위치(문서 순서·번호 보존), `endnote` 는 문서 끝에서 렌더할
+/// 미주 본문(앞선 구역 paragraphs 에서 복제).
+#[derive(Debug, Clone)]
+pub struct DeferredEndnote {
+    pub reff: EndnoteRef,
+    pub endnote: crate::model::footnote::Endnote,
+}
+crate::storage::clone_fields!(DeferredEndnote, {reff, endnote});
+
+/// 이 구역의 미주를 어떻게 배치할지 (Hancom: EndnoteEndOfSection vs EndnoteEndOfDocument).
+pub enum EndnoteDeferral<'a> {
+    /// 기본: 이 구역 미주를 구역 끝에 렌더 (END_OF_SECTION, 그리고 단일 구역
+    /// END_OF_DOCUMENT — 구역 끝 ≡ 문서 끝이라 결과 동일).
+    None,
+    /// END_OF_DOCUMENT, 마지막이 아닌 구역: 본문 렌더를 억제(참조 표시는 인라인
+    /// 유지)하고 미주 본문은 문서 끝으로 미룬다.
+    Suppress,
+    /// END_OF_DOCUMENT, 마지막 구역: 앞선 구역들의 미주 본문(문서 순서)에 이어
+    /// 이 구역 미주를 모두 문서 끝에 렌더한다.
+    RenderAll(&'a [DeferredEndnote]),
+}
+
+/// 렌더용으로 가상 삽입된 미주 문단의 원본 위치.
+#[derive(Debug, Clone)]
+pub struct EndnoteParaSource {
+    /// 소속 구역 인덱스
+    pub section_index: usize,
+    /// 원본 Endnote 컨트롤이 있는 본문 문단 인덱스
+    pub para_index: usize,
+    /// 본문 문단 내 Endnote 컨트롤 인덱스(셀 안 미주면 최상위 표 컨트롤 인덱스)
+    pub control_index: usize,
+    /// [#7860] 표 셀 안 미주의 소유 경로(`EndnoteRef::cell_path` 와 같은 규약)
+    pub cell_path: Vec<TableFootnotePathEntry>,
+    /// Endnote 내부 문단 인덱스
+    pub note_para_index: usize,
+    /// 줄의 물리 합집합을 재발행하면서 같은 전진 안에서 이미 소비한 후행 간격.
+    /// 원본 파일 속성이 아니라 fit과 배치가 공유하는 미주 끝줄의 투영 결과다.
+    pub tail_leading_consumed_hu: i32,
+}
+crate::storage::clone_fields!(EndnoteParaSource, {section_index, para_index, control_index, cell_path, note_para_index, tail_leading_consumed_hu});
+
+impl EndnoteParaSource {
+    /// 같은 미주 컨트롤에서 나온 문단인가(내부 문단 번호는 보지 않는다).
+    pub fn same_note(&self, other: &EndnoteParaSource) -> bool {
+        self.section_index == other.section_index
+            && self.para_index == other.para_index
+            && self.control_index == other.control_index
+            && same_cell_path(&self.cell_path, &other.cell_path)
+    }
+}
+
+/// 페이지 분할 결과: 페이지별 콘텐츠 참조
+#[derive(Debug)]
+pub struct PaginationResult {
+    /// 페이지별 콘텐츠 목록
+    pub pages: Vec<PageContent>,
+    /// 어울림 배치 표와 나란히 배치되는 빈 리턴 문단 목록 (전체)
+    pub wrap_around_paras: Vec<WrapAroundPara>,
+    /// 빈 줄 감추기로 높이 0 처리된 문단 인덱스 집합
+    pub hidden_empty_paras: std::collections::HashSet<usize>,
+    /// [Task #1755] 지연 이월 표의 host 텍스트 줄이 typeset 에서 이월 전 쪽에
+    /// PartialParagraph 로 pre-emit 된 문단 집합 — layout 의 마지막 fragment 뒤
+    /// host 렌더(`render_deferred_rowbreak_host_text_after`) 이중 렌더 억제용.
+    pub pre_emitted_host_paras: std::collections::HashSet<usize>,
+    /// [#2015] pre-emit 한 host 텍스트 높이(px). layout 이 vert_offset 이중계상을 보정할 때 사용.
+    pub pre_emitted_host_heights: std::collections::HashMap<usize, f64>,
+    /// [#7418] pre-emit 한 host 글의 내용 높이(px, 마지막 줄간격 제외).
+    pub pre_emitted_host_content_heights: std::collections::HashMap<usize, f64>,
+    /// 섹션별 미주 목록 (문서 끝 또는 섹션 끝에 렌더)
+    pub endnotes: Vec<EndnoteRef>,
+    /// [Task #836] 미주 paragraphs (endnote_para_base + idx 로 lookup)
+    pub endnote_paragraphs: Vec<crate::model::paragraph::Paragraph>,
+    /// `endnote_paragraphs` 각 항목의 원본 Endnote 내부 위치.
+    pub endnote_para_sources: Vec<EndnoteParaSource>,
+    /// 가상 미주 문단의 표 측정. 분할과 실제 배치가 같은 행 기하를 소비한다.
+    pub endnote_measured_tables: Vec<super::height_measurer::MeasuredTable>,
+    /// [Task #1246] 현재 섹션 미주의 between-notes 마진(HU, 0=미적용). HeightCursor 가 미주 사이
+    /// min-gap 보정에 사용.
+    pub endnote_between_notes_hu: i32,
+    /// 현재 섹션 미주의 정규화된 "구분선 위" 마진(HU).
+    pub endnote_separator_above_hu: i32,
+    /// 현재 섹션 미주의 정규화된 "구분선 아래" 마진(HU).
+    pub endnote_separator_below_hu: i32,
+}
+
+/// 한 페이지에 배치될 콘텐츠
+#[derive(Debug, Clone)]
+pub struct PageContent {
+    /// 페이지 인덱스 (0-based)
+    pub page_index: u32,
+    /// 실제 쪽 번호 (NewNumber 반영, 1-based)
+    pub page_number: u32,
+    /// 소속 구역 인덱스
+    pub section_index: usize,
+    /// 페이지 레이아웃 정보
+    pub layout: PageLayoutInfo,
+    /// 단별 콘텐츠
+    pub column_contents: Vec<ColumnContent>,
+    /// 이 페이지에 적용할 머리말 (None이면 머리말 없음)
+    pub active_header: Option<HeaderFooterRef>,
+    /// 이 페이지에 적용할 꼬리말 (None이면 꼬리말 없음)
+    pub active_footer: Option<HeaderFooterRef>,
+    /// 이 페이지에서 `새 번호로 시작`(NewNumber)이 발화해 `page_number` 가 재설정됐는지.
+    ///
+    /// 재시작 값은 절대값이므로 이 페이지부터는 구역 간 쪽번호 carry 를 더하면 안 된다
+    /// (Issue #6206 — 표 셀 안 `newNum` 이 carry 판정에서도 누락돼 재시작 값에 carry 가
+    /// 얹혔다).
+    pub page_number_restarted: bool,
+    /// 쪽 번호 위치 (None이면 쪽 번호 표시 안 함)
+    pub page_number_pos: Option<crate::model::control::PageNumberPos>,
+    /// 감추기 설정 (None이면 감추기 없음)
+    pub page_hide: Option<crate::model::control::PageHide>,
+    /// 이 페이지에 배치될 각주 목록
+    pub footnotes: Vec<FootnoteRef>,
+    /// 이 페이지에 적용할 바탕쪽 (None이면 바탕쪽 없음)
+    pub active_master_page: Option<MasterPageRef>,
+    /// 확장 바탕쪽 (임의 쪽 등, 기본 바탕쪽에 추가로 적용)
+    pub extra_master_pages: Vec<MasterPageRef>,
+    /// [#5699 H1] 이 쪽에서 typeset 이 "사다리-미계상 표 밴드" 자기모순을 판별해
+    /// 실높이로 교정한 표들 `(para_index, control_index)`. 렌더러는 이 표들 뒤의
+    /// 저장 vpos 후방 스냅을 페인트된 밴드 아래로 막는다 — typeset 판정과 렌더
+    /// 판정이 갈라지지 않도록 신호를 명시 전달한다(tac-img-02 비대칭 발동 실측).
+    pub ladder_band_tables: Vec<(usize, usize)>,
+}
+crate::storage::clone_fields!(PageContent, {page_index, page_number, section_index, layout, column_contents, active_header, active_footer, page_number_restarted, page_number_pos, page_hide, footnotes, active_master_page, extra_master_pages, ladder_band_tables});
+
+/// 바탕쪽 참조
+#[derive(Debug, Clone)]
+pub struct MasterPageRef {
+    /// 구역 인덱스
+    pub section_index: usize,
+    /// master_pages 배열 내 인덱스
+    pub master_page_index: usize,
+}
+crate::storage::clone_fields!(MasterPageRef, {section_index, master_page_index});
+
+/// 표 셀 안에 중첩된 머리말/꼬리말 컨트롤로 내려가는 경로 한 단계.
+///
+/// 최상위 문단 → 표 → 셀 → 셀 문단 순으로 내려간다. 여러 단계가 쌓이면
+/// 표 안의 표처럼 다중 중첩도 표현할 수 있다.
+#[derive(Debug, Clone)]
+pub struct HeaderFooterTableStep {
+    /// 바깥 controls 리스트에서 Table 컨트롤의 인덱스
+    pub table_control_index: usize,
+    /// 표 셀 인덱스
+    pub cell_index: usize,
+    /// 셀 내부 문단 인덱스
+    pub cell_para_index: usize,
+}
+crate::storage::clone_fields!(HeaderFooterTableStep, {table_control_index, cell_index, cell_para_index});
+
+/// 머리말/꼬리말 참조
+#[derive(Debug, Clone)]
+pub struct HeaderFooterRef {
+    /// Header/Footer 컨트롤이 있는 (최상위) 문단 인덱스
+    pub para_index: usize,
+    /// Header/Footer 컨트롤이 위치한 (가장 안쪽) controls 리스트 내 인덱스
+    pub control_index: usize,
+    /// Header/Footer 컨트롤이 속한 구역 인덱스 (구역 간 상속 시 원본 구역 추적용)
+    pub source_section_index: usize,
+    /// 표 셀 안에 중첩된 경우의 경로. 비어 있으면 최상위 문단 직속 컨트롤.
+    ///
+    /// HWP 시험지(예: 수능 수학 선택과목 소책자)는 4쪽짜리 소책자의 4쪽 머리말을
+    /// 제목표(1x1 표) 셀 안에 정의하기도 한다. 이 경로가 없으면 그 머리말이
+    /// 수집되지 않아 4쪽 쪽번호가 2쪽 머리말로 대체돼 잘못 표시된다.
+    pub table_path: Vec<HeaderFooterTableStep>,
+}
+crate::storage::clone_fields!(HeaderFooterRef, {para_index, control_index, source_section_index, table_path});
+
+/// 두 조판 경로가 공유하는 구역의 마지막 쪽번호 위치 선언이다.
+pub(crate) fn collect_page_number_pos(
+    paragraphs: &[crate::model::paragraph::Paragraph],
+) -> Option<crate::model::control::PageNumberPos> {
+    // 쪽번호 위치는 표 셀 안에 저장돼도 구역의 출력 컨트롤이다.
+    // 최상위 문단의 기존 마지막 선언 선택을 셀의 소스 순서까지 확장한다.
+    // 머리말/꼬리말 내용 자체를 구역 선언으로 끌어올리지는 않는다.
+    paragraphs.iter().rev().find_map(|para| {
+        para.controls
+            .iter()
+            .rev()
+            .find_map(|control| match control {
+                Control::PageNumberPos(pos) => Some(pos.clone()),
+                Control::Table(table) => table
+                    .cells
+                    .iter()
+                    .rev()
+                    .find_map(|cell| collect_page_number_pos(&cell.paragraphs)),
+                _ => None,
+            })
+    })
+}
+
+/// 머리말/꼬리말/쪽 번호 위치 컨트롤 수집
+pub(crate) fn collect_header_footer_controls_with_storage<S: crate::storage::Storage>(
+    paragraphs: &[Paragraph],
+    section_index: usize,
+    storage: &S,
+) -> Result<
+    (
+        Vec<(usize, HeaderFooterRef, bool, HeaderFooterApply)>,
+        Option<crate::model::control::PageNumberPos>,
+    ),
+    S::Error,
+> {
+    let mut hf_entries = Vec::new();
+    let page_number_pos = crate::renderer::pagination::collect_page_number_pos(paragraphs);
+    for (pi, para) in paragraphs.iter().enumerate() {
+        for (ci, control) in para.controls.iter().enumerate() {
+            match control {
+                Control::Header(h) => {
+                    let r = HeaderFooterRef {
+                        para_index: pi,
+                        control_index: ci,
+                        source_section_index: section_index,
+                        table_path: Vec::new(),
+                    };
+                    storage.push(&mut hf_entries, (pi, r, true, h.apply_to))?;
+                }
+                Control::Footer(f) => {
+                    let r = HeaderFooterRef {
+                        para_index: pi,
+                        control_index: ci,
+                        source_section_index: section_index,
+                        table_path: Vec::new(),
+                    };
+                    storage.push(&mut hf_entries, (pi, r, false, f.apply_to))?;
+                }
+                Control::Table(table) => {
+                    crate::renderer::pagination::collect_nested_header_footer_controls_with_storage(
+                        table,
+                        pi,
+                        section_index,
+                        ci,
+                        &[],
+                        &mut hf_entries, storage)?;
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok((hf_entries, page_number_pos))
+}
+
+/// 표 셀 안에 중첩된 Header/Footer 컨트롤을 재귀적으로 수집한다.
+///
+/// `base_path` 는 바깥 문단에서 `table` 까지 내려온 경로(마지막 단계의 셀/문단은
+/// 이 함수 안에서 채운다). 수집된 항목은 최상위 문단 인덱스 `pi` 를 그대로 써서
+/// 페이지 매핑 정합성을 유지한다(PageHide 수집과 동일 규약).
+pub(crate) fn collect_nested_header_footer_controls(
+    table: &crate::model::table::Table,
+    pi: usize,
+    section_index: usize,
+    table_control_index: usize,
+    base_path: &[HeaderFooterTableStep],
+    hf_entries: &mut Vec<(usize, HeaderFooterRef, bool, HeaderFooterApply)>,
+) {
+    match collect_nested_header_footer_controls_with_storage(
+        table,
+        pi,
+        section_index,
+        table_control_index,
+        base_path,
+        hf_entries,
+        &crate::storage::Unbounded,
+    ) {
+        Ok(v) => v,
+        Err(never) => match never {},
+    }
+}
+
+pub(crate) fn collect_nested_header_footer_controls_with_storage<S: crate::storage::Storage>(
+    table: &crate::model::table::Table,
+    pi: usize,
+    section_index: usize,
+    table_control_index: usize,
+    base_path: &[HeaderFooterTableStep],
+    hf_entries: &mut Vec<(usize, HeaderFooterRef, bool, HeaderFooterApply)>,
+    storage: &S,
+) -> Result<(), S::Error> {
+    for (cell_idx, cell) in table.cells.iter().enumerate() {
+        for (cpi, cp) in cell.paragraphs.iter().enumerate() {
+            let mut path = storage.try_collect(
+                base_path
+                    .iter()
+                    .map(|step| crate::storage::try_clone(step, storage)),
+            )?;
+            storage.push(
+                &mut path,
+                HeaderFooterTableStep {
+                    table_control_index,
+                    cell_index: cell_idx,
+                    cell_para_index: cpi,
+                },
+            )?;
+            for (cci, ctrl) in cp.controls.iter().enumerate() {
+                match ctrl {
+                    Control::Header(h) => {
+                        storage.push(
+                            hf_entries,
+                            (
+                                pi,
+                                HeaderFooterRef {
+                                    para_index: pi,
+                                    control_index: cci,
+                                    source_section_index: section_index,
+                                    table_path: crate::storage::try_clone(&path, storage)?,
+                                },
+                                true,
+                                h.apply_to,
+                            ),
+                        )?;
+                    }
+                    Control::Footer(f) => {
+                        storage.push(
+                            hf_entries,
+                            (
+                                pi,
+                                HeaderFooterRef {
+                                    para_index: pi,
+                                    control_index: cci,
+                                    source_section_index: section_index,
+                                    table_path: crate::storage::try_clone(&path, storage)?,
+                                },
+                                false,
+                                f.apply_to,
+                            ),
+                        )?;
+                    }
+                    Control::Table(inner) => {
+                        collect_nested_header_footer_controls_with_storage(
+                            inner,
+                            pi,
+                            section_index,
+                            cci,
+                            &path,
+                            hf_entries,
+                            storage,
+                        )?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// `HeaderFooterRef` 가 가리키는 Header/Footer 컨트롤을 원본 문단 슬라이스에서 해석한다.
+/// `table_path` 를 따라 표 셀 안까지 내려간다.
+pub(crate) fn resolve_header_footer_control<'a>(
+    paragraphs: &'a [Paragraph],
+    hf_ref: &HeaderFooterRef,
+) -> Option<&'a Control> {
+    let mut para = paragraphs.get(hf_ref.para_index)?;
+    for step in &hf_ref.table_path {
+        let Control::Table(table) = para.controls.get(step.table_control_index)? else {
+            return None;
+        };
+        para = table
+            .cells
+            .get(step.cell_index)?
+            .paragraphs
+            .get(step.cell_para_index)?;
+    }
+    para.controls.get(hf_ref.control_index)
+}
+
+/// 쪽별 활성 머리말/꼬리말 선택기.
+///
+/// 등장한 컨트롤을 **종류별 칸에 나눠** 누적하고, 쓸 때 쪽 홀짝에 맞춰 고른다. 홀수/짝수
+/// 전용이 양 쪽보다 **더 구체적**이므로 우선한다 — 문서 안에서 어느 컨트롤이 먼저
+/// 등장했는지와 무관해야 한다.
+///
+/// 한 변수에 덮어쓰며 누적하면 "마지막에 일치한 것" 이 이기고, 그러면 양 쪽 머리말을
+/// 나중에 추가했다는 이유만으로 홀수 전용 머리말이 홀수 쪽에서 사라진다 (Task #3234).
+#[derive(Debug, Default, Clone)]
+pub struct ActiveHeaderFooter {
+    header_both: Option<HeaderFooterRef>,
+    header_even: Option<HeaderFooterRef>,
+    header_odd: Option<HeaderFooterRef>,
+    footer_both: Option<HeaderFooterRef>,
+    footer_even: Option<HeaderFooterRef>,
+    footer_odd: Option<HeaderFooterRef>,
+}
+crate::storage::clone_fields!(ActiveHeaderFooter, {header_both, header_even, header_odd, footer_both, footer_even, footer_odd});
+
+impl ActiveHeaderFooter {
+    /// `page_last_para` 까지 등장한 컨트롤을 누적한다.
+    ///
+    /// 누적은 쪽을 넘어가며 유지된다 — 머리말은 정의된 문단이 나온 쪽부터 이후 쪽에도
+    /// 계속 적용되기 때문이다.
+    pub fn accumulate(
+        &mut self,
+        entries: &[(usize, HeaderFooterRef, bool, HeaderFooterApply)],
+        page_last_para: usize,
+    ) {
+        match self.accumulate_with_storage(entries, page_last_para, &crate::storage::Unbounded) {
+            Ok(()) => (),
+            Err(never) => match never {},
+        }
+    }
+
+    pub(crate) fn accumulate_with_storage<S: crate::storage::Storage>(
+        &mut self,
+        entries: &[(usize, HeaderFooterRef, bool, HeaderFooterApply)],
+        page_last_para: usize,
+        storage: &S,
+    ) -> Result<(), S::Error> {
+        for (para_idx, hf_ref, is_header, apply_to) in entries {
+            if *para_idx > page_last_para {
+                continue;
+            }
+            let slot = match (is_header, apply_to) {
+                (true, HeaderFooterApply::Both) => &mut self.header_both,
+                (true, HeaderFooterApply::Even) => &mut self.header_even,
+                (true, HeaderFooterApply::Odd) => &mut self.header_odd,
+                (false, HeaderFooterApply::Both) => &mut self.footer_both,
+                (false, HeaderFooterApply::Even) => &mut self.footer_even,
+                (false, HeaderFooterApply::Odd) => &mut self.footer_odd,
+            };
+            *slot = Some(crate::storage::try_clone(hf_ref, storage)?);
+        }
+        Ok(())
+    }
+
+    /// 쪽 번호에 대한 활성 (머리말, 꼬리말).
+    pub fn active(&self, page_number: u32) -> (Option<HeaderFooterRef>, Option<HeaderFooterRef>) {
+        match self.active_with_storage(page_number, &crate::storage::Unbounded) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    pub(crate) fn active_with_storage<S: crate::storage::Storage>(
+        &self,
+        page_number: u32,
+        storage: &S,
+    ) -> Result<(Option<HeaderFooterRef>, Option<HeaderFooterRef>), S::Error> {
+        let is_odd = page_number % 2 == 1;
+        let pick = |odd: &Option<HeaderFooterRef>,
+                    even: &Option<HeaderFooterRef>,
+                    both: &Option<HeaderFooterRef>| {
+            let selected = if is_odd { odd } else { even };
+            crate::storage::try_clone(if selected.is_some() { selected } else { both }, storage)
+        };
+        Ok((
+            pick(&self.header_odd, &self.header_even, &self.header_both)?,
+            pick(&self.footer_odd, &self.footer_even, &self.footer_both)?,
+        ))
+    }
+}
+
+/// 표 안에서 각주까지 내려가는 실제 control 경로의 한 단계.
+/// 마지막 단계는 각주 control, 앞 단계들은 중첩 표 control을 가리킨다.
+#[derive(Debug, Clone, Copy)]
+pub struct TableFootnotePathEntry {
+    pub cell_index: usize,
+    pub cell_para_index: usize,
+    pub control_index: usize,
+}
+crate::storage::clone_copy!(TableFootnotePathEntry);
+
+/// 각주 출처 (본문 문단 또는 표 셀 내)
+#[derive(Debug, Clone)]
+pub enum FootnoteSource {
+    /// 본문 문단 내 각주
+    Body {
+        para_index: usize,
+        control_index: usize,
+    },
+    /// 표 셀 내 각주
+    TableCell {
+        para_index: usize,
+        table_control_index: usize,
+        cell_index: usize,
+        cell_para_index: usize,
+        cell_control_index: usize,
+    },
+    /// 표 셀 안의 중첩 표에 있는 각주. 최상위 host와 내부 소유 경로를 함께 보존한다.
+    NestedTableCell {
+        para_index: usize,
+        table_control_index: usize,
+        cell_path: Vec<TableFootnotePathEntry>,
+    },
+    /// 글상자(Shape TextBox) 내 각주
+    ShapeTextBox {
+        para_index: usize,
+        shape_control_index: usize,
+        tb_para_index: usize,
+        tb_control_index: usize,
+    },
+}
+impl crate::storage::CloneWithStorage for FootnoteSource {
+    fn clone_with_storage<S: crate::storage::Storage>(
+        &self,
+        storage: &S,
+    ) -> Result<Self, S::Error> {
+        match self {
+            Self::Body {
+                para_index,
+                control_index,
+            } => Ok(Self::Body {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                control_index: crate::storage::try_clone(control_index, storage)?,
+            }),
+            Self::TableCell {
+                para_index,
+                table_control_index,
+                cell_index,
+                cell_para_index,
+                cell_control_index,
+            } => Ok(Self::TableCell {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                table_control_index: crate::storage::try_clone(table_control_index, storage)?,
+                cell_index: crate::storage::try_clone(cell_index, storage)?,
+                cell_para_index: crate::storage::try_clone(cell_para_index, storage)?,
+                cell_control_index: crate::storage::try_clone(cell_control_index, storage)?,
+            }),
+            Self::NestedTableCell {
+                para_index,
+                table_control_index,
+                cell_path,
+            } => Ok(Self::NestedTableCell {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                table_control_index: crate::storage::try_clone(table_control_index, storage)?,
+                cell_path: crate::storage::try_clone(cell_path, storage)?,
+            }),
+            Self::ShapeTextBox {
+                para_index,
+                shape_control_index,
+                tb_para_index,
+                tb_control_index,
+            } => Ok(Self::ShapeTextBox {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                shape_control_index: crate::storage::try_clone(shape_control_index, storage)?,
+                tb_para_index: crate::storage::try_clone(tb_para_index, storage)?,
+                tb_control_index: crate::storage::try_clone(tb_control_index, storage)?,
+            }),
+        }
+    }
+}
+
+impl FootnoteSource {
+    pub(crate) fn table_cell_path(
+        para_index: usize,
+        table_control_index: usize,
+        cell_path: &[TableFootnotePathEntry],
+    ) -> Self {
+        match Self::table_cell_path_with_storage(
+            para_index,
+            table_control_index,
+            cell_path,
+            &crate::storage::Unbounded,
+        ) {
+            Ok(v) => v,
+            Err(never) => match never {},
+        }
+    }
+    pub(crate) fn table_cell_path_with_storage<S: crate::storage::Storage>(
+        para_index: usize,
+        table_control_index: usize,
+        cell_path: &[TableFootnotePathEntry],
+        storage: &S,
+    ) -> Result<Self, S::Error> {
+        Ok({
+            match cell_path {
+                [entry] => Self::TableCell {
+                    para_index,
+                    table_control_index,
+                    cell_index: entry.cell_index,
+                    cell_para_index: entry.cell_para_index,
+                    cell_control_index: entry.control_index,
+                },
+                _ => Self::NestedTableCell {
+                    para_index,
+                    table_control_index,
+                    cell_path: storage.copy_slice(cell_path)?,
+                },
+            }
+        })
+    }
+}
+
+/// 저장 셀/control 순서를 유지하면서 중첩 표 안의 각주도 같은 수집 경로로 반환한다.
+pub(crate) fn table_cell_footnotes(
+    table: &crate::model::table::Table,
+) -> Vec<(Vec<TableFootnotePathEntry>, &Footnote)> {
+    match table_cell_footnotes_with_storage(table, &crate::storage::Unbounded) {
+        Ok(v) => v,
+        Err(never) => match never {},
+    }
+}
+pub(crate) fn table_cell_footnotes_with_storage<'a, S: crate::storage::Storage>(
+    table: &'a crate::model::table::Table,
+    storage: &S,
+) -> Result<Vec<(Vec<TableFootnotePathEntry>, &'a Footnote)>, S::Error> {
+    fn collect<'a, S: crate::storage::Storage>(
+        table: &'a crate::model::table::Table,
+        path: &mut Vec<TableFootnotePathEntry>,
+        notes: &mut Vec<(Vec<TableFootnotePathEntry>, &'a Footnote)>,
+        storage: &S,
+    ) -> Result<(), S::Error> {
+        for (cell_index, cell) in table.cells.iter().enumerate() {
+            for (cell_para_index, para) in cell.paragraphs.iter().enumerate() {
+                for (control_index, control) in para.controls.iter().enumerate() {
+                    storage.push(
+                        path,
+                        TableFootnotePathEntry {
+                            cell_index,
+                            cell_para_index,
+                            control_index,
+                        },
+                    )?;
+                    match control {
+                        Control::Footnote(note) => {
+                            let copied = crate::storage::try_clone(path, storage)?;
+                            storage.push(notes, (copied, note))?;
+                        }
+                        Control::Table(child) => collect(child, path, notes, storage)?,
+                        _ => {}
+                    }
+                    path.pop();
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut notes = Vec::new();
+    collect(table, &mut Vec::new(), &mut notes, storage)?;
+    Ok(notes)
+}
+
+/// 한 각주를 물리 페이지 경계에서 나눈 line fragment.
+///
+/// `start_line..end_line`은 각주 안의 문단을 순서대로 compose한 뒤의 평탄 line index다.
+/// `end_line`은 끝 줄을 포함하지 않는다. 번호는 첫 조각에만 표시하며,
+/// 물리 쪽의 각주 구분선 표시는 번호와 별도로 결정한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FootnoteFragment {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub draw_separator: bool,
+    pub draw_number: bool,
+    /// [hwpx-cowork] 이 평탄 줄부터 시작하는 문단의 떠 있는 개체는 이 조각에 놓지 않는다
+    /// (앵커 줄은 이 쪽에 들어가도 개체가 넘치면 개체만 다음 쪽 각주로 — 한/글 2022).
+    pub defer_floats_from: Option<usize>,
+    /// [hwpx-cowork] 앞 조각에서 미룬 개체(이 평탄 줄 ~ 조각 시작 줄 사이 문단)를 조각 맨 위에 놓는다.
+    pub carry_floats_from: Option<usize>,
+    /// [hwpx-cowork] 2026-11-04 쪽 끝에 걸려 두 쪽으로 나뉜 각주 안 표(한/글 2022: 표 나눔 '셀 단위'·'나눔'은
+    /// 각주 안에서도 나뉜다). `None` 이면 종전처럼 통째.
+    pub float_cut: Option<FootnoteFloatCut>,
+}
+
+/// [hwpx-cowork] 2026-11-04 각주 안 표 한 개를 쪽 경계에서 자른 자리.
+///
+/// 앞 조각(`tail == false`)은 표 문단의 첫 평탄 줄 `para_line` 바로 앞에서 끝나며 그 문단의 표를
+/// 위에서 `offset_hu` 까지 그린다. 뒤 조각(`tail == true`)은 `para_line` 에서 시작하며 표를
+/// `offset_hu` 부터(반복 제목 줄이 있으면 그 아래에) 조각 맨 위에 그린다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FootnoteFloatCut {
+    pub para_line: usize,
+    pub control_index: usize,
+    pub offset_hu: i32,
+    pub tail: bool,
+}
+crate::storage::clone_copy!(FootnoteFragment);
+
+/// 페이지에 배치되는 각주 참조
+#[derive(Debug, Clone)]
+pub struct FootnoteRef {
+    /// 참조를 수용한 본문 단. 번호 순서와 물리 각주 프레임의 소유를 구분한다.
+    pub column_index: u16,
+    /// 각주 번호 (1-based)
+    pub number: u16,
+    /// 출처
+    pub source: FootnoteSource,
+    /// `None`이면 각주 전체를 그린다.
+    pub fragment: Option<FootnoteFragment>,
+}
+crate::storage::clone_fields!(FootnoteRef, {column_index, number, source, fragment});
+
+/// 다음 원본 저장 줄이 확인한 재조판 문단의 실제 소비와 단 원점.
+#[derive(Debug, Clone, Copy)]
+pub struct ParagraphOrigin {
+    pub paragraph_index: usize,
+    pub spacing_before: f64,
+    pub source_vpos_base: i32,
+    pub flow_start: f64,
+    pub flow_end: f64,
+}
+crate::storage::clone_copy!(ParagraphOrigin);
+
+/// 한 단(Column)에 배치될 콘텐츠
+#[derive(Debug, Clone)]
+pub struct ColumnContent {
+    /// 측정이 확정한 문단 원점/간격. paint는 원본 줄 부재를 다시 추정하지 않는다.
+    pub paragraph_origins: std::collections::HashMap<usize, ParagraphOrigin>,
+    /// 실제 fit에 사용한 일반 본문 구성. 전체/부분 배치가 같은 줄을 소비한다.
+    pub computed_paragraphs: std::collections::HashMap<usize, super::composer::ComposedParagraph>,
+    /// 부분 문단의 줄 범위는 이 수용된 구성의 문자 컷을 참조한다.
+    pub host_compositions:
+        std::collections::HashMap<usize, std::sync::Arc<super::composer::ComposedParagraph>>,
+    /// 저장 사다리의 기준을 수용할 때 확정한 문단 끝(단 상대 좌표).
+    /// 배치는 이후의 cursor 기준으로 같은 사다리를 다시 투영하지 않는다.
+    pub stored_paragraph_flow_ends: std::collections::HashMap<usize, f64>,
+    /// 저장 첫 줄의 앞 간격 중 쪽/단 상단에서도 유지할 것으로 확정한 몫.
+    /// fit/예약의 문단 메트릭을 그대로 배치에 전달하며 누적 vpos를 재해석하지 않는다.
+    pub stored_column_top_spacings:
+        std::collections::HashMap<usize, crate::renderer::float_placement::StoredColumnTopSpacing>,
+    /// 문단 텍스트 앞/뒤 관계로 확정한 자리차지 표 배치(단 상대 좌표).
+    pub paragraph_float_placements:
+        std::collections::HashMap<(usize, usize), super::float_placement::ParagraphFloatPlacement>,
+    /// [#7330] 같은 문단의 자리차지 표가 아래로 민 host 첫 글줄이 표 점유 끝 위에 더
+    /// 소비하는 문단 앞 간격(px, 0 이상). 측정(typeset)이 확정하고 배치(layout)가 같은 값을
+    /// 확정 앞 간격으로 소비한다. 키는 문단 인덱스이며 항목이 없으면 이 계약이 아니다.
+    pub float_pushed_line_spacings:
+        std::collections::HashMap<usize, super::float_placement::FloatPushedFirstLine>,
+    /// [#7696] 쪽·종이 기준 자리차지 그림·도형의 밴드가 밀어 확정한 문단 시작(단 상대 px).
+    /// 측정(typeset)이 확정하고 배치(layout)가 그 문단의 시작으로 소비한다.
+    pub page_band_flow_starts: std::collections::HashMap<usize, f64>,
+    /// #6812: 텍스트와 TAC 표가 공유하는 확정 줄 결과(단 상대 좌표).
+    pub inline_flow_plans: std::collections::HashMap<usize, super::inline_flow::InlineFlowPlan>,
+    /// #6812: 분할기에서 확정한 단 기준 TAC 배치. 그림 paint 순서와 무관하다.
+    pub inline_placements:
+        std::collections::HashMap<(usize, usize), super::float_placement::InlineBoxPlacement>,
+    /// 단 인덱스 (0-based)
+    pub column_index: u16,
+    /// 단 시작 시점의 논리 높이(px).
+    ///
+    /// 미주 vpos 되감김 보정은 다음 단/쪽을 음수 높이에서 시작시켜
+    /// 페이지 수를 한컴과 맞춘다. 렌더러도 같은 시작 높이를 알아야
+    /// typeset에서 허용한 항목들이 실제 그림에서 하단을 넘지 않는다.
+    pub start_height: f64,
+    /// 이 단이 미주 흐름을 포함하는지 여부.
+    ///
+    /// 미주 본문은 일반 본문과 달리 한 단 안에서도 LINE_SEG vpos가 크게
+    /// 되감길 수 있으므로, 렌더러의 vpos 보정 가드에서 별도 취급한다.
+    pub endnote_flow: bool,
+    /// 배치될 문단 슬라이스 정보
+    pub items: Vec<PageItem>,
+    /// 이 존의 레이아웃 (None이면 page.layout 사용). 다단 설정 나누기로 같은 페이지 내 단 수 변경 시 사용.
+    pub zone_layout: Option<PageLayoutInfo>,
+    /// 이 존의 body_area 내 y 시작 오프셋 (px). 이전 존의 높이만큼 아래로 밀림.
+    pub zone_y_offset: f64,
+    /// 어울림 배치 표와 나란히 배치되는 빈 리턴 문단 인덱스 목록
+    /// (표 오른쪽에 문단 부호를 표시하기 위해 사용)
+    pub wrap_around_paras: Vec<WrapAroundPara>,
+    /// 단을 닫을 시점의 누적 사용 높이 (px). 진단/측정 도구용.
+    pub used_height: f64,
+    /// [Task #604 R3] anchor 그림/표 옆 wrap text 문단의 wrap context 메타데이터.
+    /// typeset.rs 의 wrap_around state machine 매칭 결과 (anchor cs/sw 일치) 를
+    /// layout 시점까지 보존. layout 이 본 메타데이터로 wrap zone 판정 + LineSeg cs/sw
+    /// 정합 렌더 (PR #589 wrap_precomputed 메커니즘 대체).
+    pub wrap_anchors: std::collections::HashMap<usize, WrapAnchorRef>,
+    /// [#4568] 앞 쪽에서 쪽 하단에 잘린 overlay 표의 **잔여 행**을 이 단 최상단에
+    /// 이어 그리기 위한 목록.
+    ///
+    /// `items` 에 섞지 않는 이유는 소유 의미가 다르기 때문이다 — 잔여 행은 흐름을
+    /// 소비하지 않는 z-layer 장식이고 이 단이 그 문단을 소유하지도 않는다. 항목으로
+    /// 넣으면 이 조각이 단의 **첫 항목**이 되어 `items.first()` 를 보는 휴리스틱들이
+    /// 조각을 본문으로 읽는다(실측: `overflow_cell_baseline` 래칫 62 → 63줄).
+    pub overlay_continuations: Vec<OverlayContinuation>,
+    /// [#4568] 이 단에서 잔여 행을 다음 쪽에 넘긴 overlay 표의 **앵커 쪽 컷**.
+    /// `(para_index, control_index, cut)` — 앵커는 cut의 행·셀 유닛만 그린다.
+    /// 넘긴 행을 앵커 쪽에서도 전부 그리면(bleed) 시각적으로는 클립돼 안 보이지만
+    /// render tree 에 쪽 밖 줄이 남아 `overflow_cell_baseline` 래칫에 계상된다.
+    pub overlay_cuts: Vec<(usize, usize, OverlayCut)>,
+}
+crate::storage::clone_fields!(ColumnContent, {paragraph_origins, computed_paragraphs, host_compositions, stored_paragraph_flow_ends, stored_column_top_spacings, paragraph_float_placements, float_pushed_line_spacings, page_band_flow_starts, inline_flow_plans, inline_placements, column_index, start_height, endnote_flow, items, zone_layout, zone_y_offset, wrap_around_paras, used_height, wrap_anchors, overlay_continuations, overlay_cuts});
+
+/// 장식 표의 앵커 쪽 내용 소유와 마지막 행의 물리 높이.
+#[derive(Debug, Clone)]
+pub struct OverlayCut {
+    pub end_row: usize,
+    pub end_cut: Vec<usize>,
+    pub end_row_height: Option<f64>,
+    /// 내용 컷 밖의 물리 띠까지 인증한 원본 프레임의 정렬 소유.
+    pub owns_stored_frame: bool,
+}
+crate::storage::clone_fields!(OverlayCut, {end_row, end_cut, end_row_height, owns_stored_frame});
+
+/// 한 행의 앞/뒤 조각은 동일한 셀 유닛 컷과 점유 높이를 소비한다.
+#[derive(Debug, Clone)]
+pub struct OverlayRowFragment {
+    pub end_cut: Vec<usize>,
+    pub opening_height: f64,
+    pub remaining_height: f64,
+    pub owns_stored_frame: bool,
+}
+crate::storage::clone_fields!(OverlayRowFragment, {end_cut, opening_height, remaining_height, owns_stored_frame});
+
+/// [#4568] 쪽을 넘긴 overlay 표의 잔여 행 조각.
+#[derive(Debug, Clone)]
+pub struct OverlayContinuation {
+    /// 표 컨트롤이 있는 원본 문단 인덱스
+    pub para_index: usize,
+    /// 문단 내 컨트롤 인덱스
+    pub control_index: usize,
+    /// 이 단에서 그릴 첫 행 (inclusive). 부분 행이면 start_cut 이후만 소유한다.
+    pub start_row: usize,
+    /// 앞 쪽이 소비한 셀 유닛. 비어 있으면 온전한 행에서 시작한다.
+    pub start_cut: Vec<usize>,
+    /// 부분 첫 행의 물리 높이. 전체 행의 선언 높이를 다시 계상하지 않는다.
+    pub start_row_height: Option<f64>,
+    /// [#5792] 이 단 최상단에 잔여 행이 차지하는 높이(px). 0 이면 예약하지 않는다.
+    ///
+    /// 뒤따르는 흐름이 잔여 행의 자리를 스스로 만드는 형상(#4514 필러 문단)에서는
+    /// 0 이어야 이중 계상이 없다. 판정은 typeset 한 곳에서만 한다.
+    pub reserve_px: f64,
+}
+crate::storage::clone_fields!(OverlayContinuation, {para_index, control_index, start_row, start_cut, start_row_height, reserve_px});
+
+/// 어울림 배치 표 옆에 배치되는 빈 리턴 문단 정보
+#[derive(Debug, Clone)]
+pub struct WrapAroundPara {
+    /// 어울림 문단의 인덱스
+    pub para_index: usize,
+    /// 연관된 표의 문단 인덱스
+    pub table_para_index: usize,
+    /// 텍스트가 있는 문단인지 (false면 빈 리턴)
+    pub has_text: bool,
+    /// 표 옆 띠에서 렌더할 첫 줄(포함).
+    pub start_line: usize,
+    /// 표 옆 띠에서 렌더할 끝 줄(제외). `usize::MAX`는 전체 줄을 뜻한다.
+    pub end_line: usize,
+}
+crate::storage::clone_fields!(WrapAroundPara, {para_index, table_para_index, has_text, start_line, end_line});
+
+/// [Task #604 R3] anchor 그림/표 ↔ wrap text 문단 매칭 메타데이터.
+///
+/// typeset.rs 의 wrap_around state machine 이 본 문단의 LineSeg cs/sw 가 anchor
+/// 의 cs/sw 와 매칭됨을 검출 시 ColumnContent.wrap_anchors 에 등록. layout 단계가
+/// 본 메타데이터로 wrap zone 정합 렌더 (LineSeg cs/sw 그대로 사용 — 현 보완6 효과).
+#[derive(Debug, Clone)]
+pub struct WrapAnchorRef {
+    /// anchor 문단 인덱스 (그림/표 보유)
+    pub anchor_para_index: usize,
+    /// anchor wrap zone column_start (HWPUNIT)
+    pub anchor_cs: i32,
+    /// anchor wrap zone segment_width (HWPUNIT)
+    pub anchor_sw: i32,
+    /// [Task #722] anchor image 의 outer margin_right (HWPUNIT).
+    /// 한컴 viewer 는 inter-image-text gap 으로 image margin_right 를 추가 적용.
+    /// paragraph_layout 의 wrap_anchor 처리에서 cs px 에 +margin_right_px,
+    /// sw px 에서 -margin_right_px 보정 (text 시작 위치와 가용 폭 정합).
+    pub anchor_image_margin_right: i32,
+    /// 줄 단위 배제 밴드 — Some((top, bottom)) 이면 문단 시작 기준 상대 y(px)가
+    /// 이 구간과 교차하는 줄에만 anchor cs/sw 를 적용한다(출석부 형상). None 이면
+    /// 기존처럼 문단 전체에 적용.
+    pub band_y_range: Option<(f64, f64)>,
+}
+crate::storage::clone_fields!(WrapAnchorRef, {anchor_para_index, anchor_cs, anchor_sw, anchor_image_margin_right, band_y_range});
+
+/// A spanning cell carries accepted content independently of page-end blank space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StraddleCellCarry {
+    pub cell_index: usize,
+    /// 원래 측정 행에 추가로 반영하는 저장 프레임 띠. 실제 수용 상자와 구분한다.
+    pub physical_height: f64,
+    /// 앞 조각의 실제 빈 상자를 소유한다. 추정 행 높이의 추가 차감량이 아니다.
+    pub owns_blank_band: bool,
+    /// 앞 조각들이 실제 수용한 셀 상자 높이의 합. 물리 상자를 알 수 없는 경로는 None.
+    pub accepted_physical_height: Option<f64>,
+    /// PageItem에서 현재 조각을 수용하기 직전의 합. incoming carry에서는 None.
+    pub accepted_before_fragment: Option<f64>,
+    /// First unconsumed unit at the fragment's incoming boundary.
+    pub next_unit: Option<usize>,
+    /// Accepted window for this PageItem; cleared when advancing the cursor.
+    pub fragment_cut: Option<(usize, usize)>,
+}
+crate::storage::clone_fields!(StraddleCellCarry, {cell_index, physical_height, owns_blank_band, accepted_physical_height, accepted_before_fragment, next_unit, fragment_cut});
+
+impl StraddleCellCarry {
+    /// 수용 후 snapshot도 현재 조각 직전의 물리 prefix를 제공한다.
+    pub(crate) fn accepted_prefix_physical_height(&self) -> Option<f64> {
+        if self.fragment_cut.is_some() {
+            self.accepted_before_fragment
+        } else {
+            self.accepted_physical_height
+        }
+    }
+}
+
+/// 페이지에 배치되는 개별 항목
+#[derive(Debug, Clone)]
+pub enum PageItem {
+    /// 문단 전체가 배치됨
+    FullParagraph {
+        /// 원본 문단 인덱스
+        para_index: usize,
+    },
+    /// 문단 일부가 배치됨 (페이지 넘김)
+    PartialParagraph {
+        /// 원본 문단 인덱스
+        para_index: usize,
+        /// 시작 줄 인덱스 (LineSeg 인덱스)
+        start_line: usize,
+        /// 끝 줄 인덱스 (exclusive)
+        end_line: usize,
+    },
+    /// 표 전체
+    Table {
+        /// 원본 문단 내 컨트롤 인덱스
+        para_index: usize,
+        control_index: usize,
+    },
+    /// 표의 일부 행만 배치 (페이지 분할)
+    PartialTable {
+        /// 원본 문단 인덱스
+        para_index: usize,
+        /// 컨트롤 인덱스
+        control_index: usize,
+        /// 시작 행 (inclusive)
+        start_row: usize,
+        /// 끝 행 (exclusive)
+        end_row: usize,
+        /// 연속 페이지 여부 (true면 제목행 반복)
+        is_continuation: bool,
+        /// [Task #993] `start_row`의 시작 컷 — 셀별(col 오름차순 `row_span==1`
+        /// 셀) 이전 페이지까지 소비한 콘텐츠 유닛 수. 빈 Vec = 처음부터.
+        start_cut: Vec<usize>,
+        /// [Task #993] `end_row-1`행의 끝 컷 — 이 페이지에서 보일 마지막 유닛
+        /// 까지의 셀별 소비 유닛 수. 빈 Vec = 끝까지.
+        end_cut: Vec<usize>,
+        /// [Task #1025] 기존 블록 조각 게이트: 시작 또는 끝 분할이 rowspan 블록
+        /// 경로를 사용했으면 true다. 끝 컷 소비 지점은 이 legacy 게이트와 행-지역
+        /// fallback을 유지한다. 끝 컷만의 인덱스 공간이라고 해석하면 안 된다.
+        ///
+        /// [#6935] 시작 컷은 `start_cut_is_block`이 명시한 공간으로만 해석한다.
+        /// 시작이 행 공간이고 끝이 블록 공간인 조각에서 이 게이트를 시작 쪽에도
+        /// 적용하면 앞 조각 내용을 다시 소비한다. 반대 방향의 끝 컷 전용 전환은
+        /// block→row 예약/배치 계약과 함께 검증해야 하므로 이 변경에 포함하지 않는다.
+        is_block_split: bool,
+        /// [#6935] true 이면 **`start_cut`** 이 블록-셀 `(row,col)` 인덱스다.
+        ///
+        /// 종전에는 `is_block_split` 하나가 두 사실을 OR 로 합쳐, 시작이 행 공간인데
+        /// 끝이 블록 공간인 조각에서 시작 쪽이 블록 서수로 읽혔다. 걸친 rowspan 셀은
+        /// 행 공간에 자리가 없어 `su = 0` 으로 떨어져 **앞 조각이 그린 내용을 처음부터
+        /// 다시 그렸다**(같은 문서 2쪽 +341자, 본문 +232.3px).
+        start_cut_is_block: bool,
+        /// [Issue #4326] `start_row`/`end_row`/`start_cut`/`end_cut`이 가리키는 좌표계.
+        /// true면 투명 1×1 래퍼를 벗긴 중첩 표(측정기·`row_geometry_table`이 실제로 쓰는
+        /// 표) 기준이고, false면 이 항목이 참조하는 바깥 `para_index`/`control_index`
+        /// 표 자신의 행 도메인 기준이다. 렌더러가 값(`end_row <= table.row_count`)으로
+        /// 되추론하던 것을 페이지네이션 결정 시점에 데이터로 고정한다.
+        row_cursor_is_nested: bool,
+        /// RowBreak 표에서 이전 rowspan이 닿는 마지막 행을 현재 조각의 남은
+        /// 물리 높이에 맞춰 배치해야 할 때의 마지막 행 높이 상한(px).
+        ///
+        /// 내용은 이미 이 조각에 모두 소비됐지만 선언 행 높이만 남은 공간보다
+        /// 큰 경우에만 사용한다. 다음 조각은 끝행의 full cut으로 재진입해 남은
+        /// 빈 밴드만 소비하므로, 이 값은 cursor/cut 계약과 짝을 이룬다.
+        end_row_height_override: Option<f64>,
+        /// 직전 조각에서 내용이 모두 소비된 시작 행의 남은 빈 물리 밴드 높이(px).
+        /// `start_cut`은 해당 셀 내용을 숨기고 이 값은 테두리/셀 기하만 보존한다.
+        start_row_height_override: Option<f64>,
+        /// 앞 조각의 실제 병합 점유를 반영해 예약에서 확정한 행 높이.
+        /// 비어 있으면 기존 측정 경로이며 paint는 확정값을 다시 분배하지 않는다.
+        /// [#7531] 쪽을 넘어온 걸침 칸의 끝 행에서 앞 쪽 빈 띠만큼 덜 높이 `(행, px)`.
+        /// 조판 scan 이 같은 값으로 행을 쟀으므로 그리기도 이 값을 그대로 적용한다.
+        straddle_row_relief: Vec<(usize, f64)>,
+        straddle_page_bands: Vec<crate::renderer::pagination::StraddleCellCarry>,
+        /// Fragment row geometry with previously accepted physical boxes.
+        /// None keeps the ordinary global measured-row contract.
+        fragment_row_heights: Option<Vec<f64>>,
+        /// 블록 내용 컷과 독립적으로 수용한 물리 행 상자의 소유 범위.
+        fragment_block_frames: Vec<(usize, usize)>,
+        /// 예산에서 인증·수용한 종료 행의 저장 물리 프레임 소유. 배치가 다시 추정하지 않는다.
+        end_row_owns_stored_frame: bool,
+    },
+    /// 그리기 개체
+    Shape {
+        /// 원본 문단 내 컨트롤 인덱스
+        para_index: usize,
+        control_index: usize,
+    },
+    /// 미주 영역 시작 구분선
+    EndnoteSeparator {
+        /// 확정된 미주 시작 흐름 원점(px, 단 본문 상단 기준). None은 기존 저장 경로.
+        flow_origin: Option<f64>,
+        /// 구분선 길이 (HWP 단위). 한컴 전폭 sentinel(14692344)이 i16을 넘으므로 i32.
+        separator_length: i32,
+        /// 구분선 위 여백 (HWP 단위)
+        margin_above: i16,
+        /// 구분선 아래 여백 (HWP 단위)
+        margin_below: i16,
+        /// 구분선 종류
+        line_type: u8,
+        /// 구분선 굵기
+        line_width: u8,
+        /// 구분선 색상
+        color: crate::model::ColorRef,
+    },
+}
+impl crate::storage::CloneWithStorage for PageItem {
+    fn clone_with_storage<S: crate::storage::Storage>(
+        &self,
+        storage: &S,
+    ) -> Result<Self, S::Error> {
+        match self {
+            Self::FullParagraph { para_index } => Ok(Self::FullParagraph {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+            }),
+            Self::PartialParagraph {
+                para_index,
+                start_line,
+                end_line,
+            } => Ok(Self::PartialParagraph {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                start_line: crate::storage::try_clone(start_line, storage)?,
+                end_line: crate::storage::try_clone(end_line, storage)?,
+            }),
+            Self::Table {
+                para_index,
+                control_index,
+            } => Ok(Self::Table {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                control_index: crate::storage::try_clone(control_index, storage)?,
+            }),
+            Self::PartialTable {
+                para_index,
+                control_index,
+                start_row,
+                end_row,
+                is_continuation,
+                start_cut,
+                end_cut,
+                is_block_split,
+                start_cut_is_block,
+                row_cursor_is_nested,
+                end_row_height_override,
+                start_row_height_override,
+                straddle_row_relief,
+                straddle_page_bands,
+                fragment_row_heights,
+                fragment_block_frames,
+                end_row_owns_stored_frame,
+            } => Ok(Self::PartialTable {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                control_index: crate::storage::try_clone(control_index, storage)?,
+                start_row: crate::storage::try_clone(start_row, storage)?,
+                end_row: crate::storage::try_clone(end_row, storage)?,
+                is_continuation: crate::storage::try_clone(is_continuation, storage)?,
+                start_cut: crate::storage::try_clone(start_cut, storage)?,
+                end_cut: crate::storage::try_clone(end_cut, storage)?,
+                is_block_split: crate::storage::try_clone(is_block_split, storage)?,
+                start_cut_is_block: crate::storage::try_clone(start_cut_is_block, storage)?,
+                row_cursor_is_nested: crate::storage::try_clone(row_cursor_is_nested, storage)?,
+                end_row_height_override: crate::storage::try_clone(
+                    end_row_height_override,
+                    storage,
+                )?,
+                start_row_height_override: crate::storage::try_clone(
+                    start_row_height_override,
+                    storage,
+                )?,
+                straddle_row_relief: crate::storage::try_clone(straddle_row_relief, storage)?,
+                straddle_page_bands: crate::storage::try_clone(straddle_page_bands, storage)?,
+                fragment_row_heights: crate::storage::try_clone(fragment_row_heights, storage)?,
+                fragment_block_frames: crate::storage::try_clone(fragment_block_frames, storage)?,
+                end_row_owns_stored_frame: crate::storage::try_clone(
+                    end_row_owns_stored_frame,
+                    storage,
+                )?,
+            }),
+            Self::Shape {
+                para_index,
+                control_index,
+            } => Ok(Self::Shape {
+                para_index: crate::storage::try_clone(para_index, storage)?,
+                control_index: crate::storage::try_clone(control_index, storage)?,
+            }),
+            Self::EndnoteSeparator {
+                flow_origin,
+                separator_length,
+                margin_above,
+                margin_below,
+                line_type,
+                line_width,
+                color,
+            } => Ok(Self::EndnoteSeparator {
+                flow_origin: crate::storage::try_clone(flow_origin, storage)?,
+                separator_length: crate::storage::try_clone(separator_length, storage)?,
+                margin_above: crate::storage::try_clone(margin_above, storage)?,
+                margin_below: crate::storage::try_clone(margin_below, storage)?,
+                line_type: crate::storage::try_clone(line_type, storage)?,
+                line_width: crate::storage::try_clone(line_width, storage)?,
+                color: crate::storage::try_clone(color, storage)?,
+            }),
+        }
+    }
+}
+
+/// [Issue #476] 인라인(treat_as_char) 컨트롤이 라우팅된 페이지/단을 찾는다.
+///
+/// `pages`: 이미 finalize 된 이전 페이지들의 ColumnContent(items 포함).
+/// `current_items`: 현재(마지막) 페이지의 진행 중 항목 목록 (아직 flush 안 된 상태).
+///
+/// 박스의 char 위치 → line index → 그 line 을 포함하는 PartialParagraph 가 들어있는
+/// `(page_idx, column_idx)` 를 반환. 마지막 페이지(현재 처리 중)에 들어있으면 `None` (= 현재).
+/// 어디에도 없거나 페이지 분할이 없으면 `None`.
+pub fn find_inline_control_target_page(
+    pages: &[PageContent],
+    current_items: &[PageItem],
+    para_idx: usize,
+    ctrl_idx: usize,
+    para: &Paragraph,
+) -> Option<(usize, usize)> {
+    match find_inline_control_target_page_with_storage(
+        pages,
+        current_items,
+        para_idx,
+        ctrl_idx,
+        para,
+        &crate::storage::Unbounded,
+    ) {
+        Ok(v) => v,
+        Err(never) => match never {},
+    }
+}
+
+pub(crate) fn find_inline_control_target_page_with_storage<S: crate::storage::Storage>(
+    pages: &[PageContent],
+    current_items: &[PageItem],
+    para_idx: usize,
+    ctrl_idx: usize,
+    para: &Paragraph,
+    storage: &S,
+) -> Result<Option<(usize, usize)>, S::Error> {
+    crate::storage::with_optional(|failure| {
+        let target_line = if let Some(line) = tac_object_owning_line_seg_index(para, ctrl_idx) {
+            Some(line)
+        } else {
+            crate::storage::optional(
+                crate::renderer::layout::control_line_seg_index_with_storage(
+                    para, ctrl_idx, storage,
+                ),
+                failure,
+            )?
+        }?;
+
+        // 1) 현재(마지막) 페이지의 current_items 검사 — 박스 line 이 여기 있으면 None (= 현재)
+        let in_current = current_items.iter().any(|item| match item {
+            PageItem::FullParagraph { para_index } if *para_index == para_idx => true,
+            PageItem::PartialParagraph {
+                para_index,
+                start_line,
+                end_line,
+            } if *para_index == para_idx && (*start_line..*end_line).contains(&target_line) => true,
+            _ => false,
+        });
+        if in_current {
+            return None;
+        }
+
+        // 2) 이전 페이지/단 검색
+        for (page_idx, page) in pages.iter().enumerate() {
+            for (col_idx, col) in page.column_contents.iter().enumerate() {
+                let hit = col.items.iter().any(|item| match item {
+                    PageItem::FullParagraph { para_index } if *para_index == para_idx => true,
+                    PageItem::PartialParagraph {
+                        para_index,
+                        start_line,
+                        end_line,
+                    } if *para_index == para_idx
+                        && (*start_line..*end_line).contains(&target_line) =>
+                    {
+                        true
+                    }
+                    _ => false,
+                });
+                if hit {
+                    return Some((page_idx, col_idx));
+                }
+            }
+        }
+        None
+    })
+}
+
+/// TAC 개체가 소유한 저장 줄을 **기하**로 짚는다 — 저장 `line_height` 가 개체의 흐름
+/// 높이와 같은 줄이 그 개체의 줄이다.
+///
+/// [#6972] 글자 위치 투영(`control_line_seg_index`)은 개체가 문단의 모든 글자 **앞**에
+/// 있을 때 첫 글자의 줄, 곧 개체 줄의 **다음** 줄을 돌려준다(컨트롤 문자 0, 첫 글자
+/// offset 0 이면 `p >= start_txt` 가 `0 >= 0` 으로 참). 그러면 문단이 쪽으로 갈릴 때
+/// 전면 크기 TAC 그림이 자기 줄이 없는 뒤 조각으로 라우팅돼 **두 쪽에 그려진다**
+/// (56288 1쪽 표지 그림). 같은 quirk 를 #6078 도 기하로 피해 갔다.
+///
+/// 같은 높이의 줄이 둘 이상이면(#2004 이미지 스택) 모호하므로 쓰지 않는다 — 그때는
+/// 종전 글자 위치 투영으로 되돌아간다.
+fn tac_object_owning_line_seg_index(para: &Paragraph, ctrl_idx: usize) -> Option<usize> {
+    /// 8px @96dpi. `line_owning_tac_object_height_px` 의 하한과 같은 자리다.
+    const MIN_OBJECT_LINE_HU: i32 = 600;
+
+    if para.line_segs.len() < 2 {
+        return None;
+    }
+    let ctrl = para.controls.get(ctrl_idx)?;
+    if !is_routable_treat_as_char_picture_or_shape(ctrl) {
+        return None;
+    }
+    let height_hu = crate::renderer::tac_object_flow_height_hu(ctrl)?;
+    if height_hu < MIN_OBJECT_LINE_HU {
+        return None;
+    }
+    let mut owner = None;
+    for (idx, seg) in para.line_segs.iter().enumerate() {
+        if seg.line_height == height_hu {
+            if owner.is_some() {
+                return None;
+            }
+            owner = Some(idx);
+        }
+    }
+    owner
+}
+
+/// 페이지로 분할된 문단에서 해당 줄을 소유한 쪽으로 다시 배치해야 하는 인라인 개체인가.
+///
+/// `PageItem::Shape`는 개체 종류를 함께 담지만, 실제 그림/도형의 인라인 좌표는 문단의
+/// 일부 줄만 렌더한 쪽에 등록된다. 문단 끝에서 일괄 추가하면 모든 TAC 그림이 마지막
+/// 조각으로 몰린다. 표·수식은 별도 조판 경로와 소유 규칙을 가지므로 여기서 넓히지 않는다.
+/// [#5941] 앵커 줄이 앞 쪽에 남은 그림/도형을 그 쪽으로 라우팅할 대상인지.
+///
+/// `is_routable_treat_as_char_picture_or_shape` 는 `treat_as_char` 만 받는다. 그런데
+/// "문단이 쪽 분할되면 개체가 마지막 쪽에 붙는다" 는 문제는 TAC 여부와 무관하다.
+/// 비-TAC 자리차지/어울림 개체도 같은 라우팅이 필요하다 — 목적지 판정은
+/// `find_inline_control_target_page` 가 하고, 제자리 개체에는 `None` 을 돌려준다.
+pub(crate) fn is_routable_anchored_picture_or_shape(control: &Control) -> bool {
+    let common = match control {
+        Control::Picture(picture) => &picture.common,
+        Control::Shape(shape) => shape.common(),
+        _ => return false,
+    };
+    // 종전 대상(글자처럼)은 그대로 두고, **용지 기준** 개체를 더한다.
+    //
+    // 용지 기준 개체는 세로 오프셋이 그 쪽 안의 절대 위치다 — 어느 쪽에 얹히느냐가
+    // 정해져야 그 값이 뜻을 갖는다. 그래서 앵커 줄이 있는 쪽으로 보내야 한다.
+    //
+    // ⚠ **문단 기준까지 넓히면 안 된다.** `#2814` 의 절반쪽 그림 6장은 한 문단에
+    // 공동 앵커돼 쪽마다 2장씩 분배되는데, 문단 기준까지 라우팅하면 5장이 첫 쪽으로
+    // 몰려 `[5, 1]` 이 된다(실측). 그 개체들은 흐름이 자리를 정하는 쪽이다.
+    common.treat_as_char || matches!(common.vert_rel_to, crate::model::shape::VertRelTo::Paper)
+}
+
+pub(crate) fn is_routable_treat_as_char_picture_or_shape(control: &Control) -> bool {
+    match control {
+        Control::Picture(picture) => picture.common.treat_as_char,
+        Control::Shape(shape) => shape.common().treat_as_char,
+        _ => false,
+    }
+}
+
+impl PageItem {
+    /// 항목의 para_index를 반환한다.
+    pub fn para_index(&self) -> usize {
+        match self {
+            PageItem::FullParagraph { para_index } => *para_index,
+            PageItem::PartialParagraph { para_index, .. } => *para_index,
+            PageItem::Table { para_index, .. } => *para_index,
+            PageItem::PartialTable { para_index, .. } => *para_index,
+            PageItem::Shape { para_index, .. } => *para_index,
+            PageItem::EndnoteSeparator { .. } => usize::MAX,
+        }
+    }
+
+    /// para_index를 offset만큼 조정한 새 항목을 반환한다.
+    pub fn with_offset(&self, offset: i32) -> Self {
+        let adjust = |pi: usize| (pi as i64 + offset as i64).max(0) as usize;
+        match self {
+            PageItem::FullParagraph { para_index } => PageItem::FullParagraph {
+                para_index: adjust(*para_index),
+            },
+            PageItem::PartialParagraph {
+                para_index,
+                start_line,
+                end_line,
+            } => PageItem::PartialParagraph {
+                para_index: adjust(*para_index),
+                start_line: *start_line,
+                end_line: *end_line,
+            },
+            PageItem::Table {
+                para_index,
+                control_index,
+            } => PageItem::Table {
+                para_index: adjust(*para_index),
+                control_index: *control_index,
+            },
+            PageItem::PartialTable {
+                para_index,
+                control_index,
+                start_row,
+                end_row,
+                is_continuation,
+                start_cut,
+                end_cut,
+                is_block_split,
+                start_cut_is_block,
+                row_cursor_is_nested,
+                end_row_height_override,
+                start_row_height_override,
+                straddle_row_relief,
+                straddle_page_bands,
+                fragment_row_heights,
+                fragment_block_frames,
+                end_row_owns_stored_frame,
+            } => PageItem::PartialTable {
+                para_index: adjust(*para_index),
+                control_index: *control_index,
+                start_row: *start_row,
+                end_row: *end_row,
+                is_continuation: *is_continuation,
+                start_cut: start_cut.clone(),
+                end_cut: end_cut.clone(),
+                is_block_split: *is_block_split,
+                start_cut_is_block: *start_cut_is_block,
+                row_cursor_is_nested: *row_cursor_is_nested,
+                end_row_height_override: *end_row_height_override,
+                start_row_height_override: *start_row_height_override,
+                straddle_row_relief: straddle_row_relief.clone(),
+                straddle_page_bands: straddle_page_bands.clone(),
+                fragment_row_heights: fragment_row_heights.clone(),
+                fragment_block_frames: fragment_block_frames.clone(),
+                end_row_owns_stored_frame: *end_row_owns_stored_frame,
+            },
+            PageItem::Shape {
+                para_index,
+                control_index,
+            } => PageItem::Shape {
+                para_index: adjust(*para_index),
+                control_index: *control_index,
+            },
+            PageItem::EndnoteSeparator {
+                flow_origin,
+                separator_length,
+                margin_above,
+                margin_below,
+                line_type,
+                line_width,
+                color,
+            } => PageItem::EndnoteSeparator {
+                flow_origin: *flow_origin,
+                separator_length: *separator_length,
+                margin_above: *margin_above,
+                margin_below: *margin_below,
+                line_type: *line_type,
+                line_width: *line_width,
+                color: *color,
+            },
+        }
+    }
+
+    /// 두 항목이 구조적으로 동일한지 비교 (para_index offset 적용).
+    fn matches_with_offset(&self, other: &PageItem, offset: i32) -> bool {
+        let adj = |pi: usize| (pi as i64 + offset as i64) as usize;
+        match (self, other) {
+            (
+                PageItem::FullParagraph { para_index: a },
+                PageItem::FullParagraph { para_index: b },
+            ) => *a == adj(*b),
+            (
+                PageItem::PartialParagraph {
+                    para_index: a,
+                    start_line: s1,
+                    end_line: e1,
+                },
+                PageItem::PartialParagraph {
+                    para_index: b,
+                    start_line: s2,
+                    end_line: e2,
+                },
+            ) => *a == adj(*b) && s1 == s2 && e1 == e2,
+            (
+                PageItem::Table {
+                    para_index: a,
+                    control_index: c1,
+                },
+                PageItem::Table {
+                    para_index: b,
+                    control_index: c2,
+                },
+            ) => *a == adj(*b) && c1 == c2,
+            (
+                PageItem::PartialTable {
+                    para_index: a,
+                    control_index: c1,
+                    start_row: sr1,
+                    end_row: er1,
+                    ..
+                },
+                PageItem::PartialTable {
+                    para_index: b,
+                    control_index: c2,
+                    start_row: sr2,
+                    end_row: er2,
+                    ..
+                },
+            ) => *a == adj(*b) && c1 == c2 && sr1 == sr2 && er1 == er2,
+            (
+                PageItem::Shape {
+                    para_index: a,
+                    control_index: c1,
+                },
+                PageItem::Shape {
+                    para_index: b,
+                    control_index: c2,
+                },
+            ) => *a == adj(*b) && c1 == c2,
+            (
+                PageItem::EndnoteSeparator {
+                    flow_origin: a,
+                    separator_length: al,
+                    margin_above: aa,
+                    margin_below: ab,
+                    line_type: at,
+                    line_width: aw,
+                    color: ac,
+                },
+                PageItem::EndnoteSeparator {
+                    flow_origin: b,
+                    separator_length: bl,
+                    margin_above: ba,
+                    margin_below: bb,
+                    line_type: bt,
+                    line_width: bw,
+                    color: bc,
+                },
+            ) => a == b && al == bl && aa == ba && ab == bb && at == bt && aw == bw && ac == bc,
+            _ => false,
+        }
+    }
+}
+
+impl PaginationResult {
+    /// 이전 결과와 비교하여 수렴 페이지를 찾는다.
+    /// offset: 문단 인덱스 변화량 (삽입=+1, 삭제=-1)
+    /// 반환: 수렴 시작 페이지 인덱스 (None이면 수렴 없음)
+    pub fn find_convergence(&self, old: &PaginationResult, offset: i32) -> Option<usize> {
+        if offset == 0 {
+            return Some(0);
+        }
+        for page_idx in 0..self.pages.len().min(old.pages.len()) {
+            let new_page = &self.pages[page_idx];
+            let old_page = &old.pages[page_idx];
+            if new_page.column_contents.len() != old_page.column_contents.len() {
+                continue;
+            }
+            let matched = new_page
+                .column_contents
+                .iter()
+                .zip(old_page.column_contents.iter())
+                .all(|(nc, oc)| {
+                    nc.inline_flow_plans.len() == oc.inline_flow_plans.len()
+                        && oc.inline_flow_plans.iter().all(|(&pi, plan)| {
+                            let new_pi = (pi as i64 + offset as i64).max(0) as usize;
+                            nc.inline_flow_plans.get(&new_pi) == Some(plan)
+                        })
+                        && nc.inline_placements.len() == oc.inline_placements.len()
+                        && oc.inline_placements.iter().all(|(&(pi, ci), placement)| {
+                            let new_pi = (pi as i64 + offset as i64).max(0) as usize;
+                            nc.inline_placements.get(&(new_pi, ci)) == Some(placement)
+                        })
+                        && nc.items.len() == oc.items.len()
+                        && nc
+                            .items
+                            .iter()
+                            .zip(oc.items.iter())
+                            .all(|(ni, oi)| ni.matches_with_offset(oi, offset))
+                });
+            if matched {
+                return Some(page_idx);
+            }
+        }
+        None
+    }
+
+    /// 수렴 이후 페이지를 이전 결과에서 복사한다 (para_index offset 적용).
+    pub fn copy_converged_pages(
+        &mut self,
+        old: &PaginationResult,
+        converge_page: usize,
+        offset: i32,
+    ) {
+        // 수렴 페이지 이후를 이전 결과에서 복사
+        self.pages.truncate(converge_page);
+        for old_page in &old.pages[converge_page..] {
+            let new_page = PageContent {
+                page_index: old_page.page_index,
+                page_number: old_page.page_number,
+                page_number_restarted: old_page.page_number_restarted,
+                section_index: old_page.section_index,
+                layout: old_page.layout.clone(),
+                column_contents: old_page
+                    .column_contents
+                    .iter()
+                    .map(|cc| ColumnContent {
+                        computed_paragraphs: cc
+                            .computed_paragraphs
+                            .iter()
+                            .map(|(&owner, comp)| {
+                                ((owner as i64 + offset as i64).max(0) as usize, comp.clone())
+                            })
+                            .collect(),
+                        paragraph_origins: cc
+                            .paragraph_origins
+                            .iter()
+                            .map(|(&owner, &origin)| {
+                                let shifted = (owner as i64 + offset as i64).max(0) as usize;
+                                (
+                                    shifted,
+                                    ParagraphOrigin {
+                                        paragraph_index: shifted,
+                                        ..origin
+                                    },
+                                )
+                            })
+                            .collect(),
+                        column_index: cc.column_index,
+                        start_height: cc.start_height,
+                        endnote_flow: cc.endnote_flow,
+                        items: cc.items.iter().map(|it| it.with_offset(offset)).collect(),
+                        overlay_continuations: cc.overlay_continuations.clone(),
+                        overlay_cuts: cc.overlay_cuts.clone(),
+                        inline_placements: cc
+                            .inline_placements
+                            .iter()
+                            .map(|(&(pi, ci), &placement)| {
+                                (((pi as i64 + offset as i64).max(0) as usize, ci), placement)
+                            })
+                            .collect(),
+                        inline_flow_plans: cc
+                            .inline_flow_plans
+                            .iter()
+                            .map(|(&pi, plan)| {
+                                ((pi as i64 + offset as i64).max(0) as usize, plan.clone())
+                            })
+                            .collect(),
+                        stored_paragraph_flow_ends: cc
+                            .stored_paragraph_flow_ends
+                            .iter()
+                            .map(|(&pi, &end)| ((pi as i64 + offset as i64).max(0) as usize, end))
+                            .collect(),
+                        host_compositions: cc
+                            .host_compositions
+                            .iter()
+                            .map(|(&pi, comp)| {
+                                ((pi as i64 + offset as i64).max(0) as usize, comp.clone())
+                            })
+                            .collect(),
+                        stored_column_top_spacings: cc
+                            .stored_column_top_spacings
+                            .iter()
+                            .map(|(&pi, &end)| ((pi as i64 + offset as i64).max(0) as usize, end))
+                            .collect(),
+                        paragraph_float_placements: cc
+                            .paragraph_float_placements
+                            .iter()
+                            .map(|(&(pi, ci), &placement)| {
+                                (((pi as i64 + offset as i64).max(0) as usize, ci), placement)
+                            })
+                            .collect(),
+                        float_pushed_line_spacings: cc
+                            .float_pushed_line_spacings
+                            .iter()
+                            .map(|(&pi, &spacing)| {
+                                ((pi as i64 + offset as i64).max(0) as usize, spacing)
+                            })
+                            .collect(),
+                        page_band_flow_starts: cc
+                            .page_band_flow_starts
+                            .iter()
+                            .map(|(&pi, &start)| {
+                                ((pi as i64 + offset as i64).max(0) as usize, start)
+                            })
+                            .collect(),
+                        zone_layout: cc.zone_layout.clone(),
+                        zone_y_offset: cc.zone_y_offset,
+                        wrap_around_paras: cc
+                            .wrap_around_paras
+                            .iter()
+                            .map(|w| WrapAroundPara {
+                                para_index: (w.para_index as i64 + offset as i64).max(0) as usize,
+                                table_para_index: (w.table_para_index as i64 + offset as i64).max(0)
+                                    as usize,
+                                has_text: w.has_text,
+                                start_line: w.start_line,
+                                end_line: w.end_line,
+                            })
+                            .collect(),
+                        used_height: cc.used_height,
+                        wrap_anchors: cc
+                            .wrap_anchors
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    (*k as i64 + offset as i64).max(0) as usize,
+                                    WrapAnchorRef {
+                                        anchor_para_index: (v.anchor_para_index as i64
+                                            + offset as i64)
+                                            .max(0)
+                                            as usize,
+                                        anchor_cs: v.anchor_cs,
+                                        anchor_sw: v.anchor_sw,
+                                        anchor_image_margin_right: v.anchor_image_margin_right,
+                                        band_y_range: v.band_y_range,
+                                    },
+                                )
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                active_header: old_page.active_header.clone(),
+                active_footer: old_page.active_footer.clone(),
+                page_number_pos: old_page.page_number_pos.clone(),
+                page_hide: old_page.page_hide.clone(),
+                footnotes: old_page
+                    .footnotes
+                    .iter()
+                    .map(|f| {
+                        let source = match &f.source {
+                            FootnoteSource::Body {
+                                para_index,
+                                control_index,
+                            } => FootnoteSource::Body {
+                                para_index: (*para_index as i64 + offset as i64).max(0) as usize,
+                                control_index: *control_index,
+                            },
+                            FootnoteSource::TableCell {
+                                para_index,
+                                table_control_index,
+                                cell_index,
+                                cell_para_index,
+                                cell_control_index,
+                            } => FootnoteSource::TableCell {
+                                para_index: (*para_index as i64 + offset as i64).max(0) as usize,
+                                table_control_index: *table_control_index,
+                                cell_index: *cell_index,
+                                cell_para_index: *cell_para_index,
+                                cell_control_index: *cell_control_index,
+                            },
+                            FootnoteSource::ShapeTextBox {
+                                para_index,
+                                shape_control_index,
+                                tb_para_index,
+                                tb_control_index,
+                            } => FootnoteSource::ShapeTextBox {
+                                para_index: (*para_index as i64 + offset as i64).max(0) as usize,
+                                shape_control_index: *shape_control_index,
+                                tb_para_index: *tb_para_index,
+                                tb_control_index: *tb_control_index,
+                            },
+                            FootnoteSource::NestedTableCell {
+                                para_index,
+                                table_control_index,
+                                cell_path,
+                            } => FootnoteSource::NestedTableCell {
+                                para_index: (*para_index as i64 + offset as i64).max(0) as usize,
+                                table_control_index: *table_control_index,
+                                cell_path: cell_path.clone(),
+                            },
+                        };
+                        FootnoteRef {
+                            column_index: f.column_index,
+                            number: f.number,
+                            source,
+                            fragment: f.fragment,
+                        }
+                    })
+                    .collect(),
+                active_master_page: old_page.active_master_page.clone(),
+                extra_master_pages: old_page.extra_master_pages.clone(),
+                ladder_band_tables: old_page.ladder_band_tables.clone(),
+            };
+            // hidden_empty_paras는 별도 처리
+            self.pages.push(new_page);
+        }
+        // wrap_around_paras도 복사
+        for w in &old.wrap_around_paras {
+            let shifted_pi = (w.para_index as i64 + offset as i64).max(0) as usize;
+            let shifted_tpi = (w.table_para_index as i64 + offset as i64).max(0) as usize;
+            if !self
+                .wrap_around_paras
+                .iter()
+                .any(|e| e.para_index == shifted_pi)
+            {
+                self.wrap_around_paras.push(WrapAroundPara {
+                    para_index: shifted_pi,
+                    table_para_index: shifted_tpi,
+                    has_text: w.has_text,
+                    start_line: w.start_line,
+                    end_line: w.end_line,
+                });
+            }
+        }
+        // hidden_empty_paras offset
+        let mut new_hidden = std::collections::HashSet::new();
+        for &pi in &old.hidden_empty_paras {
+            new_hidden.insert((pi as i64 + offset as i64).max(0) as usize);
+        }
+        self.hidden_empty_paras = new_hidden;
+    }
+}
+
+/// 페이지 분할 옵션
+#[derive(Debug, Clone, Default)]
+pub struct PaginationOpts {
+    /// 빈 줄 숨김 (SectionDef.hide_empty_line)
+    pub hide_empty_line: bool,
+    /// LINE_SEG vpos-reset (vertical_pos==0, line>0) 위치를 강제 단/페이지 경계로 처리
+    pub respect_vpos_reset: bool,
+    /// [Task #1007] HWP3 → HWP5 변환본 (한컴 변환 산출물).
+    /// 변환본의 cross-paragraph vpos reset (이전 paragraph 의 last_line vpos 가
+    /// 페이지 절반 이상 + 현재 paragraph 의 first_line vpos 가 페이지 1/4 이내)
+    /// 시 강제 page break — 한컴 변환 시 인코딩한 page break 시그널 인식.
+    pub is_hwp3_variant: bool,
+    /// 현재 구역의 각주 모양. 각주 예약 영역을 렌더 영역과 같은 metric으로 계산한다.
+    pub footnote_shape: Option<FootnoteShape>,
+}
+crate::storage::clone_fields!(PaginationOpts, {hide_empty_line, respect_vpos_reset, is_hwp3_variant, footnote_shape});
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PaginationSourceContext {
+    source_uses_inline_field_reset: bool,
+    hwp3_converted_missing_lineseg: bool,
+    stored_geometry_policy: crate::model::provenance::StoredGeometryPolicy,
+}
+crate::storage::clone_copy!(PaginationSourceContext);
+
+impl PaginationSourceContext {
+    fn from_profile(profile: crate::model::provenance::LayoutCompatibilityProfile) -> Self {
+        let hwp3_converted_missing_lineseg =
+            profile.hwp3_layout() && !profile.hwp3_native_layout() && !profile.hwpx_container();
+        Self {
+            source_uses_inline_field_reset: profile.hwpx_stored_layout()
+                || hwp3_converted_missing_lineseg,
+            hwp3_converted_missing_lineseg,
+            stored_geometry_policy: profile.stored_geometry_policy(),
+        }
+    }
+
+    fn from_public_variant(is_hwp3_variant: bool) -> Self {
+        Self {
+            source_uses_inline_field_reset: is_hwp3_variant,
+            hwp3_converted_missing_lineseg: is_hwp3_variant,
+            stored_geometry_policy: is_hwp3_variant.into(),
+        }
+    }
+}
+
+/// 페이지 분할 엔진
+pub struct Paginator {
+    /// DPI
+    dpi: f64,
+}
+
+impl Paginator {
+    pub fn new(dpi: f64) -> Self {
+        Self { dpi }
+    }
+
+    /// 기본 DPI(96)로 생성
+    pub fn with_default_dpi() -> Self {
+        Self::new(super::DEFAULT_DPI)
+    }
+
+    /// 문단 내 단 경계를 감지한다.
+    /// HWP에서 같은 너비 다단 레이아웃의 문단은 한 문단이 여러 단에 걸칠 수 있다.
+    /// LineSeg의 vertical_pos가 급격히 감소(이전 줄의 vpos보다 작아짐)하면 단이 변경된 것.
+    /// 반환: 각 단의 시작 줄 인덱스 목록 (첫 번째는 항상 0)
+    fn detect_column_breaks_in_paragraph(para: &Paragraph) -> Vec<usize> {
+        let mut breaks = vec![0usize];
+        if para.line_segs.len() <= 1 {
+            return breaks;
+        }
+        for i in 1..para.line_segs.len() {
+            let prev_vpos = para.line_segs[i - 1].vertical_pos;
+            let curr_vpos = para.line_segs[i].vertical_pos;
+            // vpos가 이전보다 작아지면 단 경계
+            if curr_vpos < prev_vpos {
+                breaks.push(i);
+            }
+        }
+        breaks
+    }
+
+    /// 구역의 문단 목록을 페이지로 분할한다.
+    ///
+    /// 2-패스 페이지네이션:
+    /// 1. HeightMeasurer로 모든 콘텐츠의 실제 렌더링 높이를 사전 측정
+    /// 2. 측정된 높이를 기반으로 정확한 페이지 분할 수행
+    ///
+    /// - 본문 영역 높이를 초과하면 새 페이지 시작
+    /// - ColumnBreakType::Page이면 강제 페이지 넘김
+    pub fn paginate(
+        &self,
+        paragraphs: &[Paragraph],
+        composed: &[ComposedParagraph],
+        styles: &ResolvedStyleSet,
+        page_def: &PageDef,
+        column_def: &ColumnDef,
+        section_index: usize,
+    ) -> (PaginationResult, MeasuredSection) {
+        // === 1-패스: 높이 사전 측정 ===
+        let measurer = HeightMeasurer::new(self.dpi);
+        let layout = crate::renderer::page_layout::PageLayoutInfo::from_page_def(
+            page_def, column_def, self.dpi,
+        );
+        let col_w = layout
+            .column_areas
+            .first()
+            .map(|a| a.width)
+            .unwrap_or(layout.body_area.width);
+        let measured = measurer.measure_section(paragraphs, composed, styles, Some(col_w));
+
+        // === 2-패스: 측정된 높이로 페이지 분할 ===
+        let result = self.paginate_with_measured(
+            paragraphs,
+            &measured,
+            page_def,
+            column_def,
+            section_index,
+            &styles.para_styles,
+        );
+        (result, measured)
+    }
+}
+
+mod engine;
+mod state;
+
+#[cfg(test)]
+mod tests;

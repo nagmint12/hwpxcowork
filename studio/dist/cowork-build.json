@@ -1,0 +1,637 @@
+{
+  "builtAt": "2026-11-13T06:39:48.045Z",
+  "enginePackage": "artifacts\\public-build-20261113\\engine-pkg",
+  "source": "vendor\\rhwp",
+  "upstream": {
+    "repo": "edwardkim/rhwp",
+    "tag": "v0.9.0",
+    "commit": "c21316ab3bd4f9b84b15a06f8be5ff45d39cdebe"
+  },
+  "patches": [
+    {
+      "id": "canvas-metric-session-pending-work",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "fontsReady 전에 취소된 문단과 전체 측정 요청을 다음 표시 revision에 보존한다"
+    },
+    {
+      "id": "canvas-metric-session-pending-reset",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "측정 무효화 뒤 최초 준비는 전체 문서를 다시 수집한다"
+    },
+    {
+      "id": "canvas-metric-session-coalesce-before-await",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "첫 비동기 대기 전에 미완료 작업을 합쳐 다른 문단/전체 측정 요청의 유실을 막는다"
+    },
+    {
+      "id": "canvas-metric-session-complete-pending-work",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "현재 세대의 측정 등록과 선택이 모두 성공한 경우에만 미완료 표식을 해제한다"
+    },
+    {
+      "id": "canvas-metric-bridge-pending-work",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "host 폰트 준비를 기다리는 동안에도 앞선 문단과 전체 측정 작업을 누적한다"
+    },
+    {
+      "id": "canvas-metric-bridge-reserve-pending-work",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "표시 revision 선택의 첫 await 전부터 측정 범위를 동기로 예약하여 취소된 변경을 보존한다"
+    },
+    {
+      "id": "canvas-metric-bridge-coalesce-before-await",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "Bridge의 첫 await 전에 누적 범위를 확정하고 폰트 세대 변경도 current 검증에 포함한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-optional-api",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "단일 문단 측정 요청 API를 선택적으로 지원하며 구형 WASM은 전체 수집을 유지한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-session-scope",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "표시 revision의 기존 세대·epoch 계약 안에서 검증된 문단 대상만 추가로 받는다"
+    },
+    {
+      "id": "paragraph-canvas-metric-session-collection",
+      "file": "src/core/canvas-metric-session.ts",
+      "why": "순수 문자 변경은 기존 측정 요청과 해당 문단의 새 글리프만 수집한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-bridge-scope",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "측정 문단 범위를 현재 문서·폰트 세대의 Session에 전달한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-bridge-delegate",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "측정 Context·host 폰트와 세대 검증을 유지하면서 마지막 인수로 문단 대상을 전달한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-target-validator",
+      "file": "src/view/canvas-view.ts",
+      "why": "텍스트 전용 무효화의 유효한 본문/셀 문단 위치만 측정 범위로 변환한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-view-invalidated-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "텍스트 무효화에 한해서만 검증된 문단의 측정을 요청한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-view-selection-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "단일 문단 측정 힌트를 현재 표시 revision에 전달한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-mutation-reserve",
+      "file": "src/view/canvas-view.ts",
+      "why": "auto/명시 렌더러 분기와 비동기 선택 전에 누적 문단 범위를 예약한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-next-revision-reserve",
+      "file": "src/view/canvas-view.ts",
+      "why": "전체 revision 요청도 rendererSession.resolve 대기 전에 기록하여 후속 텍스트 입력이 지우지 못하게 한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-explicit-renderer-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "실제 호스트의 명시적 canvas2d 렌더러에서도 문단 측정 범위를 유지한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-next-revision-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "명시 렌더러 revision 선택에서도 검증된 문단 대상을 선택적으로 받는다"
+    },
+    {
+      "id": "paragraph-canvas-metric-next-revision-prepare",
+      "file": "src/view/canvas-view.ts",
+      "why": "명시 렌더러의 metrics 준비에도 epoch·문서 freshness 검증을 유지한 채 문단을 전달한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-view-prepare-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "동일 폰트·문서 세대 및 현재 revision 조건을 유지한 채 문단만 측정한다"
+    },
+    {
+      "id": "paragraph-canvas-metric-text-invalidation-hint",
+      "file": "src/engine/input-handler.ts",
+      "why": "이미 순수 문자 변경으로 검증된 위치만 페이지 무효화에도 독립 복사하여 담는다"
+    },
+    {
+      "id": "font-normalization-cache-storage",
+      "file": "src/core/font-rule-runtime.ts",
+      "why": "불변 글꼴 이름 정규화를 제한된 크기로 재사용하며 모듈 초기화 중에도 사용할 수 있게 한다"
+    },
+    {
+      "id": "font-normalization-cache",
+      "file": "src/core/font-rule-runtime.ts",
+      "why": "매 glyph마다 반복되는 Unicode/locale 글꼴 이름 정규화를 재사용한다"
+    },
+    {
+      "id": "font-supply-catalog-index",
+      "file": "src/core/font-loader.ts",
+      "why": "고정 웹폰트 카탈로그를 이름으로 색인하여 입력마다 전체 목록을 순회하지 않는다"
+    },
+    {
+      "id": "font-supply-indexed-lookup",
+      "file": "src/core/font-loader.ts",
+      "why": "실제 등록/로드 상태는 유지하면서 같은 이름의 카탈로그 항목만 조회한다"
+    },
+    {
+      "id": "font-rule-catalog-index",
+      "file": "src/core/font-rule-runtime.ts",
+      "why": "진단 ruleIds도 고정 카탈로그를 반복 정규화하지 않고 색인으로 읽는다"
+    },
+    {
+      "id": "font-substitution-cache-storage",
+      "file": "src/core/font-substitution.ts",
+      "why": "표시 치환의 정규화 캐시는 최초 정부 글꼴 인덱스 구성 전에 준비한다"
+    },
+    {
+      "id": "font-substitution-normalization-cache",
+      "file": "src/core/font-substitution.ts",
+      "why": "표시 치환에서 동일한 요청/설치 글꼴 이름의 locale 정규화를 반복하지 않는다"
+    },
+    {
+      "id": "typing-text-mutation-target",
+      "file": "src/engine/input-handler.ts",
+      "why": "검증된 단일 문단 텍스트 입력만 협업 정렬의 부분 갱신 대상으로 알린다"
+    },
+    {
+      "id": "typing-text-mutation-payload",
+      "file": "src/engine/input-handler.ts",
+      "why": "문단 구조를 바꾸지 않은 입력의 문단/셀 경로를 독립 복사하여 전달한다"
+    },
+    {
+      "id": "typing-raw-input-target",
+      "file": "src/engine/input-handler.ts",
+      "why": "IME와 iOS 입력도 같은 문단인 것이 검증된 경우에만 부분 갱신한다"
+    },
+    {
+      "id": "typing-command-input-target",
+      "file": "src/engine/input-handler.ts",
+      "why": "일반 입력과 삭제도 같은 문단인 것이 검증된 경우에만 부분 갱신한다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-toggle",
+      "file": "src/ui/toolbar.ts",
+      "why": "반복 입력마다 바뀌지 않은 글자 효과와 정렬 버튼의 class 속성을 다시 쓰지 않는다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-effects",
+      "file": "src/ui/toolbar.ts",
+      "why": "동일 글자 효과 메뉴의 class 속성 중복 쓰기를 생략한다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-font",
+      "file": "src/ui/toolbar.ts",
+      "why": "현재 글꼴이 그대로면 매 키 입력마다 글꼴 option 전체를 순회하지 않는다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-size",
+      "file": "src/ui/toolbar.ts",
+      "why": "같은 크기의 글자를 연속 입력할 때 크기 입력 DOM 쓰기를 생략한다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-color",
+      "file": "src/ui/toolbar.ts",
+      "why": "글자색이 같은 입력에서 색상 피커와 표시 막대를 다시 쓰지 않는다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-highlight",
+      "file": "src/ui/toolbar.ts",
+      "why": "형광펜 색이 같은 입력에서 표시 막대를 다시 쓰지 않는다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-spacing",
+      "file": "src/ui/toolbar.ts",
+      "why": "줄간격이 같은 문단에서 option 조회와 select 쓰기를 반복하지 않는다"
+    },
+    {
+      "id": "toolbar-preserve-unchanged-style",
+      "file": "src/ui/toolbar.ts",
+      "why": "문단 스타일이 같은 입력에서 select 값을 반복해서 쓰지 않는다"
+    },
+    {
+      "id": "off-thread-hwpx-export-import",
+      "file": "src/main.ts",
+      "why": "협업·자동 저장 HWPX 압축을 Web Worker에서 수행한다"
+    },
+    {
+      "id": "off-thread-hwpx-export-helper",
+      "file": "src/main.ts",
+      "why": "저장 작업자를 편집기 번들에 연결한다"
+    },
+    {
+      "id": "prime-hwpx-compression-on-open",
+      "file": "src/main.ts",
+      "why": "원본 ZIP의 미변경 압축 항목을 백그라운드에서 준비하여 첫 저장부터 재사용한다"
+    },
+    {
+      "id": "reset-hwpx-compression-on-new-document",
+      "file": "src/main.ts",
+      "why": "새 문서 생성 시 이전 문서의 압축 캐시를 해제한다"
+    },
+    {
+      "id": "uncompressed-hwpx-bridge",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "기존 HWPX XML 생성·저장 훅을 그대로 사용하고 압축만 분리한다"
+    },
+    {
+      "id": "exact-local-face-import",
+      "file": "src/core/font-loader.ts",
+      "why": "CSS 가족명과 다른 HWP 전체 글꼴명은 local(fullName/PostScriptName)으로 확인한다"
+    },
+    {
+      "id": "exact-local-faces-before-webfonts",
+      "file": "src/core/font-loader.ts",
+      "why": "첫 화면 측정 전에 설치된 KoPubWorld·나눔바른고딕의 요청 굵기를 확정한다"
+    },
+    {
+      "id": "local-font-catalog-targets-import",
+      "file": "src/core/local-fonts.ts",
+      "why": "현재 문서의 사용 글꼴과 KoPub 한영 별칭으로 파일 읽기 대상을 제한한다"
+    },
+    {
+      "id": "local-font-catalog-lazy-signature",
+      "file": "src/core/local-fonts.ts",
+      "why": "전체 설치 목록의 이름 테이블을 읽지 않고 문서 후보를 명시적으로 받는다"
+    },
+    {
+      "id": "local-font-catalog-lazy-name-tables",
+      "file": "src/core/local-fonts.ts",
+      "why": "목록에는 FontData 메타데이터만 사용하고 현재 문서가 요청한 face만 SFNT 별칭을 보강한다"
+    },
+    {
+      "id": "local-font-catalog-document-coverage",
+      "file": "src/core/local-fonts.ts",
+      "why": "수동 목록 갱신 시 현재 문서 후보를 제한적인 존재 검사에도 전달한다"
+    },
+    {
+      "id": "local-font-catalog-document-only-reads",
+      "file": "src/core/local-fonts.ts",
+      "why": "이전에 열었던 문서의 후보를 현재 문서의 파일 읽기 범위로 누적하지 않는다"
+    },
+    {
+      "id": "bundled-noto-bold-face",
+      "file": "src/core/font-loader.ts",
+      "why": "미설치 환경에서도 Noto Sans KR의 진하게 표시는 번들 Bold 파일을 쓴다"
+    },
+    {
+      "id": "webfont-key-includes-weight",
+      "file": "src/core/font-loader.ts",
+      "why": "같은 가족 이름의 보통·진하게 등록 상태를 구분한다"
+    },
+    {
+      "id": "webfont-css-weight",
+      "file": "src/core/font-loader.ts",
+      "why": "CSS도 FontFace와 같은 굵기 정보를 사용한다"
+    },
+    {
+      "id": "webfont-api-weight",
+      "file": "src/core/font-loader.ts",
+      "why": "Noto Bold 파일을 보통 굵기로 잘못 등록하지 않는다"
+    },
+    {
+      "id": "wire-toolbar-cut",
+      "file": "index.html",
+      "why": "오려두기 단추의 누락된 data-cmd를 연결해 실제 클립보드 명령을 실행한다"
+    },
+    {
+      "id": "wire-toolbar-copy",
+      "file": "index.html",
+      "why": "복사하기 단추의 누락된 data-cmd를 연결해 실제 클립보드 명령을 실행한다"
+    },
+    {
+      "id": "native-paste-empty-paragraph-source-format",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "빈 문단에서는 첫 복사 문단의 스타일과 직접 지정한 줄 간격·문단 모양을 가져온다"
+    },
+    {
+      "id": "native-import-uploaded-fragment-conversion",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "2018·2022의 복사 원본 바이트를 한글 자체로 HWPX 변환하여 메모·개체·스타일을 가져온다"
+    },
+    {
+      "id": "native-import-keyboard-integration",
+      "file": "src/engine/input-handler-keyboard.ts",
+      "why": "한글 원본 형식을 문서 조각 붙여넣기 경로에 연결한다"
+    },
+    {
+      "id": "native-import-portable-clipboard-atomic-paste",
+      "file": "src/engine/input-handler-keyboard.ts",
+      "why": "원본 변환이 끝날 때까지 선택 영역을 유지하고 문서·커서가 바뀐 뒤에는 지연 붙여넣기를 취소한다"
+    },
+    {
+      "id": "native-import-local-paste-conversion",
+      "file": "src/engine/input-handler-keyboard.ts",
+      "why": "로컬의 기존 native 읽기 경로도 같은 원본 HWPX 변환을 사용한다"
+    },
+    {
+      "id": "native-copy-missing-picture-notice",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "한글 붙여넣기 준비 상태와 모든 서식의 일치 검증을 구분하고 원본 없는 그림을 알린다"
+    },
+    {
+      "id": "native-copy-public-origin-physical-proof",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "공용 HTTPS 접속도 실제 호스트 클립보드에 복사 표식이 있는 경우에만 원본 한글 형식으로 변환한다"
+    },
+    {
+      "id": "native-copy-probe-public-origin-on-write",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "원격 브라우저에는 클립보드 읽기를 열지 않고 쓰기마다 물리 복사 표식을 검증한다"
+    },
+    {
+      "id": "native-copy-remote-fallback-without-warning",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "서버와 다른 PC에서 복사한 경우 기존 문서모델·HTML 복사를 그대로 유지한다"
+    },
+    {
+      "id": "native-copy-wait-for-physical-publication",
+      "file": "src/engine/native-clipboard.ts",
+      "why": "큰 복사의 브라우저 게시가 끝나기 전에 물리 표식을 검사한 경우 짧게 재확인한다"
+    },
+    {
+      "id": "context-menu-select-all",
+      "file": "src/ui/context-menu.ts",
+      "why": "본문·표·그림 우클릭 메뉴에 실제 전체 선택 명령을 제공한다"
+    },
+    {
+      "id": "progressive-open-main-helper",
+      "file": "src/main.ts",
+      "why": "읽기 전용 첫 쪽과 전체 조판 준비를 구분한다"
+    },
+    {
+      "id": "progressive-open-progress-paint-gate",
+      "file": "src/main.ts",
+      "why": "문서 열기의 연속 진행 문구마다 고정 두 프레임을 기다리지 않는다"
+    },
+    {
+      "id": "progressive-open-progress-coalesce",
+      "file": "src/main.ts",
+      "why": "첫 진입은 반드시 표시하고 80ms 이내의 중복 진행 표시 대기만 합친다"
+    },
+    {
+      "id": "progressive-open-bridge-previous-document",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "점진 열기가 끝나기 전까지 이전 문서와 파일 메타데이터를 보존한다"
+    },
+    {
+      "id": "progressive-open-atomic-hold-option",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "정상 열기와 구분하여 점진 열기만 이전 핸들의 해제를 지연한다"
+    },
+    {
+      "id": "progressive-open-atomic-replace-pending",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "다른 문서를 여는 새 시도는 이전 미완료 문서를 먼저 원래 상태로 되돌린다"
+    },
+    {
+      "id": "progressive-open-atomic-previous-state",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "기존 문서의 저장 이름·핸들·보호 상태·식별자를 함께 보존한다"
+    },
+    {
+      "id": "progressive-open-atomic-delay-free",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "완료 전 오류가 발생해도 기존 문서를 복구할 수 있게 한다"
+    },
+    {
+      "id": "progressive-open-atomic-rollback-error",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "부분 문서 교체 뒤 오류에서도 이미 해제한 핸들을 다시 사용하지 않는다"
+    },
+    {
+      "id": "progressive-open-bridge-log-phase",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "처음 두 쪽의 임시 수를 전체 문서 쪽 수로 오해하지 않게 한다"
+    },
+    {
+      "id": "progressive-open-bridge-api",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "새 엔진의 점진 열기를 선택적으로 사용하고 구형 엔진은 그대로 연다"
+    },
+    {
+      "id": "progressive-open-main-coordinator",
+      "file": "src/main.ts",
+      "why": "첫 1~2쪽을 표시한 뒤 브라우저에 실행 기회를 주며 나머지를 계산한다"
+    },
+    {
+      "id": "progressive-open-release-held-document",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "문서 해제 시 이전 문서 보존 핸들도 함께 해제한다"
+    },
+    {
+      "id": "progressive-open-new-document-clears-held",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "새 문서 생성은 이전 점진 열기의 복구 핸들을 남기지 않는다"
+    },
+    {
+      "id": "progressive-open-cancelled-error",
+      "file": "src/main.ts",
+      "why": "새 문서로 교체된 이전 비동기 열기는 오류 화면을 덮어쓰지 않는다"
+    },
+    {
+      "id": "progressive-open-ignore-stale-error",
+      "file": "src/main.ts",
+      "why": "이전 열기의 취소 처리가 새 문서 화면 복구나 준비 상태를 건드리지 않는다"
+    },
+    {
+      "id": "progressive-open-finish-preview",
+      "file": "src/main.ts",
+      "why": "기존 초기화가 끝난 뒤 미리보기 보존 화면을 해제하고 확정 쪽 수를 알린다"
+    },
+    {
+      "id": "progressive-open-preview-view-option",
+      "file": "src/view/canvas-view.ts",
+      "why": "미리보기에서는 아직 완성되지 않은 전 문서 메트릭 준비를 요청하지 않는다"
+    },
+    {
+      "id": "progressive-open-preview-metrics-barrier",
+      "file": "src/view/canvas-view.ts",
+      "why": "정상 전체 열기만 기존 정확 폰트 메트릭을 준비한다"
+    },
+    {
+      "id": "progressive-open-preview-page-bound",
+      "file": "src/view/canvas-view.ts",
+      "why": "미리보기 페이지 정보와 Canvas를 처음 두 쪽으로 제한한다"
+    },
+    {
+      "id": "progressive-open-preview-ready-barrier",
+      "file": "src/view/canvas-view.ts",
+      "why": "부분 화면을 협업 플러그인의 편집 준비 완료로 알리지 않는다"
+    },
+    {
+      "id": "progressive-open-load-retry-wrapper",
+      "file": "src/view/canvas-view.ts",
+      "why": "화면 선택이 바뀌어 그만둔 문서 화면 올리기를 같은 문서면 다시 한다"
+    },
+    {
+      "id": "progressive-open-load-retry-start",
+      "file": "src/view/canvas-view.ts",
+      "why": "앞쪽 그만두기를 끝(done)과 선택 바뀜(superseded)으로 나눈다"
+    },
+    {
+      "id": "progressive-open-load-retry-metrics",
+      "file": "src/view/canvas-view.ts",
+      "why": "메트릭 준비 뒤 그만두기도 나눈다"
+    },
+    {
+      "id": "progressive-open-load-retry-no-pages",
+      "file": "src/view/canvas-view.ts",
+      "why": "쪽이 없으면 다시 해도 같다"
+    },
+    {
+      "id": "progressive-open-load-retry-end",
+      "file": "src/view/canvas-view.ts",
+      "why": "끝까지 올렸다"
+    },
+    {
+      "id": "select-all-releases-object-selection",
+      "file": "src/engine/input-handler-keyboard.ts",
+      "why": "개체 선택 중 모두 선택은 개체 선택을 풀고 문서 전체를 고른다(한/글 2022 실측) — 개체만 복사되던 결함"
+    },
+    {
+      "id": "select-all-from-table-object-selection",
+      "file": "src/engine/input-handler-keyboard.ts",
+      "why": "표 개체 선택 중 Ctrl+A 는 표 선택을 푸는 폴스루보다 먼저 모두 선택으로 보낸다(그래야 위 패치가 표 밖에서 문서 전체를 고른다)"
+    },
+    {
+      "id": "engine-mobile-hold-input-import",
+      "file": "src/engine/input-handler.ts",
+      "why": "편집기 엔진의 모든 IME 포커스 경로에 모바일 길게 누르기 정책을 연결한다"
+    },
+    {
+      "id": "engine-mobile-hold-input-state",
+      "file": "src/engine/input-handler.ts",
+      "why": "문서 입력기 수명과 모바일 포커스 정책의 수명을 맞춘다"
+    },
+    {
+      "id": "engine-mobile-hold-input-install",
+      "file": "src/engine/input-handler.ts",
+      "why": "textarea와 iOS contenteditable 모두 짧은 터치·자동 포커스로 키보드를 열지 않는다"
+    },
+    {
+      "id": "engine-mobile-hold-input-dispose",
+      "file": "src/engine/input-handler.ts",
+      "why": "입력기 종료 때 길게 누르기 타이머·문서 이벤트를 제거한다"
+    },
+    {
+      "id": "mobile-editor-shared-ui",
+      "file": "src/main.ts",
+      "why": "웹·기본 편집기·APK가 같은 도구 접기와 문서 배율 핀치를 쓴다"
+    },
+    {
+      "id": "mobile-options-import",
+      "file": "src/ui/options-dialog.ts",
+      "why": "환경 설정의 모바일 전용 터치 민감도 탭"
+    },
+    {
+      "id": "mobile-options-state",
+      "file": "src/ui/options-dialog.ts",
+      "why": "설정 창 취소 시 저장하지 않도록 입력 패널을 보관한다"
+    },
+    {
+      "id": "mobile-options-tab",
+      "file": "src/ui/options-dialog.ts",
+      "why": "모바일에서만 0.1~2초 설정을 표시한다"
+    },
+    {
+      "id": "mobile-options-save",
+      "file": "src/ui/options-dialog.ts",
+      "why": "확인을 누를 때만 기기에 민감도를 저장한다"
+    },
+    {
+      "id": "allow-cowork-plugin",
+      "file": "src/main.ts",
+      "why": "플러그인 allowlist 에 cowork 추가(번들 포함, 임의 URL 로드 없음)"
+    },
+    {
+      "id": "context-menu-hook",
+      "file": "src/ui/context-menu.ts",
+      "why": "우클릭 메뉴가 화면에 붙기 직전에 cowork '검토' 구역을 넣는다(크기 계산 전이라 위치 보정이 같이 된다)"
+    },
+    {
+      "id": "preload-noto-sans-kr-fallback",
+      "file": "src/core/font-loader.ts",
+      "why": "외부 CDN 없이도 첫 문서 표시 전에 번들 Noto Sans KR를 준비한다"
+    },
+    {
+      "id": "detect-same-face-aliases",
+      "file": "src/core/font-loader.ts",
+      "why": "같은 글꼴의 설치 이름(HY견명조 등)도 감지하고, 명조 글꼴이 있는 문서는 번들 Noto Serif KR 도 준비한다"
+    },
+    {
+      "id": "preload-noto-serif-for-serif-docs",
+      "file": "src/core/font-loader.ts",
+      "why": "쓸 수 없는 명조 글꼴의 대체(Noto Serif KR)를 첫 표시 전에 준비한다(명조 글꼴이 있는 문서만)"
+    },
+    {
+      "id": "inspect-loaded-font-for-fallback",
+      "file": "src/core/font-substitution.ts",
+      "why": "카탈로그 등록과 실제 웹폰트 적재 성공을 구분한다"
+    },
+    {
+      "id": "noto-sans-kr-for-unavailable-font",
+      "file": "src/core/font-substitution.ts",
+      "why": "사용할 수 없는 문서 글꼴은 Noto Sans KR로 표시하고 실제 설치·적재된 글꼴은 유지한다"
+    },
+    {
+      "id": "rhwp090-metric-revision-scope",
+      "file": "src/view/canvas-view.ts",
+      "why": "0.9 공통 renderer 준비 함수에 문단 범위와 읽기 전용 미리보기 계약 전달"
+    },
+    {
+      "id": "rhwp090-metric-revision-prepare",
+      "file": "src/view/canvas-view.ts",
+      "why": "세대 검사와 portable fallback을 유지하며 범위를 측정 수집 지점에 연결"
+    },
+    {
+      "id": "rhwp090-installed-face-probe-before-consent",
+      "file": "src/core/font-substitution.ts",
+      "why": "감지 동의 전에도 폭 탐지로 확인된 설치 글꼴을 원본 face 로 사용(fork 표시 계약)"
+    },
+    {
+      "id": "fontfix-fork-canvas-font-import",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "fork 병합이 쓰는 resolveFont 를 가져옴"
+    },
+    {
+      "id": "fontfix-fork-canvas-font-merge",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "Canvas 글꼴 병합을 fork 방식으로: 엔진 내부 별칭을 원 이름으로 되돌려 설치·웹 글꼴 대신 Noto 로 그리지 않음"
+    },
+    {
+      "id": "fontfix-fork-canvas-font-merge-tail",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "fork 병합: 감지 동의와 관계없이 엔진 체인 보존, 표시 정책 나머지는 뒤에 이어 붙임"
+    },
+    {
+      "id": "fontfix-fork-canvas-font-cache",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "Canvas 글꼴 치환을 fork 처럼 글꼴 상태 단위로 기억(같은 결과, 반복 셈 없음)"
+    },
+    {
+      "id": "fontfix-fork-system-fallback",
+      "file": "src/core/font-substitution.ts",
+      "why": "빠진 글자의 대체 사다리를 fork 와 같게(기호·이모지 글꼴을 끼우지 않음)"
+    },
+    {
+      "id": "fontfix-fork-no-declared-font-environment",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "0.9 선언 글꼴 환경(로컬 바이트 별칭·엔진 환경 교체)을 쓰지 않음(fork 방식)"
+    },
+    {
+      "id": "rhwp090-progressive-hold-recovery-cipher",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "rollback 완료까지 이전 문서의 복구 암호 핸들 보존"
+    }
+  ],
+  "plugin": {
+    "id": "cowork",
+    "version": "0.4.0"
+  },
+  "externalFonts": false
+}

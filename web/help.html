@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>사용 설명서 · HWPX 공동 검토</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/help.css">
+</head>
+<body>
+  <header class="help-top"><a href="/" class="brand">HWPX 공동 검토</a><span>사용 설명서</span><a class="button" href="/">문서로 돌아가기</a></header>
+  <div class="help-layout">
+    <nav aria-label="설명서 목차">
+      <a href="#start">시작하기</a><a href="#join">처음 접속하기</a><a href="#library">문서함과 권한</a><a href="#review">AI에게 요청하기</a><a href="#ai">AI 연결</a>
+      <a class="sub" href="#agents">① 내 PC의 구독 AI · 기본</a><a class="sub" href="#chatgpt-oauth">② ChatGPT 앱 연결 · 선택</a><a class="sub" href="#personal-key">③ 내 AI 키 · 사용료 별도</a>
+      <a href="#local">내 PC 폴더(개인용 앱)</a><a href="#troubleshooting">문제가 생겼을 때</a>
+      <span class="nav-admin" data-admin hidden>관리자</span>
+      <a href="#host" data-admin hidden>중앙 서버 준비</a><a href="#connections" data-admin hidden>공유 주소 점검</a><a href="#worker-api" data-admin hidden>서버 AI·API 실행기</a><a href="#manual" data-admin hidden>상세 운영 매뉴얼</a>
+    </nav>
+    <main>
+      <section id="start" class="intro">
+        <div class="eyebrow">한글 문서를 함께 · 각자의 AI와 함께</div>
+        <h1>한글 문서를 여럿이 함께 고치고, AI에게 도움을 받습니다.</h1>
+        <p class="lead">HWPX 파일을 브라우저에서 함께 고칩니다. AI에게 맡기면 수정 제안이 돌아오고, 사람이 보고 반영합니다.</p>
+        <div class="start-grid">
+          <a href="#join"><b>1. 접속하기</b><span>서버 주소와 내 토큰만 있으면 됩니다.</span></a>
+          <a href="#agents"><b>2. 내 AI 연결하기</b><span>내 PC의 Codex·Claude Code — 추가 비용 없음.</span></a>
+          <a href="#review"><b>3. AI에게 맡기기</b><span>글을 고르고 할 일을 적어 보냅니다.</span></a>
+        </div>
+        <ol class="flow" aria-label="협업 흐름"><li>문서 올리기</li><li>함께 고치기·AI 요청</li><li>AI가 제안 회신</li><li>사람이 확인·반영</li><li>한글로 저장</li></ol>
+      </section>
+
+      <section id="join"><h2>처음 접속하기</h2>
+        <ol><li>관리자에게 <strong>서버 주소</strong>와 <strong>나만의 접속 토큰</strong>을 받습니다. 토큰은 다른 사람과 함께 쓰지 않습니다.</li><li>브라우저에서 서버 주소를 열고 토큰을 넣습니다. 설치할 것은 없습니다.</li><li>문서를 열거나 HWPX 파일을 올립니다.</li></ol>
+        <p class="note">주소가 <code>localhost</code>로 시작하면 그 PC에서만 열립니다. 다른 PC에서 쓸 주소는 관리자에게 받으세요.</p>
+      </section>
+
+      <section id="library"><h2>문서함과 권한</h2>
+        <p><strong>공용 문서함</strong>은 함께 쓰는 곳, <strong>개인 문서함</strong>은 나만 보는 곳, <strong>공유받은 문서함</strong>은 남이 내게 공유한 것이 모이는 곳입니다. 폴더의 <strong>권한</strong>(사람 모양)에서 사람마다 권한을 줍니다.</p>
+        <ul class="points"><li><strong>보기</strong> 읽기·메모·AI 요청 · <strong>작성</strong> 올리기·폴더 만들기 · <strong>편집</strong> 고치기</li><li><strong>삭제</strong> 지우기 · <strong>관리</strong> 권한·이름 바꾸기, 옮기기</li></ul>
+        <details class="more"><summary>자세히</summary>
+          <p>어느 문서함이든 <strong>새 폴더</strong>, <strong>HWPX 올리기</strong>, <strong>새 문서로 시작</strong>을 씁니다(같은 이름이 있으면 뒤에 (2)를 붙입니다). 문서 이름은 목록의 ✎ 또는 문서 화면 맨 위 이름을 눌러 바꿉니다.</p>
+          <p>공용 문서함 폴더는 <strong>상위 폴더 따름</strong>(위 폴더 권한 그대로) 또는 <strong>직접 지정</strong>(적은 사람만)입니다. 맨 위 권한은 관리자가 정합니다.</p>
+          <p>개인 문서함 폴더의 권한에 사람을 더하면 그 사람에게 공유됩니다. 문서 하나만 다르게 하려면 문서 줄의 <strong>권한 → 직접 지정</strong>. 관리자는 언제나 볼 수 있습니다.</p>
+          <p>볼 권한이 없는 문서는 목록과 AI 연결(MCP)에서도 보이지 않습니다. 문서 설정(⚙)의 <strong>수정 권한</strong>은 편집 권한이 있는 사람 가운데서 다시 고르는 것입니다.</p>
+        </details>
+      </section>
+
+      <section id="review"><h2>AI에게 요청하기</h2>
+        <figure class="see"><a href="/help-assets/request-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/request-steps.webp" width="880" height="253" alt="1 글을 고르거나 문단에서 우클릭, 2 AI에게 맡기기에 할 일을 적음(비우면 검토), 3 AI 작업 탭에서 확인 필요가 되면, 4 반영하거나 거절" decoding="async"></a></figure>
+        <ul class="points">
+          <li>할 일은 자유롭게 적습니다. 다듬기·표 넣기·서식·여러 안 비교도 지시에 적으면 됩니다. 자료는 <strong>첨부</strong>.</li>
+          <li><strong>AI에게 빠르게 맡기기</strong>(보라 ✦)는 누르면 바로 보냅니다.</li>
+          <li>AI가 끝내도 문서 글은 그대로입니다. <strong>AI 작업</strong> 탭에서 <strong>반영</strong>해야 들어갑니다.</li>
+        </ul>
+        <p class="muted">화면의 <strong>?</strong>에 마우스를 올리면 설명이, 누르면 이 설명서의 그 절이 열립니다.</p>
+        <details class="more"><summary>고치기·메모·자동 반영</summary>
+          <p>고치고 잠시 멈추면 저장되고 다른 사람 화면에도 보입니다. 문서 설정이 <strong>승인 후 반영</strong>이면 내 수정본에서 고친 뒤 검토를 받습니다. 의견은 우클릭 → 메모.</p>
+          <p>빠르게 맡기기 전에 예시 지시를 보고 싶으면 <strong>⚙ 문서 설정 → AI에게 빠르게 맡기기 → 확인 후 보내기</strong>. 작업이 끝날 때 권장안을 바로 넣으려면 <strong>AI 자동 반영 → 자동 반영</strong>(되돌릴 수 있음). 수정안은 기본 1개, 비교가 필요하면 지시에 “세 가지 안으로”처럼 적습니다.</p>
+        </details>
+        <details class="more"><summary>차례 만들기</summary>
+          <p><strong>도구 → 차례/색인 → 차례 만들기</strong>는 한글과 같습니다. 개요 문단(또는 고른 스타일, <strong>제목 차례 표시</strong>)으로 제목 차례를, 캡션으로 표·그림·수식 차례를 만들고 쪽 번호와 하이퍼링크를 답니다. <strong>필드로 넣기</strong>로 만든 차례는 차례 안에서 우클릭 → <strong>차례 새로 고침</strong>(또는 <strong>모든 차례 새로 고침</strong>)으로 다시 맞추고, <strong>차례 고치기…</strong>로 선택 사항을 바꿉니다. 빼고 싶은 개요 문단은 <strong>차례 숨기기</strong>. 위치를 <strong>현재 문서의 새 구역</strong>으로 고르면 커서 문단 뒤에서 구역을 나눠 차례만 든 쪽을 만듭니다. 차례를 없애려면 끌어 골라 지웁니다.</p>
+        </details>
+        <details class="more"><summary>버전과 한글로 저장</summary>
+          <p>버전은 문서를 올릴 때, 변경 요청을 반영할 때, 이력 탭의 <strong>버전 저장</strong>으로 생깁니다. AI 작업은 시간이 좀 지난 뒤의 작업에서만 버전을 남깁니다. 이전 버전은 이력 탭에서 받거나 되돌리고, 최종 파일은 상단 <strong>한글로 저장</strong>으로 받습니다.</p>
+        </details>
+        <details class="more"><summary>화면 넓게 쓰기</summary>
+          <p>화면은 <strong>문서</strong>와 오른쪽 <strong>AI 작업 창</strong> 두 칸입니다. 메모·AI 작업·제안은 <strong>문서 옆 여백</strong>에 뜹니다. 메모 머리 줄을 끌면 옮기고, 두 번 누르거나 <strong>↺</strong>로 제자리로 돌립니다(모두: <strong>보기 → 메모 제자리로</strong>).</p>
+          <p>오른쪽 끝 <strong>AI 작업</strong> 꼭지로 창을 접고 고정합니다. 접어 둔 동안 오른쪽 끝에 마우스를 대면 잠깐 펼쳐집니다. <strong>메모</strong> 꼭지는 문서 옆 메모를 숨기거나 보입니다. 경계선을 끌어 폭을 바꿉니다(두 번 누르면 기본 폭).</p>
+          <p>휴대전화처럼 좁은 화면에서는 문서 설정·사용 설명서·보기·한글로 저장이 <strong>⋯</strong> 메뉴에 들어가고, 메모는 아래쪽 창의 검토 탭에서 봅니다. 편집 도구 막대는 <strong>⋯ → 편집 도구 막대</strong>.</p>
+        </details>
+      </section>
+
+      <section id="ai"><h2>AI 연결</h2>
+        <p class="lead">요청은 연결된 AI가 처리해야 결과가 옵니다. 기본은 ① 내 PC의 구독 AI입니다.</p>
+        <figure class="see"><a href="/help-assets/ai-flow.webp" target="_blank" rel="noopener"><img src="/help-assets/ai-flow.webp" width="880" height="318" alt="1 문서에서 AI에게 맡기기, 2 내 PC의 Codex나 Claude Code가 MCP로 바로 받아 처리(구독 사용량 안에서, 추가 비용 없음), 3 제안과 메모가 문서로 돌아옴, 4 내가 보고 반영하거나 거절" decoding="async"></a></figure>
+        <div id="automatic">
+          <div class="method-grid">
+            <a href="#agents" class="main-way"><i>1</i><b>내 PC의 구독 AI · 기본</b><span>Codex(ChatGPT 구독)나 Claude Code(Claude 구독)가 요청을 바로 처리합니다.</span><em>추가 비용 없음 · 실시간</em></a>
+            <a href="#chatgpt-oauth"><i>2</i><b>ChatGPT 앱 연결 · 선택</b><span>ChatGPT 대화창에서 쌓인 요청을 처리합니다. 필요할 때만.</span><em>대화할 때 처리 · https 주소 필요</em></a>
+            <a href="#personal-key" class="paid-way"><i>3</i><b>내 AI 키 · 사용료 별도</b><span>설치 없이 서버가 내 API 키로 처리합니다.</span><em>유료 · 쓴 만큼 요금</em></a>
+          </div>
+          <button class="button primary" type="button" id="automation-status">내 연결 상태 확인</button><div id="automation-result" class="diagnostics" role="status"><p class="muted">같은 서버에 내 토큰으로 로그인한 뒤 확인하세요.</p></div>
+        </div>
+        <div id="mcp" class="mcp-box">
+          <p><strong>MCP 서버</strong>는 AI가 이 문서 서버에 들어와 문서를 읽고 제안·메모를 남기는 연결 창구입니다. 따로 설치하지 않습니다. AI는 내 토큰의 권한으로만 들어와 내 요청만 맡습니다.</p>
+          <div class="address-card"><div><span>AI에 등록할 MCP 주소</span><code id="shared-mcp">확인 중…</code><button class="button" type="button" data-copy="shared-mcp">MCP 주소 복사</button></div><div><span>지금 브라우저로 접속한 주소</span><code id="current-web">확인 중…</code></div><p id="address-note" class="muted"></p></div>
+        </div>
+      </section>
+
+      <section id="agents"><div class="method-tag">① 기본 · 추가 비용 없음</div><h2>내 PC의 Codex·Claude Code로 바로 처리</h2>
+        <figure class="see"><a href="/help-assets/realtime-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/realtime-steps.webp" width="880" height="336" alt="Codex: 1 codex login, 2 토큰 저장(setx, 한 번), 3 start-codex-agent.bat 켜 두기, 그러면 문서 화면에 Codex로 보내기가 보임. Claude Code: 1 claude auth login, 2 토큰 저장, 3 start-claude-worker.bat 실행기 켜 두기, 그러면 Claude Code로 보내기가 보임. 창을 켜 두면 새 요청을 바로 처리하고, 끄면 요청은 대기열에서 기다림" loading="lazy" decoding="async"></a></figure>
+        <ul class="points">
+          <li>쓰는 구독(ChatGPT·Claude)의 사용 한도 안에서 처리합니다. 별도 API 요금은 없습니다.</li>
+          <li>실행기·채널 창을 켜 두면 새 요청을 바로 처리합니다.</li>
+          <li>VS Code의 Codex·Claude Code 대화창에서는 <strong>“대기열을 처리해 줘”</strong> 한마디로 처리합니다.</li>
+        </ul>
+        <figure class="see"><a href="/help-assets/vscode-places.webp" target="_blank" rel="noopener"><img src="/help-assets/vscode-places.webp" width="880" height="420" alt="VS Code에서 붙여넣는 곳: 1 터미널에 명령 붙여넣기, 2 설정 파일 config.toml은 직접 고칠 때만, 3 Codex·Claude Code 대화창에 대기열을 처리해 줘 입력" loading="lazy" decoding="async"></a></figure>
+
+        <div class="paste" aria-label="VS Code에 붙여넣을 내용">
+          <div class="paste-title"><b>VS Code에 붙여넣을 내용</b><span>복사 → VS Code 터미널(PowerShell)이나 대화창에 붙여넣기</span></div>
+          <div class="paste-item"><div class="paste-head"><i>0</i><b>토큰 저장</b><span class="where">터미널 · 한 번만</span><button class="button" type="button" data-copy="token-command" aria-label="토큰 저장 명령 복사">복사</button></div>
+            <pre><code id="token-command">setx HWPX_COWORK_TOKEN "내-토큰"</code></pre>
+            <p><code>내-토큰</code> 자리에 관리자에게 받은 토큰을 넣습니다. 실행한 뒤 VS Code를 완전히 닫았다 다시 엽니다.</p></div>
+
+          <h3 id="codex">Codex <span>ChatGPT 구독</span></h3>
+          <div class="paste-item"><div class="paste-head"><i>1</i><b>설치·로그인</b><span class="where">터미널 · 처음 한 번</span><button class="button" type="button" data-copy="codex-login" aria-label="Codex 설치·로그인 명령 복사">복사</button></div>
+            <pre><code id="codex-login">npm.cmd install -g @openai/codex
+codex login</code></pre>
+            <p>ChatGPT 계정으로 로그인합니다. VS Code의 Codex 확장도 같은 로그인·설정을 씁니다.</p></div>
+          <div class="paste-item"><div class="paste-head"><i>2</i><b>MCP 등록 · 대화창에서 쓸 때</b><span class="where">터미널 · 한 번</span><button class="button" type="button" data-copy="codex-mcp-command" aria-label="Codex MCP 등록 명령 복사">복사</button></div>
+            <pre><code id="codex-mcp-command">연결 주소 확인 중…</code></pre>
+            <details class="more"><summary>설정 파일에 직접 넣기(config.toml)</summary>
+              <pre><code id="codex-mcp-config">연결 주소 확인 중…</code></pre><button class="button" type="button" data-copy="codex-mcp-config">설정 복사</button>
+              <p class="muted">파일: <code>%USERPROFILE%\.codex\config.toml</code>. 토큰은 파일에 적지 않고 0번의 환경 변수에서 읽습니다.</p></details></div>
+          <div class="paste-item" id="worker"><div class="paste-head"><i>3</i><b>실시간 처리 켜기</b><span class="where">프로그램 폴더의 터미널 · 켜 둠</span><button class="button" type="button" data-copy="codex-start" aria-label="Codex 실행기 시작 명령 복사">복사</button></div>
+            <pre><code id="codex-start">.\start-codex-agent.bat</code></pre>
+            <p>창을 켜 두면 새 요청을 바로 처리합니다. 끌 때는 <kbd>Ctrl</kbd>+<kbd>C</kbd>. PC를 다시 켜면 다시 실행합니다.</p>
+            <div class="alt"><b>프로그램 폴더가 없으면</b> 실행기 ZIP을 받아 풀고, 그 폴더에서 <code>npm.cmd install</code> 뒤 아래를 실행합니다.
+              <div class="alt-actions"><button class="button primary" type="button" id="download-worker">실행기 ZIP 내려받기</button><span id="worker-download-status" class="muted" role="status">문서 화면에 내 토큰으로 로그인한 상태에서 내려받습니다.</span></div>
+              <pre><code id="codex-command">실행 예제 준비 중…</code></pre><button class="button" type="button" data-copy="codex-command">실행 예제 복사</button></div></div>
+
+          <h3 id="claude-code">Claude Code <span>Claude 구독</span></h3>
+          <div class="paste-item"><div class="paste-head"><i>1</i><b>로그인</b><span class="where">터미널 · 처음 한 번</span><button class="button" type="button" data-copy="claude-login" aria-label="Claude Code 로그인 명령 복사">복사</button></div>
+            <pre><code id="claude-login">claude auth login</code></pre>
+            <p>Claude 구독 계정으로 로그인합니다. 설치: <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener">Claude Code 설치 안내</a>. 최신 CLI를 준비하세요.</p></div>
+          <div class="paste-item"><div class="paste-head"><i>2</i><b>MCP 등록 · 대화창에서 쓸 때</b><span class="where">터미널(PowerShell) · 한 번</span><button class="button" type="button" data-copy="claude-mcp-command" aria-label="Claude Code MCP 등록 명령 복사">복사</button></div>
+            <pre><code id="claude-mcp-command">연결 주소 확인 중…</code></pre>
+            <p>작은따옴표 그대로 붙여넣습니다. 토큰은 파일에 적히지 않고 연결할 때 0번의 환경 변수에서 읽습니다.</p></div>
+          <div class="paste-item"><div class="paste-head"><i>3</i><b>실시간 처리 켜기</b><span class="where">프로그램 폴더의 터미널 · 켜 둠</span><button class="button" type="button" data-copy="claude-start" aria-label="Claude Code 실행기 시작 명령 복사">복사</button></div>
+            <pre><code id="claude-start">연결 주소 확인 중…</code></pre>
+            <p>실행기가 요청마다 Claude Code를 띄워 처리합니다. API 키·채널 설정 없이 구독 사용량 안에서 처리하며, MCP 연결도 실행기가 준비합니다. 끝에 <code>--check</code>를 붙이면 연결만 점검합니다.</p>
+            <div class="alt"><b>실행기 ZIP을 쓰면</b> 위의 ZIP을 풀고 <code>npm.cmd install</code> 뒤 아래를 실행합니다.
+              <pre><code id="claude-command">실행 예제 준비 중…</code></pre><button class="button" type="button" data-copy="claude-command">실행 예제 복사</button></div>
+            <details class="more"><summary>Claude Code 채널로 켜 두기</summary><pre><code id="channel-command">연결 주소 확인 중…</code></pre><button class="button" type="button" data-copy="channel-command">채널 명령 복사</button><p>대화형 터미널 세션에 알림을 보내는 다른 방법입니다. 조직 계정은 채널 허용이 필요할 수 있습니다. <a href="/manual-resources/AGENT_SETUP.md" target="_blank" rel="noopener">자세한 채널 안내</a></p></details></div>
+
+          <h3>대화창에 한마디 <span>Codex·Claude Code 공통</span></h3>
+          <div class="paste-item"><div class="paste-head"><i>✦</i><b>쌓인 요청 처리</b><span class="where">VS Code의 Codex·Claude Code 대화창</span><button class="button" type="button" data-copy="queue-short" aria-label="대기열 처리 문장 복사">복사</button></div>
+            <pre><code id="queue-short">대기열을 처리해 줘</code></pre>
+            <p>실시간 창을 켜지 않았을 때 씁니다. 쌓인 내 요청을 오래된 것부터 처리합니다.</p></div>
+        </div>
+        <details class="more" id="ai-run"><summary>모델·추론 강도</summary>
+          <p>문서 목록의 <strong>AI 모델·추론 강도</strong>에서 연결마다 정합니다. 비워 두면 그 AI의 기본값입니다. 실행기는 요청마다 읽고(Codex 관리자는 기본으로 <strong>Codex가 자동 선택</strong>), Claude Code 채널은 다음에 띄울 때부터 씁니다. VS Code 대화창은 그 앱에서 고릅니다.</p>
+        </details>
+        <p class="muted">자세한 안내: <a href="/manual-resources/AGENT_SETUP.md" target="_blank" rel="noopener">Claude Code 채널</a> · <a href="/manual-resources/AUTOMATIC_AI_GUIDE.md" target="_blank" rel="noopener">Codex 실행기</a></p>
+      </section>
+
+      <section id="chatgpt-oauth"><div class="method-tag gray">② 고급 · 필요할 때만</div><h2>ChatGPT 앱 연결(웹)</h2>
+        <p>ChatGPT 대화에서 <strong>“대기열을 처리해 줘”</strong>라고 말할 때마다 쌓인 요청을 처리합니다. 실시간이 아니고, 서버에 공개 https 주소가 있어야 합니다.</p>
+        <details class="more advanced" data-open-on="chatgpt-oauth"><summary>연결 방법 펼치기</summary>
+          <figure class="see"><a href="/help-assets/chatgpt-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/chatgpt-steps.webp" width="880" height="296" alt="ChatGPT 웹: 1 플러그인에서 사용자 지정 MCP 서버 추가, 2 서버 URL 넣기와 인증 OAuth, 3 HWPX 확인 화면에서 내 토큰으로 허용, 4 대화에서 대기열을 처리해 줘. 실시간이 아니고 말할 때마다 처리" loading="lazy" decoding="async"></a></figure>
+          <p id="oauth-status" class="muted" role="status">연결 준비 상태를 확인하는 중입니다…</p>
+          <div class="address-card"><div><span>ChatGPT에 등록할 서버 주소</span><code id="oauth-mcp">https 주소 확인 필요</code><button class="button" type="button" data-copy="oauth-mcp">주소 복사</button></div></div>
+          <ol><li><a href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">ChatGPT 플러그인</a> → <strong>＋ → 사용자 지정 MCP 서버 추가</strong>.</li><li>이름 <strong>HWPX 공동 검토</strong>, 서버 URL은 위 주소, 인증 <strong>OAuth</strong>(등록 방식을 물으면 <strong>DCR</strong>, Client ID·Secret은 비움).</li><li><strong>연결</strong> → 이 서버의 확인 화면에서 내 토큰으로 허용.</li></ol>
+          <div class="paste"><div class="paste-title"><b>ChatGPT에 붙여넣을 내용</b><span>짧게는 “대기열을 처리해 줘”, 자세히는 아래 프롬프트</span></div>
+            <div class="paste-item"><div class="paste-head"><i>✦</i><b>대기열 처리 프롬프트</b><span class="where">HWPX를 연결한 채팅</span><button class="button" type="button" data-copy="queue-prompt">프롬프트 복사</button></div>
+              <pre><code id="queue-prompt">HWPX 공동 검토에서 내 대기 요청을 처리해 줘. claim_next_request로 가장 오래된 요청부터 하나씩 가져와 지시와 첨부를 읽고, 필요한 수정 제안과 의견을 남긴 뒤 complete_request에 짧은 요약을 적어 완료해 줘. 수정안은 기본 1개, 비교를 요청한 경우에만 여러 안을 만들어 줘. 본문에 직접 반영하지 마. CLAIMED·NOT_OWNER·REQUEST_CLOSED 오류가 나면 그 요청은 건너뛰어 줘. 더 가져올 요청이 없으면 몇 건을 처리했는지 알려 주고 끝내 줘.</code></pre></div></div>
+          <p class="muted">claude.ai 같은 다른 웹 AI도 사용자 지정 커넥터에 같은 주소를 넣고 내 토큰으로 허용하면 같습니다.</p>
+          <details class="more"><summary>내 ChatGPT 연결 보기·끊기</summary><p>같은 서버에 내 토큰으로 로그인한 뒤 연결 목록을 보거나 끊습니다. 끊으면 그 연결은 바로 쓸 수 없습니다.</p><button class="button" type="button" id="oauth-list">내 연결 보기</button><div id="oauth-connections" role="status"></div></details>
+        </details>
+      </section>
+
+      <section id="personal-key"><div class="method-tag cost">③ 선택 · 유료</div><h2>내 AI 키로 처리하기(API)</h2>
+        <p>설치 없이 서버가 내 API 키로 바로 처리합니다. <strong>구독과 별도로 쓴 만큼 API 요금이 듭니다.</strong></p>
+        <figure class="see"><a href="/help-assets/api-key.webp" target="_blank" rel="noopener"><img src="/help-assets/api-key.webp" width="880" height="274" alt="API 키: 1 문서 목록 화면의 내 AI 키, 2 API 제공업체에서 발급한 키 붙여넣기, 3 저장과 연결 확인(확인은 요금 없음), 4 서버가 바로 처리하고 내 키로 요금 청구" loading="lazy" decoding="async"></a></figure>
+        <ol><li>API 제공업체에서 키를 발급합니다.</li><li>문서 목록의 <strong>내 AI 키</strong> → 모델을 고르고(기본값 그대로 두어도 됨) 키 붙여넣기 → <strong>저장</strong> → <strong>연결 확인</strong>.</li><li>그만 쓰려면 <strong>키 삭제</strong>.</li></ol>
+        <p class="muted">키는 서버에 암호로 잠가 두고 다시 보여 주지 않습니다. 연결 확인과 모델 <strong>목록</strong>은 요금이 들지 않습니다.</p>
+      </section>
+
+      <section id="local"><h2>내 PC 폴더에서 쓰기(개인용 앱)</h2>
+        <p><strong>개인용 앱</strong>은 내 PC 폴더의 HWPX를 바로 열어 고치는 앱입니다. 문서는 내 PC 파일 그대로이고, 여럿이 검토할 때만 서버로 보냅니다. 아래 단추는 개인용 앱에서만 보입니다.</p>
+        <ul class="points"><li><strong>PC 폴더 연결</strong> → 폴더 고르기. 개인 문서함 아래에 <strong>PC</strong> 표시로 보입니다.</li><li>고치면 잠시 뒤 그 파일에 저장됩니다(한글에서 그대로 열림).</li><li><strong>함께 검토</strong> → 보내기 → 검토 뒤 <strong>검토본 가져오기</strong>.</li></ul>
+        <details class="more"><summary>자세히</summary>
+          <ul><li>한글에서 그 파일을 고쳐 저장하면 앱이 다시 읽습니다. 양쪽에서 고쳤으면 <strong>PC 파일이 기준</strong>이고, 앱에서 고친 내용은 이력 탭에 남습니다.</li><li>한글에서 열어 둔 동안에는 쓰지 못합니다(<strong>PC 쓰기 대기</strong>). 한글에서 닫으면 저장합니다.</li><li>새 문서·올리기·이름 바꾸기·옮기기·폴더 만들기는 PC 폴더에 그대로 반영됩니다. 지운 문서의 파일은 휴지통으로 갑니다.</li><li>탐색기에서 옮기거나 이름을 바꿔도 내용이 같으면 같은 문서로 이어집니다. <strong>연결 끊기</strong>는 문서함에서만 뺍니다.</li><li><strong>검토 서버</strong>에 함께 쓰는 서버의 주소와 그 서버의 내 토큰을 한 번 등록합니다. 검토본은 <strong>그대로</strong>(변경 추적·메모까지) 또는 <strong>최종본</strong>(변경을 모두 받아들인 글)으로 가져옵니다.</li></ul>
+          <p class="muted">받는 곳과 켜는 법은 관리자에게 문의하세요(묶음 이름 hwpx-cowork-personal, <code>personal-app.bat</code>).</p>
+        </details>
+      </section>
+
+      <section id="troubleshooting"><h2>문제가 생겼을 때</h2>
+        <details><summary>요청이 계속 ‘대기’에 있어요</summary><p>처리할 AI가 켜져 있지 않습니다. 내 PC의 Codex·Claude Code 실행기나 채널을 켜거나, 대화창에서 “대기열을 처리해 줘”라고 하세요(<a href="#agents">① 내 PC의 AI</a>). <a href="#automatic">내 연결 상태 확인</a>으로 볼 수 있습니다.</p></details>
+        <details><summary>토큰이 없다고 나와요</summary><p><code>setx</code>는 새로 연 창부터 보입니다. VS Code와 터미널을 완전히 닫았다 다시 엽니다.</p></details>
+        <details><summary>MCP 등록에서 이미 있다고 나와요</summary><p>예전 설정이 남아 있습니다. <code>claude mcp remove hwpx -s user</code> 또는 <code>codex mcp remove hwpx</code> 뒤 다시 등록합니다.</p></details>
+        <details><summary>AI가 완료했는데 문서 글은 그대로예요</summary><p>완료는 제안이 준비됐다는 뜻입니다. AI 작업 탭에서 <strong>반영</strong>을 눌러야 문서에 들어갑니다.</p></details>
+        <details><summary>다른 AI가 이미 처리 중이라고 나와요</summary><p>요청 하나는 한 곳에서만 처리합니다. 잠시 기다리세요. 처리하던 쪽이 끊겼으면 시간이 지난 뒤 다시 가져갈 수 있습니다.</p></details>
+        <details><summary>API 키의 연결 확인이 실패해요</summary><p>키를 다시 복사해 넣고, 모델 ID가 그 API에서 쓸 수 있는 모델인지 확인하세요.</p></details>
+      </section>
+
+      <section id="host" class="admin" data-admin hidden><div class="admin-tag">관리자에게만 보입니다</div><h2>중앙 서버 준비</h2>
+        <p>중앙 PC는 문서·메모·제안·대기열을 보관하고 브라우저와 AI 연결을 받습니다. 참여자에게는 서버 주소와 서로 다른 개인 토큰을 전달하세요.</p>
+        <ol><li>중앙 PC에 Node.js 22 이상을 준비하고 프로그램 폴더에서 아래 명령을 실행합니다.</li><li><code>config.example.json</code>을 참고해 <code>config.json</code>에 참여자별 이름·역할·토큰을 설정합니다(웹 상단 <strong>관리자 → 사용자</strong>에서도 됩니다).</li><li>다른 PC의 접속을 받으려면 <code>host</code>를 <code>0.0.0.0</code>으로, <code>publicUrl</code>을 실제 공유할 주소로 맞추고 서버를 다시 시작합니다.</li><li>아래 공유 주소 점검으로 주소 후보를 보고, 다른 PC의 브라우저에서 실제 접속을 확인합니다.</li></ol>
+        <pre><code>npm.cmd install
+npm run build:studio
+npm start</code></pre>
+        <p>같은 사무실 예: <code>http://중앙PC의_IP:8787</code>. 다른 지역에서는 HTTPS 주소나 VPN을 준비합니다. 주소 후보가 보인다고 외부 접속이 확인된 것은 아닙니다.</p>
+        <details><summary>외부 주소·ChatGPT 연결(OAuth)을 준비할 때</summary><p>사설 VPN·Tailscale Serve로 연결하거나, 인터넷 공개에는 Tailscale Funnel·정식 Cloudflare Tunnel·HTTPS 프록시를 씁니다. Cloudflare Quick Tunnel은 실시간 알림 연결을 유지하지 못하므로 자동 처리용 주소로 쓰지 마세요. 실행 터미널에서 <code>$env:HWPX_COWORK_PUBLIC_URL = 'https://실제_서버_주소'</code>로 주소를 지정할 수도 있습니다.</p><p>ChatGPT·claude.ai 연결에는 공개 HTTPS 주소가 필요합니다. <strong>관리자 → 외부 공유 주소</strong>를 실제 HTTPS 주소로 저장하고 재시작하면 OAuth(DCR·PKCE S256)가 켜집니다. HTTP IP 주소에서는 꺼집니다. 콜백 주소가 기본 허용 목록과 다르면 <code>config.json.oauth.redirectUris</code>에 추가하고 재시작합니다.</p></details>
+        <p class="muted">참여자 토큰은 권한을 가진 접속 정보입니다. 공개 링크나 문서 본문에 넣지 마세요. 문서와 수정 이력은 중앙 PC의 data 폴더에 저장됩니다.</p>
+      </section>
+
+      <section id="connections" class="admin" data-admin hidden><div class="admin-tag">관리자에게만 보입니다</div><h2>공유 주소 점검</h2>
+        <p>지금 브라우저가 접속한 주소와 서버가 추천하는 내부망 주소를 구분해 확인합니다.</p>
+        <div class="address-card"><div><span>참여자에게 알려 줄 서버 주소</span><code id="shared-web">확인 중…</code><button class="button" type="button" data-copy="shared-web">서버 주소 복사</button></div></div>
+        <button class="button primary" id="check-connections" type="button">이 서버 연결 점검</button>
+        <div id="connection-result" class="diagnostics" role="status"></div>
+      </section>
+
+      <section id="worker-api" class="admin" data-admin hidden><div class="admin-tag">관리자에게만 보입니다</div><h2>서버 AI·개인 API 실행기</h2>
+        <p class="note">둘 다 API 요금이 듭니다. 참여자에게는 ① 내 PC의 AI(구독)를 먼저 안내하세요.</p>
+        <h3>중앙 서버 AI (배포 전)</h3>
+        <p>관리자가 서버 설정에 제공업체·모델·API 키를 지정하고 서버 AI를 켜면, 참여자가 따로 연결하지 않아도 서버의 공용 키로 요청을 처리합니다. 비용은 서버 계정에 붙습니다. 관리자 설정 → 사용자의 <strong>서버 AI</strong> 칸을 켠 계정만 씁니다. API 게이트웨이 키를 쓰려면 <code>ai.gateway="baze"</code>와 <code>BAZE_API_KEY</code>를 설정합니다. 자세한 설정은 상세 운영 매뉴얼을 보세요.</p>
+        <h3>개인 API 실행기 — 제공업체 직접 설정</h3>
+        <p>키를 서버에 맡기지 않고 개인 PC에서 API 키로 처리하는 방식입니다. 실행기 ZIP(①의 단추)을 풀고 <code>npm.cmd install</code> 뒤 아래 예제로 실행합니다. 사용료는 그 키의 계정에 붙습니다.</p>
+        <div class="worker-form"><label>연결 방식<select id="gateway"><option value="baze">API (--gateway baze)</option><option value="direct">제공업체 API에 직접</option></select></label><label>제공업체·모델 계열<select id="provider"><option value="openai">OpenAI (GPT 계열)</option><option value="anthropic">Anthropic (Claude)</option><option value="gemini">Google (Gemini)</option></select></label><label>모델 ID<input id="model-id" placeholder="예: gpt-6.1-sol" autocomplete="off" spellcheck="false"></label><label>추론 강도<select id="effort"><option value="">모델 기본값</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label></div>
+        <pre><code id="worker-command">실행 예제 준비 중…</code></pre><button class="button" type="button" data-copy="worker-command">실행 예제 복사</button><p class="muted" id="model-note">MODEL_ID 자리에 모델 ID를 넣으세요.</p>
+        <p class="muted">한 사람은 실행기 하나만 켜 두세요. 여러 개를 켜면 먼저 요청을 맡은 쪽이 처리합니다.</p>
+      </section>
+
+      <section id="manual" class="admin" data-admin hidden aria-labelledby="manual-title"><div class="admin-tag">관리자에게만 보입니다</div><h2 id="manual-title">상세 운영 매뉴얼</h2>
+        <p class="muted">중앙 서버 설치부터 외부 접속·AI 연결까지 전체 설명입니다. <a href="/manual.md" target="_blank" rel="noopener noreferrer">Markdown 원문 열기</a></p>
+        <p id="manual-status" class="muted" role="status" aria-live="polite">상세 운영 매뉴얼을 불러오는 중입니다…</p>
+        <button id="manual-retry" class="button" type="button" hidden>다시 불러오기</button>
+        <article id="manual-content" class="manual-content" aria-label="상세 운영 매뉴얼 본문" aria-busy="true"></article>
+      </section>
+      <footer>설명서 기준: 2026-11-13 · 계정과 서버 설정에 따라 쓸 수 있는 방법이 다를 수 있습니다.<br>공식 안내: <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a> · <a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code MCP</a> · <a href="https://code.claude.com/docs/en/channels" target="_blank" rel="noopener">Claude Code 채널</a> · <a href="https://learn.chatgpt.com/docs/extend/mcp" target="_blank" rel="noopener">ChatGPT MCP</a></footer>
+    </main>
+  </div>
+  <div id="copy-status" class="copy-status" role="status" aria-live="polite"></div>
+  <script type="module" src="/help.js"></script>
+</body>
+</html>

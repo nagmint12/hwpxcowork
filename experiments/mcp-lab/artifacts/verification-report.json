@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-05",
+  "status": "passed_with_explicit_scope",
+  "method": "Component runs and independent HTTP/stdio/scenario verification, followed by an exact npm entry-point full-suite run after correcting a working-directory-dependent test fixture path.",
+  "npmEntryPointRegression": {
+    "reportedResultBeforeFix": { "passed": 44, "failed": 1 },
+    "cause": "The refusal test used a relative data/scenario-report.json path. npm --prefix changed cwd to the lab, making that test path an allowed laboratory destination instead of the intended production destination.",
+    "fix": "Resolve the forbidden production path from import.meta.url; the runtime output guard was unchanged.",
+    "exactCommand": "npm --prefix experiments/mcp-lab test",
+    "verifiedResultAfterFix": { "passed": 45, "failed": 0 },
+    "repositoryRootNamedTest": { "passed": 1, "failed": 0 },
+    "userStdioProcessStopped": false
+  },
+  "environment": {
+    "node": "v24.11.1",
+    "mcpSdk": "1.32.1",
+    "negotiatedProtocol": "2025-11-25"
+  },
+  "componentTests": {
+    "runtime": 2,
+    "instructions": 6,
+    "figures": 10,
+    "formatting": 13,
+    "localFiles": 4,
+    "gateway": 4,
+    "http": 3,
+    "stdio": 1,
+    "scenarios": 2,
+    "totalPassed": 45,
+    "unresolvedFailures": 0
+  },
+  "independentFinalVerification": {
+    "command": "node --test --test-concurrency=1 experiments/mcp-lab/tests/http.test.mjs experiments/mcp-lab/tests/stdio.test.mjs experiments/mcp-lab/tests/scenarios.test.mjs",
+    "passed": 6,
+    "additionalHttpChecks": [
+      "tools/list_changed notifications after enabling groups",
+      "focused 13 tools and full 69 tools",
+      "enable_tools(all) and full tool lists match",
+      "local file bytes survive download/upload",
+      "another session of the same user cannot use the claimed request",
+      "another user cannot reuse a session ID",
+      "file transfer does not replace document bytes",
+      "test listener, subprocess and temporary files cleaned"
+    ],
+    "sourceReview": "No material issue found in the reviewed isolation, file path, permission and deferred TOC paths. Partial application failure injection was not performed."
+  },
+  "retainedEvidence": {
+    "workflowReport": "scenarios-report.json",
+    "formattingReport": "formatting-report.json",
+    "guidanceReport": "real-guidance-report.json",
+    "workflowCasesPassed": 5,
+    "formattingCasesPassed": 2,
+    "realSkillResourcesMatchedExactly": 7
+  },
+  "notEvaluated": [
+    "Real model reasoning and compliance quality",
+    "Billable model input/output tokens",
+    "End-user latency excluding fixture setup",
+    "Hancom visual layout and pagination",
+    "Remote Work file exchange or public deployment",
+    "MCP 2026-07-28 adapter compatibility"
+  ],
+  "modelTokens": null,
+  "paidApiCalls": 0,
+  "productionDeployment": false,
+  "productionRestart": false
+}

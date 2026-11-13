@@ -1,0 +1,66 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "dataDir": "./data",
+  "studio": {
+    "mode": "local"
+  },
+  "clipboardBridge": {
+    "enabled": false
+  },
+  "studioUrl": "https://edwardkim.github.io/rhwp/",
+  "allowAgentApply": true,
+  "events": {
+    "enabled": true
+  },
+  "oauth": {
+    "enabled": true,
+    "redirectUris": [],
+    "allowLoopbackClients": false
+  },
+  "users": [
+    {
+      "name": "관리자",
+      "token": "change-me-admin-token",
+      "role": "admin"
+    },
+    {
+      "name": "홍길동",
+      "token": "change-me-token-1",
+      "role": "editor"
+    },
+    {
+      "name": "김검토",
+      "token": "change-me-token-2",
+      "role": "editor"
+    }
+  ],
+  "ai": {
+    "provider": "anthropic",
+    "enabled": false,
+    "mock": false,
+    "keyFile": "~/.needs/anthropic_api_key.txt",
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "maxProposals": 10
+  },
+  "attachments": {
+    "maxBytes": 52428800,
+    "maxTextChars": 200000
+  },
+  "agents": {
+    "leaseMinutes": 15,
+    "othersCanTake": false
+  },
+  "changeRequests": {
+    "requireApprovals": 1,
+    "allowDirectApply": false
+  },
+  "documents": {
+    "defaultEditMode": "realtime",
+    "aiMilestoneMinutes": 30
+  },
+  "manuals": {
+    "seed": false
+  }
+}

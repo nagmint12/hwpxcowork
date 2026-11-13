@@ -1,0 +1,1446 @@
+//! Issue #4961: bounded, read-only layout and paint font decision trace.
+
+use serde::Deserialize;
+use serde_json::json;
+
+use crate::document_core::helpers::{find_logical_control_positions, logical_to_text_offset};
+use crate::document_core::DocumentCore;
+use crate::error::HwpError;
+use crate::model::control::Control;
+use crate::renderer::composer::is_lang_neutral;
+use crate::renderer::font_decision::*;
+use crate::renderer::layout::trace_char_width_decisions;
+use crate::renderer::px_to_hwpunit;
+use crate::renderer::render_tree::{
+    PageRenderTree, RenderNode, RenderNodeType, TextLineNode, TextRunNode,
+};
+use crate::renderer::style_resolver::{
+    detect_lang_category, lookup_font_name_in_environment, FontSubstitutionBoundary,
+};
+
+#[path = "font_decision/direct_metric_rule.rs"]
+mod direct_metric_rule;
+
+const DEFAULT_MAX_CHARACTERS: usize = 1024;
+const MAX_CHARACTERS: usize = 4096;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TraceOptions {
+    max_characters: Option<usize>,
+}
+
+fn options(options_json: &str) -> Result<TraceLimits, HwpError> {
+    let parsed: TraceOptions = if options_json.trim().is_empty() {
+        TraceOptions::default()
+    } else {
+        serde_json::from_str(options_json).map_err(|error| {
+            HwpError::RenderError(format!("font decision trace options: {error}"))
+        })?
+    };
+    let max_characters = parsed.max_characters.unwrap_or(DEFAULT_MAX_CHARACTERS);
+    if !(1..=MAX_CHARACTERS).contains(&max_characters) {
+        return Err(HwpError::RenderError(format!(
+            "font decision trace maxCharacters must be in 1..={MAX_CHARACTERS}"
+        )));
+    }
+    Ok(TraceLimits { max_characters })
+}
+
+fn collect_runs<'a>(
+    node: &'a RenderNode,
+    runs: &mut Vec<(&'a TextRunNode, bool)>,
+    source_frame: Option<bool>,
+    in_container: bool,
+    in_text_box: bool,
+) {
+    let in_container = in_container
+        || matches!(
+            node.node_type,
+            RenderNodeType::TableCell(_) | RenderNodeType::TextBox
+        );
+    let in_text_box = in_text_box || matches!(node.node_type, RenderNodeType::TextBox);
+    // 조상 줄은 새 컨테이너 문단의 원문 소유자가 아니다.
+    let source_frame = match &node.node_type {
+        RenderNodeType::Header | RenderNodeType::Footer | RenderNodeType::FootnoteArea => None,
+        RenderNodeType::TextLine(line) if line.caption_owner.is_some() => None,
+        RenderNodeType::TextLine(_) => source_frame.map(|_| true),
+        RenderNodeType::TableCell(_) | RenderNodeType::TextBox => source_frame.map(|_| false),
+        _ => source_frame,
+    };
+    if let RenderNodeType::TextRun(run) = &node.node_type {
+        let has_source_path = !in_container
+            || run.cell_context.as_ref().is_some_and(|context| {
+                !context.path.is_empty() && (!in_text_box || context.in_textbox)
+            });
+        runs.push((run, source_frame == Some(true) && has_source_path));
+    }
+    for child in &node.children {
+        collect_runs(child, runs, source_frame, in_container, in_text_box);
+    }
+}
+
+struct LineSnapshot<'a> {
+    node: &'a RenderNode,
+    line: &'a TextLineNode,
+    context: &'static str,
+    runs: Vec<(usize, &'a RenderNode, &'a TextRunNode)>,
+}
+
+fn collect_line_snapshots<'a>(
+    node: &'a RenderNode,
+    active_line: Option<usize>,
+    next_run_index: &mut usize,
+    lines: &mut Vec<LineSnapshot<'a>>,
+    unframed_run_indices: &mut Vec<usize>,
+    context: &'static str,
+) {
+    let context = match node.node_type {
+        RenderNodeType::TableCell(_) => "table-cell",
+        RenderNodeType::TextBox => "text-box",
+        RenderNodeType::Header => "header",
+        RenderNodeType::Footer => "footer",
+        RenderNodeType::FootnoteArea => "footnote",
+        _ => context,
+    };
+    let active_line = if let RenderNodeType::TextLine(line) = &node.node_type {
+        let index = lines.len();
+        lines.push(LineSnapshot {
+            node,
+            line,
+            context,
+            runs: Vec::new(),
+        });
+        Some(index)
+    } else {
+        active_line
+    };
+
+    if let RenderNodeType::TextRun(run) = &node.node_type {
+        let run_index = *next_run_index;
+        *next_run_index += 1;
+        if let Some(line_index) = active_line {
+            lines[line_index].runs.push((run_index, node, run));
+        } else {
+            unframed_run_indices.push(run_index);
+        }
+    }
+    for child in &node.children {
+        collect_line_snapshots(
+            child,
+            active_line,
+            next_run_index,
+            lines,
+            unframed_run_indices,
+            context,
+        );
+    }
+}
+
+pub(super) fn run_language_slots(
+    chars: &[char],
+    neutral_only_fallback: Option<usize>,
+) -> Vec<(usize, Option<usize>)> {
+    if chars.is_empty() {
+        return Vec::new();
+    }
+    // composer::split_runs_by_lang와 같은 초기 언어 및 중립 문자 상속 규칙.
+    let all_default = chars.iter().all(|&ch| detect_lang_category(ch) == 0);
+    let mut current = if chars.iter().all(|&ch| is_lang_neutral(ch)) {
+        neutral_only_fallback.unwrap_or(0)
+    } else {
+        chars
+            .iter()
+            .map(|&ch| detect_lang_category(ch))
+            .find(|&lang| lang != 0 || all_default)
+            .unwrap_or(0)
+    };
+    chars
+        .iter()
+        .map(|&ch| {
+            if is_lang_neutral(ch) {
+                (current, Some(current))
+            } else {
+                current = detect_lang_category(ch);
+                (current, None)
+            }
+        })
+        .collect()
+}
+
+fn run_style_language_slot(core: &DocumentCore, run: &TextRunNode) -> Option<usize> {
+    let style = core.styles.char_styles.get(run.char_shape_id? as usize)?;
+    (0..crate::renderer::style_resolver::LANG_COUNT).find(|&slot| {
+        style.font_family_for_lang(slot) == run.style.font_family
+            && (style.letter_spacing_for_lang(slot) - run.style.letter_spacing).abs() < 1e-9
+            && (style.ratio_for_lang(slot) - run.style.ratio).abs() < 1e-9
+    })
+}
+
+// [hwpx-cowork] Projection turns one HFT language run into glyph nodes.
+// Rejoin contiguous source/style segments *within each existing line* once
+// for diagnostic language inheritance. Scanning a whole paragraph per glyph
+// is quadratic and can also inherit a slot across a line boundary incorrectly.
+fn source_style_groups(tree: &PageRenderTree) -> Vec<Vec<(usize, &TextRunNode)>> {
+    let mut groups = Vec::new();
+    let mut lines = Vec::new();
+    collect_line_snapshots(&tree.root, None, &mut 0, &mut lines, &mut Vec::new(), "body");
+    for line in lines {
+        let mut start = 0;
+        while start < line.runs.len() {
+            let first = line.runs[start].2;
+            let mut end = start + 1;
+            while end < line.runs.len() {
+                let previous = line.runs[end - 1].2;
+                let next = line.runs[end].2;
+                if next.char_shape_id != first.char_shape_id || previous.char_start.is_none()
+                    || next.char_start != previous.char_start.map(|n| n + previous.text.chars().count()) {
+                    break;
+                }
+                end += 1;
+            }
+            groups.push(line.runs[start..end].iter().map(|&(index, _, run)| (index, run)).collect());
+            start = end;
+        }
+    }
+    groups
+}
+
+fn projected_hft_slot_hints(tree: &PageRenderTree, run_count: usize) -> Vec<Option<usize>> {
+    let mut hints = vec![None; run_count];
+    for group in source_style_groups(tree) {
+        if group.iter().any(|(_, r)| r.style.paint_font_geometry.is_some()) {
+            let chars: Vec<_> = group.iter().flat_map(|(_, r)| r.text.chars()).collect();
+            let slots = run_language_slots(&chars, None);
+            let mut offset = 0;
+            for &(index, run) in &group {
+                if run.style.paint_font_geometry.is_some() {
+                    hints[index] = slots.get(offset).map(|&(slot, _)| slot);
+                }
+                offset += run.text.chars().count();
+            }
+        }
+    }
+    hints
+}
+
+// [hwpx-cowork] 2026-11-10 B7 진단 계약(tests/font_b7_hft_ttf.test.mjs, fork 2026-11-07
+// `artifacts/b7-fix-20261107/REPORT.md`): Latin-1 구두점·기호(U+00A1–U+00BF, ±·소프트 하이픈 제외)는
+// 한/글 언어 구간 판정에서 앞 글자 언어를 잇는 중립 글자다(fork `is_lang_neutral`, 한/글 2022 PDF
+// 16조건 — 한글 뒤 B7 은 한글 구간, 줄 경계에서 다시 시작). 0.9.0 #7702/#8136 은 같은 글자를 영문
+// 슬롯 글꼴로 재고 그린다(`is_latin_slot_symbol` → 조합기가 영문 run 으로 나눔). 둘은 다른 단계다:
+// 문서 슬롯 = 언어 구간 상속 슬롯, 측정 슬롯 = 영문(조판이 실제로 쓴 run 슬롯). 진단은 두 정체를
+// 함께 남기고(`latinPunctuationMetricSlot`) 측정·조판은 바꾸지 않는다.
+fn is_language_run_neutral_symbol(ch: char) -> bool {
+    matches!(ch, '\u{00A1}'..='\u{00BF}') && !matches!(ch, '\u{00AD}' | '\u{00B1}')
+}
+
+/// 줄 안의 같은 글자 모양 연속 구간에서 위 중립 기호의 문서 언어 슬롯(상속 슬롯)을 구한다.
+/// 구간에 언어 글자가 하나도 없으면 상속할 대상이 없으므로 조판 run 슬롯을 그대로 둔다.
+fn language_run_slot_overrides(tree: &PageRenderTree, run_count: usize) -> Vec<Vec<Option<usize>>> {
+    let mut overrides = vec![Vec::new(); run_count];
+    for group in source_style_groups(tree) {
+        let chars: Vec<char> = group.iter().flat_map(|(_, r)| r.text.chars()).collect();
+        if !chars.iter().any(|&ch| is_language_run_neutral_symbol(ch)) {
+            continue;
+        }
+        let language_chars: Vec<char> = chars
+            .iter()
+            .map(|&ch| if is_language_run_neutral_symbol(ch) { ' ' } else { ch })
+            .collect();
+        if language_chars.iter().all(|&ch| is_lang_neutral(ch)) {
+            continue;
+        }
+        let slots = run_language_slots(&language_chars, None);
+        let mut offset = 0;
+        for &(index, run) in &group {
+            let count = run.text.chars().count();
+            overrides[index] = chars[offset..offset + count]
+                .iter()
+                .zip(&slots[offset..offset + count])
+                .map(|(&ch, &(slot, _))| is_language_run_neutral_symbol(ch).then_some(slot))
+                .collect();
+            offset += count;
+        }
+    }
+    overrides
+}
+
+fn nested_path(run: &TextRunNode) -> Vec<usize> {
+    run.cell_context
+        .as_ref()
+        .map(|context| {
+            context
+                .path
+                .iter()
+                .flat_map(|entry| [entry.control_index, entry.cell_index, entry.cell_para_index])
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn source_paragraph_index(run: &TextRunNode) -> Option<usize> {
+    run.cell_context
+        .as_ref()
+        .map(|context| context.parent_para_index)
+        .or(run.para_index)
+        // Header/footer and note layout use usize::MAX-relative internal markers.
+        // They are not document paragraph coordinates and differ on wasm32/native.
+        .filter(|index| *index < usize::MAX.saturating_sub(4096))
+}
+
+fn source_character(
+    core: &DocumentCore,
+    run: &TextRunNode,
+    offset: usize,
+    in_text_line: bool,
+) -> Option<(usize, char)> {
+    if !in_text_line {
+        return None;
+    }
+    let section = run.section_index?;
+    let paragraph = source_paragraph_index(run)?;
+    let mut logical_offset = run.char_start?.checked_add(offset)?;
+    let path: Vec<(usize, usize, usize)> = run
+        .cell_context
+        .as_ref()
+        .map(|context| {
+            context
+                .path
+                .iter()
+                .map(|entry| (entry.control_index, entry.cell_index, entry.cell_para_index))
+                .collect()
+        })
+        .unwrap_or_default();
+    let para = core.resolve_control_para(section, paragraph, &path).ok()?;
+    let control_positions = find_logical_control_positions(para);
+    let text_positions = para.control_text_positions();
+    let mut note_positions: Vec<usize> = para
+        .controls
+        .iter()
+        .zip(&control_positions)
+        .zip(text_positions)
+        .filter_map(|((control, position), text_position)| {
+            (text_position == 0 && matches!(control, Control::Footnote(_) | Control::Endnote(_)))
+                .then_some(*position)
+        })
+        .collect();
+    note_positions.sort_unstable();
+    // 선두 참조 번호는 note_reference가 줄 밖의 prefix로 방출해 런 주소에서 제외된다.
+    // 줄 안의 참조 번호는 emit_line_runs가 이미 논리 한 칸을 반영하므로 다시 더하지 않는다.
+    for note_position in note_positions {
+        if note_position > logical_offset {
+            break;
+        }
+        logical_offset = logical_offset.checked_add(1)?;
+    }
+    for (control, position) in para.controls.iter().zip(control_positions) {
+        // shortcut: 겹침 런의 원문 소유권을 전달할 때까지 첫 겹침부터 뒤 주소는 확정하지 않는다.
+        if (matches!(control, Control::CharOverlap(_) | Control::Ruby(_))
+            && position <= logical_offset)
+            || (control.is_logical_inline() && position == logical_offset)
+        {
+            return None;
+        }
+    }
+    let (scalar_offset, _) = logical_to_text_offset(para, logical_offset);
+    para.text
+        .chars()
+        .nth(scalar_offset)
+        .map(|character| (scalar_offset, character))
+}
+
+fn measurement_provenance() -> Result<ProvenanceDecision, HwpError> {
+    linked_provenance(
+        json!({
+            "sourceBoundaryId": "rust-measurement.estimate-width",
+            "candidateKind": "predicate",
+            "sourceFace": null,
+            "targetOrPolicy": "estimate cluster and character advances using embedded metrics and guarded heuristics",
+            "conditions": {},
+            "order": null,
+        }),
+        "rust-measurement",
+        "unknown",
+        "inferred",
+        vec!["The predicate selects advances; it does not prove glyph identity.".into()],
+    )
+    .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))
+}
+
+fn style_provenance(
+    boundary: FontSubstitutionBoundary,
+    source: &str,
+    target: &str,
+    _language_slot: usize,
+    generated_rule_id: &str,
+) -> Result<ProvenanceDecision, HwpError> {
+    // [hwpx-cowork] Generated HFT->TTF bindings are local, slot-specific facts
+    // (Hancom 2022 FontDB + raw HFT metrics), not historical upstream aliases.
+    // Validate the exact source/target/key before reporting unlinked evidence;
+    // never manufacture a ledger rule or relax checks for historical mappings.
+    if boundary == FontSubstitutionBoundary::Hft && generated_rule_id == "hft-ttf.mapped-design" {
+        let key = crate::renderer::hft_ttf::metric_key_for_slot(source, _language_slot);
+        if key.is_none() || crate::renderer::hft_ttf::family_for_slot(source, _language_slot) != Some(target) {
+            return Err(HwpError::RenderError(format!("font trace provenance: generated HFT binding mismatch for {source}")));
+        }
+        return unlinked_provenance(json!({
+            "sourceBoundaryId": "hwpx-cowork.hft-ttf-mapped-design",
+            "candidateKind": "slot-specific-hft-ttf-binding",
+            "sourceFace": source, "targetOrPolicy": target,
+            "conditions": { "languageSlot": _language_slot.to_string(), "metricKey": key.unwrap() },
+            "order": null,
+        }), "hwpx-cowork-hft-ttf").map_err(|e| HwpError::RenderError(format!("HFT provenance: {e}")));
+    }
+    // [hwpx-cowork] Local FontDB has independent file/hash provenance; it is
+    // not one of the historical webhwp rules in the upstream registry.
+    if boundary == FontSubstitutionBoundary::HancomFontDb {
+        return unlinked_provenance(json!({
+            "sourceBoundaryId": boundary.source_boundary_id(),
+            "candidateKind": "availability-dependent-fontdb",
+            "sourceFace": source, "targetOrPolicy": target,
+            "conditions": { "languageSlot": _language_slot.to_string(), "availability": "missing" },
+            "order": null,
+        }), "hwpx-cowork-fontdb").map_err(|e| HwpError::RenderError(format!("fontdb provenance: {e}")));
+    }
+    let language = boundary.language_condition(source);
+    let mut conditions = json!({ "languageSlot": language });
+    if boundary == FontSubstitutionBoundary::MissingProgram {
+        conditions["availability"] = json!("primary-and-document-substitute-missing");
+    }
+    let provenance = linked_provenance(
+        json!({
+            "sourceBoundaryId": boundary.source_boundary_id(),
+            "candidateKind": "finite-mapping",
+            "sourceFace": source,
+            "targetOrPolicy": target,
+            "conditions": conditions,
+            "order": null,
+        }),
+        "rust-style-resolution",
+        "style-fallback",
+        "verified-by-test",
+        vec!["Name compatibility does not establish SFNT identity or metric equivalence.".into()],
+    )
+    .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))?;
+    if provenance.rule_id.as_deref() != Some(generated_rule_id) {
+        return Err(HwpError::RenderError(format!(
+            "font trace provenance: generated style ruleId mismatch for {source}"
+        )));
+    }
+    Ok(provenance)
+}
+
+fn subst_font_provenance(
+    source: &str,
+    target: &str,
+    language_slot: usize,
+) -> Result<ProvenanceDecision, HwpError> {
+    unlinked_provenance(
+        json!({
+            "sourceBoundaryId": "rust-style-resolution.document-subst-font",
+            "candidateKind": "document-declared-substitution",
+            "sourceFace": source,
+            "targetOrPolicy": target,
+            "conditions": { "languageSlot": language_slot.to_string() },
+            "order": null,
+        }),
+        "rust-style-resolution",
+    )
+    .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))
+}
+
+fn document_substitute_lookup_provenance(
+    source: &str,
+    target: &str,
+    language_slot: usize,
+    generated_rule_id: &str,
+) -> Result<ProvenanceDecision, HwpError> {
+    let rule = crate::renderer::font_rule_layout_name_projection::find_font_rule_layout_name(
+        "rust-style-resolution.document-substitute",
+        source,
+        language_slot,
+    )
+    .filter(|rule| {
+        rule.rule_id == generated_rule_id
+            && rule.target_face_or_policy == target
+            && rule.mode == "direct"
+            && rule.conditions.alt_type == Some("1")
+            && rule.conditions.availability == Some("nonembedded-ttf-document-substitute")
+    })
+    .ok_or_else(|| HwpError::RenderError("font trace document substitute rule mismatch".into()))?;
+    let identity = json!({
+        "sourceBoundaryId": rule.source_boundary_id,
+        "candidateKind": "finite-mapping",
+        "sourceFace": source,
+        "targetOrPolicy": target,
+        "conditions": {"languageSlot":"all", "altType":"1", "availability":"nonembedded-ttf-document-substitute"},
+        "order": null,
+    });
+    let candidate_id = crate::renderer::font_decision::candidate_id(identity)
+        .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))?;
+    Ok(ProvenanceDecision {
+        candidate_id,
+        rule_id: Some(rule.rule_id.into()),
+        evidence_anchor: format!("assets/font-rules/font_rule_registry_v2.json#{}", rule.rule_id),
+        source_owner: "rust-style-resolution".into(),
+        relation_type: Some(rule.relation_type.into()),
+        evidence_status: Some("verified-by-test".into()),
+        known_limitations: vec!["Document substitute candidate lookup, not SFNT identity or proof of actual paint supply.".into()],
+        reason: None,
+    })
+}
+
+pub(super) fn metric_alias_relation(source: &str, target: &str) -> (&'static str, &'static str) {
+    if source == "HY각헤드라인M" || target == "Pretendard" || target == "Noto Serif KR" {
+        ("metric-surrogate", "historical")
+    } else {
+        ("unknown", "unknown")
+    }
+}
+
+fn metric_alias_provenance(
+    source: &str,
+    target: &str,
+    generated_rule_id: &str,
+) -> Result<ProvenanceDecision, HwpError> {
+    // v2는 change-set에 기록된 ID를 허용한다. 해시에서 나온다는 과거 가정 대신
+    // 실제 폭 선택에 쓴 canonical projection의 전체 identity를 검증한다.
+    let rule =
+        crate::renderer::font_rule_layout_metric_projection::find_font_rule_layout_metric(source)
+            .filter(|rule| {
+                rule.rule_id == generated_rule_id
+                    && rule.source_boundary_id == "rust-metric.metric-alias"
+                    && rule.source_face == Some(source)
+                    && rule.target_face_or_policy == target
+                    && rule.decision_plane == "layout-metric"
+                    && rule.order.is_none()
+                    && rule.conditions.language_slot.is_none()
+                    && rule.conditions.alt_type.is_none()
+                    && rule.conditions.availability.is_none()
+                    && rule.conditions.profile.is_none()
+            })
+            .ok_or_else(|| {
+                HwpError::RenderError(format!(
+                    "font trace provenance: selected metric projection mismatch for {source}"
+                ))
+            })?;
+    let (relation_type, evidence_status) = metric_alias_relation(source, target);
+    let is_surrogate = relation_type == "metric-surrogate";
+    let identity = json!({
+        "sourceBoundaryId": "rust-metric.metric-alias",
+        "candidateKind": "finite-mapping",
+        "sourceFace": source,
+        "targetOrPolicy": target,
+        "conditions": {},
+        "order": null,
+    });
+    if let Some(provenance) =
+        direct_metric_rule::provenance(source, target, generated_rule_id, &identity)?
+    {
+        return Ok(provenance);
+    }
+    let mut provenance = linked_provenance(
+        identity,
+        "rust-metric",
+        relation_type,
+        evidence_status,
+        if is_surrogate {
+            vec!["Alias selection does not prove glyph-outline identity.".into()]
+        } else {
+            Vec::new()
+        },
+    )
+    .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))?;
+    // candidate_id와 과거 증적 앵커·확실성은 보존한다. 현재 선택 규칙의 ID는
+    // 위에서 검증한 생성 projection이 소유하며 서술형 ID도 그대로 연결한다.
+    provenance.rule_id = Some(rule.rule_id.to_owned());
+    Ok(provenance)
+}
+
+fn metric_entry_provenance(
+    metric: &crate::renderer::font_metrics_data::MetricLookupDecision<'_>,
+    character: char,
+) -> Result<ProvenanceDecision, HwpError> {
+    if let Some((source, symbol)) =
+        crate::renderer::font_metrics_data::core14_metric_source(metric.metric)
+    {
+        let mut provenance = unlinked_provenance(
+            json!({
+                "sourceBoundaryId":"rust-metric.adobe-core14",
+                "candidateKind":"metric-entry", "sourceFace":metric.metric.name,
+                "targetOrPolicy":format!("metric-entry:{}",metric.entry_index),
+                "conditions":{"bold":metric.metric.bold,"italic":metric.metric.italic,
+                    "emSize":metric.metric.em_size,"latinRangeSymbol":symbol,"afmSource":source},
+                "order":null,
+            }),
+            "adobe-core14-afm",
+        )
+        .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))?;
+        provenance.evidence_anchor = source.into();
+        provenance.reason = Some("publishedAfmOutsideHistoricalLedger".into());
+        provenance.known_limitations.push("Published advances do not establish the installed paint font or recover a missing PDF font program.".into());
+        return Ok(provenance);
+    }
+    if let Some(source) =
+        crate::renderer::font_metrics_data::nimbus_roman_metric_source(metric.metric)
+    {
+        let mut provenance = unlinked_provenance(
+            json!({
+                "sourceBoundaryId":"rust-metric.verified-sfnt",
+                "candidateKind":"metric-entry", "sourceFace":metric.metric.name,
+                "targetOrPolicy":format!("metric-entry:{}",metric.entry_index),
+                "conditions":{"bold":metric.metric.bold,"italic":metric.metric.italic,
+                    "emSize":metric.metric.em_size,"sfntSource":source},
+                "order":null,
+            }),
+            "verified-sfnt-advances",
+        )
+        .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))?;
+        provenance.evidence_anchor = source.into();
+        provenance.reason = Some("verifiedSfntAdvancesOutsideHistoricalLedger".into());
+        provenance.known_limitations.push(
+            "Measured advances do not establish the installed paint font or recover a missing PDF font program.".into(),
+        );
+        return Ok(provenance);
+    }
+    let mut identity = json!({
+        "sourceBoundaryId": "rust-metric.metric-table",
+        "candidateKind": "metric-entry",
+        "sourceFace": metric.metric.name,
+        "targetOrPolicy": format!("metric-entry:{}", metric.entry_index),
+        "conditions": {
+            "bold": metric.metric.bold,
+            "italic": metric.metric.italic,
+            "emSize": metric.metric.em_size,
+            "latinRangeSymbol": format!("FONT_{}_LATIN_RANGES", metric.entry_index),
+            "hangulSymbol": metric.metric.hangul.as_ref().map(|_| format!("FONT_{}_HANGUL", metric.entry_index)),
+        },
+        "order": null,
+    });
+    if crate::renderer::font_metrics_data::uses_hangul_jamo_overlay(metric.metric, character) {
+        identity["conditions"]["latinRangeSymbol"] = serde_json::Value::Null;
+        identity["conditions"]["hangulJamoModule"] =
+            json!("src/renderer/font_metric_hangul_jamo.rs");
+    }
+    linked_provenance(
+        identity,
+        "rust-metric",
+        "metric-entry",
+        "verified-by-test",
+        Vec::new(),
+    )
+    .map_err(|error| HwpError::RenderError(format!("font trace provenance: {error}")))
+}
+
+fn transform_steps(
+    style: &crate::renderer::TextStyle,
+    ch: char,
+    decision: &crate::renderer::layout::CharWidthDecision<'_>,
+) -> Vec<DecisionStep> {
+    if matches!(
+        decision.width_source,
+        "clusterContinuation" | "inlineObjectPlaceholder" | "hwpPuaFiller"
+    ) {
+        return vec![DecisionStep {
+            kind: "zeroAdvance".into(),
+            input: Some(ch.to_string()),
+            output: Some("0".into()),
+            reason: Some(decision.width_source.into()),
+        }];
+    }
+    if decision.width_source == "tabAdvance" {
+        return vec![DecisionStep {
+            kind: "tabContextAdvance".into(),
+            input: Some(ch.to_string()),
+            output: Some(decision.final_width_px.to_string()),
+            reason: Some("computedFromCurrentPositionAndTabPolicy".into()),
+        }];
+    }
+    let mut steps = Vec::new();
+    if decision.metric.is_some_and(|metric| metric.bold_fallback) {
+        let hft_bold = decision.width_source == "metricHftBoldAdvance";
+        steps.push(DecisionStep {
+            kind: "boldFallback".into(),
+            input: Some("bold".into()),
+            output: Some(
+                if hft_bold {
+                    "hftBoldAdvance"
+                } else {
+                    "regularMetricAdvance"
+                }
+                .into(),
+            ),
+            reason: Some(
+                if hft_bold {
+                    "hftBoldAddsRelativeAdvance"
+                } else {
+                    "fauxBoldDoesNotChangeLayoutAdvance"
+                }
+                .into(),
+            ),
+        });
+    }
+    // [#8079] 실제 Bold 면도 전진폭은 보통 면에서 — 측정과 같은 조건·helper 로 판정한다.
+    let latin_slot = ch
+        .is_ascii_punctuation()
+        .then_some(style.ascii_punct_latin.as_deref())
+        .flatten();
+    let source_font_is_hft =
+        latin_slot.map_or(style.source_font_is_hft, |l| l.source_font_is_hft);
+    if !source_font_is_hft
+        && decision.width_source == "embeddedMetric"
+        && decision.metric.is_some_and(|metric| {
+            crate::renderer::font_metrics_data::regular_advance_metric(metric.metric)
+                .and_then(|regular| regular.get_width(ch))
+                .is_some()
+        })
+    {
+        steps.push(DecisionStep {
+            kind: "regularAdvanceForBold".into(),
+            input: Some("bold".into()),
+            output: Some("regularMetricAdvance".into()),
+            reason: Some("boldFaceDrawsAtRegularAdvance".into()),
+        });
+    }
+    let latin = crate::renderer::composer::is_latin_slot_punct(ch)
+        .then_some(style.ascii_punct_latin.as_deref()).flatten();
+    let raw_ratio = latin.map_or(style.ratio, |s| s.ratio);
+    let ratio = if raw_ratio > 0.0 { raw_ratio } else { 1.0 };
+    let letter_spacing = latin.map_or(style.letter_spacing, |s| s.letter_spacing);
+    if let Some(latin) = latin {
+        // [hwpx-cowork] The inherited Hangul slot may be HGSMJ, but B7
+        // explicitly measures with the Latin ENSMJ key. Show both identities.
+        steps.push(DecisionStep {
+            kind: "latinPunctuationMetricSlot".into(),
+            input: style.metric_font_family.clone().or_else(|| Some(style.font_family.clone())),
+            output: Some(latin.metric_font_family.as_ref().unwrap_or(&latin.font_family).clone()),
+            reason: Some("explicitLatinSlotPunctuation".into()),
+        });
+    }
+    if (ratio - 1.0).abs() > f64::EPSILON {
+        steps.push(DecisionStep {
+            kind: "ratio".into(),
+            input: Some(decision.base_width_px.to_string()),
+            output: Some(ratio.to_string()),
+            reason: Some("documentCharacterWidthRatio".into()),
+        });
+    }
+    for (kind, value, applies) in [
+        ("letterSpacing", letter_spacing, true),
+        ("extraCharacterSpacing", style.extra_char_spacing, true),
+        ("extraWordSpacing", style.extra_word_spacing, ch == ' '),
+        (
+            "extraDashAdvance",
+            style.extra_dash_advance,
+            decision.dash_leader,
+        ),
+    ] {
+        if applies && value.abs() > f64::EPSILON {
+            steps.push(DecisionStep {
+                kind: kind.into(),
+                input: Some(value.to_string()),
+                output: None,
+                reason: Some("layoutSpacingAdjustment".into()),
+            });
+        }
+    }
+    if decision.dash_leader {
+        steps.push(DecisionStep {
+            kind: "dashLeaderClamp".into(),
+            input: Some(decision.base_width_px.to_string()),
+            output: Some(decision.final_width_px.to_string()),
+            reason: Some("elasticDashLeader".into()),
+        });
+    }
+    if decision.negative_spacing_clamped {
+        steps.push(DecisionStep {
+            kind: "negativeSpacingClamp".into(),
+            input: None,
+            output: Some(decision.final_width_px.to_string()),
+            reason: Some("preventReverseAdvance".into()),
+        });
+    }
+    steps
+}
+
+impl DocumentCore {
+    pub fn get_font_decision_trace_native(
+        &self,
+        page_num: u32,
+        options_json: &str,
+    ) -> Result<String, HwpError> {
+        let native_unavailable_reason =
+            if cfg!(all(not(target_arch = "wasm32"), feature = "native-skia")) {
+                "nativeRendererSnapshotRequired"
+            } else {
+                "nativeSkiaFeatureUnavailable"
+            };
+        self.get_font_decision_trace_with_native_observer(
+            page_num,
+            options_json,
+            None,
+            native_unavailable_reason,
+        )
+    }
+
+    /// Issue #4967: one-tree evidence surface for bounded font qualification.
+    ///
+    /// The trace, line frames and stored-row probe all consume the same
+    /// `PageRenderTree`. This method is read-only; the probe uses isolated
+    /// paragraph/frame values and cannot publish a reflow.
+    pub fn get_font_layout_evidence_native(
+        &self,
+        page_num: u32,
+        options_json: &str,
+    ) -> Result<String, HwpError> {
+        if page_num >= self.page_count() {
+            return Err(HwpError::PageOutOfRange(page_num));
+        }
+        let requested_limits = options(options_json)?;
+        let native_unavailable_reason =
+            if cfg!(all(not(target_arch = "wasm32"), feature = "native-skia")) {
+                "nativeRendererSnapshotRequired"
+            } else {
+                "nativeSkiaFeatureUnavailable"
+            };
+        let tree = self.build_page_tree(page_num)?;
+        let trace_raw = self.get_font_decision_trace_from_tree(
+            page_num,
+            requested_limits,
+            None,
+            native_unavailable_reason,
+            &tree,
+        )?;
+        let trace: serde_json::Value = serde_json::from_str(&trace_raw).map_err(|error| {
+            HwpError::RenderError(format!("font layout evidence trace: {error}"))
+        })?;
+
+        let mut lines = Vec::new();
+        let mut unframed_run_indices = Vec::new();
+        let mut next_run_index = 0usize;
+        collect_line_snapshots(
+            &tree.root,
+            None,
+            &mut next_run_index,
+            &mut lines,
+            &mut unframed_run_indices,
+            "body",
+        );
+        let line_values = lines
+            .iter()
+            .map(|snapshot| self.line_snapshot_evidence(snapshot))
+            .collect::<Vec<_>>();
+        let framed_runs = line_values
+            .iter()
+            .filter_map(|line| line.get("runIndices").and_then(serde_json::Value::as_array))
+            .map(Vec::len)
+            .sum::<usize>();
+
+        serde_json::to_string(&json!({
+            "schemaVersion": 1,
+            "status": if unframed_run_indices.is_empty() { "complete" } else { "unmodelled" },
+            "scope": {
+                "pageIndex": page_num,
+                "pageCount": self.page_count(),
+                "pageTreeBuilds": 1,
+                "sameSnapshot": true,
+            },
+            "counts": {
+                "lines": line_values.len(),
+                "runs": next_run_index,
+                "framedRuns": framed_runs,
+                "unframedRuns": unframed_run_indices.len(),
+            },
+            "trace": trace,
+            "lines": line_values,
+            "unframedRunIndices": unframed_run_indices,
+        }))
+        .map_err(|error| {
+            HwpError::RenderError(format!("font layout evidence serialization: {error}"))
+        })
+    }
+
+    fn line_snapshot_evidence(&self, snapshot: &LineSnapshot<'_>) -> serde_json::Value {
+        use crate::renderer::composer::{
+            probe_stored_row_disposition, StoredRowMissPolicy, StoredRowProbeDisposition,
+        };
+        use crate::renderer::layout_frame::ParagraphBox;
+
+        let first_run = snapshot.runs.first().map(|(_, _, run)| *run);
+        let source = first_run.and_then(|run| {
+            Some((
+                run.section_index?,
+                source_paragraph_index(run)?,
+                run.cell_context
+                    .as_ref()
+                    .map(|context| {
+                        context
+                            .path
+                            .iter()
+                            .map(|entry| {
+                                (entry.control_index, entry.cell_index, entry.cell_para_index)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+            ))
+        });
+        let source_consistent = source.as_ref().is_some_and(|expected| {
+            snapshot.runs.iter().all(|(_, _, run)| {
+                let path = run
+                    .cell_context
+                    .as_ref()
+                    .map(|context| {
+                        context
+                            .path
+                            .iter()
+                            .map(|entry| {
+                                (entry.control_index, entry.cell_index, entry.cell_para_index)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                run.section_index == Some(expected.0)
+                    && source_paragraph_index(run) == Some(expected.1)
+                    && path == expected.2
+            })
+        });
+
+        let (disposition, reason) = if !source_consistent {
+            (
+                StoredRowProbeDisposition::Unmodelled,
+                "sourceMappingUnavailable",
+            )
+        } else if !snapshot.node.bbox.width.is_finite() || snapshot.node.bbox.width <= 0.0 {
+            (StoredRowProbeDisposition::Unmodelled, "invalidActualFrame")
+        } else if let Some((section, paragraph, path)) = source.as_ref() {
+            match self.resolve_control_para(*section, *paragraph, path) {
+                Ok(para) => {
+                    let para_style = self.styles.para_styles.get(para.para_shape_id as usize);
+                    let margin_left = para_style.map(|style| style.margin_left).unwrap_or(0.0);
+                    let margin_right = para_style.map(|style| style.margin_right).unwrap_or(0.0);
+                    let owner_width = snapshot.node.bbox.width + margin_left + margin_right;
+                    let is_nested = !path.is_empty();
+                    let paragraph_box = if is_nested {
+                        ParagraphBox::content_width_px(owner_width, self.dpi)
+                    } else {
+                        ParagraphBox::body_for_style(owner_width, para_style, self.dpi)
+                    };
+                    let miss_policy = if is_nested {
+                        StoredRowMissPolicy::UnmodelledUnlessStale
+                    } else {
+                        StoredRowMissPolicy::Reflow
+                    };
+                    let disposition = probe_stored_row_disposition(
+                        para,
+                        paragraph_box,
+                        &self.styles,
+                        self.dpi,
+                        self.effective_layout_profile().stored_geometry_policy(),
+                        miss_policy,
+                    );
+                    let reason = match disposition {
+                        StoredRowProbeDisposition::Admitted => "exactCacheKey",
+                        StoredRowProbeDisposition::Rejected => "cacheKeyRejectedOrStale",
+                        StoredRowProbeDisposition::Unmodelled => "frameProvenanceIncomplete",
+                        StoredRowProbeDisposition::NotApplicable => "noAuthoritativeStoredRows",
+                    };
+                    (disposition, reason)
+                }
+                Err(_) => (
+                    StoredRowProbeDisposition::Unmodelled,
+                    "sourceMappingUnavailable",
+                ),
+            }
+        } else {
+            (
+                StoredRowProbeDisposition::Unmodelled,
+                "sourceMappingUnavailable",
+            )
+        };
+
+        let source_value = source
+            .as_ref()
+            .map(|(section, paragraph, path)| {
+                json!({
+                    "sectionIndex": section,
+                    "paragraphIndex": paragraph,
+                    "nestedPath": path.iter().flat_map(|entry| [entry.0, entry.1, entry.2]).collect::<Vec<_>>(),
+                })
+            })
+            .unwrap_or(serde_json::Value::Null);
+        let run_indices = snapshot
+            .runs
+            .iter()
+            .map(|(index, _, _)| *index)
+            .collect::<Vec<_>>();
+        let run_frames = snapshot
+            .runs
+            .iter()
+            .map(|(index, node, _)| {
+                json!({
+                    "runIndex": index,
+                    "x": node.bbox.x,
+                    "y": node.bbox.y,
+                    "width": node.bbox.width,
+                    "height": node.bbox.height,
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "lineId": snapshot.node.id,
+            "frame": {
+                "x": snapshot.node.bbox.x,
+                "y": snapshot.node.bbox.y,
+                "width": snapshot.node.bbox.width,
+                "height": snapshot.node.bbox.height,
+            },
+            "lineHeight": snapshot.line.line_height,
+            "baseline": snapshot.line.baseline,
+            "sectionIndex": snapshot.line.section_index,
+            "paragraphIndex": snapshot.line.para_index,
+            "lineIndex": snapshot.line.line_index,
+            "vpos": snapshot.line.vpos,
+            "source": source_value,
+            "context": snapshot.context,
+            "runIndices": run_indices,
+            "runs": run_frames,
+            "storedRow": {
+                "disposition": disposition.as_str(),
+                "reason": reason,
+            },
+        })
+    }
+
+    pub(crate) fn get_font_decision_trace_with_native_observer(
+        &self,
+        page_num: u32,
+        options_json: &str,
+        native_observer: Option<
+            &dyn Fn(
+                &str,
+                char,
+                bool,
+                bool,
+                bool,
+            ) -> crate::renderer::font_decision::BackendDecision,
+        >,
+        native_unavailable_reason: &'static str,
+    ) -> Result<String, HwpError> {
+        if page_num >= self.page_count() {
+            return Err(HwpError::PageOutOfRange(page_num));
+        }
+        let requested_limits = options(options_json)?;
+        let tree = self.build_page_tree(page_num)?;
+        self.get_font_decision_trace_from_tree(
+            page_num,
+            requested_limits,
+            native_observer,
+            native_unavailable_reason,
+            &tree,
+        )
+    }
+
+    fn get_font_decision_trace_from_tree(
+        &self,
+        page_num: u32,
+        requested_limits: TraceLimits,
+        native_observer: Option<
+            &dyn Fn(
+                &str,
+                char,
+                bool,
+                bool,
+                bool,
+            ) -> crate::renderer::font_decision::BackendDecision,
+        >,
+        native_unavailable_reason: &'static str,
+        tree: &PageRenderTree,
+    ) -> Result<String, HwpError> {
+        let applied_limits = requested_limits;
+        let mut runs = Vec::new();
+        collect_runs(&tree.root, &mut runs, Some(false), false, false);
+        let hft_slot_hints = projected_hft_slot_hints(tree, runs.len());
+        let language_run_slots = language_run_slot_overrides(tree, runs.len());
+        let characters_seen = runs
+            .iter()
+            .map(|(run, _)| run.text.chars().count())
+            .sum::<usize>();
+        let mut records = Vec::with_capacity(characters_seen.min(applied_limits.max_characters));
+        let mut source_mapping_mismatch = false;
+        let mut ledger_rule_missing = false;
+        'runs: for (run_index, (run, in_text_line)) in runs.iter().enumerate() {
+            let chars: Vec<char> = run.text.chars().collect();
+            let language_slots = run_language_slots(&chars,
+                hft_slot_hints[run_index].or_else(|| run_style_language_slot(self, run)));
+            // [hwpx-cowork] The paint projection intentionally clears the HFT
+            // metric key after saving layout_positions. A diagnostic must use
+            // the original metric identity, not remeasure the paint TTF (whose
+            // B7 is 1em versus ENSMJ's .384em). This does not change layout.
+            let mut measurement_style = run.style.clone();
+            if let (Some(id), Some(&(slot, _))) = (run.char_shape_id, language_slots.first()) {
+                if let Some(cs) = self.styles.char_styles.get(id as usize) {
+                    if let Some(key) = cs.metric_face_for_lang(slot).filter(|k| crate::renderer::hft_ttf::is_native(k)) {
+                        measurement_style.metric_font_family = Some(key.to_string());
+                        let source_style = crate::renderer::layout::resolved_to_text_style(&self.styles, id, slot);
+                        measurement_style.ascii_punct_latin = source_style.ascii_punct_latin;
+                        measurement_style.hft_fullwidth_dot = source_style.hft_fullwidth_dot;
+                        measurement_style.hft_hangul_face = source_style.hft_hangul_face;
+                    }
+                }
+            }
+            let width_decisions = trace_char_width_decisions(&run.text, &measurement_style);
+            for (run_offset, ((&ch, &(language_slot, inherited)), width)) in chars
+                .iter()
+                .zip(language_slots.iter())
+                .zip(width_decisions.iter())
+                .enumerate()
+            {
+                if records.len() >= applied_limits.max_characters {
+                    break 'runs;
+                }
+                let source_character = source_character(self, run, run_offset, *in_text_line);
+                let source_complete = source_character.is_some_and(|(_, source)| source == ch);
+                source_mapping_mismatch |= !source_complete;
+                // [hwpx-cowork] 문서 슬롯(언어 구간 상속)과 측정 슬롯(조판 run)을 따로 둔다.
+                let (document_slot, document_inherited) = match language_run_slots[run_index]
+                    .get(run_offset)
+                    .copied()
+                    .flatten()
+                {
+                    Some(slot) => (slot, Some(slot)),
+                    None => (language_slot, inherited),
+                };
+                let font_decision = run.char_shape_id.and_then(|char_shape_id| {
+                    self.document
+                        .doc_info
+                        .char_shapes
+                        .get(char_shape_id as usize)
+                        .map(|shape| {
+                            lookup_font_name_in_environment(
+                                &self.document.doc_info,
+                                document_slot,
+                                shape.font_ids[document_slot],
+                                self.resolved_font_environment(),
+                            )
+                        })
+                });
+                let mut provenance = vec![measurement_provenance()?];
+                let mut name_steps = Vec::new();
+                if let Some(font) = &font_decision {
+                    if let (Some(source), Some(target), Some(rule_id)) = (
+                        font.requested_subst_font.as_deref(),
+                        font.subst_font.as_deref(),
+                        font.document_substitute_rule_id,
+                    ) {
+                        name_steps.push(DecisionStep {
+                            kind: "documentSubstituteLookup".into(),
+                            input: Some(source.into()),
+                            output: Some(target.into()),
+                            reason: Some(
+                                "candidateBeforeProgramAvailabilityAndCallerOverride".into(),
+                            ),
+                        });
+                        provenance.push(document_substitute_lookup_provenance(
+                            source,
+                            target,
+                            font.language_slot,
+                            rule_id,
+                        )?);
+                    }
+                    if let Some(profile_id) = &font.environment_profile_id {
+                        name_steps.push(DecisionStep {
+                            kind: "fontEnvironment".into(),
+                            input: font.requested_face.clone(),
+                            output: font.normalized_face.clone(),
+                            reason: Some(profile_id.clone()),
+                        });
+                    }
+                    if let (Some(boundary), Some(source), Some(target)) = (
+                        font.substitution_boundary,
+                        font.requested_face.as_deref(),
+                        font.normalized_face.as_deref(),
+                    ) {
+                        let rule_id = font.substitution_rule_id.ok_or_else(|| {
+                            HwpError::RenderError(format!(
+                                "font trace provenance: generated style ruleId missing for {source}"
+                            ))
+                        })?;
+                        name_steps.push(DecisionStep {
+                            kind: "styleSubstitution".into(),
+                            input: Some(source.into()),
+                            output: Some(target.into()),
+                            reason: Some(boundary.source_boundary_id().into()),
+                        });
+                        let style = style_provenance(
+                            boundary,
+                            source,
+                            target,
+                            font.language_slot,
+                            rule_id,
+                        )?;
+                        ledger_rule_missing |= style.rule_id.is_none();
+                        provenance.push(style);
+                    }
+                    if let (Some(source), Some(substitute)) = (
+                        font.normalized_face.as_deref(),
+                        font.subst_font
+                            .as_deref()
+                            .filter(|_| font.environment_profile_id.is_none()),
+                    ) {
+                        name_steps.push(DecisionStep {
+                            kind: "documentSubstFont".into(),
+                            input: Some(source.into()),
+                            output: Some(substitute.into()),
+                            reason: Some("nonEmbeddedDocumentSubstitute".into()),
+                        });
+                        provenance.push(subst_font_provenance(
+                            source,
+                            substitute,
+                            font.language_slot,
+                        )?);
+                        ledger_rule_missing = true;
+                    }
+                }
+                if let Some(metric) = width.metric {
+                    if metric.requested_name != metric.alias_resolved_name {
+                        provenance.push(metric_alias_provenance(
+                            metric.requested_name,
+                            metric.alias_resolved_name,
+                            metric.alias_rule_id.ok_or_else(|| {
+                                HwpError::RenderError(format!(
+                                    "font trace provenance: generated metric ruleId missing for {}",
+                                    metric.requested_name
+                                ))
+                            })?,
+                        )?);
+                    }
+                    provenance.push(metric_entry_provenance(
+                        &metric,
+                        width.measurement_character.unwrap_or(ch),
+                    )?);
+                }
+                let requested_face = width
+                    .metric
+                    .map(|metric| metric.requested_name.to_string())
+                    .or_else(|| crate::renderer::composer::is_latin_slot_punct(ch)
+                        .then_some(measurement_style.ascii_punct_latin.as_deref()).flatten()
+                        .map(|s| s.metric_font_family.as_ref().unwrap_or(&s.font_family).clone()))
+                    .or_else(|| measurement_style.metric_font_family.clone())
+                    .or_else(|| {
+                        // 원본 부분 메트릭을 소비한 글리프는 표시 폴백으로 기록하지 않는다.
+                        let family = if width.width_source == "measuredOriginalGlyph" {
+                            let latin = ch
+                                .is_ascii_punctuation()
+                                .then_some(run.style.ascii_punct_latin.as_deref())
+                                .flatten();
+                            latin
+                                .and_then(|slot| {
+                                    slot.original_glyph_metric_family
+                                        .as_deref()
+                                        .map(String::as_str)
+                                        .or(slot.metric_font_family.as_deref())
+                                })
+                                .or(run
+                                    .style
+                                    .original_glyph_metric_family
+                                    .as_deref()
+                                    .map(String::as_str))
+                                .or(run.style.metric_font_family.as_deref())
+                                .unwrap_or(&run.style.font_family)
+                        } else {
+                            &run.style.font_family
+                        };
+                        family.split(',').next().map(|face| face.trim().to_string())
+                    });
+                let layout_metric = LayoutMetricDecision {
+                    requested_face: requested_face.clone(),
+                    alias_resolved_face: width
+                        .metric
+                        .map(|metric| metric.alias_resolved_name.to_string())
+                        .or_else(|| requested_face.clone()),
+                    match_kind: width
+                        .metric
+                        .map(|metric| metric.match_kind.as_str().to_string())
+                        .unwrap_or_else(|| "none".into()),
+                    metric_entry: width.metric.map(|metric| metric.entry_index),
+                    character_match: width.character_match.into(),
+                    width_source: width.width_source.into(),
+                    measurement_character: width.measurement_character.map(|ch| ch.to_string()),
+                    base_advance_hwpunit: Some(px_to_hwpunit(width.base_width_px, self.dpi)),
+                    transforms: {
+                        let mut steps = transform_steps(&measurement_style, ch, width);
+                        if document_slot != language_slot {
+                            // 문서 슬롯의 측정 정체 → 조판이 실제로 잰 영문 슬롯 정체.
+                            let input = run.char_shape_id
+                                .and_then(|id| self.styles.char_styles.get(id as usize))
+                                .map(|cs| cs.metric_face_for_lang(document_slot)
+                                    .unwrap_or_else(|| cs.font_family_for_lang(document_slot))
+                                    .to_string());
+                            steps.insert(0, DecisionStep {
+                                kind: "latinPunctuationMetricSlot".into(),
+                                input,
+                                output: requested_face.clone(),
+                                reason: Some("explicitLatinSlotPunctuation".into()),
+                            });
+                        }
+                        steps
+                    },
+                    final_advance_hwpunit: Some(px_to_hwpunit(width.final_width_px, self.dpi)),
+                };
+                let source_offset = source_character.map(|(offset, _)| offset);
+                let requested_document_face = font_decision
+                    .as_ref()
+                    .and_then(|font| font.requested_face.clone());
+                records.push(TraceRecord {
+                    record_id: format!("page:{page_num}:run:{run_index}:char:{run_offset}"),
+                    source: SourceDecision {
+                        status: if source_complete {
+                            "complete"
+                        } else {
+                            "unavailable"
+                        }
+                        .into(),
+                        section_index: run.section_index,
+                        paragraph_index: source_paragraph_index(run),
+                        nested_path: nested_path(run),
+                        run_index: Some(run_index),
+                        char_offset: source_offset,
+                        character: ch.to_string(),
+                        code_point: ch as u32,
+                        char_shape_id: run.char_shape_id,
+                    },
+                    document: DocumentDecision {
+                        language_slot: Some(document_slot),
+                        inherited_language_slot: document_inherited,
+                        face: requested_document_face.clone(),
+                        alt_type: font_decision.as_ref().and_then(|font| font.alt_type),
+                        embedded: font_decision.as_ref().and_then(|font| font.embedded),
+                        subst_font: font_decision
+                            .as_ref()
+                            .and_then(|font| font.requested_subst_font.clone()),
+                    },
+                    layout_name: LayoutNameDecision {
+                        requested_face: requested_document_face,
+                        normalized_face: font_decision
+                            .as_ref()
+                            .and_then(|font| font.normalized_face.clone()),
+                        css_family_chain: font_decision
+                            .as_ref()
+                            .map(|font| font.css_family_chain.clone())
+                            .unwrap_or_default(),
+                        steps: name_steps,
+                    },
+                    paint: PaintDecision::stage3(
+                        Some(run.style.font_family.clone()),
+                        native_observer.map(|observe| {
+                            observe(
+                                &crate::renderer::native_font_family_for_style(&run.style),
+                                ch,
+                                run.style.bold,
+                                run.style.italic,
+                                run.style.source_font_is_ttf,
+                            )
+                        }),
+                        native_unavailable_reason,
+                    ),
+                    layout_metric,
+                    provenance,
+                    oracle: self.resolved_font_environment().map_or_else(
+                        OracleDecision::not_provided,
+                        |env| OracleDecision {
+                            status: "declared".into(),
+                            profile_id: Some(env.id().into()),
+                            known_limitations: vec!["Caller-declared environment; backend font availability and PDF equivalence are not verified.".into()],
+                        },
+                    ),
+                });
+            }
+        }
+
+        let records_omitted = characters_seen.saturating_sub(records.len());
+        let truncated = records_omitted > 0;
+        let mut reasons = vec![TraceReason {
+            code: "backendUnsupported".into(),
+            detail: Some(
+                "Studio Canvas2D and CanvasKit observations require a current renderer snapshot."
+                    .into(),
+            ),
+        }, TraceReason {
+            code: "ledgerSourceDrift".into(),
+            detail: Some("W1 candidate identities still join, but their recorded Rust source digests predate this Stage 2 trace-only refactor.".into()),
+        }];
+        if truncated {
+            reasons.push(TraceReason {
+                code: "characterLimitExceeded".into(),
+                detail: Some(format!(
+                    "{} characters omitted by maxCharacters={}",
+                    records_omitted, applied_limits.max_characters
+                )),
+            });
+        }
+        if source_mapping_mismatch {
+            reasons.push(TraceReason {
+                code: "sourceMappingMismatch".into(),
+                detail: Some("At least one render-tree character could not be joined exactly to source IR coordinates.".into()),
+            });
+        }
+        if ledger_rule_missing {
+            reasons.push(TraceReason {
+                code: "ledgerRuleMissing".into(),
+                detail: Some(
+                    "Local generated font bindings or document substFont are observed but are not historical ledger rules."
+                        .into(),
+                ),
+            });
+        }
+        let emitted = records.len();
+        let mut trace = TraceEnvelope {
+            schema_version: 1,
+            status: if truncated { "truncated" } else { "complete" }.into(),
+            scope: TraceScope {
+                page_index: page_num,
+                requested_limits,
+                applied_limits,
+            },
+            counts: TraceCounts {
+                runs_seen: runs.len(),
+                characters_seen,
+                records_emitted: emitted,
+                records_omitted: Some(records_omitted),
+            },
+            records,
+            backend_summary: BackendSummary::stage3(
+                native_observer.is_some(),
+                native_unavailable_reason,
+            ),
+            reasons,
+            layout_hash: TraceHash::pending(),
+            normalized_hash: TraceHash::pending(),
+        };
+        finalize_hashes(&mut trace)
+            .map_err(|error| HwpError::RenderError(format!("font trace hash: {error}")))?;
+        serde_json::to_string(&trace)
+            .map_err(|error| HwpError::RenderError(format!("font trace serialization: {error}")))
+    }
+}
+
+#[cfg(test)]
+mod b7_trace_tests {
+    use super::*;
+    #[test]
+    fn local_hft_binding_is_traced_without_claiming_a_historical_ledger_rule() {
+        let p = style_provenance(FontSubstitutionBoundary::Hft, "한양신명조", "HY신명조", 1, "hft-ttf.mapped-design").unwrap();
+        assert_eq!(p.source_owner, "hwpx-cowork-hft-ttf");
+        assert!(p.rule_id.is_none());
+        assert_eq!(p.reason.as_deref(), Some("ledgerRuleMissing"));
+        assert!(p.evidence_status.is_none());
+    }
+    #[test]
+    fn local_hft_trace_still_rejects_a_wrong_target_slot_or_rule_id() {
+        for (target, slot, rule) in [("Arial", 1, "hft-ttf.mapped-design"), ("HY신명조", 6, "hft-ttf.mapped-design"), ("HY신명조", 1, "not-the-generated-rule")] {
+            assert!(style_provenance(FontSubstitutionBoundary::Hft, "한양신명조", target, slot, rule).is_err());
+        }
+    }
+}

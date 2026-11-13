@@ -1,0 +1,301 @@
+{
+ "hwp_start_attempts": 1,
+ "hwp_pid": 17520,
+ "hwp_version": "12, 0, 0, 3146",
+ "security_module": "HwpxCoworkFilePathCheck",
+ "security_registered": true,
+ "find_base": "학교에 학교 학교가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c",
+ "find": [
+  {
+   "query": "school",
+   "opt": {},
+   "ok": false,
+   "after": "학교에 학교 학교가 # #s # 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "school",
+   "opt": {
+    "MatchCase": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 # #s School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "학교",
+   "opt": {
+    "WholeWordOnly": 1
+   },
+   "ok": false,
+   "after": "학교에 # 학교가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "school",
+   "opt": {
+    "WholeWordOnly": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 # schools # 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "가",
+   "opt": {
+    "WholeWordOnly": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 # 나 #  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "a?c",
+   "opt": {
+    "UseWildCards": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 가 나 가  나 #d abxd # a22c ab #"
+  },
+  {
+   "query": "a*c",
+   "opt": {
+    "UseWildCards": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 가 나 가  나 #d abxd # # ab #"
+  },
+  {
+   "query": "ab*d",
+   "opt": {
+    "UseWildCards": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 가 나 가  나 # # a1c a22c ab a?c"
+  },
+  {
+   "query": "a?c",
+   "opt": {},
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab #"
+  },
+  {
+   "query": "학교,school",
+   "opt": {
+    "SeveralWords": 1
+   },
+   "ok": false,
+   "after": "#에 # #가 # #s # 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "학교;school",
+   "opt": {
+    "SeveralWords": 1
+   },
+   "ok": false,
+   "after": "#에 # #가 # #s # 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "학교 school",
+   "opt": {
+    "SeveralWords": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "가나",
+   "opt": {
+    "AllWordForms": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School # 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "가 나",
+   "opt": {
+    "AllWordForms": 1
+   },
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School # # 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "가나",
+   "opt": {},
+   "ok": false,
+   "after": "학교에 학교 학교가 school schools School # 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "학교",
+   "opt": {
+    "FindJaso": 1
+   },
+   "ok": false,
+   "after": "#에 # #가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  },
+  {
+   "query": "ㅎ",
+   "opt": {
+    "FindJaso": 1
+   },
+   "ok": false,
+   "after": "#교에 #교 #교가 school schools School 가나 가 나 가  나 abcd abxd a1c a22c ab a?c"
+  }
+ ],
+ "convertCase": [
+  {
+   "type": 0,
+   "ok": true,
+   "after": "HELLO WORLD. ABC DEF GHI"
+  },
+  {
+   "type": 1,
+   "ok": true,
+   "after": "hello world. abc def ghi"
+  },
+  {
+   "type": 2,
+   "ok": true,
+   "after": "HELLO wORLD. ABC def GhI"
+  },
+  {
+   "type": 3,
+   "ok": true,
+   "after": "Hello World. Abc Def Ghi"
+  },
+  {
+   "type": 4,
+   "ok": true,
+   "after": "Hello World. Abc DEF gHi"
+  },
+  {
+   "type": 5,
+   "ok": true,
+   "after": "Hello world. Abc def ghi"
+  }
+ ],
+ "convertFullHalf": [
+  {
+   "type": 0,
+   "flags": {
+    "Number": 1,
+    "Alpha": 1,
+    "Symbol": 1,
+    "Gata": 1,
+    "HGJamo": 1
+   },
+   "ok": true,
+   "after": "ABC abc 123 !?#() &#65393;&#65394;&#65395; &#65393;&#65394; ㄱㄴ 가 ABC123! ㈜ &#65438;"
+  },
+  {
+   "type": 0,
+   "flags": {
+    "Number": 1,
+    "Alpha": 0,
+    "Symbol": 0,
+    "Gata": 0,
+    "HGJamo": 0
+   },
+   "ok": true,
+   "after": "ABC abc 123 !?#() &#65393;&#65394;&#65395; アイ ㄱㄴ 가 ＡＢＣ123！ ㈜ &#65438;"
+  },
+  {
+   "type": 1,
+   "flags": {
+    "Number": 1,
+    "Alpha": 1,
+    "Symbol": 1,
+    "Gata": 1,
+    "HGJamo": 1
+   },
+   "ok": true,
+   "after": "ＡＢＣ　ａｂｃ　１２３　！？＃（）　アイウ　アイ　ㄱㄴ　가　ＡＢＣ１２３！　㈜　&#12441;"
+  },
+  {
+   "type": 1,
+   "flags": {
+    "Number": 1,
+    "Alpha": 0,
+    "Symbol": 0,
+    "Gata": 0,
+    "HGJamo": 0
+   },
+   "ok": true,
+   "after": "ABC abc １２３ !?#() &#65393;&#65394;&#65395; アイ ㄱㄴ 가 ＡＢＣ１２３！ ㈜ &#65438;"
+  }
+ ],
+ "dutmalDefault": {
+  "ResultText": "",
+  "SubText": "",
+  "PosType": "0",
+  "FsizeRatio": "0",
+  "Option": "0",
+  "StyleNo": "0",
+  "Align": "0"
+ },
+ "dutmal": {
+  "ok": true,
+  "xml": [
+   "<hp:dutmal posType=\"TOP\" szRatio=\"0\" option=\"0\" styleIDRef=\"0\" align=\"CENTER\"><hp:mainText>漢字</hp:mainText><hp:subText>한자</hp:subText></hp:dutmal>"
+  ],
+  "text": "앞漢字(덧말:한자)뒤"
+ },
+ "compose": [
+  {
+   "in": [
+    0,
+    1,
+    1
+   ],
+   "default": {
+    "Chars": "",
+    "CircleType": "0",
+    "CharSize": "-3",
+    "CheckCompose": "0"
+   },
+   "ok": true,
+   "xml": [
+    "<hp:compose circleType=\"SHAPE_CIRCLE\" charSz=\"0\" composeType=\"OVERLAP\" charPrCnt=\"10\" composeText=\"12\"><hp:charPr prIDRef=\"7\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/></hp:compose>"
+   ]
+  },
+  {
+   "in": [
+    -3,
+    1,
+    1
+   ],
+   "default": {
+    "Chars": "",
+    "CircleType": "0",
+    "CharSize": "-3",
+    "CheckCompose": "0"
+   },
+   "ok": true,
+   "xml": [
+    "<hp:compose circleType=\"SHAPE_CIRCLE\" charSz=\"-3\" composeType=\"OVERLAP\" charPrCnt=\"10\" composeText=\"12\"><hp:charPr prIDRef=\"7\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/></hp:compose>"
+   ]
+  },
+  {
+   "in": [
+    2,
+    3,
+    0
+   ],
+   "default": {
+    "Chars": "",
+    "CircleType": "0",
+    "CharSize": "-3",
+    "CheckCompose": "0"
+   },
+   "ok": true,
+   "xml": [
+    "<hp:compose circleType=\"SHAPE_RECTANGLE\" charSz=\"2\" composeType=\"SPREAD\" charPrCnt=\"10\" composeText=\"12\"><hp:charPr prIDRef=\"7\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/><hp:charPr prIDRef=\"4294967295\"/></hp:compose>"
+   ]
+  }
+ ],
+ "date": {
+  "okString": true,
+  "okField": true,
+  "text": "2026년 11월 11일|2026년 11월 11일",
+  "xml": "<hp:p id=\"3121190098\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"0\"><hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"1\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\"><hp:grid lineGrid=\"0\" charGrid=\"0\" wonggojiFormat=\"0\"/><hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/><hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/><hp:lineNumberShape restartType=\"0\" countBy=\"0\" distance=\"0\" startNumber=\"0\"/><hp:pagePr landscape=\"WIDELY\" width=\"59528\" height=\"84186\" gutterType=\"LEFT_ONLY\"><hp:margin header=\"4252\" footer=\"4252\" gutter=\"0\" left=\"8504\" right=\"8504\" top=\"5668\" bottom=\"4252\"/></hp:pagePr><hp:footNotePr><hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\")\" supscript=\"0\"/><hp:noteLine length=\"-1\" type=\"SOLID\" width=\"0.12 mm\" color=\"#000000\"/><hp:noteSpacing betweenNotes=\"283\" belowLine=\"567\" aboveLine=\"850\"/><hp:numbering type=\"CONTINUOUS\" newNum=\"1\"/><hp:placement place=\"EACH_COLUMN\" beneathText=\"0\"/></hp:footNotePr><hp:endNotePr><hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\")\" supscript=\"0\"/><hp:noteLine length=\"14692344\" type=\"SOLID\" width=\"0.12 mm\" color=\"#000000\"/><hp:noteSpacing betweenNotes=\"0\" belowLine=\"567\" aboveLine=\"850\"/><hp:numbering type=\"CONTINUOUS\" newNum=\"1\"/><hp:placement place=\"END_OF_DOCUMENT\" beneathText=\"0\"/></hp:endNotePr><hp:pageBorderFill type=\"BOTH\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill><hp:pageBorderFill type=\"EVEN\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill><hp:pageBorderFill type=\"ODD\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill></hp:secPr><hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"1\" sameSz=\"1\" sameGap=\"0\"/></hp:ctrl></hp:run><hp:run charPrIDRef=\"0\"><hp:t>2026년 11월 11일|</hp:t><hp:ctrl><hp:fieldBegin id=\"1244829065\" type=\"DATE\" name=\"\" editable=\"0\" dirty=\"0\" zorder=\"-1\" fieldid=\"627340389\" metaTag=\"\"><hp:parameters cnt=\"4\" name=\"\"><hp:integerParam name=\"Prop\">8</hp:integerParam><hp:stringParam name=\"Command\">:1년 2월 3일</hp:stringParam><hp:stringParam name=\"DateNation\">KOR</hp:stringParam><hp:stringParam name=\"DateFormat\">YYYY년 M월 D일</hp:stringParam></hp:parameters></hp:fieldBegin></hp:ctrl><hp:t>2026년 11월 11일</hp:t><hp:ctrl><hp:fieldEnd beginIDRef=\"1244829065\" fieldid=\"627340389\"/></hp:ctrl><hp:t/></hp:run></hp:p>"
+ },
+ "dateStyleDefault": {
+  "DateStyleType": "0",
+  "DateStyleDataForm": ""
+ }
+}

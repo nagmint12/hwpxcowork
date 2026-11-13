@@ -1,0 +1,22 @@
+# 실행 중 생기는 것 — 저장소에 올리지 않는다
+node_modules/
+/config.json
+/.hwpx-cowork-secret
+/data/
+/userdata-personal/
+/logs/
+/tests/out/
+*.log
+
+# 개인 환경
+.env
+.env.*
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+
+# 직접 빌드할 때 생기는 것(배포본에는 빌드 결과 studio/dist·vendor/rhwp/pkg 가 이미 들어 있다)
+/vendor/rhwp/target/
+/artifacts/

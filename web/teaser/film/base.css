@@ -1,0 +1,21 @@
+#stage { --ground:#FFFFFF; --main:#001A70; --second:#212121; --accent:#F5A800; color:var(--second); font-family:var(--sans, system-ui, sans-serif) }
+.ground { position:absolute; inset:0; background:color-mix(in srgb, var(--main) 6%, var(--ground)) }
+.words { position:absolute; margin:0; display:flex; flex-direction:column; gap:24px } .words > * { margin:0 }
+.line { font-family:var(--display, var(--sans, system-ui, sans-serif)); font-size:96px; line-height:1.18; font-weight:700; word-break:keep-all; color:var(--main); letter-spacing:-0.02em } .sub { font-size:36px; word-break:keep-all; font-weight:500; color:color-mix(in srgb, var(--second) 72%, var(--ground)) }
+.bar { position:absolute; left:0; top:0; bottom:0; width:20px; background:var(--main) }
+.pg { position:absolute; background:var(--ground); border-radius:6px; box-shadow:0 2px 4px rgba(0,0,0,.16), 0 28px 64px rgba(0,0,0,.12); overflow:hidden }
+.ph { position:absolute; height:14px; border-radius:7px; background:color-mix(in srgb, var(--second) 13%, var(--ground)) }
+.ph.t { height:24px; border-radius:6px; background:color-mix(in srgb, var(--main) 80%, var(--ground)) }
+.doc { position:absolute; margin:0; font-size:46px; line-height:1.7; font-weight:500; color:var(--second); word-break:keep-all }
+.del { position:relative; white-space:nowrap } .strk { position:absolute; left:-4px; right:-4px; top:54%; height:5px; border-radius:3px; background:var(--second); transform-origin:0 50% }
+.ins { position:relative; white-space:nowrap; color:var(--main); font-weight:700 } .uline { position:absolute; left:0; right:0; bottom:-2px; height:8px; border-radius:4px; background:var(--accent); transform-origin:0 50% }
+.tag { position:absolute; display:flex; align-items:center; gap:12px; padding:10px 22px; border-radius:4px; background:var(--main); color:var(--ground); font-size:28px; font-weight:700; white-space:nowrap }
+.memo { position:absolute; padding:20px 26px; border-radius:6px; background:color-mix(in srgb, var(--accent) 14%, var(--ground)); border:2px solid color-mix(in srgb, var(--accent) 75%, var(--ground)); font-size:28px; line-height:1.45; font-weight:500; word-break:keep-all; box-shadow:0 8px 20px rgba(0,0,0,.08) }
+.who { font-size:22px; font-weight:700; color:var(--main); margin-bottom:6px }
+.caret { position:absolute; width:4px; border-radius:2px; background:var(--main) }
+.ui-win { position:absolute; left:0; top:0; width:1920px; height:1080px; overflow:hidden; background:#f4f5f7; transform-origin:0 0 }
+.ui-img { position:absolute; left:0; top:0; width:1920px; height:1080px; display:block }
+.ui-mask { position:absolute; background:#fff }
+.cap { position:absolute; left:64px; bottom:64px; margin:0; padding:20px 36px 22px; border-radius:6px; background:var(--main); color:var(--ground); font-size:46px; line-height:1.2; font-weight:700; letter-spacing:-0.01em; white-space:nowrap; box-shadow:0 12px 32px rgba(0,0,0,.22) }
+.cur { position:absolute; left:0; top:0; width:34px; height:34px; pointer-events:none } .cur svg { width:100%; height:100%; overflow:visible; filter:drop-shadow(0 2px 3px rgba(0,0,0,.35)) }
+.ring { position:absolute; width:56px; height:56px; margin:-28px 0 0 -28px; border-radius:50%; border:4px solid var(--accent) }

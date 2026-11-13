@@ -1,0 +1,2 @@
+# hwpx-cowork 사용자 앱 설정 — 관리자에게 받은 서버 주소를 적습니다. '#' 로 시작하는 줄은 설명입니다.
+HWPX_COWORK_SERVER=__SERVER_URL__

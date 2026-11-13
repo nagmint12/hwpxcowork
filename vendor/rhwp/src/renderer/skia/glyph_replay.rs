@@ -1,0 +1,996 @@
+//! Prepare strict glyph resources before selecting a text alternative.
+//!
+//! Preparation is atomic: a failed font, path, shader or image never suppresses
+//! the anchored TextRun. Prepared Skia objects are reused by the actual draw.
+
+use std::collections::HashSet;
+
+use skia_safe::{
+    font_arguments::{variation_position, VariationPosition},
+    gradient::{shaders, Colors, Gradient, Interpolation},
+    Canvas, Color, Color4f, Data, FilterMode, Font, FontArguments, FontMgr, FourByteTag, Image,
+    Matrix, MipmapMode, Paint, Path, PathBuilder, Point, Rect, SamplingOptions, TileMode,
+};
+
+use crate::paint::{
+    BitmapGlyphFiltering, ColorGlyphFormat, ColorPaintCompositeMode, ColorPaintGraphNodeKind,
+    GlyphOutlineFillRule, GlyphOutlinePaintOrder, GlyphOutlinePayloadKind,
+    GlyphRunReplayEligibility, LayerAffineTransform, LayerGlyphOutlinePaint, LayerGlyphRunPaint,
+    ResolvedColor, ResourceArena, TextVariantQuality,
+};
+use crate::renderer::render_tree::BoundingBox;
+use crate::renderer::{svg_arc_to_beziers, PathCommand};
+
+use super::renderer::{
+    colorref_to_skia, NativeGlyphPreparationFailure, NativeGlyphRunReplayProofReason as FontFailure,
+};
+
+pub(super) const MAX_PREPARED_GLYPH_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PATH_COMMANDS: usize = 100_000;
+const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_IMAGE_PIXELS: u64 = 4096 * 4096;
+
+pub(super) struct PreparedGlyph {
+    draws: Vec<PreparedDraw>,
+    pub byte_cost: usize,
+}
+
+pub(super) struct GlyphPreparationBudget {
+    remaining_entries: usize,
+    remaining_bytes: usize,
+}
+
+impl GlyphPreparationBudget {
+    pub fn new() -> Self {
+        Self {
+            remaining_entries: 4096,
+            remaining_bytes: MAX_PREPARED_GLYPH_BYTES,
+        }
+    }
+
+    pub fn prepare<T: std::borrow::Borrow<PreparedGlyph>>(
+        &mut self,
+        minimum_bytes: usize,
+        prepare: impl FnOnce() -> Result<T, NativeGlyphPreparationFailure>,
+    ) -> Result<T, NativeGlyphPreparationFailure> {
+        if self.remaining_entries == 0
+            || self.remaining_bytes == 0
+            || minimum_bytes > self.remaining_bytes
+        {
+            return Err(NativeGlyphPreparationFailure::PreparationBudgetExceeded);
+        }
+        // Charge before parsing/copying. A failed candidate must not restore
+        // the work allowance and repeatedly prepare the same large resource.
+        self.remaining_entries -= 1;
+        self.remaining_bytes -= minimum_bytes;
+        let prepared = prepare()?;
+        let additional_bytes = prepared.borrow().byte_cost.saturating_sub(minimum_bytes);
+        let Some(remaining) = self.remaining_bytes.checked_sub(additional_bytes) else {
+            // Outline costs are known only after preparation. Stop further
+            // preparation if this candidate exhausted the remaining allowance.
+            self.remaining_bytes = 0;
+            return Err(NativeGlyphPreparationFailure::PreparationBudgetExceeded);
+        };
+        self.remaining_bytes = remaining;
+        Ok(prepared)
+    }
+}
+
+pub(super) fn glyph_run_minimum_byte_cost(
+    run: &LayerGlyphRunPaint,
+    resources: &ResourceArena,
+) -> Option<usize> {
+    let fonts = resources.font_resources();
+    let face = fonts
+        .faces
+        .iter()
+        .find(|face| face.id == run.shape_key.font_instance.face_key)?;
+    let blob = fonts.blobs.iter().find(|blob| blob.id == face.blob_key)?;
+    let bytes = resources.font_blob_bytes_for_ref(blob.data_ref.as_ref()?)?;
+    let placement_bytes = if run.paint_style.is_fill_only_glyph_replay() {
+        run.glyph_ids
+            .len()
+            .checked_mul(std::mem::size_of::<Point>() + std::mem::size_of::<u16>())?
+    } else {
+        0
+    };
+    bytes.len().checked_add(placement_bytes)
+}
+
+struct PreparedDraw {
+    transforms: Vec<Matrix>,
+    /// Clips are prepared in page space so child transforms cannot move an
+    /// enclosing graph clip. The renderer's outer layer transform still applies.
+    clips: Vec<Path>,
+    paint: Paint,
+    /// 외곽선 효과 획. raster 출력에서 장치 한 칸보다 가늘게 긋지 않는다.
+    floor_stroke: bool,
+    content: DrawContent,
+}
+
+enum DrawContent {
+    Glyphs {
+        font: Font,
+        glyphs: Vec<u16>,
+        positions: Vec<Point>,
+    },
+    Path(Path),
+    Image {
+        image: Image,
+        destination: Rect,
+        sampling: SamplingOptions,
+        respect_profile_sampling: bool,
+    },
+}
+
+impl PreparedGlyph {
+    pub fn draw(
+        &self,
+        canvas: &Canvas,
+        antialias: bool,
+        sampling: SamplingOptions,
+        raster_target: bool,
+    ) {
+        for draw in &self.draws {
+            canvas.save();
+            for clip in &draw.clips {
+                canvas.clip_path(clip, None, antialias);
+            }
+            for transform in &draw.transforms {
+                canvas.concat(transform);
+            }
+            let mut paint = draw.paint.clone();
+            paint.set_anti_alias(antialias);
+            match &draw.content {
+                DrawContent::Glyphs {
+                    font,
+                    glyphs,
+                    positions,
+                } => {
+                    canvas.draw_glyphs_at(glyphs, positions.as_slice(), (0.0, 0.0), font, &paint);
+                }
+                DrawContent::Path(path) => {
+                    if draw.floor_stroke {
+                        super::line_replay::floor_stroke_to_device(
+                            canvas,
+                            &mut paint,
+                            raster_target,
+                        );
+                    }
+                    canvas.draw_path(path, &paint);
+                }
+                DrawContent::Image {
+                    image,
+                    destination,
+                    sampling: explicit_sampling,
+                    respect_profile_sampling,
+                } => {
+                    canvas.draw_image_rect_with_sampling_options(
+                        image,
+                        None,
+                        destination,
+                        if *respect_profile_sampling {
+                            sampling
+                        } else {
+                            *explicit_sampling
+                        },
+                        &paint,
+                    );
+                }
+            }
+            canvas.restore();
+        }
+    }
+}
+
+pub(super) fn finite_scalar(value: f64) -> bool {
+    value.is_finite() && value.abs() <= f64::from(f32::MAX)
+}
+
+fn matrix(transform: LayerAffineTransform) -> Option<Matrix> {
+    let values = [
+        transform.a,
+        transform.b,
+        transform.c,
+        transform.d,
+        transform.e,
+        transform.f,
+    ];
+    values
+        .into_iter()
+        .all(finite_scalar)
+        .then(|| Matrix::from_affine(&values.map(|value| value as f32)))
+}
+
+fn fill_paint(color: Color) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    paint
+}
+
+pub(super) fn construct_glyph_font(
+    run: &LayerGlyphRunPaint,
+    resources: &ResourceArena,
+    font_mgr: &FontMgr,
+) -> Result<PreparedGlyph, Vec<FontFailure>> {
+    let instance = &run.shape_key.font_instance;
+    let face = resources
+        .font_resources()
+        .faces
+        .iter()
+        .find(|face| face.id == instance.face_key)
+        .ok_or_else(|| vec![FontFailure::FontFaceMissing])?;
+    let blob = resources
+        .font_resources()
+        .blobs
+        .iter()
+        .find(|blob| blob.id == face.blob_key)
+        .ok_or_else(|| vec![FontFailure::FontBlobMissing])?;
+    let bytes = blob
+        .data_ref
+        .as_ref()
+        .and_then(|data_ref| resources.font_blob_bytes_for_ref(data_ref))
+        .ok_or_else(|| vec![FontFailure::FontBlobBytesMissing])?;
+    let unavailable = || {
+        let mut reasons = vec![FontFailure::ExactFaceUnavailable];
+        if face.face_index != 0 {
+            reasons.push(FontFailure::FaceIndexUnsupported);
+        }
+        if !instance.variations.is_empty() {
+            reasons.push(FontFailure::FontVariationUnsupported);
+        }
+        reasons
+    };
+    // Parse the requested collection face first. Font backends must never turn
+    // an out-of-range face into a successful face-zero family fallback.
+    let parsed = ttf_parser::Face::parse(bytes, face.face_index).map_err(|_| unavailable())?;
+    if run
+        .glyph_ids
+        .iter()
+        .any(|glyph| *glyph >= u32::from(parsed.number_of_glyphs()))
+    {
+        return Err(vec![FontFailure::GlyphIdOutOfRange]);
+    }
+    let mut typeface = super::font_catalog::typeface_from_data(font_mgr, bytes, face.face_index)
+        .ok_or_else(unavailable)?;
+    if !instance.variations.is_empty() {
+        if instance.variations.len() > 16 {
+            return Err(vec![FontFailure::FontVariationUnsupported]);
+        }
+        let parameters = typeface
+            .variation_design_parameters()
+            .ok_or_else(|| vec![FontFailure::FontVariationUnsupported])?;
+        let mut seen = HashSet::new();
+        let mut coordinates = Vec::with_capacity(instance.variations.len());
+        for variation in &instance.variations {
+            let tag: [u8; 4] = variation
+                .tag
+                .as_bytes()
+                .try_into()
+                .map_err(|_| vec![FontFailure::FontVariationUnsupported])?;
+            let axis = FourByteTag::from_chars(
+                tag[0] as char,
+                tag[1] as char,
+                tag[2] as char,
+                tag[3] as char,
+            );
+            let parameter = parameters
+                .iter()
+                .find(|parameter| parameter.tag == axis)
+                .ok_or_else(|| vec![FontFailure::FontVariationUnsupported])?;
+            if !seen.insert(tag)
+                || !variation.value.is_finite()
+                || variation.value < parameter.min
+                || variation.value > parameter.max
+            {
+                return Err(vec![FontFailure::FontVariationUnsupported]);
+            }
+            coordinates.push(variation_position::Coordinate {
+                axis,
+                value: variation.value,
+            });
+        }
+        let mut arguments = FontArguments::new().set_variation_design_position(VariationPosition {
+            coordinates: &coordinates,
+        });
+        arguments.set_collection_index(face.face_index as usize);
+        typeface = typeface
+            .clone_with_arguments(&arguments)
+            .ok_or_else(|| vec![FontFailure::FontVariationUnsupported])?;
+        let actual = typeface
+            .variation_design_position()
+            .ok_or_else(|| vec![FontFailure::FontVariationUnsupported])?;
+        if coordinates.iter().any(|expected| {
+            !actual.iter().any(|value| {
+                value.axis == expected.axis && (value.value - expected.value).abs() <= 0.001
+            })
+        }) {
+            return Err(vec![FontFailure::FontVariationUnsupported]);
+        }
+    }
+    let mut font = Font::from_typeface(typeface, instance.size_px as f32);
+    font.set_embolden(instance.synthetic_bold);
+    font.set_skew_x(if instance.synthetic_italic {
+        crate::renderer::text_italic::SKEW_X as f32
+    } else {
+        0.0
+    });
+    font.set_edging(skia_safe::font::Edging::AntiAlias);
+    let transforms =
+        vec![matrix(run.placement.run_to_page)
+            .ok_or_else(|| vec![FontFailure::PlacementNotFinite])?];
+    if !run.paint_style.is_fill_only_glyph_replay() {
+        return prepare_glyph_effects(run, &font, transforms, bytes.len());
+    }
+    Ok(PreparedGlyph {
+        byte_cost: bytes.len() + run.glyph_ids.len() * (std::mem::size_of::<Point>() + 2),
+        draws: vec![PreparedDraw {
+            transforms,
+            clips: Vec::new(),
+            paint: fill_paint(colorref_to_skia(run.paint_style.color, 1.0)),
+            floor_stroke: false,
+            content: DrawContent::Glyphs {
+                font,
+                glyphs: run.glyph_ids.iter().map(|glyph| *glyph as u16).collect(),
+                positions: run
+                    .positions
+                    .iter()
+                    .map(|position| Point::new(position.x as f32, position.y as f32))
+                    .collect(),
+            },
+        }],
+    })
+}
+
+fn prepare_glyph_effects(
+    run: &LayerGlyphRunPaint,
+    font: &Font,
+    transforms: Vec<Matrix>,
+    font_byte_cost: usize,
+) -> Result<PreparedGlyph, Vec<FontFailure>> {
+    let unsupported = || vec![FontFailure::UnsupportedPaintEffect];
+    let mut paths = Vec::with_capacity(run.glyph_ids.len());
+    let mut byte_cost = font_byte_cost;
+    // Resolve every outline before suppressing the TextRun. A missing outline
+    // is safe only for an actually empty glyph, such as a space.
+    for (&glyph, position) in run.glyph_ids.iter().zip(&run.positions) {
+        let Some(path) = font.get_path(glyph as u16) else {
+            let mut bounds = [Rect::default()];
+            font.get_bounds(&[glyph as u16], &mut bounds, None);
+            if !bounds[0].is_empty() {
+                return Err(unsupported());
+            }
+            continue;
+        };
+        let path = path.with_offset((position.x as f32, position.y as f32));
+        if !path.is_finite() || path.count_verbs() > MAX_PATH_COMMANDS {
+            return Err(unsupported());
+        }
+        byte_cost = byte_cost
+            .checked_add(path.approximate_bytes_used())
+            .filter(|cost| *cost <= MAX_PREPARED_GLYPH_BYTES)
+            .ok_or_else(unsupported)?;
+        paths.push(path);
+    }
+    let style = &run.paint_style;
+    let fill = fill_paint(colorref_to_skia(style.color, 1.0));
+    let highlight = fill_paint(Color::WHITE);
+    let mut passes = Vec::with_capacity(3);
+    if style.emboss || style.engrave {
+        let offset = (style.font_size as f32 / 20.0).max(1.0);
+        let relief_shadow = fill_paint(Color::from_rgb(0x80, 0x80, 0x80));
+        let (upper, lower) = if style.emboss {
+            (highlight, relief_shadow)
+        } else {
+            (relief_shadow, highlight)
+        };
+        passes.push((upper, (-offset, -offset)));
+        passes.push((lower, (offset, offset)));
+        passes.push((fill, (0.0, 0.0)));
+    } else {
+        if style.shadow_type > 0 {
+            passes.push((
+                fill_paint(colorref_to_skia(style.shadow_color, 1.0)),
+                (style.shadow_offset_x as f32, style.shadow_offset_y as f32),
+            ));
+        }
+        // 외곽선 글자는 SVG·Canvas와 같은 굵기·반복 구간으로 윤곽만 긋는다.
+        if let Some((width, intervals)) =
+            crate::renderer::stroke_pattern::char_outline_stroke(style.outline_type)
+        {
+            let mut stroke = fill;
+            stroke.set_style(skia_safe::paint::Style::Stroke);
+            stroke.set_stroke_width(width as f32);
+            stroke.set_stroke_cap(skia_safe::paint::Cap::Round);
+            stroke.set_stroke_join(skia_safe::paint::Join::Round);
+            if !intervals.is_empty() {
+                let intervals: Vec<f32> = intervals.iter().map(|v| *v as f32).collect();
+                stroke.set_path_effect(skia_safe::PathEffect::dash(&intervals, 0.0));
+            }
+            passes.push((stroke, (0.0, 0.0)));
+        } else {
+            passes.push((fill, (0.0, 0.0)));
+        }
+    }
+    let mut draws = Vec::with_capacity(paths.len() * passes.len());
+    // Preserve the branch's effect precedence and complete pass ordering:
+    // relief overrides shadow/outline; shadow precedes the outline stroke.
+    for (paint, offset) in passes {
+        for path in &paths {
+            let shifted = path.with_offset(offset);
+            if !shifted.is_finite() {
+                return Err(unsupported());
+            }
+            byte_cost = byte_cost
+                .checked_add(shifted.approximate_bytes_used())
+                .filter(|cost| *cost <= MAX_PREPARED_GLYPH_BYTES)
+                .ok_or_else(unsupported)?;
+            draws.push(PreparedDraw {
+                transforms: transforms.clone(),
+                clips: Vec::new(),
+                paint: paint.clone(),
+                floor_stroke: paint.style() == skia_safe::paint::Style::Stroke,
+                content: DrawContent::Path(shifted),
+            });
+        }
+    }
+    Ok(PreparedGlyph { draws, byte_cost })
+}
+
+fn path(commands: &[PathCommand], fill_rule: GlyphOutlineFillRule) -> Option<Path> {
+    if commands.is_empty() || commands.len() > MAX_PATH_COMMANDS {
+        return None;
+    }
+    let mut builder = PathBuilder::new();
+    let mut current = (0.0, 0.0);
+    let mut origin = current;
+    for command in commands {
+        match *command {
+            PathCommand::MoveTo(x, y) | PathCommand::LineTo(x, y) => {
+                if !finite_scalar(x) || !finite_scalar(y) {
+                    return None;
+                }
+                if matches!(command, PathCommand::MoveTo(..)) {
+                    builder.move_to((x as f32, y as f32));
+                    origin = (x, y);
+                } else {
+                    builder.line_to((x as f32, y as f32));
+                }
+                current = (x, y);
+            }
+            PathCommand::CurveTo(x1, y1, x2, y2, x, y) => {
+                if ![x1, y1, x2, y2, x, y].into_iter().all(finite_scalar) {
+                    return None;
+                }
+                builder.cubic_to(
+                    (x1 as f32, y1 as f32),
+                    (x2 as f32, y2 as f32),
+                    (x as f32, y as f32),
+                );
+                current = (x, y);
+            }
+            PathCommand::ArcTo(rx, ry, rotation, large, sweep, x, y) => {
+                if ![rx, ry, rotation, x, y].into_iter().all(finite_scalar) {
+                    return None;
+                }
+                if rx == 0.0 || ry == 0.0 {
+                    builder.line_to((x as f32, y as f32));
+                } else {
+                    for segment in svg_arc_to_beziers(
+                        current.0, current.1, rx, ry, rotation, large, sweep, x, y,
+                    ) {
+                        if let PathCommand::CurveTo(x1, y1, x2, y2, ex, ey) = segment {
+                            if ![x1, y1, x2, y2, ex, ey].into_iter().all(finite_scalar) {
+                                return None;
+                            }
+                            builder.cubic_to(
+                                (x1 as f32, y1 as f32),
+                                (x2 as f32, y2 as f32),
+                                (ex as f32, ey as f32),
+                            );
+                        }
+                    }
+                }
+                current = (x, y);
+            }
+            PathCommand::ClosePath => {
+                builder.close();
+                current = origin;
+            }
+        }
+    }
+    builder.set_fill_type(match fill_rule {
+        GlyphOutlineFillRule::NonZero => skia_safe::PathFillType::Winding,
+        GlyphOutlineFillRule::EvenOdd => skia_safe::PathFillType::EvenOdd,
+    });
+    Some(builder.detach())
+}
+
+fn resolved_color(color: &ResolvedColor, opacity: f64) -> Option<Color> {
+    if !color
+        .rgba
+        .into_iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+        || !opacity.is_finite()
+        || !(0.0..=1.0).contains(&opacity)
+        || color
+            .color_space
+            .as_deref()
+            .is_some_and(|space| !space.eq_ignore_ascii_case("srgb"))
+    {
+        return None;
+    }
+    let channel = |value: f32| (value * 255.0).round() as u8;
+    Some(Color::from_argb(
+        channel(color.rgba[3] * opacity as f32),
+        channel(color.rgba[0]),
+        channel(color.rgba[1]),
+        channel(color.rgba[2]),
+    ))
+}
+
+/// Conservative stop-storage estimate shared by preparation and retained caches.
+/// Count both temporary adapter arrays and the shader-owned color/offset arrays;
+/// reserve two additional shader stops for implicit endpoints. This deliberately
+/// keeps the temporary cost in the retained estimate rather than understating it.
+pub(super) fn gradient_stop_byte_cost(stop_count: usize) -> Option<usize> {
+    if !(2..=MAX_PATH_COMMANDS).contains(&stop_count) {
+        return None;
+    }
+    let stop_bytes = std::mem::size_of::<Color4f>().checked_add(std::mem::size_of::<f32>())?;
+    let adapter_bytes = stop_count.checked_mul(stop_bytes)?;
+    let shader_bytes = stop_count.checked_add(2)?.checked_mul(stop_bytes)?;
+    adapter_bytes.checked_add(shader_bytes)
+}
+
+fn reserve_gradient_stop_bytes(byte_cost: &mut usize, stop_count: usize) -> Option<()> {
+    let total = byte_cost.checked_add(gradient_stop_byte_cost(stop_count)?)?;
+    if total > MAX_PREPARED_GLYPH_BYTES {
+        return None;
+    }
+    *byte_cost = total;
+    Some(())
+}
+
+fn gradient_stops(stops: &[crate::paint::ColorGradientStop]) -> Option<(Vec<Color4f>, Vec<f32>)> {
+    if stops.len() < 2 || stops.len() > MAX_PATH_COMMANDS {
+        return None;
+    }
+    let mut colors = Vec::with_capacity(stops.len());
+    let mut positions = Vec::with_capacity(stops.len());
+    let mut last = 0.0;
+    for stop in stops {
+        if !stop.offset.is_finite() || stop.offset < last || stop.offset > 1.0 {
+            return None;
+        }
+        colors.push(Color4f::from(resolved_color(&stop.color, 1.0)?));
+        positions.push(stop.offset as f32);
+        last = stop.offset;
+    }
+    Some((colors, positions))
+}
+
+pub(super) fn prepare_glyph_outline(
+    outline: &LayerGlyphOutlinePaint,
+    bbox: BoundingBox,
+    resources: &ResourceArena,
+    raster_scale: f32,
+) -> Option<PreparedGlyph> {
+    let diagnostics = &outline.diagnostics;
+    if !diagnostics.strict_visual_eligible
+        || diagnostics.replay_eligibility != GlyphRunReplayEligibility::Portable
+        || !matches!(
+            diagnostics.quality,
+            TextVariantQuality::Exact | TextVariantQuality::PositionAdjusted
+        )
+        || diagnostics.missing_glyph_count != 0
+        || diagnostics.cluster_mismatch_count != 0
+        || diagnostics.used_fallback_font_count != 0
+        || (diagnostics.quality == TextVariantQuality::PositionAdjusted
+            && (!diagnostics.max_residual_after_adjustment_px.is_finite()
+                || diagnostics.max_residual_after_adjustment_px > 0.25))
+        || !outline.paint_style.is_fill_only_glyph_replay()
+        || !outline.has_exclusive_payload_family()
+        || !outline.has_portable_geometry()
+        || !finite_scalar(outline.placement.baseline_y)
+    {
+        return None;
+    }
+    let placement = matrix(outline.placement.run_to_page)?;
+    let mut result = PreparedGlyph {
+        draws: Vec::new(),
+        byte_cost: 0,
+    };
+    match outline.payload_kind {
+        GlyphOutlinePayloadKind::MonochromeFill | GlyphOutlinePayloadKind::MonochromeFillStroke => {
+            if outline.paths.is_empty() || outline.paths.len() > 4096 {
+                return None;
+            }
+            let fill = fill_paint(colorref_to_skia(outline.paint_style.color, 1.0));
+            let stroke = if outline.payload_kind == GlyphOutlinePayloadKind::MonochromeFillStroke {
+                let style = outline.stroke.as_ref()?;
+                if !style.is_strict_subset()
+                    || !finite_scalar(style.width)
+                    || !finite_scalar(style.miter_limit)
+                {
+                    return None;
+                }
+                let mut paint = fill_paint(colorref_to_skia(style.color, 1.0));
+                paint.set_style(skia_safe::paint::Style::Stroke);
+                paint.set_stroke_width(style.width as f32);
+                paint.set_stroke_miter(style.miter_limit as f32);
+                paint.set_stroke_join(skia_safe::paint::Join::Miter);
+                paint.set_stroke_cap(skia_safe::paint::Cap::Butt);
+                Some((paint, style.paint_order))
+            } else {
+                None
+            };
+            for outline_path in &outline.paths {
+                let path = path(&outline_path.commands, outline_path.fill_rule)?;
+                result.byte_cost = result.byte_cost.checked_add(
+                    outline_path.commands.len() * std::mem::size_of::<PathCommand>(),
+                )?;
+                if result.byte_cost > MAX_PREPARED_GLYPH_BYTES {
+                    return None;
+                }
+                let paints = match &stroke {
+                    Some((stroke, GlyphOutlinePaintOrder::StrokeThenFill)) => {
+                        vec![stroke.clone(), fill.clone()]
+                    }
+                    Some((stroke, GlyphOutlinePaintOrder::FillThenStroke)) => {
+                        vec![fill.clone(), stroke.clone()]
+                    }
+                    None => vec![fill.clone()],
+                    _ => return None,
+                };
+                for paint in paints {
+                    result.draws.push(PreparedDraw {
+                        transforms: vec![placement],
+                        clips: Vec::new(),
+                        paint,
+                        floor_stroke: false,
+                        content: DrawContent::Path(path.clone()),
+                    });
+                }
+            }
+        }
+        GlyphOutlinePayloadKind::ColorLayers => {
+            let payload = outline.color_layers.as_ref()?;
+            if payload.color_format == ColorGlyphFormat::ColrV0
+                && payload.has_colrv0_resolved_layer_contract()
+            {
+                if payload.layers.len() > 4096 {
+                    return None;
+                }
+                for layer in &payload.layers {
+                    let commands = layer.commands.as_deref()?;
+                    let path = path(commands, layer.fill_rule?)?;
+                    let mut transforms = vec![placement];
+                    if let Some(transform) = layer.transform_to_run {
+                        transforms.push(matrix(transform)?);
+                    }
+                    result.byte_cost = result
+                        .byte_cost
+                        .checked_add(std::mem::size_of_val(commands))?;
+                    if result.byte_cost > MAX_PREPARED_GLYPH_BYTES {
+                        return None;
+                    }
+                    result.draws.push(PreparedDraw {
+                        transforms,
+                        clips: Vec::new(),
+                        paint: fill_paint(resolved_color(
+                            layer.fill.as_ref()?,
+                            layer.opacity.unwrap_or(1.0),
+                        )?),
+                        floor_stroke: false,
+                        content: DrawContent::Path(path),
+                    });
+                }
+            } else if payload.has_colrv1_supported_graph_contract() {
+                let graph = payload.paint_graph.as_ref()?;
+                let mut pending = vec![(graph.root_node_id, vec![placement], Vec::<Path>::new())];
+                let mut visits = 0;
+                while let Some((node_id, mut transforms, mut clips)) = pending.pop() {
+                    visits += 1;
+                    if visits > 4096 {
+                        return None;
+                    }
+                    let node = graph.nodes.iter().find(|node| node.node_id == node_id)?;
+                    let (commands, fill_rule, paint) = match node.kind {
+                        ColorPaintGraphNodeKind::Transform => {
+                            let transform = node.transform.as_ref()?;
+                            transforms.push(matrix(transform.transform)?);
+                            pending.push((transform.child_node_id, transforms, clips));
+                            continue;
+                        }
+                        ColorPaintGraphNodeKind::Composite => {
+                            let composite = node.composite.as_ref()?;
+                            if composite.mode != ColorPaintCompositeMode::SourceOver {
+                                return None;
+                            }
+                            // Source-over is associative. Flattening each complete
+                            // subtree preserves backdrop-first paint order, including
+                            // shared DAG nodes that must be replayed more than once.
+                            pending.push((
+                                composite.source_node_id,
+                                transforms.clone(),
+                                clips.clone(),
+                            ));
+                            pending.push((composite.backdrop_node_id, transforms, clips));
+                            continue;
+                        }
+                        ColorPaintGraphNodeKind::Clip => {
+                            let clip = node.clip.as_ref()?;
+                            let mut clip_path = path(&clip.clip_commands, clip.fill_rule)?;
+                            for transform in transforms.iter().rev() {
+                                clip_path = clip_path.with_transform(transform);
+                            }
+                            if !clip_path.is_finite() {
+                                return None;
+                            }
+                            result.byte_cost = result
+                                .byte_cost
+                                .checked_add(clip_path.approximate_bytes_used())?;
+                            if result.byte_cost > MAX_PREPARED_GLYPH_BYTES {
+                                return None;
+                            }
+                            clips.push(clip_path);
+                            pending.push((clip.child_node_id, transforms, clips));
+                            continue;
+                        }
+                        ColorPaintGraphNodeKind::SolidPath => {
+                            let leaf = node.solid_path.as_ref()?;
+                            (
+                                &leaf.commands,
+                                leaf.fill_rule,
+                                fill_paint(resolved_color(&leaf.fill, 1.0)?),
+                            )
+                        }
+                        ColorPaintGraphNodeKind::LinearGradientPath => {
+                            let leaf = node.linear_gradient_path.as_ref()?;
+                            let gradient = &leaf.gradient;
+                            if ![gradient.x0, gradient.y0, gradient.x1, gradient.y1]
+                                .into_iter()
+                                .all(finite_scalar)
+                            {
+                                return None;
+                            }
+                            reserve_gradient_stop_bytes(
+                                &mut result.byte_cost,
+                                gradient.stops.len(),
+                            )?;
+                            let (colors, stops) = gradient_stops(&gradient.stops)?;
+                            let specification = Gradient::new(
+                                Colors::new(&colors, Some(&stops), TileMode::Clamp, None),
+                                Interpolation::default(),
+                            );
+                            let shader = shaders::linear_gradient(
+                                (
+                                    (gradient.x0 as f32, gradient.y0 as f32),
+                                    (gradient.x1 as f32, gradient.y1 as f32),
+                                ),
+                                &specification,
+                                None,
+                            )?;
+                            let mut paint = fill_paint(Color::WHITE);
+                            paint.set_shader(shader);
+                            (&leaf.commands, leaf.fill_rule, paint)
+                        }
+                        ColorPaintGraphNodeKind::RadialGradientPath => {
+                            let leaf = node.radial_gradient_path.as_ref()?;
+                            let gradient = &leaf.gradient;
+                            if ![gradient.cx, gradient.cy, gradient.radius]
+                                .into_iter()
+                                .all(finite_scalar)
+                                || gradient.radius <= 0.0
+                            {
+                                return None;
+                            }
+                            reserve_gradient_stop_bytes(
+                                &mut result.byte_cost,
+                                gradient.stops.len(),
+                            )?;
+                            let (colors, stops) = gradient_stops(&gradient.stops)?;
+                            let specification = Gradient::new(
+                                Colors::new(&colors, Some(&stops), TileMode::Clamp, None),
+                                Interpolation::default(),
+                            );
+                            let shader = shaders::radial_gradient(
+                                (
+                                    (gradient.cx as f32, gradient.cy as f32),
+                                    gradient.radius as f32,
+                                ),
+                                &specification,
+                                None,
+                            )?;
+                            let mut paint = fill_paint(Color::WHITE);
+                            paint.set_shader(shader);
+                            (&leaf.commands, leaf.fill_rule, paint)
+                        }
+                        ColorPaintGraphNodeKind::SweepGradientPath => {
+                            let leaf = node.sweep_gradient_path.as_ref()?;
+                            let gradient = &leaf.gradient;
+                            if ![
+                                gradient.cx,
+                                gradient.cy,
+                                gradient.start_angle_degrees,
+                                gradient.end_angle_degrees,
+                            ]
+                            .into_iter()
+                            .all(finite_scalar)
+                            {
+                                return None;
+                            }
+                            reserve_gradient_stop_bytes(
+                                &mut result.byte_cost,
+                                gradient.stops.len(),
+                            )?;
+                            let (colors, stops) = gradient_stops(&gradient.stops)?;
+                            let specification = Gradient::new(
+                                Colors::new(&colors, Some(&stops), TileMode::Clamp, None),
+                                Interpolation::default(),
+                            );
+                            let shader = shaders::sweep_gradient(
+                                (gradient.cx as f32, gradient.cy as f32),
+                                (
+                                    gradient.start_angle_degrees as f32,
+                                    gradient.end_angle_degrees as f32,
+                                ),
+                                &specification,
+                                None,
+                            )?;
+                            let mut paint = fill_paint(Color::WHITE);
+                            paint.set_shader(shader);
+                            (&leaf.commands, leaf.fill_rule, paint)
+                        }
+                    };
+                    let path = path(commands, fill_rule)?;
+                    result.byte_cost = result
+                        .byte_cost
+                        .checked_add(path.approximate_bytes_used())?
+                        .checked_add(transforms.len() * std::mem::size_of::<Matrix>())?
+                        .checked_add(clips.len() * std::mem::size_of::<Path>())?;
+                    if result.byte_cost > MAX_PREPARED_GLYPH_BYTES {
+                        return None;
+                    }
+                    result.draws.push(PreparedDraw {
+                        transforms,
+                        clips,
+                        paint,
+                        floor_stroke: false,
+                        content: DrawContent::Path(path),
+                    });
+                }
+            } else {
+                return None;
+            }
+        }
+        GlyphOutlinePayloadKind::BitmapGlyph => {
+            let payload = outline.bitmap_glyph.as_ref()?;
+            if !payload.has_strict_visual_contract() {
+                return None;
+            }
+            let bytes = resources.image_bytes(payload.image_ref)?;
+            if bytes.len() > MAX_IMAGE_BYTES {
+                return None;
+            }
+            let encoded = Image::from_encoded(Data::new_copy(bytes))?;
+            let pixels = u64::try_from(encoded.width())
+                .ok()?
+                .checked_mul(u64::try_from(encoded.height()).ok()?)?;
+            if pixels == 0 || pixels > MAX_IMAGE_PIXELS {
+                return None;
+            }
+            // Skia's lazy image and raster copy can accept incomplete encoded
+            // data. Require a bounded, successful full decode before replacing
+            // text, then retain Skia's own color-managed raster for replay.
+            let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .ok()?;
+            let mut limits = image::Limits::default();
+            limits.max_alloc = Some(MAX_PREPARED_GLYPH_BYTES as u64);
+            decoder.limits(limits);
+            decoder.decode().ok()?;
+            let image = encoded.make_raster_image(None, None)?;
+            let transforms = optional_matrix(payload.transform_to_run)?;
+            result.byte_cost = pixels as usize * 4;
+            result.draws.push(PreparedDraw {
+                transforms: transforms.into_iter().collect(),
+                clips: Vec::new(),
+                paint: fill_paint(Color::WHITE),
+                floor_stroke: false,
+                content: DrawContent::Image {
+                    image,
+                    destination: drawable_rect(payload.placement)?,
+                    sampling: SamplingOptions::new(
+                        match payload.filtering {
+                            BitmapGlyphFiltering::Nearest => FilterMode::Nearest,
+                            BitmapGlyphFiltering::Linear => FilterMode::Linear,
+                        },
+                        MipmapMode::None,
+                    ),
+                    respect_profile_sampling: payload.filtering == BitmapGlyphFiltering::Linear,
+                },
+            });
+        }
+        GlyphOutlinePayloadKind::SvgGlyph => {
+            let payload = outline.svg_glyph.as_ref()?;
+            let viewport = payload.font_em_box.unwrap_or(bbox);
+            if !payload.has_static_sanitized_contract()
+                || !payload.has_portable_view_box_mapping(viewport)
+            {
+                return None;
+            }
+            let fragment = resources.svg_fragment(payload.svg_ref)?;
+            let (image, bytes) = svg_glyph_image(
+                fragment,
+                payload.view_box,
+                viewport,
+                raster_scale,
+                outline.paint_style.color,
+            )?;
+            let transforms = optional_matrix(payload.transform_to_run)?;
+            result.byte_cost = bytes;
+            result.draws.push(PreparedDraw {
+                transforms: transforms.into_iter().collect(),
+                clips: Vec::new(),
+                paint: fill_paint(Color::WHITE),
+                floor_stroke: false,
+                content: DrawContent::Image {
+                    image,
+                    destination: drawable_rect(viewport)?,
+                    sampling: SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
+                    respect_profile_sampling: true,
+                },
+            });
+        }
+    }
+    (!result.draws.is_empty()).then_some(result)
+}
+
+fn drawable_rect(bbox: BoundingBox) -> Option<Rect> {
+    crate::paint::paint_op::bbox_is_finite_positive(bbox).then(|| {
+        Rect::from_xywh(
+            bbox.x as f32,
+            bbox.y as f32,
+            bbox.width as f32,
+            bbox.height as f32,
+        )
+    })
+}
+
+fn svg_glyph_image(
+    fragment: &str,
+    view_box: BoundingBox,
+    bbox: BoundingBox,
+    scale: f32,
+    color: u32,
+) -> Option<(Image, usize)> {
+    let foreground = format!(
+        "#{:02x}{:02x}{:02x}",
+        color & 255,
+        (color >> 8) & 255,
+        (color >> 16) & 255
+    );
+    let raster = crate::renderer::static_svg_raster::prepare_static_svg_raster(
+        fragment,
+        view_box,
+        bbox,
+        f64::from(scale),
+        &foreground,
+    )?;
+    let image = Image::from_encoded(Data::new_copy(&raster.png))?.make_raster_image(None, None)?;
+    debug_assert_eq!(
+        (image.width(), image.height()),
+        (raster.width as i32, raster.height as i32)
+    );
+    Some((image, raster.byte_cost))
+}
+
+fn optional_matrix(transform: Option<LayerAffineTransform>) -> Option<Option<Matrix>> {
+    match transform {
+        Some(transform) => matrix(transform).map(Some),
+        None => Some(None),
+    }
+}

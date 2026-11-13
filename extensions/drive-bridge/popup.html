@@ -1,0 +1,8 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>Cowork 드라이브 연결</title><link rel="stylesheet" href="style.css">
+<body class="popup"><h1>Cowork 드라이브 연결</h1>
+<form id="dooray-settings"><label>두레이 주소<input id="dooray-origin" type="url" placeholder="https://team.dooray.com" required></label><button type="submit">두레이 주소 저장</button></form>
+<section id="quick" hidden><p id="quick-text"></p><button id="quick-connect" type="button">이 cowork 서버에 연결</button></section>
+<p id="quick-none">로그인한 cowork 화면을 연 탭에서 이 아이콘을 누르면 버튼 하나로 연결합니다.</p>
+<details id="manual"><summary>코드로 연결(다른 브라우저·직접 입력)</summary><p>cowork 왼쪽 드라이브 → 연결 설정 → 코드로 연결에서 코드를 받으세요.</p>
+<form id="pair"><label>cowork 서버 주소<input id="server" type="url" placeholder="https://cowork.example.com" required></label><label>연결 코드<input id="code" autocomplete="off" required></label><button type="submit">서버에 연결</button></form></details>
+<button id="login">두레이 로그인 열기</button><button id="runner">연결 상태</button><p>연결 후 이 창을 닫아도 백그라운드에서 동작하고, 서버를 다시 켜도 연결이 유지됩니다.</p><p id="status" role="status"></p><script type="module" src="popup.js"></script></body></html>

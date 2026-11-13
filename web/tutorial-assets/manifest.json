@@ -1,0 +1,38 @@
+{
+  "capturedOn": "2026-11-01",
+  "browser": "Ego Lite, authenticated user sessions",
+  "privacy": "Account identity, conversation lists, existing keys and usage excluded. No connection or API key creation was submitted.",
+  "images": [
+    {
+      "file": "chatgpt-add-menu.png",
+      "source": "https://chatgpt.com/plugins",
+      "method": "Ego Lite page screenshot; account sidebar excluded",
+      "width": 1908,
+      "height": 951
+    },
+    {
+      "file": "chatgpt-mcp-form.png",
+      "source": "https://chatgpt.com/plugins",
+      "method": "Ego Lite live DOM and computed-style capture of the real MCP dialog; background excluded",
+      "width": 1200,
+      "height": 1520
+    },
+    {
+      "file": "api-keys.png",
+      "source": "scripts/build-api-guide-assets.py",
+      "method": "Locally generated generic API guide illustration; no real account or provider UI",
+      "width": 1200,
+      "height": 480,
+      "kind": "illustration"
+    },
+    {
+      "file": "api-create-key.png",
+      "source": "scripts/build-api-guide-assets.py",
+      "method": "Locally generated generic API guide illustration; no real account or provider UI",
+      "width": 1200,
+      "height": 480,
+      "kind": "illustration"
+    }
+  ],
+  "updatedOn": "2026-11-12"
+}

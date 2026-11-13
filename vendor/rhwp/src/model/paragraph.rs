@@ -1,0 +1,4739 @@
+//! 문단 (Paragraph, CharRun, LineSeg, RangeTag)
+
+use super::control::{Control, FieldType, CTRL_CHAR_CODE_UNITS};
+use serde::{Deserialize, Serialize};
+
+mod control_source;
+mod marker_head;
+
+pub use marker_head::MarkerHead;
+
+/// 편집 입력의 줄바꿈을 LF로 통일한다. CR은 HWP5에서 문단 종료 코드다.
+pub fn normalize_text_newlines(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains('\r') {
+        std::borrow::Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// 문자 offset 단위의 글자 모양 복원 구간. IR의 UTF-16 위치와 구분한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CharShapeRun {
+    pub start_offset: usize,
+    pub end_offset: usize,
+    pub char_shape_id: u32,
+}
+
+/// 원고지 칸 격자(HWPUNIT). 구역 정의의 줄 격자가 한 줄 높이, 글자 격자가 한 칸 폭이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CellGrid {
+    pub line: i32,
+    pub cell: i32,
+}
+
+/// 문단 (HWPTAG_PARA_HEADER + 하위 레코드)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Paragraph {
+    /// 문자 수 (제어 문자 포함)
+    pub char_count: u32,
+    /// 컨트롤 마스크
+    pub control_mask: u32,
+    /// 문단 모양 ID 참조
+    pub para_shape_id: u16,
+    /// [hwpx-cowork] An absent HWPX paraPrIDRef selects XML defaults, not shape 0.
+    /// The package parser resolves this provenance into one shared ParaShape
+    /// before layout/editing and clears it; explicit references remain intact.
+    #[serde(skip_serializing)]
+    pub hwpx_missing_para_shape: bool,
+    /// 문단 스타일 ID 참조
+    pub style_id: u8,
+    /// 단 나누기 종류
+    pub column_type: ColumnBreakType,
+    /// 원본 break_type 바이트 (라운드트립 보존용, 0이면 column_type에서 재구성)
+    pub raw_break_type: u8,
+    /// `column_type=Page` 가 원본의 명시적 쪽나눔이 아니라 파서가 저장 당시
+    /// 자연 쪽 경계(HWP3 pgy 감소·break_flag)에서 승격한 합성값인지 여부.
+    /// 합성 나눔은 rhwp 조판(원본 쪽배치 정합)에만 쓰고, 저장 포맷으로 내보내면
+    /// 한글 재조판의 자연 경계와 이중 작용해 빈 쪽을 만든다(07615 264→329쪽).
+    pub page_break_synthesized: bool,
+    /// 문단 텍스트 (UTF-16에서 변환된 문자열)
+    pub text: String,
+    /// [hwpx-cowork] Character indices whose NBSP, soft hyphen or figure space
+    /// came from a source inline control/element rather than a literal scalar.
+    /// None retains the legacy paragraph-mask fallback; Some(empty) records
+    /// known literal text. Per-character provenance survives mixed pastes.
+    #[serde(skip_serializing)]
+    pub text_element_origins: Option<Vec<usize>>,
+    /// 텍스트 문자별 UTF-16 코드 유닛 위치 (LineSeg/CharShapeRef 위치와 매핑용)
+    /// char_offsets[i] = text[i]에 해당하는 원본 UTF-16 코드 유닛 인덱스
+    pub char_offsets: Vec<u32>,
+    /// 리터럴 U+2007의 문자 인덱스. 같은 표시 문자인 HWP 코드31과 구분한다.
+    /// 파일 표기 출처이며 원문 문자·UTF-16 축은 바꾸지 않는다.
+    #[serde(skip_serializing)]
+    pub literal_figure_spaces: Vec<usize>,
+    /// 원본에서 묶음 빈칸 제어로 저장된 문자의 스칼라 위치. `Some`은 리터럴과
+    /// 제어 표기를 각각 확인한 결과이며, `None`은 개별 출처를 알 수 없는 기존 입력이다.
+    #[serde(skip_serializing)]
+    pub nb_space_control_indices: Option<Vec<usize>>,
+    /// 글자 모양 변경 위치 목록
+    pub char_shapes: Vec<CharShapeRef>,
+    /// 줄 레이아웃 정보
+    pub line_segs: Vec<LineSeg>,
+    /// 한글 3.0 저장 줄의 원본 공백 보정값(1/1800인치). 줄 시작 UTF-16 위치와 짝을 이룬다.
+    /// 편집 또는 줄 교체 시 무효화하며 HWP5/HWPX 직렬화 속성이 아니다.
+    #[serde(skip_serializing)]
+    pub hwp3_saved_space_corrections: Vec<(u32, i16)>,
+    /// 재조판이 선택한 줄별 공백 규칙. 파일 속성이 아닌 현재 줄 구성의 출처다.
+    /// 각 항목은 해당 LineSeg의 text_start와 결합하며, 줄 교체 시 함께 교체한다.
+    #[serde(skip_serializing)]
+    pub layout_space_metrics: Vec<(u32, SpaceMetric)>,
+    /// 정규화가 개체 흐름에서 이미 확정한 줄 기하. 파일의 저장 줄 권위와 구분한다.
+    /// 재조판 입력을 무효화하거나 줄을 교체하면 지우며, 직렬화하지 않는다.
+    #[serde(skip_serializing)]
+    pub layout_object_projection: bool,
+    /// [#8399] 어울림 밴드 소유자(`layout_picture_band`)가 개체 바깥 상자로 확정한 줄 기하.
+    /// 합성 줄(구현 태그)이라도 이 줄의 cs/sw 가 줄 상자다 — 밴드 없는 프레임이 다시 채우지 않는다.
+    /// 줄을 교체하거나 재조판 입력을 무효화하면 지우며, 직렬화하지 않는다.
+    #[serde(skip_serializing)]
+    pub layout_float_band: bool,
+    /// 본문 동적 필드의 확정 표시값. 모델 문자 위치는 유지하며 측정과 paint가 함께 읽는다.
+    /// 직렬화하지 않고, 재페이지네이션이 실제 쪽 소속에서 다시 결정한다.
+    #[serde(skip_serializing)]
+    pub layout_field_values: Vec<(usize, String)>,
+    /// [#5961] `line_segs[*].text_start` 를 HWP5 문단 축으로 올리는 데 필요한 보정폭.
+    ///
+    /// `LineSeg::text_start` 는 파서가 **파일 값을 그대로** 담으므로 출처마다 축이 다르다.
+    /// HWP5·HWP3·HML 은 확장 제어 하나가 8 UTF-16 유닛을 차지하는 HWP5 축이고, HWPX 는
+    /// `hp:secPr`(구역 머리 run 소속)이 자리를 차지하지 않는 더 짧은 축이다. 반면 같은
+    /// 문단의 `char_count`·`char_offsets`·`char_shapes` 는 **출처와 무관하게 언제나
+    /// HWP5 축**이다. 그래서 HWPX 출처의 구역 첫 문단은 IR 안에서 두 축이 섞인다.
+    /// rhwp 원본 마커가 있는 HWPX 는 머리 run 의 `hp:colPr` 도 자리를 차지하지 않는다(#7526).
+    ///
+    /// 그 상태로 `text_start` 를 `char_offsets` 에 투영하면 줄이 보정폭만큼 **일찍**
+    /// 끊긴다. 한글 2024 에 직접 물어 확인한 실측(코퍼스 36497307 문단 0): 한글은 둘째
+    /// 줄을 글자 54 에서 끊는데(본문 시작 pos 24, 줄 시작 pos 78), 보정 없이 투영하면
+    /// 46 이 나온다 — 정확히 8유닛 어긋난다. HWPX 500건 표본 중 49건(9.9%)이 해당한다.
+    ///
+    /// **파일에 실리는 값이 아니라 IR 안에서만 의미가 있다**(`layout_only_fill_lines` 와
+    /// 같은 계약). 직렬화기는 이 값을 무시하고 `text_start` 를 원본 그대로 쓴다 — 축을
+    /// 파일 쪽에서 옮기면 x2x 재수출이 왕복마다 8씩 흘러내려 3회 만에 0 으로 무너지고
+    /// (실측), h2x 의 #5943 재기준화와도 충돌한다. 읽을 때만 올려 본다.
+    ///
+    /// 소비는 [`Paragraph::line_seg_text_start`] 로만 한다.
+    pub hwpx_axis_shift: u32,
+    /// [#4677] `line_segs` **끝쪽** 몇 줄이 조판 전용 보강 줄인가.
+    ///
+    /// HWPX RowBreak 표 셀은 문단별 `<hp:linesegarray>` 를 생략하면서도 셀 높이는 남긴다.
+    /// 그 높이에 맞춰 줄을 보강해야 쪽 나눔이 한컴과 같아지지만
+    /// (`DocumentCore::fit_hwpx_rowbreak_synthetic_cell_lines`), 그 줄은 **본문에 없는 줄**
+    /// 이라 HWP5 로 저장하면 안 된다 — 한글 2022 는 그런 셀 문단을 만나면 본문 전체를
+    /// 버리고 빈 1쪽 문서로 연다(rhwp 재파싱은 통과하는 함정).
+    ///
+    /// 파일에 실리는 값이 아니라 IR 안에서만 의미가 있다. `line_segs` 를 통째로 다시
+    /// 계산하는 경로(reflow)는 이 값을 0 으로 되돌린다.
+    pub layout_only_fill_lines: usize,
+    /// [#5847] 원본 파일이 싣고 있던 `line_segs[*].vertical_pos` 스냅샷 (쪽-상대
+    /// 좌표). 구역 안에 캐시 없는 문단이 하나라도 있으면 reflow 의 구역 단위 vpos
+    /// 재계산이 **원본 캐시 보유 문단까지** 문서 누적 좌표로 덮어쓰는데, 그 내부
+    /// 좌표가 HWPX 로 그대로 나가면 한글 2022 가 캐시를 신뢰해 조판이 무너진다
+    /// (08818: 81쪽 → 5쪽). 렌더러는 재계산 좌표를 계속 쓰고, HWPX 직렬화기만
+    /// 이 스냅샷으로 원본 좌표를 되돌린다. 합성(reflow) 문단·합성 lineseg 보유
+    /// 문단은 None. 파일에 실리는 값이 아니라 IR 안에서만 의미가 있다.
+    /// (`serde(skip)` — IR dump/ir-sweep 축의 필드 집합을 바꾸지 않는다.)
+    #[serde(skip_serializing)]
+    pub source_line_seg_vertical_pos: Option<Vec<i32>>,
+    /// 단 정의 부재로 본문 세로 축을 재구성했는지 나타내는 조판 전용 출처다.
+    /// 문자 분할의 유효성과 별개이며 원본 파일이나 IR로 직렬화하지 않는다.
+    #[serde(skip_serializing)]
+    pub layout_rebased_body_axis: bool,
+    /// 원고지 구역의 칸 격자. 렌더 정규화본에만 두고 파일·IR로 직렬화하지 않는다.
+    /// 있으면 문단 배치가 글자를 칸에 놓는다.
+    #[serde(skip_serializing)]
+    pub layout_cell_grid: Option<CellGrid>,
+    /// 영역 태그 정보
+    pub range_tags: Vec<RangeTag>,
+    /// 필드 텍스트 범위 (0x03~0x04 사이 텍스트 인덱스 + 컨트롤 인덱스)
+    pub field_ranges: Vec<FieldRange>,
+    /// 고아 FIELD_END (다단락 필드의 종료 마커 — begin 이 다른 문단). HWPX 전용 (Task #1556).
+    pub orphan_field_ends: Vec<OrphanFieldEnd>,
+    /// 컨트롤 목록 (표, 그림, 각주 등)
+    pub controls: Vec<Control>,
+    /// 각 컨트롤에 대응하는 CTRL_DATA 레코드 (라운드트립 보존용)
+    /// controls[i]에 대응하는 CTRL_DATA가 있으면 ctrl_data_records[i] = Some(data)
+    pub ctrl_data_records: Vec<Option<Vec<u8>>>,
+    /// char_count의 최상위 비트 (bit 31) 파싱값.
+    /// HWP5 저장기는 현재 list scope의 마지막 문단 여부로 bit 31을 재생성한다.
+    pub char_count_msb: bool,
+    /// PARA_HEADER tail 보존용 바이트.
+    ///
+    /// raw_header_extra[0..6]은 numCharShapes/numRangeTags/numLineSegs 자리지만,
+    /// HWP5 저장기는 실제 배열 길이로 count 필드를 재생성하고 이 구간을 쓰지 않는다.
+    /// raw_header_extra[6..]은 instanceId 및 변경추적 suffix로 보존한다.
+    pub raw_header_extra: Vec<u8>,
+    /// 원본에 PARA_TEXT 레코드가 존재했는지 (라운드트립 보존용)
+    pub has_para_text: bool,
+    /// TAB 확장 데이터 (라운드트립 보존용)
+    /// 각 탭 문자의 7 code unit (탭 너비, 종류 등) — text 내 '\t' 순서와 1:1 대응
+    ///
+    /// [#7170] 저장 데이터가 없는 탭은 **자리표(`tab_ext_is_placeholder`)로 자리를 채운다.**
+    /// 항목을 건너뛰면 그 뒤 탭의 확장이 순번으로 밀려 남의 폭·채움을 쓴다 — 소비자는
+    /// 자리표를 만나면 문단 `TabDef` 기준 `find_next_tab_stop` 으로 다시 계산한다.
+    pub tab_extended: Vec<[u16; 7]>,
+    /// 제목 차례 표시 (`<hp:t>` 안의 `<hp:titleMark/>`, HWP5 인라인 `Mtit`/`Mign`)
+    ///
+    /// 텍스트가 아니라 **텍스트 축 위에 놓인 8유닛 슬롯**이라 `text` 에 싣지 않는다.
+    /// 대신 `field_ranges`·`tab_extended` 와 같은 부수 채널로 위치만 보존한다 —
+    /// `text` 에 문자를 넣으면 추출·렌더·비교 축이 전부 달라진다.
+    pub title_marks: Vec<TitleMark>,
+    /// [#6956] 형광펜 표시 (`<hp:t>` 안의 `<hp:markpenBegin/>`·`<hp:markpenEnd/>`)
+    ///
+    /// `title_marks` 와 같은 부수 채널이되 **글자 축을 소비하지 않는다** — 한컴 원본의
+    /// `hp:lineseg/@textpos` 가 이 표지를 세지 않으므로 `text` 에도, 유닛 계산에도
+    /// 넣지 않고 위치만 보존한다.
+    pub markpen_marks: Vec<MarkpenMark>,
+    /// 문단 번호 시작 방식 오버라이드
+    /// None = 앞 번호 목록에 이어 (기본)
+    /// Some(NumberingRestart) = 이전 번호 이어 / 새 번호 시작
+    pub numbering_restart: Option<NumberingRestart>,
+    /// Stored LineSeg text boundaries no longer describe the edited text.
+    ///
+    /// This is persistence provenance, not a renderer cache: serializers omit
+    /// an invalid partition while layout may retain it only as a metric
+    /// template until fresh rows are published.
+    #[serde(skip_serializing)]
+    pub stored_text_partition_dirty: bool,
+    /// Pending cell-format vpos update. Travels with the paragraph during batch edits;
+    /// never serialized, and flushed before saving an undo snapshot.
+    #[serde(skip_serializing)]
+    pub cell_format_vpos_dirty: bool,
+    /// Stored cell fragment boundary, captured before the first formatting vpos update.
+    /// False also records that later growth must not invent a reset. Snapshots retain it;
+    /// splitting starts a continuation, and width reflow discards the old frames.
+    #[serde(skip_serializing)]
+    pub cell_vpos_reset: Option<bool>,
+    /// 글자처럼 취급 표의 높이 변화로 편집이 옮긴 저장 줄 흐름. 저장할 때 이 문단이 새 쪽
+    /// 맨 앞이면 저장 사본에만 쪽 원점 vpos를 적는다. 직렬화하지 않는다.
+    #[serde(skip_serializing)]
+    pub stored_flow_shifted: bool,
+    /// [#7436] 번호·개요 문단의 번호 문자열(본문과의 거리 공백 포함).
+    ///
+    /// 번호는 문서 순서의 계수기에서 정해지는데, 줄 나눔은 문단 하나만 보고 줄을 채운다.
+    /// 그래서 쪽 나누기 전에 문서 순서로 **한 번** 계산해 문단에 둔다
+    /// (`renderer::layout::assign_numbering_markers`). 줄 나눔은 이 문자열의 폭만큼 모든
+    /// 줄의 상자를 줄이고(행잉), 배치는 같은 문자열을 그린다 — 두 경로가 같은 값을 쓴다.
+    /// 파일에 실리는 값이 아니라 IR 안에서만 의미가 있다.
+    #[serde(skip_serializing)]
+    pub numbering_marker: NumberingMarker,
+}
+
+/// [`Paragraph::numbering_marker`] 의 상태.
+///
+/// `Debug` 는 값을 드러내지 않는다 — 문서의 `Debug` 문자열을 동일성 증거로 쓰는 검사
+/// (거부된 편집이 문서를 바꾸지 않았는가 등)에 편집·쪽 나누기마다 다시 계산되는 파생값이
+/// 끼면 없는 차이를 만든다. 값은 [`NumberingMarker::text`] 로 읽는다.
+#[derive(Default, Clone, PartialEq)]
+pub enum NumberingMarker {
+    /// 아직 계산하지 않았다 — 배치는 종전처럼 자기 계수기로 번호를 만든다.
+    #[default]
+    Unresolved,
+    /// 번호·개요 문단이 아니거나, 그려질 번호가 없다.
+    Absent,
+    /// 번호 문자열과 그 수준의 문단 머리 속성. 빈 문자열도 본문 거리를 점유한다.
+    Text(String, MarkerHead),
+}
+
+/// 줄 구성에서 선택한 공백 측정 규칙. 저장 형식의 bit나 글꼴 대체 규칙이 아니다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SpaceMetric {
+    /// 기존 저장 줄의 공백 측정.
+    #[default]
+    Stored,
+    /// stale 셀 재조판이 사용하는 공백 측정.
+    HancomRegenerated,
+    /// 반각 들여쓰기 셀의 공백 측정.
+    HalfCell,
+    /// KoPub 양쪽 정렬의 공백 압축 측정.
+    KoPubJustified,
+}
+crate::storage::clone_copy!(SpaceMetric);
+
+impl std::fmt::Debug for NumberingMarker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NumberingMarker(..)")
+    }
+}
+
+impl NumberingMarker {
+    /// 그려질 번호 문자열 — 계산 전이거나 번호가 없으면 `None`.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            NumberingMarker::Text(text, _) if !text.is_empty() => Some(text),
+            _ => None,
+        }
+    }
+}
+
+/// [hwpx-cowork] 조판 부호 하나의 자리 — [`Paragraph::code_slots`].
+/// `char_pos`: 자리표 글자가 있으면(자동 번호) 그 글자 번호, 없으면 부호 바로 뒤 글자 번호.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeSlot {
+    pub control_idx: usize,
+    pub char_pos: usize,
+    pub placeholder: bool,
+}
+
+/// 문단 스코프 메타데이터 — 문단 병합의 역연산(undo)에서 복원해야 하는 값들.
+///
+/// `split_at` 이 만드는 새 문단은 앞 문단(`self`)에서 파생되므로 이 값들을 재현할 수
+/// 없다. 사용자가 Enter 로 나눌 때는 앞 문단의 서식을 잇는 것이 옳지만, 병합의
+/// 역연산으로 쓰일 때는 사라진 뒷 문단의 원래 값이어야 한다. 병합 시 캡처해
+/// undo 에서 되돌린다 (Task #2342).
+///
+/// `char_count_msb` 는 여기 없다 — 저장기가 list scope 의 마지막 문단 여부로
+/// 재생성하므로(`serializer/body_text.rs` `char_count_raw`) 파생값이다.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParaMeta {
+    pub para_shape_id: u16,
+    pub style_id: u8,
+    pub column_type: ColumnBreakType,
+    pub raw_break_type: u8,
+    pub numbering_restart: Option<NumberingRestart>,
+    /// PARA_HEADER tail — instanceId 및 변경추적 suffix라 문단마다 고유하다.
+    pub raw_header_extra: Vec<u8>,
+    /// TAB 확장 데이터 — 문단 전체가 통째로 이동하므로 분할 없이 그대로 옮긴다.
+    pub tab_extended: Vec<[u16; 7]>,
+}
+
+/// 문단 번호 시작 방식
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum NumberingRestart {
+    /// 이전 번호 목록에 이어 (다른 번호 체계 후 복귀 시 이전 카운터 복원)
+    ContinuePrevious,
+    /// 새 번호 목록 시작 (지정 값부터)
+    NewStart(u32),
+}
+
+/// 문단 텍스트 내 제어 문자 종류
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CtrlChar {
+    /// 구역 정의/단 정의
+    SectionColumnDef,
+    /// 필드 시작
+    FieldBegin,
+    /// 필드 끝
+    FieldEnd,
+    /// 탭
+    Tab,
+    /// 줄 끝 (line break)
+    LineBreak,
+    /// 그리기 개체/표
+    DrawTableObject,
+    /// 문단 끝 (para break)
+    ParaBreak,
+    /// 숨은 설명
+    HiddenComment,
+    /// 머리말/꼬리말
+    HeaderFooter,
+    /// 각주/미주
+    FootnoteEndnote,
+    /// 자동 번호
+    AutoNumber,
+    /// 페이지 컨트롤
+    PageControl,
+    /// 책갈피
+    Bookmark,
+    /// 덧말/글자겹침
+    Ruby,
+    /// 하이픈
+    Hyphen,
+    /// 묶음 빈칸
+    NonBreakingSpace,
+    /// 고정폭 빈칸
+    FixedWidthSpace,
+    /// 일반 문자
+    Char(char),
+}
+
+/// 단 나누기 종류
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum ColumnBreakType {
+    #[default]
+    None,
+    /// 구역 나누기
+    Section,
+    /// 다단 나누기
+    MultiColumn,
+    /// 쪽 나누기
+    Page,
+    /// 단 나누기
+    Column,
+}
+
+/// 글자 모양 참조 (문단 내 위치별 글자 모양)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct CharShapeRef {
+    /// 글자 모양이 바뀌는 시작 위치
+    pub start_pos: u32,
+    /// 글자 모양 ID
+    pub char_shape_id: u32,
+}
+
+/// 줄 레이아웃 정보 (HWPTAG_PARA_LINE_SEG)
+///
+/// **표준**: `mydocs/tech/document_ir_lineseg_standard.md` (Task #604)
+/// 모든 i32 필드는 HWPUNIT (1 inch = 7200 HWPUNIT).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct LineSeg {
+    /// 본 줄이 차지하는 텍스트 시작 위치 (UTF-16 code unit, 문단 시작 기준)
+    pub text_start: u32,
+    /// 페이지 내 흐름 y 좌표 (HWPUNIT, 페이지 상단 기준 누적 절대값)
+    /// HWP3 파서는 현재 항상 0 (별도 task 에서 누적 계산 정정 권고)
+    pub vertical_pos: i32,
+    /// 줄 높이 (HWPUNIT, line_spacing 포함)
+    pub line_height: i32,
+    /// 텍스트 부분의 높이 (HWPUNIT)
+    pub text_height: i32,
+    /// 베이스라인까지 거리 (HWPUNIT, 줄 시작 기준)
+    pub baseline_distance: i32,
+    /// 줄간격 (HWPUNIT)
+    pub line_spacing: i32,
+    /// wrap zone x 오프셋 (HWPUNIT, 단(column) 좌측 기준). 0 = wrap 없음
+    pub column_start: i32,
+    /// 줄 너비 (HWPUNIT). 단 너비와 같으면 wrap 없음
+    pub segment_width: i32,
+    /// 비트 플래그 (HWP5 PARA_LINE_SEG tag).
+    ///
+    /// 공식 스펙 기준:
+    /// - bit 0: 페이지의 첫 줄
+    /// - bit 1: 컬럼의 첫 줄
+    /// - bit 16: 텍스트가 배열되지 않은 빈 세그먼트
+    /// - bit 17: 줄의 첫 세그먼트
+    /// - bit 18: 줄의 마지막 세그먼트
+    /// - bit 19: auto-hyphenation 수행
+    /// - bit 20: indentation 적용
+    /// - bit 21: 문단 머리 모양 적용
+    /// - bit 31: 구현 편의 property
+    pub tag: u32,
+}
+crate::storage::clone_fields!(LineSeg, {text_start, vertical_pos, line_height, text_height, baseline_distance, line_spacing, column_start, segment_width, tag});
+
+impl LineSeg {
+    pub const TAG_FIRST_LINE_OF_PAGE: u32 = 1 << 0;
+    pub const TAG_FIRST_LINE_OF_COLUMN: u32 = 1 << 1;
+    pub const TAG_EMPTY_SEGMENT: u32 = 1 << 16;
+    pub const TAG_FIRST_SEGMENT: u32 = 1 << 17;
+    pub const TAG_LAST_SEGMENT: u32 = 1 << 18;
+    pub const TAG_AUTO_HYPHENATION: u32 = 1 << 19;
+    pub const TAG_INDENTATION: u32 = 1 << 20;
+    pub const TAG_PARAGRAPH_HEAD: u32 = 1 << 21;
+    pub const TAG_IMPLEMENTATION_PROPERTY: u32 = 1 << 31;
+
+    /// 한 줄이 하나의 세그먼트로만 구성될 때 사용하는 HWP5 tag 조합.
+    pub const TAG_SINGLE_SEGMENT_LINE: u32 = Self::TAG_FIRST_SEGMENT | Self::TAG_LAST_SEGMENT;
+    /// HWP5 출처 문단의 원본 LineSeg 부재 의미를 HWPX 재파스에서도 보존하기 위한 tag 조합.
+    pub const TAG_MISSING_LINESEG_PLACEHOLDER: u32 =
+        Self::TAG_SINGLE_SEGMENT_LINE | Self::TAG_EMPTY_SEGMENT | Self::TAG_IMPLEMENTATION_PROPERTY;
+
+    /// HWP5 원본에서 LineSeg가 없던 문단을 HWPX 산출물에 명시할 때 쓰는 LineSeg.
+    pub fn missing_lineseg_placeholder() -> Self {
+        Self {
+            tag: Self::TAG_MISSING_LINESEG_PLACEHOLDER,
+            ..Self::default()
+        }
+    }
+
+    /// rhwp가 HWP5 -> HWPX export 중 생성한 원본 LineSeg 부재 보존용 LineSeg인지 여부.
+    pub fn is_missing_lineseg_placeholder(&self) -> bool {
+        self.line_height == 0
+            && self.text_height == 0
+            && self.baseline_distance == 0
+            && self.line_spacing == 0
+            && self.tag & Self::TAG_MISSING_LINESEG_PLACEHOLDER
+                == Self::TAG_MISSING_LINESEG_PLACEHOLDER
+    }
+
+    /// 페이지의 첫 줄인지 여부
+    pub fn is_first_line_of_page(&self) -> bool {
+        self.tag & Self::TAG_FIRST_LINE_OF_PAGE != 0
+    }
+
+    /// 본 줄이 wrap zone (그림/표 옆) 안에 있는지 (포맷 무관 표준).
+    ///
+    /// 표준: `mydocs/tech/document_ir_lineseg_standard.md`
+    ///
+    /// `col_w_hu`: 단 너비 (HWPUNIT). 본 줄의 segment_width 와 비교.
+    ///
+    /// 판정 본질:
+    /// - `column_start > 0`: 단 좌측에서 떨어진 위치 시작 → wrap zone
+    /// - `segment_width > 0 AND segment_width < col_w_hu`: 너비가 단 너비보다 작음 → wrap zone
+    /// - 모두 거짓: full width 정상 줄
+    pub fn is_in_wrap_zone(&self, col_w_hu: i32) -> bool {
+        self.column_start > 0 || (self.segment_width > 0 && self.segment_width < col_w_hu)
+    }
+
+    /// 컬럼의 첫 줄인지 여부
+    pub fn is_first_line_of_column(&self) -> bool {
+        self.tag & Self::TAG_FIRST_LINE_OF_COLUMN != 0
+    }
+
+    /// 텍스트가 배열되지 않은 빈 세그먼트인지 여부
+    pub fn is_empty_segment(&self) -> bool {
+        self.tag & Self::TAG_EMPTY_SEGMENT != 0
+    }
+
+    /// 줄의 첫 세그먼트인지 여부
+    pub fn is_first_segment(&self) -> bool {
+        self.tag & Self::TAG_FIRST_SEGMENT != 0
+    }
+
+    /// 줄의 마지막 세그먼트인지 여부
+    pub fn is_last_segment(&self) -> bool {
+        self.tag & Self::TAG_LAST_SEGMENT != 0
+    }
+
+    /// indentation 적용 여부
+    pub fn has_indentation(&self) -> bool {
+        self.tag & Self::TAG_INDENTATION != 0
+    }
+
+    /// 문단 머리 모양 적용 여부
+    pub fn has_paragraph_head(&self) -> bool {
+        self.tag & Self::TAG_PARAGRAPH_HEAD != 0
+    }
+}
+
+/// 영역 태그 (HWPTAG_PARA_RANGE_TAG)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct RangeTag {
+    /// 영역 시작
+    pub start: u32,
+    /// 영역 끝
+    pub end: u32,
+    /// 태그 (상위 8비트: 종류, 하위 24비트: 데이터)
+    pub tag: u32,
+}
+
+/// 제목 차례 표시 — 이 문단을 제목 차례에 넣을지 표시하는 인라인 마커.
+///
+/// HWP5 는 컨트롤 문자 `0x08` + ctrl_id 로 PARA_TEXT 안에 직접 싣는다(CTRL_HEADER 없음).
+/// 실측(한글 2022 양방향, 06699 한 문서에서 둘 다 확인):
+///
+/// | HWP5 ctrl_id | HWPX |
+/// |---|---|
+/// | `Mtit` | `<hp:titleMark ignore="1"/>` |
+/// | `Mign` | `<hp:titleMark ignore="0"/>` |
+///
+/// 8 code unit 을 점유하므로 이 마커를 버리면 문단 축이 그만큼 짧아지고,
+/// 한글은 축이 어긋난 `<hp:lineseg textpos>` 를 만나면 본문을 통째로 버린다
+/// (10k 스윕 F-절단군 — 77 문서·2,237 개).
+/// [#6956] 형광펜 표시 한 개.
+///
+/// 한컴은 여는 표지에 색을 싣고 닫는 표지는 속성이 없다. 둘 다 텍스트 원소 안 글자
+/// 사이에 오며 글자 축을 소비하지 않는다.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct MarkpenMark {
+    /// `text` 문자열 내 삽입 위치 (이 인덱스의 문자 **앞**에 놓인다)
+    pub char_idx: usize,
+    /// 여는 표지의 색. `None` 이면 닫는 표지다.
+    pub color: Option<String>,
+    /// 확장 제어를 포함한 HWP5 UTF-16 위치. 표 앞뒤의 같은 char_idx를 구분한다.
+    pub utf16_pos: Option<u32>,
+}
+
+impl MarkpenMark {
+    pub(crate) fn stream_position(&self, para: &Paragraph) -> u32 {
+        self.utf16_pos.unwrap_or_else(|| {
+            para.char_offsets
+                .get(self.char_idx)
+                .copied()
+                .unwrap_or_else(|| {
+                    para.text
+                        .chars()
+                        .take(self.char_idx)
+                        .map(|c| c.len_utf16() as u32)
+                        .sum()
+                })
+        })
+    }
+}
+
+/// 저장 데이터가 없는 인라인 탭의 자리표인가 (#7170).
+///
+/// 두 서식기 모두 "데이터 없음"을 폭 0 으로 적는다 — HWP5 이진은
+/// `[0, 0, 0, 0, 0, 0, 0x0009]`, HWPX 는 `<hp:tab width="0" leader="0" type="1"/>`.
+/// 한컴이 만든 실제 탭은 폭 0 이 될 수 없어(시각 효과가 없다) 안전한 신호다.
+/// 종전에는 두 파서가 이 항목을 **버려서** 뒤 탭의 확장이 순번으로 밀렸다 —
+/// 자리만 채우고 소비자가 이 술어로 걸러 `TabDef` 기준 재계산을 택한다.
+pub fn tab_ext_is_placeholder(ext: &[u16; 7]) -> bool {
+    ext[0] == 0
+        && ext[1] == 0
+        && (ext[2] == 0 || ext[2] == 0x0100)
+        && ext[3..6].iter().all(|&v| v == 0)
+}
+
+/// 위 자리표의 정본 표기 — HWP5 이진 서식기가 내는 "데이터 없음" 마커와 같다.
+pub const TAB_EXT_PLACEHOLDER: [u16; 7] = [0, 0, 0, 0, 0, 0, 0x0009];
+
+/// 경계(시작·끝)에 친 글자를 품지 않는 필드: 웹 링크와 날짜·파일 경로 코드.
+/// 한/글은 날짜·파일 경로 코드의 글을 문서를 열 때와 다른 이름으로 저장할 때 다시 쓴다.
+/// 코드 경계에서 친 글이 코드 안에 들어가면 그때 사라진다.
+fn keeps_boundary_text_outside(control: Option<&Control>) -> bool {
+    // [hwpx-cowork] CrossRef 도: 상호 참조 안 글은 한/글이 열 때 다시 셈하는 값이다(2026-11-12 COM 왕복 — 필드 끝에 이어 친 글이
+    // 필드 안에 들어가 한/글이 새로 고칠 때 통째로 지웠다). 날짜 코드처럼 경계에서 친 글은 필드 밖에 둔다.
+    matches!(control, Some(Control::Field(field))
+        if matches!(field.field_type, FieldType::Hyperlink | FieldType::Date | FieldType::Path | FieldType::CrossRef))
+}
+
+impl Paragraph {
+    /// 재구성된 본문 축에서 단일 표가 저장 줄의 물리 상자 전체를 소유한다.
+    pub(crate) fn rebased_single_table_row(&self) -> bool {
+        self.layout_rebased_body_axis
+            && self.text.is_empty()
+            && matches!(
+                (self.line_segs.as_slice(), self.controls.as_slice()),
+                ([line], [Control::Table(table)])
+                    if table.common.treat_as_char
+                        && line.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0
+                        && i64::from(line.line_height)
+                            == i64::from(table.common.height)
+                                + i64::from(table.outer_margin_top)
+                                + i64::from(table.outer_margin_bottom)
+            )
+    }
+
+    /// 묶음 빈칸의 원본 표기를 확인한다. 개별 출처가 없는 기존 입력은 종전의
+    /// 문단 단위 신호를 유지한다.
+    pub fn nb_space_is_control_at(&self, char_idx: usize) -> bool {
+        self.nb_space_control_indices.as_ref().map_or_else(
+            || self.control_mask & (1u32 << 0x001e) != 0,
+            |indices| indices.binary_search(&char_idx).is_ok(),
+        )
+    }
+
+    fn materialized_nb_space_controls(&self) -> Vec<usize> {
+        self.text
+            .chars()
+            .enumerate()
+            .filter_map(|(index, ch)| {
+                (ch == '\u{00a0}' && self.nb_space_is_control_at(index)).then_some(index)
+            })
+            .collect()
+    }
+
+    fn refresh_nb_space_control_mask(&mut self) {
+        if let Some(indices) = &self.nb_space_control_indices {
+            if indices.is_empty() {
+                self.control_mask &= !(1u32 << 0x001e);
+            } else {
+                self.control_mask |= 1u32 << 0x001e;
+            }
+        }
+    }
+
+    /// 텍스트를 별도 수술 경로에서 제거할 때 같은 문자 범위의 표기 출처를 옮긴다.
+    pub(crate) fn delete_nb_space_origin_range(&mut self, start: usize, end: usize) {
+        let removed = end.saturating_sub(start);
+        let positions = self
+            .materialized_nb_space_controls()
+            .into_iter()
+            .filter_map(|index| {
+                if index < start {
+                    Some(index)
+                } else if index >= end {
+                    Some(index - removed)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.nb_space_control_indices = Some(positions);
+        self.refresh_nb_space_control_mask();
+    }
+    /// 새 캡션의 접두어 뒤에 원시 8유닛 자동번호 자리와 문단 끝을 만든다.
+    pub(crate) fn new_auto_number_caption(
+        prefix: &str,
+        auto_number: super::control::AutoNumber,
+    ) -> Self {
+        let mut paragraph = Self::new_empty();
+        let mut raw_offset = 0u32;
+        paragraph.char_offsets = prefix
+            .chars()
+            .map(|ch| {
+                let offset = raw_offset;
+                raw_offset += ch.len_utf16() as u32;
+                offset
+            })
+            .collect();
+        // 번호는 모델 공백 한 글자로 남지만 HWP 문자 축에서는 8유닛을 점유한다.
+        paragraph.char_offsets.push(raw_offset);
+        paragraph.text = format!("{prefix} ");
+        paragraph.char_count = raw_offset + CTRL_CHAR_CODE_UNITS + 1;
+        paragraph.char_count_msb = true;
+        paragraph.control_mask = 1u32 << 0x12;
+        paragraph.controls.push(Control::AutoNumber(auto_number));
+        paragraph.ctrl_data_records.push(None);
+        paragraph
+    }
+
+    /// 한컴 2022 실측: 종류 2, 하위 24비트는 COLORREF(BGR), 끝 위치는 exclusive.
+    pub(crate) fn import_markpen_range_tags(&mut self) {
+        self.markpen_marks = self
+            .range_tags
+            .iter()
+            .filter(|r| r.tag >> 24 == 2)
+            .flat_map(|r| {
+                let color = format!(
+                    "#{:02X}{:02X}{:02X}",
+                    r.tag & 255,
+                    (r.tag >> 8) & 255,
+                    (r.tag >> 16) & 255
+                );
+                [(r.start, Some(color)), (r.end, None)]
+            })
+            .map(|(pos, color)| MarkpenMark {
+                char_idx: self.char_offsets.partition_point(|&offset| offset < pos),
+                color,
+                utf16_pos: Some(pos),
+            })
+            .collect();
+        self.markpen_marks.sort_by_key(|m| m.utf16_pos);
+    }
+
+    pub(crate) fn effective_markpen_range_tags(&self) -> Vec<RangeTag> {
+        match self.try_effective_markpen_range_tags(&crate::storage::Unbounded) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+    pub(crate) fn try_effective_markpen_range_tags<S: crate::storage::Storage>(
+        &self,
+        storage: &S,
+    ) -> Result<Vec<RangeTag>, S::Error> {
+        if self.markpen_marks.is_empty() {
+            return storage.collect(self.range_tags.iter().cloned());
+        }
+        let mut ranges: Vec<_> =
+            storage.collect(self.range_tags.iter().filter(|r| r.tag >> 24 != 2).cloned())?;
+        let mut open = storage.vec(0)?;
+        for mark in &self.markpen_marks {
+            let pos = mark.stream_position(self);
+            if let Some(color) = &mark.color {
+                let rgb = color
+                    .strip_prefix('#')
+                    .filter(|s| s.len() == 6)
+                    .and_then(|s| u32::from_str_radix(s, 16).ok());
+                storage.push(&mut open, (pos, rgb))?;
+            } else if let Some((start, Some(rgb))) = open.pop() {
+                if pos >= start {
+                    let bgr = ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
+                    storage.push(
+                        &mut ranges,
+                        RangeTag {
+                            start,
+                            end: pos,
+                            tag: 0x0200_0000 | bgr,
+                        },
+                    )?;
+                }
+            }
+        }
+        Ok(ranges)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct TitleMark {
+    /// `text` 문자열 내 삽입 위치 (이 인덱스의 문자 **앞**에 놓인다)
+    pub char_idx: usize,
+    /// `ignore` 속성 — `true` 면 `Mtit`, `false` 면 `Mign`
+    pub ignore: bool,
+}
+
+/// 필드 텍스트 범위 (0x03 FIELD_BEGIN ~ 0x04 FIELD_END 사이 텍스트)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct FieldRange {
+    /// text 문자열 내 시작 인덱스 (포함)
+    pub start_char_idx: usize,
+    /// text 문자열 내 끝 인덱스 (미포함)
+    pub end_char_idx: usize,
+    /// controls[] 배열 내 인덱스 (해당 Field 컨트롤 참조)
+    pub control_idx: usize,
+    /// 같은 문단 내 짝을 이루는 `<hp:fieldEnd>` 자신의 `fieldid` 속성값 (0 이면 없음/생략).
+    ///
+    /// `fieldBegin` 의 `id`(문서 내 고유 ID, `Field::field_id` 로 보존)와 달리, `fieldEnd`
+    /// 자신의 `fieldid` 는 별개 값으로 관찰되며(HYPERLINK 등) IR 로 옮기지 않으면 직렬화 시
+    /// 항상 소실된다. 고아(다단락) fieldEnd 는 `OrphanFieldEnd::field_id` 로 이미 보존하므로,
+    /// 같은 문단 내 짝(matched) 경로에도 대칭적으로 보존한다.
+    pub end_field_id: u32,
+    /// FIELD_BEGIN 과 FIELD_END **사이에 있는 컨트롤 슬롯 수**.
+    ///
+    /// 표·그림처럼 텍스트 문자를 만들지 않는 인라인 개체를 감싼 누름틀은
+    /// `start_char_idx == end_char_idx`(텍스트 축 0길이)가 된다. 이때 직렬화기가
+    /// fieldEnd 를 자기 fieldBegin 직후에 놓으면 개체가 필드 **밖으로** 밀려나
+    /// 빈 누름틀이 되고, 한글은 빈 누름틀의 안내문("이곳을 마우스로 누르고 …")을
+    /// 본문으로 표시한다(10k 스윕 G-순수증식 16경로 근인). 이 값만큼 슬롯을
+    /// 지나서 fieldEnd 를 놓으면 원본 범위가 보존된다.
+    pub inner_slot_count: usize,
+}
+
+/// 고아 FIELD_END (0x04) — 짝이 되는 FIELD_BEGIN 이 다른 문단에 있는
+/// 다단락 필드의 종료 마커. begin 문단에서 `Control::Field` 로 보존되는 것과 달리,
+/// end 문단에는 컨트롤·FieldRange 가 없어 8유닛 슬롯을 표현할 산출물이 없다.
+/// 이를 기록해 직렬화기가 `<hp:fieldEnd>` 를 같은 위치에 복원한다 (Task #1556).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct OrphanFieldEnd {
+    /// text 문자열 내 위치 (이 인덱스 직전에 8유닛 fieldEnd 슬롯이 놓인다).
+    /// 텍스트 끝이면 `text.chars().count()`.
+    pub char_idx: usize,
+    /// `<hp:fieldEnd beginIDRef="..">` — 짝 fieldBegin 의 id 참조.
+    pub begin_id_ref: u32,
+    /// `<hp:fieldEnd fieldid="..">` — 필드 인스턴스 id.
+    pub field_id: u32,
+    /// 짝 필드의 HWP5 `ctrl_id`(`%clk` 등). HWP5 저장기가 종료 마커를 쓸 때 쓴다.
+    ///
+    /// 0 이면 모른다는 뜻이고, 그때는 HWP5 저장에서 마커를 내지 않는다 — 필드 종류를
+    /// 지어내면 한글이 짝을 못 맞춘다. HWPX 에서 들어온 고아 마커가 이 경우다.
+    pub begin_ctrl_id: u32,
+    /// HWP5 memo number for a memo field's closing marker. Hancom writes a
+    /// distinct 8-unit memo end marker whose sixth unit is this number; 0 means
+    /// the field is not a memo.
+    pub memo_index: u32,
+}
+
+impl Paragraph {
+    /// `ctrl_data_records` 를 `controls` 길이에 맞춰 `None` 으로 패딩한다.
+    ///
+    /// [#3214] `ctrl_data_records[i]` 는 `controls[i]` 대응이지만, **두 배열의 길이가 항상
+    /// 같지는 않다**. CTRL_DATA 는 HWP5 바이너리 전용 레코드라 HWPX 파서는 이 배열을 채우지
+    /// 않고(`parser/hwpx` 에 적재 지점이 없다), HWP3 파서와 편집 커맨드만 쌍으로 관리한다.
+    /// 즉 HWPX 로 연 문서는 `ctrl_data_records.len() < controls.len()` 이 정상 상태다.
+    ///
+    /// 그런데 컨트롤 삽입 경로는 삽입 위치를 `controls` 기준으로 계산한 뒤 그 인덱스를 그대로
+    /// `ctrl_data_records.insert(idx, None)` 에 넘긴다. 두 길이가 어긋나 있으면
+    /// `insertion index (is N) should be <= len (is M)` 로 패닉하고, WASM 에서는 패닉이
+    /// 객체 borrow 를 오염시켜 이후 모든 호출이 `recursive use of an object` 로 실패한다.
+    ///
+    /// 인덱스 대응에 기대는 쓰기를 하기 전에 이 함수로 정렬한다. 삽입 **전에** 호출하면
+    /// `insert_idx <= ctrl_data_records.len()` 이 보장된다.
+    pub fn align_ctrl_data_records(&mut self) {
+        while self.ctrl_data_records.len() < self.controls.len() {
+            self.ctrl_data_records.push(None);
+        }
+    }
+
+    pub(crate) fn is_split_movable_control(ctrl: &Control) -> bool {
+        matches!(
+            ctrl,
+            Control::Shape(_)
+                | Control::Table(_)
+                | Control::Picture(_)
+                | Control::Equation(_)
+                | Control::Form(_)
+                | Control::Footnote(_)
+                | Control::Endnote(_)
+                | Control::AutoNumber(_)
+                | Control::CharOverlap(_)
+                | Control::Ruby(_)
+        )
+    }
+
+    /// 문단 나누기 offset(캐럿 축)에서 한 칸을 차지하는 컨트롤인가.
+    ///
+    /// 캐럿은 [`Control::is_logical_inline`]과 같은 개체·각주·미주·글자겹침을 센다.
+    /// 떠 있는 개체는 칸이 없고, 자동 번호는
+    /// 자리표 글자가 이미 한 칸이다. 이들까지 세면 그 뒤에서 한 글자씩 앞에서 나눈다.
+    /// 어느 문단으로 옮길지는 [`Self::is_split_movable_control`] 이 따로 정한다.
+    pub(crate) fn occupies_split_slot(ctrl: &Control) -> bool {
+        ctrl.is_logical_inline()
+    }
+
+    fn control_mask_bit(ctrl: &Control) -> u32 {
+        match ctrl {
+            Control::SectionDef(_) | Control::ColumnDef(_) => 0x0002,
+            Control::Field(_) => 0x0003,
+            Control::Table(_)
+            | Control::Shape(_)
+            | Control::Picture(_)
+            | Control::Hyperlink(_)
+            | Control::Ruby(_)
+            | Control::Equation(_)
+            | Control::Form(_)
+            | Control::Unknown(_) => 0x000B,
+            Control::HiddenComment(_) => 0x000F,
+            Control::Header(_) | Control::Footer(_) => 0x0010,
+            Control::Footnote(_) | Control::Endnote(_) => 0x0011,
+            Control::AutoNumber(_) | Control::NewNumber(_) => 0x0012,
+            Control::PageNumberPos(_) | Control::PageHide(_) | Control::PageNumCtrl(_) => 0x0015,
+            Control::Bookmark(_) | Control::IndexMark(_) => 0x0016,
+            Control::CharOverlap(_) => 0x0017,
+        }
+    }
+
+    /// [hwpx-cowork] Resolve the legacy mask before changing the text axis.
+    pub(crate) fn resolved_text_element_origins(&self) -> Vec<usize> {
+        self.text_element_origins.clone().unwrap_or_else(|| {
+            self.text
+                .chars()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    let bit = match c {
+                        '\u{00AD}' => 24,
+                        '\u{00A0}' => 30,
+                        '\u{2007}' => 31,
+                        _ => return None,
+                    };
+                    (self.control_mask & (1u32 << bit) != 0).then_some(i)
+                })
+                .collect()
+        })
+    }
+
+    pub(crate) fn text_element_control_mask(&self) -> u32 {
+        let origins = self.resolved_text_element_origins();
+        self.text.chars().enumerate().fold(0, |mask, (i, c)| {
+            if origins.binary_search(&i).is_err() {
+                return mask;
+            }
+            mask | match c {
+                '\u{00AD}' => 1u32 << 24,
+                '\u{00A0}' => 1u32 << 30,
+                '\u{2007}' => 1u32 << 31,
+                _ => 0,
+            }
+        })
+    }
+
+    /// Plain input is literal; only the copied fragment contributes origins.
+    pub(crate) fn insert_clipboard_text_at(&mut self, at: usize, source: &Paragraph) -> usize {
+        self.insert_text_from_paragraph(at, source)
+    }
+
+    fn compute_control_mask_for(
+        text: &str,
+        controls: &[Control],
+        field_ranges: &[FieldRange],
+    ) -> u32 {
+        let mut mask = 0u32;
+        for ctrl in controls {
+            mask |= 1u32 << Self::control_mask_bit(ctrl);
+        }
+        if !field_ranges.is_empty() {
+            mask |= 1u32 << 0x0004;
+        }
+        if text.contains('\t') {
+            mask |= 1u32 << 0x0009;
+        }
+        if text.contains('\n') {
+            mask |= 1u32 << 0x000A;
+        }
+        mask
+    }
+
+    fn split_logical_control_positions(&self) -> Vec<usize> {
+        if self.text.is_empty() && self.char_offsets.is_empty() {
+            let mut inline_seen = 0usize;
+            let mut positions = Vec::with_capacity(self.controls.len());
+            for ctrl in &self.controls {
+                positions.push(inline_seen);
+                if Self::occupies_split_slot(ctrl) {
+                    inline_seen += 1;
+                }
+            }
+            return positions;
+        }
+
+        let text_positions = self.control_text_positions();
+        let text_len = self.text.chars().count();
+        let mut inline_seen = 0usize;
+        let mut positions = Vec::with_capacity(self.controls.len());
+
+        for (ci, ctrl) in self.controls.iter().enumerate() {
+            let text_pos = text_positions.get(ci).copied().unwrap_or(text_len);
+            positions.push(text_pos + inline_seen);
+            if Self::occupies_split_slot(ctrl) {
+                inline_seen += 1;
+            }
+        }
+
+        positions
+    }
+
+    fn split_text_pos_for_logical_offset(
+        &self,
+        logical_offset: usize,
+        control_positions: &[usize],
+    ) -> usize {
+        let controls_before = self
+            .controls
+            .iter()
+            .enumerate()
+            .filter(|(_, ctrl)| Self::occupies_split_slot(ctrl))
+            .filter(|(ci, _)| {
+                control_positions.get(*ci).copied().unwrap_or(usize::MAX) < logical_offset
+            })
+            .count();
+
+        logical_offset
+            .saturating_sub(controls_before)
+            .min(self.text.chars().count())
+    }
+
+    // [hwpx-cowork] 쪽·단 나누기 판정·고치기 — 한/글처럼 Ctrl+Enter·Ctrl+Shift+Enter 를 하고(나누기를 문단에 걸기/가르기)
+    // Backspace·Delete 로 나누기만 지우는 데 쓴다(document_core/commands/text_editing.rs `insert_break_like_hangul_native`).
+
+    /// 강제 쪽 나누기가 걸린 문단인가(저장기 `pageBreak="1"` 과 같은 판정 — 파서가 자연 쪽 경계에서 승격한 합성 쪽나눔은 아니다)
+    pub fn has_page_break(&self) -> bool {
+        (self.column_type == ColumnBreakType::Page || self.raw_break_type & 0x04 != 0)
+            && !self.page_break_synthesized
+    }
+
+    /// 단 나누기가 걸린 문단인가(저장기 `columnBreak="1"` 과 같은 판정)
+    pub fn has_column_break(&self) -> bool {
+        self.column_type == ColumnBreakType::Column || self.raw_break_type & 0x08 != 0
+    }
+
+    /// 쪽·단 흐름을 새로 시작하는 문단인가 — 강제 쪽/단 나누기 또는 구역·다단 정의(저장 vpos 를 다시 이을 때 넘지 않는 경계)
+    pub fn starts_flow_zone(&self) -> bool {
+        self.has_page_break()
+            || self.has_column_break()
+            || self.raw_break_type & 0x03 != 0
+            || matches!(
+                self.column_type,
+                ColumnBreakType::Section | ColumnBreakType::MultiColumn
+            )
+    }
+
+    /// 쪽 나누기(column=false) 또는 단 나누기를 건다 — 다른 축 비트는 남긴다(유효 분류는 파서와 같이 쪽 우선)
+    pub fn set_break(&mut self, column: bool) {
+        if column {
+            if self.column_type == ColumnBreakType::Page && !self.page_break_synthesized {
+                self.raw_break_type |= 0x04;
+            }
+            self.raw_break_type |= 0x08;
+            self.column_type = if self.raw_break_type & 0x04 != 0 {
+                ColumnBreakType::Page
+            } else {
+                ColumnBreakType::Column
+            };
+        } else {
+            self.column_type = ColumnBreakType::Page;
+            self.raw_break_type |= 0x04;
+            self.page_break_synthesized = false;
+        }
+    }
+
+    /// 쪽·단 나누기만 뺀다(구역·다단 비트는 남김) → 바뀌었는가
+    pub fn clear_page_column_break(&mut self) -> bool {
+        if !self.has_page_break() && !self.has_column_break() {
+            return false;
+        }
+        self.raw_break_type &= !0x0C;
+        self.page_break_synthesized = false;
+        self.column_type = if self.raw_break_type & 0x01 != 0 {
+            ColumnBreakType::Section
+        } else if self.raw_break_type & 0x02 != 0 {
+            ColumnBreakType::MultiColumn
+        } else {
+            ColumnBreakType::None
+        };
+        true
+    }
+
+    /// 논리 위치 char_offset 에서 가르면 뒤 조각이 비는가(문단 끝 — 뒤로 옮겨 갈 글·개체가 없다, `split_at` 과 같은 규칙)
+    pub fn split_tail_is_empty(&self, char_offset: usize) -> bool {
+        let positions = self.split_logical_control_positions();
+        let split = self.split_text_pos_for_logical_offset(char_offset, &positions);
+        split >= self.text.chars().count()
+            && !self.controls.iter().enumerate().any(|(ci, ctrl)| {
+                Self::is_split_movable_control(ctrl)
+                    && positions.get(ci).copied().unwrap_or(usize::MAX) >= char_offset
+            })
+    }
+
+    /// 구역·단 정의(SectionDef/ColumnDef)를 가진 문단인가 — 한/글은 이 문단 처음에 캐럿을 두지 못한다(부호 뒤로 간다)
+    pub fn defines_section_or_columns(&self) -> bool {
+        self.controls
+            .iter()
+            .any(|c| matches!(c, Control::SectionDef(_) | Control::ColumnDef(_)))
+    }
+
+    /// 빈 문단을 생성한다 (문단 끝 마커만 포함).
+    ///
+    /// `para_shape_id`/`style_id` 는 0, `char_shapes` 는 빈 채로 남는다. 이 0 은
+    /// "기본 서식" 이 아니라 그 문서 `header.xml` 의 **0번 항목**이며, 저장기는 빈
+    /// `char_shapes` 를 `charPrIDRef="0"` 으로 쓴다. 따라서 이미 존재하는 문서에
+    /// 문단을 끼워 넣을 때 이 함수를 쓰면 그 문서의 0번 문단모양·글자모양이 적용된다.
+    ///
+    /// 상속할 이웃 문단이 있는 경우 [`Paragraph::new_empty_like`] 를 쓴다. 이 함수는
+    /// 상속원이 아예 없는 경우 — 새 빈 문서 생성, HTML 임포트, 문단이 하나도 없던
+    /// 셀을 파싱할 때 — 에만 쓴다.
+    pub fn new_empty() -> Self {
+        Paragraph {
+            char_count: 1, // 끝 마커(0x000D) 포함
+            line_segs: vec![LineSeg {
+                text_start: 0,
+                line_height: 1000,
+                text_height: 1000,
+                baseline_distance: 850,
+                line_spacing: 600,
+                tag: LineSeg::TAG_SINGLE_SEGMENT_LINE,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// `template` 의 서식을 상속한 빈 문단을 생성한다.
+    ///
+    /// 문단모양(`para_shape_id`), 스타일(`style_id`), 끝 글자모양(마지막
+    /// `char_shapes` 엔트리)만 가져온다. 텍스트·컨트롤·필드는 상속하지 않는다.
+    /// 새 문단은 템플릿 문단 *뒤에* 이어지므로(문단 끝 Enter), 혼합 글자모양
+    /// 문단에서는 첫 엔트리가 아니라 문단 끝의 글자모양이 상속 기준이다.
+    pub fn new_empty_like(template: &Paragraph) -> Self {
+        Paragraph {
+            para_shape_id: template.para_shape_id,
+            style_id: template.style_id,
+            char_shapes: template
+                .char_shapes
+                .last()
+                .map(|cs| CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: cs.char_shape_id,
+                })
+                .into_iter()
+                .collect(),
+            ..Paragraph::new_empty()
+        }
+    }
+
+    /// Return only line segments backed by document state.
+    ///
+    /// Layout may append a suffix while fitting an HWPX RowBreak cell to its
+    /// declared height. That suffix is a rendering projection, not file data.
+    /// Every persistence adapter must start from this view so format writers
+    /// cannot disagree about where source state ends.
+    #[inline]
+    pub fn serializable_line_segs(&self) -> &[LineSeg] {
+        let source_len = self
+            .line_segs
+            .len()
+            .saturating_sub(self.layout_only_fill_lines);
+        &self.line_segs[..source_len]
+    }
+
+    /// Invalidate every layout result derived from text or CharShapeRef input.
+    /// Existing rows remain as edit-reflow metric templates, but cannot be
+    /// admitted or serialized as the current text partition.
+    #[inline]
+    pub fn invalidate_layout_inputs(&mut self) {
+        self.stored_text_partition_dirty = true;
+        self.hwp3_saved_space_corrections.clear();
+        self.layout_object_projection = false;
+        self.layout_float_band = false;
+        self.layout_field_values.clear();
+    }
+
+    /// PARA_TEXT 로 실을 내용이 있는가 — 글자, 컨트롤, 제목 차례 표시, 짝 fieldBegin 을 아는
+    /// 다단락 필드의 고아 끝 마커(#4398). 저장기가 PARA_TEXT 를 쓰는 조건과 같다.
+    pub(crate) fn has_para_text_content(&self) -> bool {
+        !self.text.is_empty()
+            || !self.controls.is_empty()
+            || !self.title_marks.is_empty()
+            || self
+                .orphan_field_ends
+                .iter()
+                .any(|end| end.begin_ctrl_id != 0)
+    }
+
+    /// 편집이 내용을 모두 걷어낸 문단은 원본의 빈 PARA_TEXT 표지를 버린다.
+    ///
+    /// `has_para_text` 는 끝 표시만 든 원본 PARA_TEXT 를 다시 쓰게 하는 표지다. 개체나 글을
+    /// 지워 빈 문단이 됐는데 표지가 남으면 저장기가 char_count 1 문단에 PARA_TEXT `0d 00` 을
+    /// 쓰고, 한/글 12.30 은 그 HWP 를 "파일이 손상되었습니다"로 거절한다. 한/글이 쓰는 빈
+    /// 문단에는 PARA_TEXT 가 없고, 저장본을 다시 열어도 이 표지는 꺼진다.
+    pub(crate) fn forget_para_text_if_emptied(&mut self) {
+        if !self.has_para_text_content() {
+            self.has_para_text = false;
+        }
+    }
+
+    #[inline]
+    pub fn stored_text_partition_is_dirty(&self) -> bool {
+        self.stored_text_partition_dirty
+    }
+
+    /// Replace stored rows and their validity state at one owner boundary.
+    pub(crate) fn replace_line_segs(&mut self, line_segs: Vec<LineSeg>) {
+        self.line_segs = line_segs;
+        self.hwp3_saved_space_corrections.clear();
+        self.layout_object_projection = false;
+        self.layout_float_band = false;
+        self.layout_space_metrics.clear();
+        // A fresh vector has no renderer-appended suffix and cannot reuse a
+        // source-position snapshot owned by the replaced rows.
+        self.layout_only_fill_lines = 0;
+        self.source_line_seg_vertical_pos = None;
+        self.layout_rebased_body_axis = false;
+        // [#5961] 새로 계산한 줄은 `char_offsets` 와 같은 HWP5 축에서 나온다. 파일에서
+        // 읽은 줄에만 붙던 보정폭을 그대로 두면 다음 투영에서 이중으로 더해진다.
+        self.hwpx_axis_shift = 0;
+        self.stored_text_partition_dirty = false;
+    }
+
+    /// 같은 줄 구성 결과에서 생성한 경계와 공백 규칙을 함께 발행한다.
+    pub(crate) fn replace_line_segs_with_space_metrics(
+        &mut self,
+        line_segs: Vec<LineSeg>,
+        metrics: Vec<(u32, SpaceMetric)>,
+    ) {
+        self.replace_line_segs(line_segs);
+        self.layout_space_metrics = metrics;
+    }
+
+    /// [#8399] 어울림 밴드 소유자의 생산 경계에서만 밴드 줄과 그 출처를 함께 발행한다.
+    pub(crate) fn publish_float_band_rows(
+        &mut self,
+        line_segs: Vec<LineSeg>,
+        metrics: Vec<(u32, SpaceMetric)>,
+    ) {
+        self.replace_line_segs_with_space_metrics(line_segs, metrics);
+        self.layout_float_band = true;
+    }
+
+    /// 개체 흐름 투영의 생산 경계에서만 확정 줄과 그 출처를 함께 발행한다.
+    pub(crate) fn publish_object_projection(&mut self, line_segs: Vec<LineSeg>) {
+        self.replace_line_segs(line_segs);
+        self.layout_object_projection = true;
+    }
+
+    pub(crate) fn line_space_metric(&self, line_index: usize) -> SpaceMetric {
+        self.layout_space_metrics
+            .get(line_index)
+            .zip(self.line_segs.get(line_index))
+            .filter(|((start, _), line)| *start == line.text_start)
+            .map(|((_, rule), _)| *rule)
+            .unwrap_or_else(|| {
+                // An original saved row retains its text partition. Its
+                // ordinary spaces follow the half-cell rule; compatibility
+                // widths for fresh line decisions must not shift that row's
+                // literal indentation. Explicit useFontSpace is still kept
+                // by HalfCell when the selected style is resolved.
+                if self.layout_space_metrics.is_empty()
+                    && !self.stored_text_partition_is_dirty()
+                    && self
+                        .line_segs
+                        .get(line_index)
+                        .is_some_and(|line| line.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0)
+                {
+                    SpaceMetric::HalfCell
+                } else {
+                    SpaceMetric::Stored
+                }
+            })
+    }
+
+    /// 문자의 UTF-16 코드 유닛 수를 반환한다.
+    fn char_utf16_len(c: char) -> u32 {
+        if (c as u32) > 0xFFFF {
+            2
+        } else {
+            1
+        }
+    }
+
+    /// `PARA_TEXT`에서 한 문자가 차지하는 UTF-16 code unit 수를 반환한다.
+    ///
+    /// 탭은 Rust 문자열에서는 한 문자지만 HWP5에서는 7개 확장 데이터 unit이 뒤따르는
+    /// 8-unit 확장 문자다. 문단 좌표와 `char_count`는 이 스트림 폭을 사용해야 한다.
+    pub(crate) fn char_stream_len(c: char) -> u32 {
+        if c == '\t' {
+            CTRL_CHAR_CODE_UNITS
+        } else {
+            Self::char_utf16_len(c)
+        }
+    }
+
+    /// 마지막 공백이 자동 번호의 원시 8유닛을 소유하면 그 컨트롤을 반환한다.
+    /// 저장 파서/새 캡션은 자리표 인덱스를, 구형 편집 모델은 문단 끝을
+    /// 전달할 수 있다. 양쪽 표현 모두 병합·삽입·분할에서 같은 슬롯 끝을 소비한다.
+    fn trailing_auto_number(&self, control_positions: &[usize]) -> Option<usize> {
+        let chars: Vec<_> = self.text.chars().collect();
+        if chars.last() != Some(&' ') {
+            return None;
+        }
+        control_positions.iter().enumerate().find_map(|(ci, &at)| {
+            (matches!(self.controls.get(ci), Some(Control::AutoNumber(_)))
+                && (at >= chars.len()
+                    || (at + 1 == chars.len()
+                        && self.control_owns_char(ci, at, &chars, &self.char_offsets))))
+            .then_some(ci)
+        })
+    }
+
+    /// `idx` 번째 글자가 끝나는 스트림 위치. 문단 끝 자동 번호의 자리표(마지막 글자)는 번호의
+    /// 8유닛을 함께 차지한다 ([`Self::trailing_auto_number`]).
+    fn char_stream_end(
+        &self,
+        text_chars: &[char],
+        idx: usize,
+        trailing_number: Option<usize>,
+    ) -> u32 {
+        self.char_offsets[idx]
+            + if trailing_number.is_some() && idx + 1 == text_chars.len() {
+                CTRL_CHAR_CODE_UNITS
+            } else {
+                Self::char_stream_len(text_chars[idx])
+            }
+    }
+
+    /// char_offset 위치에 텍스트를 삽입한다.
+    /// 인라인 컨트롤(각주/미주/수식/새 번호 등, 8 code unit)을 char_offset 위치에 삽입할 때
+    /// 문단 메타데이터를 일괄 시프트한다.
+    ///
+    /// `char_offsets[safe_offset..]` 를 +8 하고, 삽입 지점(UTF-16) 이후의
+    /// `char_shapes.start_pos`·`range_tags.start/end`·`line_segs.text_start` 도 +8
+    /// 시프트한다. 종전에는 각 삽입 경로가 char_offsets 만 밀고 char_shapes/range_tags 를
+    /// 그대로 둬서, 삽입 지점 이후 글자모양 run 경계가 텍스트와 어긋났다(글자모양 오염).
+    /// `insert_text_at` 의 시프트 규약과 동형이다.
+    ///
+    /// **이 문단의 UTF-16 좌표를 들고 있는 것은 전부 여기서 함께 민다.** 하나라도 빠지면
+    /// 그것만 8 만큼 어긋난 채 남아, 다음에 그 문단을 다시 조판할 때 값이 튀어 원인이
+    /// 삽입이 아닌 곳에서 찾아진다(#4347 에서 line_segs 가 그랬다).
+    ///
+    /// 컨트롤 번호도 같은 이유로 민다. 새 컨트롤이 `controls[control_idx]` 에 들어가면 그
+    /// 자리부터 뒤 컨트롤의 번호가 1씩 커진다. 누름틀 범위가 옛 번호에 남으면 앞에 넣은
+    /// 개체를 가리켜, 누름틀이 조회와 저장에서 사라진다.
+    pub(crate) fn shift_for_inline_control_insert(
+        &mut self,
+        control_idx: usize,
+        char_offset: usize,
+    ) {
+        for range in &mut self.field_ranges {
+            if range.control_idx >= control_idx {
+                range.control_idx += 1;
+            }
+        }
+        self.shift_for_control_slot_insert(char_offset);
+    }
+
+    /// BEGIN/END 슬롯처럼 컨트롤 번호가 늘지 않는 8유닛 삽입에도 사용한다.
+    pub(crate) fn shift_for_control_slot_insert(&mut self, char_offset: usize) {
+        if self.char_offsets.is_empty() {
+            return;
+        }
+        let text_len = self.text.chars().count();
+        let safe_offset = char_offset.min(text_len);
+        // 컨트롤이 삽입되는 UTF-16 위치 — char_offsets 시프트 전에 계산한다.
+        let insert_pos: u32 = if safe_offset < self.char_offsets.len() {
+            self.char_offsets[safe_offset]
+        } else {
+            let last_idx = self.char_offsets.len() - 1;
+            let last_w = self
+                .text
+                .chars()
+                .nth(last_idx)
+                .map(Self::char_stream_len)
+                .unwrap_or(1);
+            self.char_offsets[last_idx] + last_w
+        };
+        for co in self.char_offsets[safe_offset..].iter_mut() {
+            *co += 8;
+        }
+        self.shift_position_metadata_for_stream_insertion(insert_pos, 8);
+    }
+
+    /// 구역·단 정의를 보강할 때 기존 선행 컨트롤의 슬롯과 소유 인덱스를 보존한다.
+    pub(crate) fn insert_leading_definition<S: crate::storage::Storage>(
+        &mut self,
+        index: usize,
+        control: Control,
+        storage: &S,
+    ) -> Result<(), S::Error> {
+        debug_assert!(matches!(
+            control,
+            Control::SectionDef(_) | Control::ColumnDef(_)
+        ));
+        let leading_defs = self
+            .controls
+            .iter()
+            .take_while(|control| matches!(control, Control::SectionDef(_) | Control::ColumnDef(_)))
+            .count();
+        debug_assert!(index <= leading_defs);
+        // Aligning the parallel records and inserting a definition can grow both
+        // vectors. Reserve through the request storage before changing coordinates.
+        storage.reserve(&mut self.controls, 1)?;
+        let additional_records = self
+            .controls
+            .len()
+            .saturating_sub(self.ctrl_data_records.len())
+            + 1;
+        storage.reserve(&mut self.ctrl_data_records, additional_records)?;
+        let existing_room = self.char_offsets.first().copied().unwrap_or(0);
+        let auxiliary_slots = self
+            .field_ranges
+            .iter()
+            .filter(|range| range.end_char_idx == 0)
+            .count()
+            + self
+                .orphan_field_ends
+                .iter()
+                .filter(|end| end.char_idx == 0)
+                .count()
+            + self
+                .title_marks
+                .iter()
+                .filter(|mark| mark.char_idx == 0)
+                .count();
+        // 선행 갭은 머리말·누름틀 등이 이미 쓰고 있으므로 빈 예약 공간만 재사용한다.
+        let occupied_controls = (existing_room as usize / 8)
+            .saturating_sub(auxiliary_slots)
+            .min(self.controls.len());
+        let required_slots = occupied_controls.max(leading_defs) + auxiliary_slots + 1;
+        let shift = (required_slots as u32 * 8).saturating_sub(existing_room);
+        for offset in &mut self.char_offsets {
+            *offset += shift;
+        }
+        self.shift_position_metadata_for_stream_insertion(
+            (index as u32 * 8).min(existing_room),
+            shift,
+        );
+        for range in &mut self.field_ranges {
+            if range.control_idx >= index {
+                range.control_idx += 1;
+            }
+        }
+        self.align_ctrl_data_records();
+        self.ctrl_data_records.insert(index, None);
+        self.controls.insert(index, control);
+        Ok(())
+    }
+
+    /// 선행 확장 제어문자가 들어갈 만큼 첫 텍스트 앞 스트림 좌표를 확보한다.
+    ///
+    /// `SectionDef`·`ColumnDef`처럼 문단 첫 글자보다 앞에 와야 하는 확장 제어문자는 각각
+    /// 8 UTF-16 code unit을 쓴다. 이미 확보된 선행 공간은 보존하고 부족한 만큼만 모든
+    /// 텍스트 좌표를 민다. `char_offsets`와 같은 좌표계를 쓰는 글자모양, range tag,
+    /// 줄 시작도 함께 갱신해야 한다.
+    ///
+    /// 호출 전에 제어문자를 `controls`의 선두에 넣고, 그 연속 개수를 넘긴다.
+    pub(crate) fn reserve_leading_extended_control_slots(&mut self, control_count: usize) {
+        const EXTENDED_CONTROL_CODE_UNITS: u32 = 8;
+
+        let required_room = u32::try_from(control_count)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(EXTENDED_CONTROL_CODE_UNITS);
+        let existing_room = self.char_offsets.first().copied().unwrap_or(0);
+        let shift = required_room.saturating_sub(existing_room);
+        if shift == 0 {
+            return;
+        }
+
+        for offset in &mut self.char_offsets {
+            *offset += shift;
+        }
+        self.shift_position_metadata_for_stream_insertion(existing_room, shift);
+    }
+
+    /// [`Self::reserve_leading_extended_control_slots`] 의 역연산 — 떼어낸 선행 확장
+    /// 제어문자의 자리를 첫 텍스트 앞에서 거둔다.
+    ///
+    /// 자리를 남기면 `char_offsets` 만 그만큼 뒤로 밀린 채 남는다. 다른 문단에 병합하면
+    /// `char_count`(텍스트 + 남은 컨트롤로 다시 셈)보다 뒤의 글자가 줄 밖으로 밀려
+    /// 그려지지 않는다.
+    ///
+    /// 호출 전에 제어문자를 `controls` 에서 빼고, 뺀 선두 연속 개수를 넘긴다. 선행 공간이
+    /// 그보다 작으면 있는 만큼만 거둔다.
+    pub(crate) fn release_leading_extended_control_slots(&mut self, control_count: usize) {
+        let released = u32::try_from(control_count)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(8)
+            .min(self.char_offsets.first().copied().unwrap_or(0));
+        if released == 0 {
+            return;
+        }
+
+        for offset in &mut self.char_offsets {
+            *offset -= released;
+        }
+        // 거둔 자리 안에서 시작한 글자모양 중 첫 글자에 닿는 마지막 것만 남긴다.
+        if let Some(first_kept) = self
+            .char_shapes
+            .iter()
+            .rposition(|cs| cs.start_pos <= released)
+        {
+            self.char_shapes.drain(..first_kept);
+        }
+        for cs in &mut self.char_shapes {
+            cs.start_pos = cs.start_pos.saturating_sub(released);
+        }
+        for rt in &mut self.range_tags {
+            rt.start = rt.start.saturating_sub(released);
+            rt.end = rt.end.saturating_sub(released);
+        }
+        for mark in &mut self.markpen_marks {
+            if let Some(pos) = &mut mark.utf16_pos {
+                *pos = pos.saturating_sub(released);
+            }
+        }
+        for seg in &mut self.line_segs {
+            seg.text_start = seg.text_start.saturating_sub(released);
+        }
+        self.char_count = self.char_count.saturating_sub(released);
+    }
+
+    /// 문단을 나눠 만든 새 문단(`self`)의 첫 글자 앞에 나눈 자리 갭에서 넘어온 자리를 비운다.
+    ///
+    /// 나눈 자리 갭은 원래 문단에서 나눈 글자 바로 앞의 제어문자 자리다. 새 문단으로 넘어오는
+    /// 것은 각각 8유닛인 셋이다.
+    /// - 컨트롤: 개체·각주·누름틀 시작 따위. 원래 글자 위치가 나눈 자리인 컨트롤 수를
+    ///   `moved_controls` 로 받는다.
+    /// - 빈 누름틀의 끝 표지: 이 문단 맨 앞에서 시작하고 끝나는 필드 범위마다 하나.
+    /// - 제목 차례 표시: 이 문단 맨 앞의 표지.
+    ///
+    /// 비우지 않으면 넘어온 컨트롤이 문단 끝으로 밀리고, 저장한 글자 위치가 실제 스트림과
+    /// 어긋난다. 글이 없는 문단은 모든 컨트롤을 글 뒤에 쓰므로 비우지 않는다.
+    pub(crate) fn reserve_split_gap_slots(&mut self, moved_controls: usize) {
+        if self.char_offsets.is_empty() {
+            return;
+        }
+        let empty_field_ends = self
+            .field_ranges
+            .iter()
+            .filter(|range| range.start_char_idx == 0 && range.end_char_idx == 0)
+            .count();
+        let title_marks = self
+            .title_marks
+            .iter()
+            .filter(|mark| mark.char_idx == 0)
+            .count();
+        self.reserve_leading_extended_control_slots(
+            moved_controls + empty_field_ends + title_marks,
+        );
+    }
+
+    /// `char_idx` 글자 앞 갭의 첫 슬롯(8유닛)을 걷어낸다.
+    ///
+    /// 나누기로 잘린 누름틀의 끝 표지처럼 다른 문단으로 간 슬롯 자리에 쓴다. 남겨 두면 그
+    /// 갭이 주인 없는 8유닛이 되어 뒤 컨트롤이 그 자리로 당겨진다. 같은 좌표를 쓰는
+    /// 글자모양·영역 태그·줄 시작·형광펜 표지도 함께 당긴다.
+    fn remove_gap_slot(&mut self, char_idx: usize) {
+        let Some(&gap_end) = self.char_offsets.get(char_idx) else {
+            return;
+        };
+        let gap_start = match char_idx.checked_sub(1) {
+            Some(prev) => {
+                self.char_offsets[prev]
+                    + self.text.chars().nth(prev).map_or(1, Self::char_stream_len)
+            }
+            None => 0,
+        };
+        if gap_end < gap_start + CTRL_CHAR_CODE_UNITS {
+            return;
+        }
+        self.remove_stream_slot(gap_start, true);
+    }
+
+    /// `controls[control_idx]` 를 빼고 그 8유닛 자리를 걷어낸다.
+    ///
+    /// 그림·도형·수식·표 삭제 경로가 함께 쓴다. 자리 뒤의 글자·글자모양·영역 태그·줄 시작·
+    /// 형광펜 표지를 모두 8유닛 당기고, 뒤 누름틀 범위의 컨트롤 번호도 하나씩 줄인다.
+    /// 종전에는 경로마다 `char_offsets` 만 당겨 개체 뒤 글자모양 경계가 8유닛 뒤에 남았다.
+    pub(crate) fn remove_control(&mut self, control_idx: usize) -> Control {
+        // serialize_para_text 와 같은 순서로 control_idx 번째 컨트롤의 자리를 찾는다.
+        let text_chars: Vec<char> = self.text.chars().collect();
+        let mut ci = 0usize;
+        let mut prev_end: u32 = 0;
+        let mut slot_start: Option<u32> = None;
+        'outer: for (i, &ch) in text_chars.iter().enumerate() {
+            let offset = self.char_offsets.get(i).copied().unwrap_or(prev_end);
+            while prev_end + CTRL_CHAR_CODE_UNITS <= offset && ci < self.controls.len() {
+                if ci == control_idx {
+                    slot_start = Some(prev_end);
+                    break 'outer;
+                }
+                ci += 1;
+                prev_end += CTRL_CHAR_CODE_UNITS;
+            }
+            prev_end = offset + Self::char_stream_len(ch);
+        }
+        // 텍스트 뒤에 놓인 컨트롤
+        if slot_start.is_none() && control_idx >= ci {
+            slot_start = Some(prev_end + (control_idx - ci) as u32 * CTRL_CHAR_CODE_UNITS);
+        }
+        if let Some(start) = slot_start {
+            self.remove_stream_slot(start, true);
+        }
+        self.remove_control_entry(control_idx)
+    }
+
+    /// [#8306] HWPX 저장이 접는 컨트롤(같은 문단의 두 번째 이후 쪽 번호 위치, #6869)의
+    /// 자리를 저장기와 같은 좌표로 걷어낸다.
+    ///
+    /// 자리는 [`Self::control_utf16_positions`] 로 찾는다(필드 끝·제목 차례 표시 같은 부수
+    /// 슬롯을 건너뛰는 공용 결과). [`Self::remove_control`] 과 달리 같은 자리로 모인 글자
+    /// 모양을 합치지 않는다 — HWPX 저장기는 그 경계를 빈 run 으로 남기므로 재파싱 IR 에도
+    /// 그대로 남는다.
+    pub(crate) fn remove_control_slot_like_hwpx_export(&mut self, control_idx: usize) -> Control {
+        if let Some(&start) = self.control_utf16_positions().get(control_idx) {
+            self.remove_stream_slot(start, false);
+        }
+        self.remove_control_entry(control_idx)
+    }
+
+    fn remove_control_entry(&mut self, control_idx: usize) -> Control {
+        let removed = self.controls.remove(control_idx);
+        if control_idx < self.ctrl_data_records.len() {
+            self.ctrl_data_records.remove(control_idx);
+        }
+        for range in &mut self.field_ranges {
+            if range.control_idx > control_idx {
+                range.control_idx -= 1;
+            }
+        }
+        self.char_count = self.char_count.saturating_sub(CTRL_CHAR_CODE_UNITS);
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges);
+        self.forget_para_text_if_emptied();
+        removed
+    }
+
+    /// `slot_start` 에서 시작하는 8유닛 자리를 스트림에서 걷어내고 같은 좌표를 쓰는
+    /// 문단 메타데이터를 당긴다.
+    /// `merge_same_position_shapes` 면 같은 자리로 모인 글자모양을 하나로 합친다(편집 경로).
+    fn remove_stream_slot(&mut self, slot_start: u32, merge_same_position_shapes: bool) {
+        let slot_end = slot_start + CTRL_CHAR_CODE_UNITS;
+        for offset in &mut self.char_offsets {
+            if *offset >= slot_end {
+                *offset -= CTRL_CHAR_CODE_UNITS;
+            }
+        }
+        let pull = |pos: &mut u32| {
+            if *pos >= slot_end {
+                *pos -= CTRL_CHAR_CODE_UNITS;
+            } else if *pos > slot_start {
+                *pos = slot_start;
+            }
+        };
+        for shape in &mut self.char_shapes {
+            pull(&mut shape.start_pos);
+        }
+        // 같은 자리로 모인 글자모양은 그 자리 글자에 쓰이는 뒤의 것만 남긴다.
+        if merge_same_position_shapes {
+            self.char_shapes.dedup_by(|later, kept| {
+                let same = later.start_pos == kept.start_pos;
+                if same {
+                    kept.char_shape_id = later.char_shape_id;
+                }
+                same
+            });
+        }
+        for tag in &mut self.range_tags {
+            pull(&mut tag.start);
+            pull(&mut tag.end);
+        }
+        for seg in &mut self.line_segs {
+            pull(&mut seg.text_start);
+        }
+        for mark in &mut self.markpen_marks {
+            if let Some(pos) = &mut mark.utf16_pos {
+                pull(pos);
+            }
+        }
+    }
+
+    /// 스트림 삽입으로 이동한 텍스트 좌표와 같은 기준을 쓰는 문단 메타데이터를 갱신한다.
+    pub(crate) fn shift_position_metadata_for_stream_insertion(
+        &mut self,
+        insert_pos: u32,
+        shift: u32,
+    ) {
+        if shift == 0 {
+            return;
+        }
+        for mark in &mut self.markpen_marks {
+            if let Some(pos) = &mut mark.utf16_pos {
+                if *pos >= insert_pos {
+                    *pos += shift;
+                }
+            }
+        }
+        // 문단 시작(pos 0)에 고정된 첫 스타일은 유지(insert_text_at 과 동일).
+        for cs in &mut self.char_shapes {
+            if cs.start_pos > insert_pos || (cs.start_pos == insert_pos && cs.start_pos > 0) {
+                cs.start_pos += shift;
+            }
+        }
+        for rt in &mut self.range_tags {
+            if rt.start >= insert_pos {
+                rt.start += shift;
+            }
+            if rt.end >= insert_pos {
+                rt.end += shift;
+            }
+        }
+        // [#4347] 줄 시작도 같은 좌표계(UTF-16 code unit)를 쓴다 — 함께 밀지 않으면 저장된
+        // 줄 나눔이 삽입 지점 뒤로 8 만큼 어긋난다. 눈에 안 띄다가 문단을 다시 조판하는
+        // 순간(그림 배치 토글 따위) 값이 갑자기 8 뛰어 "왕복이 원복을 깼다"로 보인다.
+        // 첫 줄은 문단 시작에 고정한다 — 넣은 컨트롤이 그 줄에 든다(char_shapes 와 같은 규약).
+        for seg in &mut self.line_segs {
+            if seg.text_start > insert_pos || (seg.text_start == insert_pos && seg.text_start > 0) {
+                seg.text_start += shift;
+            }
+        }
+    }
+
+    ///
+    /// char_offset은 Rust 문자(char) 인덱스이다 (바이트 인덱스가 아님).
+    /// 삽입 후 char_offsets, char_shapes, line_segs, char_count가 자동 갱신된다.
+    ///
+    /// char_offset이 text.chars().count()를 초과하면 인라인 컨트롤 뒤의
+    /// 위치로 간주하여 올바른 UTF-16 위치에 삽입한다.
+    ///
+    /// 반환값은 **실제로 삽입된 char 오프셋**이다. 위 컨트롤 갭 처리 때문에 요청 값과
+    /// 다를 수 있으므로, 삽입 뒤 위치를 알려야 하는 호출부는 요청 값이 아니라 이 값을
+    /// 기준으로 삼는다 (Task #3216).
+    pub fn insert_text_at(&mut self, char_offset: usize, new_text: &str) -> usize {
+        self.insert_text_at_caret(char_offset, new_text, false)
+    }
+
+    /// 문단에서 복사한 텍스트는 개별 묶음 빈칸의 표기도 함께 옮긴다.
+    pub(crate) fn insert_text_from_paragraph(
+        &mut self,
+        char_offset: usize,
+        source: &Paragraph,
+    ) -> usize {
+        let inserted_at = self.insert_text_at(char_offset, &source.text);
+        self.inherit_inserted_text_controls(source, inserted_at);
+        inserted_at
+    }
+
+    /// 삽입 방식과 무관하게 복사한 묶음 빈칸의 원본 제어 슬롯을 함께 옮긴다.
+    pub(crate) fn inherit_inserted_text_controls(
+        &mut self,
+        source: &Paragraph,
+        inserted_at: usize,
+    ) {
+        // [hwpx-cowork] 복사 삽입 경로 전체가 NBSP 외 요소 출처도 함께 옮긴다.
+        // 빈 원본은 넣은 글이 없다 — `insert_text_at` 도 출처 목록을 손대지 않으므로
+        // 여기서 빈 목록으로 만들면 옛 묶음 빈칸(control_mask 에서 끌어낸 출처)을 잃는다(fork 087 규칙).
+        if !source.text.is_empty() {
+            let origins = self.text_element_origins.get_or_insert_with(Vec::new);
+            origins.extend(source.resolved_text_element_origins().into_iter().map(|i| inserted_at + i));
+            origins.sort_unstable();
+            origins.dedup();
+            self.control_mask |= self.text_element_control_mask();
+        }
+        // [hwpx-cowork] Plain insertion initially marks every U+2007 literal.
+        // A copied hp:fwSpace owns the fixed-blank contract instead; composer
+        // and serializers must consume the same source-specific distinction.
+        let inserted_end = inserted_at + source.text.chars().count();
+        self.literal_figure_spaces
+            .retain(|&index| index < inserted_at || index >= inserted_end);
+        self.literal_figure_spaces.extend(
+            source.literal_figure_spaces.iter().map(|&index| inserted_at + index),
+        );
+        self.literal_figure_spaces.sort_unstable();
+        if let Some(indices) = &mut self.nb_space_control_indices {
+            indices.extend(
+                source
+                    .materialized_nb_space_controls()
+                    .into_iter()
+                    .map(|index| inserted_at + index),
+            );
+            indices.sort_unstable();
+        }
+        self.refresh_nb_space_control_mask();
+    }
+
+    /// `tab_extended` 는 문단의 탭 글자와 차례로 짝이 맞는다(직렬화가 `tab_idx` 로 하나씩 꺼낸다).
+    /// 글을 넣고 지우고 나누고 합칠 때 그 짝을 지키지 않으면, 기존 탭의 폭이 뒤 탭으로 밀려
+    /// 한/글에서 탭 자리가 틀어진다. 새로 생긴 탭은 값을 모르는 탭(`TAB_EXT_PLACEHOLDER`)으로 둔다.
+    fn tab_count(chars: &[char]) -> usize {
+        chars.iter().filter(|&&c| c == '\t').count()
+    }
+
+    /// [`insert_text_at`](Self::insert_text_at) 과 같되, `after_inline_control` 이면
+    /// `char_offset` 자리에 놓인 개체 **뒤**(다음 글자 앞)에 넣는다 (#7444).
+    /// 글자 위치만으로는 개체 앞뒤를 가릴 수 없어 논리 오프셋 입력이 이 값을 넘긴다.
+    pub(crate) fn insert_text_at_caret(
+        &mut self,
+        char_offset: usize,
+        new_text: &str,
+        after_inline_control: bool,
+    ) -> usize {
+        // [hwpx-cowork] 조판 부호 틈 가운데 넣기(걸어 둔 자리가 있으면 이 넣기 한 번이 쓴다)
+        let code_gap = super::code_gaps::take_pending_gap_insert();
+        if new_text.is_empty() {
+            return char_offset.min(self.text.chars().count());
+        }
+        let text_chars: Vec<char> = self.text.chars().collect();
+        let text_len = text_chars.len();
+
+        // char_offset > text_len: 인라인 컨트롤 뒤의 위치
+        // navigable_text_len이 text_len보다 클 수 있음 (인라인 컨트롤 포함)
+        // 이 경우 char_offset을 text_len으로 clamp하되, UTF-16 위치는
+        // 마지막 문자 + 후행 컨트롤 갭을 포함한 값으로 계산
+        let effective_char_offset = char_offset.min(text_len);
+        let control_positions = self.control_text_positions();
+        // 문단 끝 자동 번호는 마지막 글자(자리표) 자리에 있다. 그 뒤 입력은 번호 앞이 아니다.
+        let trailing_number = self.trailing_auto_number(&control_positions);
+        let char_end = |idx: usize| self.char_stream_end(&text_chars, idx, trailing_number);
+        let is_inline_object = |ctrl: &Control| {
+            !super::border_paint::is_cell_frame_paint(ctrl)
+                && matches!(
+                    ctrl,
+                    Control::Shape(_)
+                        | Control::Table(_)
+                        | Control::Picture(_)
+                        | Control::Equation(_)
+                        | Control::Form(_)
+                        | Control::Footnote(_)
+                        | Control::Endnote(_)
+                        | Control::CharOverlap(_)
+                        | Control::Ruby(_)
+                        | Control::AutoNumber(_)
+                )
+        };
+        // 이 자리 컨트롤 가운데 첫 개체의 차례 — 그 앞에 놓인 같은 자리 컨트롤 수와 같다.
+        // 문단 끝 자동 번호는 자리표 글자가 8유닛을 차지하므로 이 자리 컨트롤로 세지 않는다.
+        let controls_before_object = self
+            .controls
+            .iter()
+            .zip(control_positions.iter())
+            .enumerate()
+            .filter(|&(ci, (_, &pos))| pos == effective_char_offset && Some(ci) != trailing_number)
+            .position(|(_, (ctrl, _))| is_inline_object(ctrl));
+        let inserts_before_inline_control =
+            !after_inline_control && char_offset <= text_len && controls_before_object.is_some();
+
+        // 바이트 삽입 위치 계산
+        let byte_offset: usize = text_chars[..effective_char_offset]
+            .iter()
+            .map(|c| c.len_utf8())
+            .sum();
+
+        // 삽입 지점의 UTF-16 위치 결정
+        let utf16_insert_pos: u32 = if char_offset > text_len && !self.char_offsets.is_empty() {
+            // 텍스트 끝 이후 (인라인 컨트롤 뒤): 마지막 문자의 UTF-16 위치 + 폭 + 후행 갭
+            let last_char_end = char_end(self.char_offsets.len() - 1);
+            // 후행 컨트롤 수 = char_offset - text_len
+            let trailing_ctrl_count = (char_offset - text_len) as u32;
+            last_char_end + trailing_ctrl_count * 8
+        } else if inserts_before_inline_control {
+            let gap_start = if effective_char_offset == 0 || self.char_offsets.is_empty() {
+                0
+            } else {
+                char_end(effective_char_offset - 1)
+            };
+            // 글은 개체 바로 앞에 넣는다. 개체보다 앞선 같은 자리 컨트롤(구역·단 정의 따위)과
+            // 이 자리에 그대로 남는 표지는 글 앞에 둔다 — 갭 맨 앞에 넣으면 구역 첫 문단의
+            // 정의 제어문자가 글 뒤로 밀리고, 한글은 그런 문서를 열다 멈춘다(#4680).
+            let kept_slots = controls_before_object.unwrap_or(0)
+                + self
+                    .orphan_field_ends
+                    .iter()
+                    .filter(|o| o.char_idx == effective_char_offset)
+                    .count()
+                + self
+                    .title_marks
+                    .iter()
+                    .filter(|m| m.char_idx == effective_char_offset)
+                    .count();
+            gap_start + kept_slots as u32 * CTRL_CHAR_CODE_UNITS
+        } else if effective_char_offset < self.char_offsets.len() {
+            self.char_offsets[effective_char_offset]
+        } else if !self.char_offsets.is_empty() {
+            // 개체 뒤 입력이면 문단 끝에 붙은 개체 자리(개체당 8)도 건너뛴다.
+            let trailing_ctrl_count = if after_inline_control {
+                control_positions
+                    .iter()
+                    .enumerate()
+                    .filter(|&(ci, &pos)| pos >= text_len && Some(ci) != trailing_number)
+                    .count() as u32
+            } else {
+                0
+            };
+            char_end(self.char_offsets.len() - 1) + trailing_ctrl_count * 8
+        } else {
+            // 텍스트가 비어있을 때: 기존 컨트롤 뒤에 삽입 (각 컨트롤 = 8 code units)
+            (self.controls.len() as u32) * 8
+        };
+        let char_offset = effective_char_offset;
+        // 링크 경계에 삽입하는 글자는 링크 밖에 둔다. 시작 경계에서는 링크의
+        // 서식 run을 뒤로 밀고, 끝 경계에서는 복원된 일반 서식 run을 유지한다.
+        // 날짜·파일 경로 코드의 글은 한/글이 문서를 열거나 다른 이름으로 저장할 때
+        // 다시 쓰므로 경계에 친 글자를 품지 않는다(서식은 일반 글처럼 앞 글자를 잇는다).
+        let outside_starts = self
+            .field_ranges
+            .iter()
+            .filter(|range| {
+                range.start_char_idx < range.end_char_idx
+                    && range.start_char_idx == char_offset
+                    && keeps_boundary_text_outside(self.controls.get(range.control_idx))
+            })
+            .count() as u32;
+        let at_hyperlink_start = self.field_ranges.iter().any(|range| {
+            range.start_char_idx < range.end_char_idx
+                && range.start_char_idx == char_offset
+                && matches!(self.controls.get(range.control_idx),
+                    Some(Control::Field(field)) if field.field_type == FieldType::Hyperlink)
+        });
+        let at_hyperlink_end = self.field_ranges.iter().any(|range| {
+            range.start_char_idx < range.end_char_idx
+                && range.end_char_idx == char_offset
+                && matches!(self.controls.get(range.control_idx),
+                    Some(Control::Field(field)) if field.field_type == FieldType::Hyperlink)
+        });
+
+        // 범위뿐 아니라 FIELD_BEGIN의 raw 슬롯도 새 글자 뒤에 있어야 한다.
+        // 그렇지 않으면 HWPX 저장 시 기존 선행 갭에서 BEGIN을 먼저 방출해
+        // 링크 밖에 입력한 글자가 다시 링크에 포함된다.
+        let preceding_text_end = if char_offset == 0 {
+            0
+        } else {
+            self.char_offsets[char_offset - 1] + Self::char_stream_len(text_chars[char_offset - 1])
+        };
+        let begin_units = outside_starts * 8;
+        let utf16_insert_pos =
+            if outside_starts > 0 && utf16_insert_pos >= preceding_text_end + begin_units {
+                utf16_insert_pos - begin_units
+            } else {
+                utf16_insert_pos
+            };
+        // [hwpx-cowork] 문단 끝에서 끝나는 경계 밖 필드(날짜 코드·상호 참조 등 — 범위는 이미 새 글 밖에 둔다)는 FIELD_END 슬롯도
+        // 새 글 앞이어야 한다. 문단 끝 자리는 마지막 글자 바로 뒤(슬롯 앞)라 그대로 두면 범위(글 밖)와 원시 슬롯(글 안)이 어긋나
+        // 다음 필드 넣기가 '원시 슬롯 위치를 확인할 수 없습니다'로 실패했다(2026-11-12, 날짜 코드 → 글 → 날짜 코드).
+        let outside_ends = if char_offset == text_chars.len() {
+            self.field_ranges
+                .iter()
+                .filter(|range| {
+                    range.start_char_idx < range.end_char_idx
+                        && range.end_char_idx == char_offset
+                        && keeps_boundary_text_outside(self.controls.get(range.control_idx))
+                })
+                .count() as u32
+        } else {
+            0
+        };
+        let utf16_insert_pos = if outside_ends > 0 {
+            utf16_insert_pos.max(preceding_text_end + outside_ends * 8)
+        } else {
+            utf16_insert_pos
+        };
+        // [hwpx-cowork] 틈 가운데 넣기: 캐럿 앞 부호 뒤·캐럿 뒤 부호 앞
+        let utf16_insert_pos = match &code_gap {
+            Some(g) if g.utf16 >= preceding_text_end && g.utf16 <= utf16_insert_pos.max(g.utf16) => g.utf16,
+            _ => utf16_insert_pos,
+        };
+
+        // 새 텍스트의 UTF-16 총 길이
+        let new_chars: Vec<char> = new_text.chars().collect();
+        let utf16_delta: u32 = new_chars.iter().map(|c| Self::char_stream_len(*c)).sum();
+
+        for position in &mut self.literal_figure_spaces {
+            if *position >= char_offset {
+                *position += new_chars.len();
+            }
+        }
+        self.literal_figure_spaces.extend(
+            new_chars
+                .iter()
+                .enumerate()
+                .filter_map(|(i, ch)| (*ch == '\u{2007}').then_some(char_offset + i)),
+        );
+        self.literal_figure_spaces.sort_unstable();
+        let mut nb_spaces = self.materialized_nb_space_controls();
+        for index in &mut nb_spaces {
+            if *index >= char_offset {
+                *index += new_chars.len();
+            }
+        }
+        self.nb_space_control_indices = Some(nb_spaces);
+
+        for mark in &mut self.markpen_marks {
+            if mark.char_idx >= char_offset {
+                mark.char_idx += new_chars.len();
+            }
+            if let Some(pos) = &mut mark.utf16_pos {
+                if *pos >= utf16_insert_pos {
+                    *pos += utf16_delta;
+                }
+            }
+        }
+
+        // [hwpx-cowork] Move existing origins; newly typed Unicode stays literal.
+        self.text_element_origins = Some(
+            self.resolved_text_element_origins()
+                .into_iter()
+                .map(|i| {
+                    if i >= char_offset {
+                        i + new_chars.len()
+                    } else {
+                        i
+                    }
+                })
+                .collect(),
+        );
+        // 1. 텍스트 삽입
+        self.text.insert_str(byte_offset, new_text);
+        self.refresh_nb_space_control_mask();
+
+        // 2. char_offsets 재구축
+        // 삽입 지점 이후의 기존 오프셋을 시프트
+        for offset in self.char_offsets[char_offset..].iter_mut() {
+            *offset += utf16_delta;
+        }
+        // 새 문자들의 오프셋 삽입
+        let mut new_offsets = Vec::with_capacity(new_chars.len());
+        let mut pos = utf16_insert_pos;
+        for c in &new_chars {
+            new_offsets.push(pos);
+            pos += Self::char_stream_len(*c);
+        }
+        // char_offset 위치에 새 오프셋 삽입
+        let mut updated_offsets = Vec::with_capacity(self.char_offsets.len() + new_offsets.len());
+        updated_offsets.extend_from_slice(&self.char_offsets[..char_offset]);
+        updated_offsets.extend_from_slice(&new_offsets);
+        updated_offsets.extend_from_slice(&self.char_offsets[char_offset..]);
+        self.char_offsets = updated_offsets;
+
+        // 3. char_shapes: 삽입 지점 이후의 start_pos를 시프트
+        // 문단 시작(pos 0)에 삽입할 때 첫 번째 스타일(start_pos=0)은 유지
+        for cs in &mut self.char_shapes {
+            if cs.start_pos > utf16_insert_pos {
+                cs.start_pos += utf16_delta;
+            } else if cs.start_pos == utf16_insert_pos
+                && cs.start_pos > 0
+                && (!at_hyperlink_end || at_hyperlink_start)
+            {
+                cs.start_pos += utf16_delta;
+            }
+        }
+
+        // 4. line_segs: 삽입 지점 이후의 text_start를 시프트
+        for ls in &mut self.line_segs {
+            if ls.text_start > utf16_insert_pos {
+                ls.text_start += utf16_delta;
+            } else if ls.text_start == utf16_insert_pos && ls.text_start > 0 {
+                ls.text_start += utf16_delta;
+            }
+        }
+
+        // 5. range_tags: 삽입 지점 이후의 start/end를 시프트
+        for rt in &mut self.range_tags {
+            if rt.start >= utf16_insert_pos {
+                rt.start += utf16_delta;
+            }
+            if rt.end >= utf16_insert_pos {
+                rt.end += utf16_delta;
+            }
+        }
+
+        super::hyperlink_format::text_edit(self, char_offset, char_offset, new_chars.len());
+        // 5-0. tab_extended: 넣은 탭을 그 자리 차례에 끼워 기존 탭과의 짝을 지킨다
+        let new_tabs = Self::tab_count(&new_chars);
+        if new_tabs > 0 && !self.tab_extended.is_empty() {
+            let at =
+                Self::tab_count(&text_chars[..effective_char_offset]).min(self.tab_extended.len());
+            self.tab_extended
+                .splice(at..at, std::iter::repeat_n(TAB_EXT_PLACEHOLDER, new_tabs));
+        }
+        // 5-1. field_ranges: 삽입 지점 이후의 char 인덱스 시프트
+        let inserted_len = new_chars.len();
+        for fr in &mut self.field_ranges {
+            // 글을 모두 지운 코드는 누름틀 문단의 첫 빈 필드 규칙처럼 친 글자를 품는다.
+            let outside = keeps_boundary_text_outside(self.controls.get(fr.control_idx))
+                && (fr.start_char_idx < fr.end_char_idx
+                    || matches!(self.controls.get(fr.control_idx),
+                        Some(Control::Field(field)) if field.field_type == FieldType::Hyperlink));
+            let is_caret_memo = fr.start_char_idx == fr.end_char_idx
+                && is_memo_control(self.controls.get(fr.control_idx));
+            // [hwpx-cowork] 틈 가운데 넣기면 이 틈의 필드 표지가 캐럿 앞/뒤 어느 쪽인지로 정한다(한/글 실측: [메모 시작] 뒤·[메모 끝] 앞 = 메모 안)
+            let gap_begin_after = code_gap.as_ref().map(|g| g.begins_after.contains(&fr.control_idx));
+            let gap_end_before = code_gap.as_ref().map(|g| g.ends_before.contains(&fr.control_idx));
+            let start_moves = match gap_begin_after {
+                Some(after) if fr.start_char_idx == char_offset => after,
+                _ => {
+                    fr.start_char_idx > char_offset
+                        || (outside
+                            && fr.start_char_idx == char_offset
+                            && fr.start_char_idx < fr.end_char_idx)
+                }
+            };
+            if start_moves {
+                fr.start_char_idx += inserted_len;
+            }
+            let end_moves = match gap_end_before {
+                Some(before) if fr.end_char_idx == char_offset && code_gap.is_some() => !before,
+                _ => fr.end_char_idx > char_offset || (fr.end_char_idx == char_offset && !outside && !is_caret_memo),
+            };
+            if end_moves {
+                fr.end_char_idx += inserted_len;
+            }
+        }
+
+        // 6. char_count 갱신
+        self.char_count += utf16_delta;
+
+        effective_char_offset
+    }
+
+    /// char_offset 위치에서 count개의 문자를 삭제한다.
+    ///
+    /// char_offset은 Rust 문자(char) 인덱스이다 (바이트 인덱스가 아님).
+    /// 삭제 후 char_offsets, char_shapes, line_segs, char_count가 자동 갱신된다.
+    /// 반환값: 실제 삭제된 문자 수.
+    pub fn delete_text_at(&mut self, char_offset: usize, count: usize) -> usize {
+        if count == 0 {
+            return 0;
+        }
+
+        let text_chars: Vec<char> = self.text.chars().collect();
+        let text_len = text_chars.len();
+
+        if char_offset >= text_len {
+            return 0;
+        }
+
+        // 실제 삭제할 문자 수 (범위 클램핑)
+        let actual_count = count.min(text_len - char_offset);
+        let del_end = char_offset + actual_count;
+
+        self.delete_nb_space_origin_range(char_offset, del_end);
+
+        // 바이트 범위 계산
+        let byte_start: usize = text_chars[..char_offset].iter().map(|c| c.len_utf8()).sum();
+        let byte_end: usize = text_chars[..del_end].iter().map(|c| c.len_utf8()).sum();
+
+        // 삭제 범위의 UTF-16 시작/끝 위치 결정
+        let utf16_start: u32 = if char_offset < self.char_offsets.len() {
+            self.char_offsets[char_offset]
+        } else {
+            0
+        };
+        let utf16_delta: u32 = text_chars[char_offset..del_end]
+            .iter()
+            .map(|c| Self::char_stream_len(*c))
+            .sum();
+        let utf16_end = utf16_start + utf16_delta;
+
+        self.literal_figure_spaces
+            .retain(|&position| position < char_offset || position >= del_end);
+        for position in &mut self.literal_figure_spaces {
+            if *position >= del_end {
+                *position -= del_end - char_offset;
+            }
+        }
+
+        for mark in &mut self.markpen_marks {
+            mark.char_idx = if mark.char_idx >= del_end {
+                mark.char_idx - (del_end - char_offset)
+            } else {
+                mark.char_idx.min(char_offset)
+            };
+            if let Some(pos) = &mut mark.utf16_pos {
+                *pos = if *pos >= utf16_end {
+                    *pos - utf16_delta
+                } else {
+                    (*pos).min(utf16_start)
+                };
+            }
+        }
+        // [hwpx-cowork] 다단락 필드 끝·제목 차례 표시도 글자 번호 축이다 — 지운 글자만큼 당긴다(지운 범위 안이면 지운 자리로)
+        let shift_idx = |idx: usize| if idx >= del_end { idx - actual_count } else { idx.min(char_offset) };
+        for o in &mut self.orphan_field_ends {
+            o.char_idx = shift_idx(o.char_idx);
+        }
+        for m in &mut self.title_marks {
+            m.char_idx = shift_idx(m.char_idx);
+        }
+
+        self.text_element_origins = Some(
+            self.resolved_text_element_origins()
+                .into_iter()
+                .filter_map(|i| {
+                    if i < char_offset {
+                        Some(i)
+                    } else if i >= del_end {
+                        Some(i - actual_count)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        );
+        // 1. 텍스트 삭제
+        self.text.drain(byte_start..byte_end);
+        self.refresh_nb_space_control_mask();
+
+        // 2. char_offsets: 삭제 범위 제거 + 이후 엔트리 시프트
+        let mut updated_offsets =
+            Vec::with_capacity(self.char_offsets.len().saturating_sub(actual_count));
+        updated_offsets.extend_from_slice(&self.char_offsets[..char_offset]);
+        for &offset in &self.char_offsets[del_end..] {
+            updated_offsets.push(offset - utf16_delta);
+        }
+        self.char_offsets = updated_offsets;
+
+        // 3. char_shapes: 삭제 범위 이후 → utf16_delta만큼 감소
+        for cs in &mut self.char_shapes {
+            if cs.start_pos >= utf16_end {
+                cs.start_pos -= utf16_delta;
+            } else if cs.start_pos > utf16_start {
+                // 삭제 범위 내 → 삭제 시작으로 클램핑
+                cs.start_pos = utf16_start;
+            }
+        }
+        // [#3576, #4271] 클램핑으로 같은 start_pos 에 몰린 ref 를 정리한다.
+        // char_shapes 는 start_pos 오름차순의 '서로 다른' 경계여야 한다.
+        //
+        // 삭제 뒤 오른쪽 텍스트가 남으면 utf16_end 의 ref 도 utf16_start 로 이동한다.
+        // 이때는 마지막 ref 가 살아남은 오른쪽 텍스트의 글자모양이므로 마지막 것을
+        // 보존해야 한다. 첫 ref 를 남기면 삽입+서식 적용을 undo 한 뒤 삽입 런의 서식이
+        // 원문 오른쪽에 새어 남는다. 반대로 문단 끝까지 삭제한 경우에는 오른쪽 텍스트가
+        // 없으므로 기존 동작대로 첫 ref 를 보존한다.
+        let preserve_right_shape = del_end < text_len;
+        let mut deduped = Vec::<CharShapeRef>::with_capacity(self.char_shapes.len());
+        for cs in self.char_shapes.drain(..) {
+            if let Some(previous) = deduped.last_mut() {
+                if previous.start_pos == cs.start_pos {
+                    if preserve_right_shape && cs.start_pos == utf16_start {
+                        *previous = cs;
+                    }
+                    continue;
+                }
+            }
+            deduped.push(cs);
+        }
+        self.char_shapes = deduped;
+
+        // 4. line_segs: 삭제 범위 이후 → utf16_delta만큼 감소
+        for ls in &mut self.line_segs {
+            if ls.text_start >= utf16_end {
+                ls.text_start -= utf16_delta;
+            } else if ls.text_start > utf16_start {
+                ls.text_start = utf16_start;
+            }
+        }
+
+        // 5. range_tags: 삭제 범위에 따라 축소/조정
+        for rt in &mut self.range_tags {
+            if rt.start >= utf16_end {
+                rt.start -= utf16_delta;
+            } else if rt.start > utf16_start {
+                rt.start = utf16_start;
+            }
+            if rt.end >= utf16_end {
+                rt.end -= utf16_delta;
+            } else if rt.end > utf16_start {
+                rt.end = utf16_start;
+            }
+        }
+
+        super::hyperlink_format::text_edit(self, char_offset, del_end, 0);
+        // 5-0. tab_extended: 지운 탭의 짝을 뺀다
+        let gone_tabs = Self::tab_count(&text_chars[char_offset..del_end]);
+        if gone_tabs > 0 && !self.tab_extended.is_empty() {
+            let at = Self::tab_count(&text_chars[..char_offset]).min(self.tab_extended.len());
+            let end = (at + gone_tabs).min(self.tab_extended.len());
+            self.tab_extended.drain(at..end);
+        }
+        // 5-1. field_ranges: 삭제 범위에 따라 축소/조정
+        for fr in &mut self.field_ranges {
+            if fr.start_char_idx >= del_end {
+                fr.start_char_idx -= actual_count;
+            } else if fr.start_char_idx > char_offset {
+                fr.start_char_idx = char_offset;
+            }
+            if fr.end_char_idx >= del_end {
+                fr.end_char_idx -= actual_count;
+            } else if fr.end_char_idx > char_offset {
+                fr.end_char_idx = char_offset;
+            }
+        }
+        // start > end (역전)인 경우만 제거. start == end (빈 필드)는 유효한 상태이므로 유지.
+        // IME 조합 중 delete→insert 사이클에서 필드가 일시적으로 비워질 수 있음.
+        self.field_ranges
+            .retain(|fr| fr.start_char_idx <= fr.end_char_idx);
+
+        // 6. char_count 갱신
+        self.char_count -= utf16_delta;
+        self.forget_para_text_if_emptied();
+
+        actual_count
+    }
+
+    // ─── [hwpx-cowork] 조판 부호(자동 번호·새 번호 등) 지우기 ─────────────────
+    //
+    // 조판 부호는 글자(`text`)가 아니라 `controls` 에 있고, 스트림에서 8유닛 자리를 차지한다
+    // (`char_offsets` 사이 틈). 자동 번호만은 그 자리 첫 유닛에 자리표 공백 한 글자를 `text` 에 남긴다
+    // (파서 공통 규약 — 자리표 P, 다음 글자 P+8). `delete_text_at` 은 글자만 지우므로 자리표를 지우면
+    // 컨트롤이 짝 글자를 잃고(저장기가 앞 공백을 자리표로 오인해 번호가 한 칸 앞으로 옮겨 간다 — 캡션
+    // '[표 1]' 에서 Backspace → '[표1]'), 부호는 지울 길이 없었다. 아래는 부호 자체를 빼는 경로다.
+
+    /// 사용자가 지울 수 있는 조판 부호인가 — 번호 넣기(그림·표·수식·쪽 번호 등 자동 번호), 새 번호로 시작,
+    /// 쪽 번호 위치, 감추기, 책갈피, 찾아보기 표식, 홀짝 쪽 시작. 표·그림 같은 개체와 구역·단 정의는 아니다.
+    pub fn is_removable_code(ctrl: &Control) -> bool {
+        matches!(
+            ctrl,
+            Control::AutoNumber(_)
+                | Control::NewNumber(_)
+                | Control::PageNumberPos(_)
+                | Control::PageHide(_)
+                | Control::Bookmark(_)
+                | Control::IndexMark(_)
+                | Control::PageNumCtrl(_)
+        )
+    }
+
+    /// 지울 수 있는 조판 부호마다 자리: `char_pos` 는 자리표가 있으면 그 글자 번호, 없으면 부호 바로 뒤
+    /// 글자 번호(그 글자 앞 틈에 부호가 있다 — 문단 끝 부호는 글자 수). 컨트롤 차례대로.
+    pub fn code_slots(&self) -> Vec<CodeSlot> {
+        if !self.controls.iter().any(Self::is_removable_code) {
+            return Vec::new();
+        }
+        let positions = self.control_text_positions();
+        let chars: Vec<char> = self.text.chars().collect();
+        let len = chars.len();
+        let mut out = Vec::new();
+        for (control_idx, ctrl) in self.controls.iter().enumerate() {
+            if !Self::is_removable_code(ctrl) {
+                continue;
+            }
+            let p = positions.get(control_idx).copied().unwrap_or(len).min(len);
+            let mut slot = CodeSlot { control_idx, char_pos: p, placeholder: false };
+            if matches!(ctrl, Control::AutoNumber(_)) && !self.char_offsets.is_empty() {
+                // control_text_positions 와 같은 판별: 공백 + 다음 글자까지 정확히 8유닛
+                // 자리표 뒤에 다른 컨트롤(메모 필드 등)이 이어지면 갭 분석이 번호를 자리표 다음 글자 앞 틈(p)으로 잡는다 —
+                // 바로 앞 글자가 공백이고 그 공백부터 다음 글자까지가 8의 배수(자리표 8 + 컨트롤 8k)면 그 공백이 자리표다
+                // (일반 공백이면 1 + 8k). 저장기(serializer/hwpx/section.rs)의 자리표 판별(다음 글자까지 8 이상)과 같은 글자를 고른다.
+                let stride = |q: usize| -> Option<u32> {
+                    Some(self.char_offsets.get(q + 1)?.checked_sub(*self.char_offsets.get(q)?)?)
+                };
+                let is_slot = |w: Option<u32>| matches!(w, Some(w) if w >= CTRL_CHAR_CODE_UNITS && w % CTRL_CHAR_CODE_UNITS == 0);
+                if p + 1 < len && chars[p] == ' ' && is_slot(stride(p)) {
+                    slot.placeholder = true;
+                } else if p >= 1 && p < len && chars[p - 1] == ' ' && is_slot(stride(p - 1)) {
+                    slot.char_pos = p - 1;
+                    slot.placeholder = true;
+                } else if p == len && len > 0 && chars[len - 1] == ' ' && self.char_offsets.len() == len {
+                    // 문단 끝 자리표(갭 분석이 마지막 글자를 보지 않아 끝으로 밀려 온 것): 마지막 공백부터
+                    // 스트림 끝(끝 마커 앞)까지가 8의 배수면 그 공백이 자리표다(일반 공백이면 1 + 8k).
+                    let tail = self
+                        .char_count
+                        .saturating_sub(1)
+                        .saturating_sub(self.char_offsets[len - 1]);
+                    if tail >= CTRL_CHAR_CODE_UNITS && tail % CTRL_CHAR_CODE_UNITS == 0 {
+                        slot.char_pos = len - 1;
+                        slot.placeholder = true;
+                    }
+                }
+            }
+            out.push(slot);
+        }
+        out
+    }
+
+    /// 스트림 `[at, at+n)` 유닛을 닫는다 — `from_char` 부터의 글자 위치와 그 뒤 메타(글자 모양·줄·영역 태그·형광펜)를
+    /// n 만큼 당기고, 닫힌 구간 안에 있던 메타는 `at` 으로 모은다. `delete_text_at` 의 UTF-16 처리와 같은 규약.
+    fn release_stream_units(&mut self, from_char: usize, at: u32, n: u32) {
+        if n == 0 {
+            return;
+        }
+        let from = from_char.min(self.char_offsets.len());
+        for o in self.char_offsets[from..].iter_mut() {
+            *o = o.saturating_sub(n);
+        }
+        let end = at + n;
+        let adj = |pos: u32| -> u32 {
+            if pos >= end {
+                pos - n
+            } else if pos > at {
+                at
+            } else {
+                pos
+            }
+        };
+        for cs in &mut self.char_shapes {
+            cs.start_pos = adj(cs.start_pos);
+        }
+        // 같은 자리에 몰린 글자 모양은 뒤 것(그 자리부터 이어지는 글자의 모양)을 남긴다
+        let mut deduped = Vec::<CharShapeRef>::with_capacity(self.char_shapes.len());
+        for cs in self.char_shapes.drain(..) {
+            if let Some(prev) = deduped.last_mut() {
+                if prev.start_pos == cs.start_pos {
+                    *prev = cs;
+                    continue;
+                }
+            }
+            deduped.push(cs);
+        }
+        self.char_shapes = deduped;
+        for ls in &mut self.line_segs {
+            ls.text_start = adj(ls.text_start);
+        }
+        for rt in &mut self.range_tags {
+            rt.start = adj(rt.start);
+            rt.end = adj(rt.end);
+        }
+        for mark in &mut self.markpen_marks {
+            if let Some(pos) = &mut mark.utf16_pos {
+                *pos = adj(*pos);
+            }
+        }
+        self.char_count = self.char_count.saturating_sub(n);
+    }
+
+    /// 조판 부호 `controls[control_idx]` 를 뺀다(자동 번호는 자리표 글자도). 지울 수 있는 부호가 아니면 None.
+    /// 반환 = 뺀 부호의 자리(뺀 뒤 캐럿을 둘 글자 번호 = `char_pos`).
+    pub fn remove_code_control(&mut self, control_idx: usize) -> Option<CodeSlot> {
+        // [hwpx-cowork] 메모 부호 — 시작·끝 표지를 빼고 글은 남긴다. 캐럿은 메모가 붙어 있던 첫 자리
+        if let Some(&(_, s, _)) = self.memo_slots().iter().find(|m| m.0 == control_idx) {
+            return self
+                .remove_memo_field(control_idx)
+                .then_some(CodeSlot { control_idx, char_pos: s, placeholder: false });
+        }
+        let slot = self.code_slots().into_iter().find(|s| s.control_idx == control_idx)?;
+        if slot.placeholder {
+            let q = slot.char_pos;
+            let slot_start = *self.char_offsets.get(q)?;
+            // 자리표 한 글자는 일반 글자 지우기로(글자 번호 기반 메타 — 필드·형광펜·링크 — 도 함께 옮겨진다),
+            // 남은 7유닛은 여기서 닫는다
+            self.delete_text_at(q, 1);
+            self.release_stream_units(q, slot_start, CTRL_CHAR_CODE_UNITS - 1);
+        } else {
+            let p = slot.char_pos;
+            // 부호가 든 틈의 끝(뒤 글자 시작, 문단 끝이면 스트림 끝) 바로 앞 8유닛을 닫는다 — 틈 안의 8유닛 칸은
+            // 모두 같은 크기라 어느 칸을 닫아도 남은 부호·숨은 칸의 자리는 그대로다
+            let gap_end = match self.char_offsets.get(p) {
+                Some(&o) => o,
+                None => self.char_count.saturating_sub(1),
+            };
+            let at = gap_end.saturating_sub(CTRL_CHAR_CODE_UNITS);
+            self.release_stream_units(p, at, CTRL_CHAR_CODE_UNITS);
+        }
+        self.align_ctrl_data_records();
+        self.controls.remove(control_idx);
+        if control_idx < self.ctrl_data_records.len() {
+            self.ctrl_data_records.remove(control_idx);
+        }
+        for range in &mut self.field_ranges {
+            if range.control_idx > control_idx {
+                range.control_idx -= 1;
+            }
+        }
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        Some(slot)
+    }
+
+    /// 글자 범위 `[char_offset, char_offset + count)` 를 지우면서 그 안의 조판 부호도 뺀다 — 선택 영역 지우기.
+    /// 자동 번호는 자리표 글자가 범위 안이면, 그 밖의 부호는 범위 양끝 글자 사이(틈이 범위 한가운데)에 있으면.
+    /// 범위 첫 글자 앞·끝 글자 뒤의 부호는 남긴다(경계). 반환 = (지운 글자 수(자리표 포함), 뺀 번호 부호가 있는가 — 번호 다시 매기기).
+    pub fn delete_text_with_codes_at(&mut self, char_offset: usize, count: usize) -> (usize, bool) {
+        self.delete_text_with_codes(char_offset, count, false, false)
+    }
+
+    /// [`Self::delete_text_with_codes_at`] 에 경계 부호 규칙을 더한 것 — 여러 문단에 걸친 선택에서 `lead` 면 범위 첫 글자
+    /// 앞 틈(끝 문단 머리 — 선택이 앞 문단에서 시작했다), `trail` 이면 범위 끝 글자 뒤 틈(첫 문단 꼬리)의 부호도 뺀다.
+    pub fn delete_text_with_codes(
+        &mut self,
+        char_offset: usize,
+        count: usize,
+        lead: bool,
+        trail: bool,
+    ) -> (usize, bool) {
+        let len = self.text.chars().count();
+        if count == 0 || char_offset >= len {
+            return (0, false);
+        }
+        let end = (char_offset + count).min(len);
+        // [hwpx-cowork] 붙은 글을 모두 지우는 메모는 함께 뺀다(글은 남기고 표지만 — 글은 아래에서 지운다). 먼저 빼야 아래 부호 자리가 맞다
+        for ci in self.memos_in_deleted_range(char_offset, end, lead, trail) {
+            self.remove_memo_field(ci);
+        }
+        let mut targets: Vec<CodeSlot> = self
+            .code_slots()
+            .into_iter()
+            .filter(|s| {
+                if s.placeholder {
+                    s.char_pos >= char_offset && s.char_pos < end
+                } else {
+                    (s.char_pos > char_offset || (lead && s.char_pos == char_offset))
+                        && (s.char_pos < end || (trail && s.char_pos == end))
+                }
+            })
+            .collect();
+        // 뒤 컨트롤부터 뺀다 — 앞 컨트롤 번호·글자 번호가 흔들리지 않게
+        targets.sort_by(|a, b| b.control_idx.cmp(&a.control_idx));
+        let mut removed_chars = 0usize;
+        let mut numbers = false;
+        for t in &targets {
+            let is_number = matches!(
+                self.controls.get(t.control_idx),
+                Some(Control::AutoNumber(_) | Control::NewNumber(_))
+            );
+            if let Some(s) = self.remove_code_control(t.control_idx) {
+                if s.placeholder {
+                    removed_chars += 1;
+                }
+                numbers |= is_number;
+            }
+        }
+        let rest = (end - char_offset).saturating_sub(removed_chars);
+        let deleted = if rest > 0 { self.delete_text_at(char_offset, rest) } else { 0 };
+        (deleted + removed_chars, numbers)
+    }
+
+    // ─── [hwpx-cowork] 다단락 필드(차례) 표지 넣고 빼기 ─────────────────
+    //
+    // 차례 필드는 첫 문단의 필드 시작(`Control::Field` — 같은 문단 `field_ranges` 없음)과 마지막 문단의 다단락 필드 끝
+    // (`orphan_field_ends`)으로 이어진다. 둘 다 스트림에서 8유닛 칸이다. 선택 지우기·문단 합치기로 한쪽이 사라졌을 때
+    // 남은 쪽을 빼거나(DocumentCore::settle_toc_markers) 끝을 지운 자리에 다시 둔다.
+
+    /// 글자 p 앞 틈 [앞 글자 끝, 틈 끝) — 틈 끝은 p 글자의 자리(문단 끝이면 끝 마커 자리)
+    fn gap_before_char(&self, p: usize) -> (u32, u32) {
+        let prev_end = if p == 0 {
+            0
+        } else {
+            let c = self.text.chars().nth(p - 1).unwrap_or(' ');
+            self.char_offsets.get(p - 1).copied().unwrap_or(0) + Self::char_stream_len(c)
+        };
+        let gap_end = match self.char_offsets.get(p) {
+            Some(&o) => o,
+            None => self.char_count.saturating_sub(1),
+        };
+        (prev_end, gap_end.max(prev_end))
+    }
+
+    /// 틈(글자 p 앞)의 끝 8유닛을 닫는다 — 틈이 8 보다 좁으면(자리를 세지 않은 IR) 닫지 않는다
+    fn release_gap_slot(&mut self, p: usize) {
+        let (prev_end, gap_end) = self.gap_before_char(p);
+        if gap_end >= prev_end + CTRL_CHAR_CODE_UNITS {
+            self.release_stream_units(p, gap_end - CTRL_CHAR_CODE_UNITS, CTRL_CHAR_CODE_UNITS);
+        }
+        let floor = self.text.chars().map(Self::char_stream_len).sum::<u32>() + 1;
+        self.char_count = self.char_count.max(floor);
+    }
+
+    /// 이 문단 안에서 닫히지 않는 필드 시작 `controls[control_idx]`(다단락 필드)를 8유닛 칸째 뺀다.
+    /// 필드가 아니거나 같은 문단에서 닫히는 필드면 false.
+    pub fn remove_unclosed_field_begin(&mut self, control_idx: usize) -> bool {
+        if !matches!(self.controls.get(control_idx), Some(Control::Field(_)))
+            || self.field_ranges.iter().any(|r| r.control_idx == control_idx)
+        {
+            return false;
+        }
+        let len = self.text.chars().count();
+        let p = self.control_text_positions().get(control_idx).copied().unwrap_or(len).min(len);
+        self.release_gap_slot(p);
+        self.align_ctrl_data_records();
+        self.controls.remove(control_idx);
+        if control_idx < self.ctrl_data_records.len() {
+            self.ctrl_data_records.remove(control_idx);
+        }
+        for range in &mut self.field_ranges {
+            if range.control_idx > control_idx {
+                range.control_idx -= 1;
+            }
+        }
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.has_para_text = !(self.text.is_empty()
+            && self.controls.is_empty()
+            && self.orphan_field_ends.is_empty()
+            && self.title_marks.is_empty());
+        true
+    }
+
+    /// 다단락 필드 끝 `orphan_field_ends[k]` 를 8유닛 칸째 뺀다
+    pub fn remove_orphan_field_end(&mut self, k: usize) -> bool {
+        let Some(o) = self.orphan_field_ends.get(k) else {
+            return false;
+        };
+        let p = o.char_idx.min(self.text.chars().count());
+        self.release_gap_slot(p);
+        self.orphan_field_ends.remove(k);
+        self.has_para_text = !(self.text.is_empty()
+            && self.controls.is_empty()
+            && self.orphan_field_ends.is_empty()
+            && self.title_marks.is_empty());
+        true
+    }
+
+    /// 다단락 필드 끝을 글자 char_idx 앞(문단 끝이면 끝)에 넣는다 — 그 틈 끝에 8유닛 칸을 낸다
+    pub fn add_orphan_field_end(&mut self, char_idx: usize, end: OrphanFieldEnd) {
+        let len = self.text.chars().count();
+        let p = char_idx.min(len);
+        if let Some(&at) = self.char_offsets.get(p) {
+            for o in self.char_offsets[p..].iter_mut() {
+                *o += CTRL_CHAR_CODE_UNITS;
+            }
+            self.shift_position_metadata_for_stream_insertion(at, CTRL_CHAR_CODE_UNITS);
+        }
+        self.char_count += CTRL_CHAR_CODE_UNITS;
+        self.orphan_field_ends.push(OrphanFieldEnd { char_idx: p, ..end });
+        self.orphan_field_ends.sort_by_key(|o| o.char_idx);
+        self.has_para_text = true;
+    }
+
+    /// 구역·단 정의(SectionDef·ColumnDef 등 첫 글자 앞 확장 컨트롤)를 문단 맨 앞 컨트롤로 넣는다(차례 '새 구역') —
+    /// 컨트롤마다 8유닛 칸을 첫 글자 앞에 낸다. 이미 있는 맨 앞 컨트롤·칸은 그 뒤로 밀린다.
+    pub fn insert_leading_extended_controls(&mut self, defs: Vec<Control>) {
+        let n = defs.len();
+        if n == 0 {
+            return;
+        }
+        self.align_ctrl_data_records();
+        for (k, d) in defs.into_iter().enumerate() {
+            self.controls.insert(k, d);
+            self.ctrl_data_records.insert(k, None);
+        }
+        for range in &mut self.field_ranges {
+            range.control_idx += n;
+        }
+        let units = n as u32 * CTRL_CHAR_CODE_UNITS;
+        if !self.char_offsets.is_empty() {
+            for o in &mut self.char_offsets {
+                *o += units;
+            }
+            self.shift_position_metadata_for_stream_insertion(0, units);
+        }
+        self.char_count += units;
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.has_para_text = true;
+    }
+
+    /// [hwpx-cowork] 문단 머리에 구역 나누기(첫 글자 앞 구역 정의 — SectionDef, 보통 ColumnDef 가 따른다)가 있는가.
+    /// 구역 첫 문단·파일 안 구역 나누기 문단(차례 '새 구역')이 그렇다(docs/SECTIONS.md).
+    pub fn has_section_break(&self) -> bool {
+        self.controls
+            .iter()
+            .take_while(|c| matches!(c, Control::SectionDef(_) | Control::ColumnDef(_)))
+            .any(|c| matches!(c, Control::SectionDef(_)))
+    }
+
+    /// [hwpx-cowork] 문단 머리를 구역 나누기로 — 구역·단 정의를 맨 앞 컨트롤로 넣고 나누기 종류를 구역으로(파서와 같은 꼴:
+    /// raw 0x01 구역 + 0x02 단 정의). 이미 구역 나누기면 그대로 둔다.
+    pub fn put_section_break(&mut self, defs: Vec<Control>) {
+        if self.has_section_break() || !defs.iter().any(|c| matches!(c, Control::SectionDef(_))) {
+            return;
+        }
+        let has_col = defs.iter().any(|c| matches!(c, Control::ColumnDef(_)));
+        self.insert_leading_extended_controls(defs);
+        self.raw_break_type |= 0x01 | if has_col { 0x02 } else { 0 };
+        if matches!(self.column_type, ColumnBreakType::None | ColumnBreakType::MultiColumn) {
+            self.column_type = ColumnBreakType::Section;
+        }
+    }
+
+    /// [hwpx-cowork] 문단 머리의 구역 나누기를 칸째 뺀다 → 뺀 구역·단 정의(차례대로). 구역 나누기가 아니면 빈 목록.
+    /// 구역 경계를 지우는 편집(구역을 넘는 지우기·구역 첫머리 Backspace)이 쓴다 — 한/글처럼 뒤 구역 정의는 사라지고 글은 앞 구역을 따른다.
+    pub fn take_section_break(&mut self) -> Vec<Control> {
+        if !self.has_section_break() {
+            return Vec::new();
+        }
+        let lead = self
+            .controls
+            .iter()
+            .take_while(|c| matches!(c, Control::SectionDef(_) | Control::ColumnDef(_)))
+            .count();
+        self.invalidate_layout_inputs();
+        self.align_ctrl_data_records();
+        let removed: Vec<Control> = self.controls.drain(..lead).collect();
+        self.ctrl_data_records.drain(..lead);
+        for range in &mut self.field_ranges {
+            range.control_idx = range.control_idx.saturating_sub(lead);
+        }
+        let units = lead as u32 * CTRL_CHAR_CODE_UNITS;
+        if self.char_offsets.is_empty() {
+            // 글자 없는 문단: 칸은 char_count 에만 있다(끝 표지 1 은 남긴다)
+            self.char_count = self.char_count.saturating_sub(units).max(1);
+        } else {
+            self.release_leading_extended_control_slots(lead);
+        }
+        self.raw_break_type &= !0x03;
+        if self.column_type == ColumnBreakType::Section {
+            self.column_type = ColumnBreakType::None;
+        }
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.has_para_text = !(self.text.is_empty()
+            && self.controls.is_empty()
+            && self.orphan_field_ends.is_empty()
+            && self.title_marks.is_empty());
+        removed
+    }
+
+    // ─── [hwpx-cowork] 메모(MEMO 필드) 빼기 ─────────────────
+    //
+    // 메모는 필드 시작(`Control::Field` — 본문은 memo_paragraphs)과 끝이 같은 문단 `field_ranges` 로 이어지고, 시작·끝 표지가
+    // 스트림에서 8유닛 칸씩 차지한다. 글은 그대로 두고 메모만 빼는 길(한/글 '메모 지우기'·메모 부호 지우기)과, 메모가 붙은 글을
+    // 통째로 지울 때 메모도 함께 빼는 규칙(선택 지우기 — delete_text_with_codes)이다.
+
+    /// 이 문단 안에서 닫히는 메모마다 (컨트롤 번호, 시작 글자, 끝 글자) — 컨트롤 차례
+    pub fn memo_slots(&self) -> Vec<(usize, usize, usize)> {
+        let mut out: Vec<(usize, usize, usize)> = self
+            .field_ranges
+            .iter()
+            .filter(|r| {
+                matches!(self.controls.get(r.control_idx),
+                    Some(Control::Field(f)) if f.field_type == crate::model::control::FieldType::Memo)
+            })
+            .map(|r| (r.control_idx, r.start_char_idx, r.end_char_idx))
+            .collect();
+        out.sort_by_key(|s| s.0);
+        out
+    }
+
+    /// 메모 `controls[control_idx]` 를 시작·끝 표지 칸째 뺀다(글은 남긴다). 같은 문단에서 닫히는 메모가 아니면 false.
+    pub fn remove_memo_field(&mut self, control_idx: usize) -> bool {
+        let Some(k) = self.field_ranges.iter().position(|r| r.control_idx == control_idx) else {
+            return false;
+        };
+        if !matches!(self.controls.get(control_idx),
+            Some(Control::Field(f)) if f.field_type == crate::model::control::FieldType::Memo)
+        {
+            return false;
+        }
+        let (start, end) = (self.field_ranges[k].start_char_idx, self.field_ranges[k].end_char_idx);
+        // 끝 표지(글자 end 앞 틈)부터 — 앞 틈을 먼저 닫으면 뒤 글자 자리가 당겨져 end 앞 틈을 다시 재야 한다
+        self.release_gap_slot(end);
+        self.release_gap_slot(start);
+        self.field_ranges.remove(k);
+        self.align_ctrl_data_records();
+        self.controls.remove(control_idx);
+        if control_idx < self.ctrl_data_records.len() {
+            self.ctrl_data_records.remove(control_idx);
+        }
+        for range in &mut self.field_ranges {
+            if range.control_idx > control_idx {
+                range.control_idx -= 1;
+            }
+        }
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.has_para_text = !(self.text.is_empty()
+            && self.controls.is_empty()
+            && self.orphan_field_ends.is_empty()
+            && self.title_marks.is_empty());
+        true
+    }
+
+    /// 글 없는 줄의 메모(붙은 글 없는 메모)를 모두 뺀다 — 여러 문단에 걸친 선택이 빈 줄에서 시작할 때(그 줄의 메모 부호가 선택 안).
+    /// → 뺀 수
+    pub fn remove_empty_line_memos(&mut self) -> usize {
+        if !self.text.is_empty() {
+            return 0;
+        }
+        let list = self.memos_in_deleted_range(0, 0, false, true);
+        let n = list.len();
+        for ci in list {
+            self.remove_memo_field(ci);
+        }
+        n
+    }
+
+    /// 글자 범위 [from, to) 를 지울 때 함께 빠질 메모 — 붙은 글이 모두 범위 안인 메모, 빈 메모(붙은 글 없음)는 범위 한가운데
+    /// 틈이거나 `lead`(범위 첫 글자 앞 틈)·`trail`(끝 글자 뒤 틈) 경계 틈에 있는 것. → 컨트롤 번호(큰 것부터)
+    pub fn memos_in_deleted_range(&self, from: usize, to: usize, lead: bool, trail: bool) -> Vec<usize> {
+        let mut out: Vec<usize> = self
+            .memo_slots()
+            .into_iter()
+            .filter(|&(_, s, e)| {
+                if s < e {
+                    s >= from && e <= to
+                } else {
+                    (from < s && s < to) || (lead && s == from) || (trail && s == to)
+                }
+            })
+            .map(|(ci, _, _)| ci)
+            .collect();
+        out.sort_by(|a, b| b.cmp(a));
+        out
+    }
+
+    /// 병합으로 사라질 문단의 스코프 메타데이터를 캡처한다 (undo 복원용).
+    pub fn capture_meta(&self) -> ParaMeta {
+        ParaMeta {
+            para_shape_id: self.para_shape_id,
+            style_id: self.style_id,
+            column_type: self.column_type,
+            raw_break_type: self.raw_break_type,
+            numbering_restart: self.numbering_restart,
+            raw_header_extra: self.raw_header_extra.clone(),
+            tab_extended: self.tab_extended.clone(),
+        }
+    }
+
+    /// 캡처한 메타데이터를 되돌린다 — 병합 undo 의 `split_at` 직후에 호출한다.
+    pub fn apply_meta(&mut self, meta: ParaMeta) {
+        self.para_shape_id = meta.para_shape_id;
+        self.style_id = meta.style_id;
+        self.column_type = meta.column_type;
+        self.raw_break_type = meta.raw_break_type;
+        self.numbering_restart = meta.numbering_restart;
+        self.raw_header_extra = meta.raw_header_extra;
+        self.tab_extended = meta.tab_extended;
+    }
+
+    /// char_offset 위치에서 문단을 분할한다.
+    ///
+    /// `char_offset` 은 캐럿 축이다 — 글자와 [`Self::occupies_split_slot`] 컨트롤을 하나씩 센다.
+    /// 현재 문단은 char_offset 이전까지만 유지되고,
+    /// char_offset 이후의 텍스트와 메타데이터로 새 문단을 생성하여 반환한다.
+    ///
+    /// 새 문단의 문단 모양·스타일·번호 시작 방식 등은 `self` 에서 상속된다 — Enter
+    /// 분할의 시맨틱이다. 병합의 역연산으로 쓰는 호출부는 `apply_meta` 로 사라진
+    /// 문단의 원래 값을 되돌려야 한다 (Task #2342).
+    pub fn split_at(&mut self, char_offset: usize) -> Paragraph {
+        self.layout_object_projection = false;
+        self.layout_float_band = false;
+        let control_positions = self.split_logical_control_positions();
+        let split_pos = self.split_text_pos_for_logical_offset(char_offset, &control_positions);
+        let nb_spaces = self.materialized_nb_space_controls();
+        let new_nb_spaces = nb_spaces
+            .iter()
+            .filter(|&&index| index >= split_pos)
+            .map(|&index| index - split_pos)
+            .collect();
+        self.nb_space_control_indices = Some(
+            nb_spaces
+                .into_iter()
+                .filter(|&index| index < split_pos)
+                .collect(),
+        );
+        let text_positions = self.control_text_positions();
+        let text_chars: Vec<char> = self.text.chars().collect();
+        // [hwpx-cowork] Split tab metadata once, below, after padding its
+        // per-character ownership. Splitting here as well loses the suffix.
+        // 문단 끝 자동 번호 뒤에서 나누면 번호는 자리표 글자와 함께 앞 문단에 남는다.
+        let kept_number = (split_pos == text_chars.len())
+            .then(|| self.trailing_auto_number(&text_positions))
+            .flatten();
+
+        // 새 문단으로 옮길 컨트롤.
+        //
+        // TAC 그림/표/수식 등은 본문에서 한 글자처럼 취급되므로 문단 분할 시
+        // logical offset 기준으로 앞뒤 문단에 나뉘어야 한다. SectionDef/ColumnDef 같은
+        // 구조 control은 문단 시작에 붙은 문서 구조 정보라 원래 문단에 둔다.
+        //
+        // Field는 보이는 문자 오프셋에서 한 글자를 차지하지 않는다. 다만 새 문단으로
+        // 이관되는 FieldRange가 참조하는 Field control은 범위와 함께 이동해야 한다.
+        // 일반 이동형 컨트롤로 분류하면 split의 논리 offset 계산에 Field가 더해져
+        // ClickHere 복사/붙여넣기 경계가 한 글자씩 어긋난다.
+        let moves: Vec<bool> = self
+            .controls
+            .iter()
+            .enumerate()
+            .map(|(ci, ctrl)| {
+                ((Self::is_split_movable_control(ctrl)
+                    && control_positions.get(ci).copied().unwrap_or(usize::MAX) >= char_offset)
+                    || self
+                        .field_ranges
+                        .iter()
+                        .any(|fr| fr.control_idx == ci && fr.start_char_idx >= split_pos))
+                    && Some(ci) != kept_number
+            })
+            .collect();
+
+        // 분할 지점의 UTF-16 위치
+        let utf16_split: u32 = if split_pos < self.char_offsets.len() {
+            // 나누는 글자 바로 앞 갭에서 새 문단으로 가는 슬롯(옮기는 컨트롤, 그 글자의 제목
+            // 차례 표시)은 새 문단 첫 글자 앞에 남긴다. 남기지 않으면 `앞[각주]뒤` 를 각주
+            // 앞에서 나눈 새 문단이 `뒤[각주]` 가 된다. 그 글자 위치로 보고되는 컨트롤 가운데
+            // 갭에 있는 것은 앞쪽뿐이다 — 자동 번호는 갭이 아니라 자리표 글자에 있다.
+            let gap_start = split_pos.checked_sub(1).map_or(0, |prev| {
+                self.char_offsets[prev] + Self::char_stream_len(text_chars[prev])
+            });
+            let gap_slots = (self.char_offsets[split_pos].saturating_sub(gap_start) / 8) as usize;
+            let moved_controls = self
+                .control_text_positions()
+                .into_iter()
+                .enumerate()
+                .filter(|&(_, at)| at == split_pos)
+                .take(gap_slots.saturating_sub(self.hidden_slots_before(split_pos)))
+                .filter(|&(ci, _)| moves[ci])
+                .count();
+            let moved_marks = self
+                .title_marks
+                .iter()
+                .filter(|m| m.char_idx == split_pos)
+                .count();
+            self.char_offsets[split_pos] - 8 * (moved_controls + moved_marks).min(gap_slots) as u32
+        } else if !self.char_offsets.is_empty() {
+            self.char_stream_end(&text_chars, self.char_offsets.len() - 1, kept_number)
+        } else {
+            text_chars[..split_pos]
+                .iter()
+                .map(|character| Self::char_stream_len(*character))
+                .sum()
+        };
+
+        // === 새 문단 구성 ===
+
+        // [hwpx-cowork] 부분 복사/붙여넣기도 이 분할을 쓴다. 탭의 저장 폭·채움·종류는
+        // 문자 순서에 대응하므로 앞/뒤 탭 개수대로 나누며, 빠진 항목은 자리표로 채운다.
+        let tabs = text_chars.iter().filter(|&&c| c == '\t').count();
+        self.tab_extended.resize(tabs, TAB_EXT_PLACEHOLDER);
+        self.tab_extended.truncate(tabs);
+        let left_tabs = text_chars[..split_pos].iter().filter(|&&c| c == '\t').count();
+        let new_tab_extended = self.tab_extended.split_off(left_tabs);
+
+        let source_origins = self.resolved_text_element_origins();
+        let new_text_element_origins = source_origins
+            .iter()
+            .copied()
+            .filter(|&i| i >= split_pos)
+            .map(|i| i - split_pos)
+            .collect();
+        self.text_element_origins = Some(
+            source_origins
+                .into_iter()
+                .filter(|&i| i < split_pos)
+                .collect(),
+        );
+
+        // 1. 텍스트 분할
+        let byte_offset: usize = text_chars[..split_pos].iter().map(|c| c.len_utf8()).sum();
+        let new_text = self.text[byte_offset..].to_string();
+        self.text.truncate(byte_offset);
+
+        let new_literal_figure_spaces = self
+            .literal_figure_spaces
+            .iter()
+            .filter(|&&position| position >= split_pos)
+            .map(|&position| position - split_pos)
+            .collect();
+        self.literal_figure_spaces
+            .retain(|&position| position < split_pos);
+
+        // 2. char_offsets 분할
+        let new_char_offsets: Vec<u32> = self.char_offsets[split_pos..]
+            .iter()
+            .map(|&off| off - utf16_split)
+            .collect();
+        self.char_offsets.truncate(split_pos);
+
+        // 2-1. 제목 차례 표시 분할 — 문자 인덱스 기준이라 뒤 절반은 원점을 옮긴다.
+        let new_title_marks: Vec<TitleMark> = self
+            .title_marks
+            .iter()
+            .filter(|m| m.char_idx >= split_pos)
+            .map(|m| TitleMark {
+                char_idx: m.char_idx - split_pos,
+                ignore: m.ignore,
+            })
+            .collect();
+        self.title_marks.retain(|m| m.char_idx < split_pos);
+        // [hwpx-cowork] 다단락 필드 끝(차례 필드 끝)은 나눈 자리 뒤에 있으면 새 문단으로 — 차례 마지막 줄 가운데에서
+        // Enter 해도 차례가 그 줄 끝까지 이어진다. 나눈 자리 바로 그곳의 끝은 앞 문단에 남긴다(합치기의 되돌리기).
+        let new_orphan_field_ends: Vec<OrphanFieldEnd> = self
+            .orphan_field_ends
+            .iter()
+            .filter(|o| o.char_idx > split_pos)
+            .map(|o| OrphanFieldEnd { char_idx: o.char_idx - split_pos, ..o.clone() })
+            .collect();
+        self.orphan_field_ends.retain(|o| o.char_idx <= split_pos);
+        let new_markpen_marks: Vec<MarkpenMark> = self
+            .markpen_marks
+            .iter()
+            .filter(|m| m.char_idx >= split_pos)
+            .map(|m| MarkpenMark {
+                char_idx: m.char_idx - split_pos,
+                color: m.color.clone(),
+                utf16_pos: m.utf16_pos.map(|pos| pos.saturating_sub(utf16_split)),
+            })
+            .collect();
+        self.markpen_marks.retain(|m| m.char_idx < split_pos);
+
+        // 3. char_shapes 분할
+        let mut new_char_shapes: Vec<CharShapeRef> = Vec::new();
+        // 분할 지점에서의 활성 스타일 찾기
+        let mut active_style_id: u32 = self
+            .char_shapes
+            .first()
+            .map(|cs| cs.char_shape_id)
+            .unwrap_or(0);
+        for cs in &self.char_shapes {
+            if cs.start_pos <= utf16_split {
+                active_style_id = cs.char_shape_id;
+            }
+        }
+
+        // 분할 지점 이후의 char_shapes를 새 문단으로 이동 (위치 조정)
+        let mut has_zero_pos = false;
+        for cs in &self.char_shapes {
+            if cs.start_pos >= utf16_split {
+                let new_pos = cs.start_pos - utf16_split;
+                if new_pos == 0 {
+                    has_zero_pos = true;
+                }
+                new_char_shapes.push(CharShapeRef {
+                    start_pos: new_pos,
+                    char_shape_id: cs.char_shape_id,
+                });
+            }
+        }
+        // 새 문단의 시작(pos 0)에 스타일이 없으면 활성 스타일 추가
+        if !has_zero_pos {
+            new_char_shapes.insert(
+                0,
+                CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: active_style_id,
+                },
+            );
+        }
+
+        // 원래 문단의 char_shapes: 분할 지점 이후 제거
+        self.char_shapes.retain(|cs| cs.start_pos < utf16_split);
+        if self.char_shapes.is_empty() {
+            self.char_shapes.push(CharShapeRef {
+                start_pos: 0,
+                char_shape_id: active_style_id,
+            });
+        }
+
+        // 4. line_segs: 원본 치수를 보존하여 리플로우 시 올바른 줄간격 유지
+        //    split_at 후 reflow_line_segs()가 첫 번째 LineSeg의 치수를 참조하므로,
+        //    원본 HWP의 줄높이/텍스트높이 등을 유지해야 한다.
+        let orig_line_seg = self.line_segs.first().cloned();
+        let (lh, th, bd, ls, sw, tag) = match orig_line_seg {
+            Some(ref o) if o.line_height > 0 => (
+                o.line_height,
+                o.text_height,
+                o.baseline_distance,
+                o.line_spacing,
+                o.segment_width,
+                o.tag,
+            ),
+            _ => (400, 400, 320, 0, 0, LineSeg::TAG_SINGLE_SEGMENT_LINE),
+        };
+        let new_line_segs = vec![LineSeg {
+            text_start: 0,
+            line_height: lh,
+            text_height: th,
+            baseline_distance: bd,
+            line_spacing: ls,
+            segment_width: sw,
+            tag,
+            ..Default::default()
+        }];
+        // [Task #2299] 앞 절반은 원본 첫 LineSeg 의 vertical_pos 를 유지한다 —
+        // 분할해도 문단의 첫 줄 위치는 변하지 않고, 저장 vpos 가 단/쪽 리셋 인코딩인
+        // 문단(예: 다단 col1 첫 문단)을 분할해도 그 신호가 살아남아야 한다.
+        // 새 절반의 vpos=0 은 배치 전 placeholder 로, 호출측 recalc 가
+        // ignore_reset_at 으로 흐름에 연결한다.
+        let orig_vpos = orig_line_seg.as_ref().map(|o| o.vertical_pos).unwrap_or(0);
+        self.replace_line_segs(vec![LineSeg {
+            text_start: 0,
+            vertical_pos: orig_vpos,
+            line_height: lh,
+            text_height: th,
+            baseline_distance: bd,
+            line_spacing: ls,
+            segment_width: sw,
+            tag,
+            ..Default::default()
+        }]);
+
+        // 5. range_tags 분할
+        let mut new_range_tags: Vec<RangeTag> = Vec::new();
+        let mut kept_range_tags: Vec<RangeTag> = Vec::new();
+        for rt in &self.range_tags {
+            if rt.start >= utf16_split {
+                // 완전히 새 문단 쪽
+                new_range_tags.push(RangeTag {
+                    start: rt.start - utf16_split,
+                    end: rt.end - utf16_split,
+                    tag: rt.tag,
+                });
+            } else if rt.end <= utf16_split {
+                // 완전히 원래 문단 쪽
+                kept_range_tags.push(rt.clone());
+            }
+            // 경계에 걸치는 태그는 양쪽에서 제거 (단순화)
+        }
+        self.range_tags = kept_range_tags;
+
+        for fr in &self.field_ranges {
+            if fr.start_char_idx < split_pos && split_pos < fr.end_char_idx {
+                if let Some(Control::Field(f)) = self.controls.get_mut(fr.control_idx) {
+                    if let Some(format) = &mut f.hyperlink_format {
+                        format.replace(
+                            split_pos - fr.start_char_idx,
+                            fr.end_char_idx - fr.start_char_idx,
+                            0,
+                        );
+                    }
+                }
+            }
+        }
+        // 5-1. field_ranges 분할
+        let mut new_field_ranges: Vec<FieldRange> = Vec::new();
+        let mut kept_field_ranges: Vec<FieldRange> = Vec::new();
+        // 5-1a. controls 분할 시 control_idx 리매핑을 위한 맵 (old → new)
+        let mut moved_control_idx_map: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
+        // 걸친 필드의 끝 표지가 있던 새 문단 글자 번호. 그 표지는 앞 문단 끝으로 간다.
+        let mut cut_field_ends: Vec<usize> = Vec::new();
+        for fr in &self.field_ranges {
+            if fr.start_char_idx >= split_pos {
+                // 완전히 새 문단 쪽 → 인덱스 조정 후 이관 (control_idx는 5-2에서 리매핑)
+                new_field_ranges.push(FieldRange {
+                    start_char_idx: fr.start_char_idx - split_pos,
+                    end_char_idx: fr.end_char_idx - split_pos,
+                    control_idx: fr.control_idx,
+                    end_field_id: fr.end_field_id,
+                    inner_slot_count: fr.inner_slot_count,
+                });
+            } else if fr.end_char_idx <= split_pos {
+                // 완전히 원래 문단 쪽
+                kept_field_ranges.push(fr.clone());
+            } else {
+                // 경계에 걸친 필드: 원래 문단에서 종료
+                if fr.end_char_idx < text_chars.len() {
+                    cut_field_ends.push(fr.end_char_idx - split_pos);
+                }
+                kept_field_ranges.push(FieldRange {
+                    start_char_idx: fr.start_char_idx,
+                    end_char_idx: split_pos,
+                    control_idx: fr.control_idx,
+                    end_field_id: fr.end_field_id,
+                    // 문단이 잘려 안쪽 슬롯 소속이 불확실해진다 — 보수적으로 0.
+                    inner_slot_count: 0,
+                });
+            }
+        }
+        self.field_ranges = kept_field_ranges;
+
+        // 5-2. controls 분할 (`moves`)
+        let old_controls = std::mem::take(&mut self.controls);
+        let old_ctrl_data = std::mem::take(&mut self.ctrl_data_records);
+        let mut kept_controls = Vec::with_capacity(old_controls.len());
+        let mut kept_ctrl_data = Vec::new();
+        let mut new_controls = Vec::new();
+        let mut new_ctrl_data_records = Vec::new();
+
+        for (ci, ctrl) in old_controls.into_iter().enumerate() {
+            let data = old_ctrl_data.get(ci).cloned().flatten();
+            if moves[ci] {
+                moved_control_idx_map.insert(ci, new_controls.len());
+                new_controls.push(ctrl);
+                new_ctrl_data_records.push(data);
+            } else {
+                kept_controls.push(ctrl);
+                kept_ctrl_data.push(data);
+            }
+        }
+        // field_ranges의 control_idx를 새 문단의 controls 배열에 맞게 리매핑
+        for fr in &mut new_field_ranges {
+            if let Some(&new_idx) = moved_control_idx_map.get(&fr.control_idx) {
+                fr.control_idx = new_idx;
+            }
+        }
+        self.layout_field_values.clear();
+        self.controls = kept_controls;
+        self.ctrl_data_records = kept_ctrl_data;
+        // 나눈 자리 갭(글자 `split_pos` 바로 앞)에 있다가 새 문단으로 가는 컨트롤 수.
+        let moved_gap_controls = moved_control_idx_map
+            .iter()
+            // 자동 번호의 8유닛은 자리표 글자에 있다. 앞 갭에 다시 예약하지 않는다.
+            .filter(|&(&ci, &new_ci)| {
+                text_positions.get(ci) == Some(&split_pos)
+                    && !matches!(new_controls[new_ci], Control::AutoNumber(_))
+            })
+            .count();
+
+        // 번호 자리표 공백은 번호의 8유닛에 포함된다. 나눈 자리에서 새 문단으로
+        // 옮긴 자리표만 따로 세지 않는다. 앞 갭 보존과 controls 이동 규칙은 그대로 둔다.
+        let placeholder_end = new_char_offsets.get(1).copied().unwrap_or_else(|| {
+            self.char_count
+                .saturating_sub(1)
+                .saturating_sub(utf16_split)
+        });
+        let moved_number_placeholder = text_chars.get(split_pos) == Some(&' ')
+            && new_char_offsets.first() == Some(&0)
+            && placeholder_end >= CTRL_CHAR_CODE_UNITS
+            && moved_control_idx_map.iter().any(|(&ci, &new_ci)| {
+                text_positions.get(ci) == Some(&split_pos)
+                    && matches!(
+                        new_controls[new_ci],
+                        Control::AutoNumber(_) | Control::NewNumber(_)
+                    )
+            });
+
+        // 6. char_count 갱신
+        //    양쪽 문단에 남은 controls와 누름틀 끝 표지는 각각 8 code unit을 차지하므로 반영 필요
+        let kept_text_code_units: u32 = self.text.chars().map(Self::char_stream_len).sum();
+        let new_text_code_units: u32 = new_text.chars().map(Self::char_stream_len).sum();
+        let ctrl_code_units: u32 = (self.controls.len() + self.field_ranges.len()) as u32 * 8;
+        // [hwpx-cowork] 컨트롤 없는 8유닛 칸(다단락 필드 끝·제목 차례 표시)도 센다
+        let hidden_units = |orphans: usize, marks: usize| (orphans + marks) as u32 * 8;
+        self.char_count = kept_text_code_units
+            + ctrl_code_units
+            + hidden_units(self.orphan_field_ends.len(), self.title_marks.len())
+            + 1 - u32::from(moved_number_placeholder); // +1 for paragraph end marker
+        let new_char_count = new_text_code_units
+            + (new_controls.len() + new_field_ranges.len()) as u32 * 8
+            + hidden_units(new_orphan_field_ends.len(), new_title_marks.len())
+            + 1 - u32::from(moved_number_placeholder);
+
+        // 7. has_para_text: 빈 문단(텍스트 없고 컨트롤 없음)이면 PARA_TEXT 불필요
+        //    HWP 프로그램은 cc=1(빈 문단)에 PARA_TEXT가 있으면 파일 손상으로 판단
+        self.has_para_text = !(self.text.is_empty() && self.controls.is_empty());
+        let new_has_para_text = !new_text.is_empty() || !new_controls.is_empty();
+
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.refresh_nb_space_control_mask();
+        let new_control_mask =
+            Self::compute_control_mask_for(&new_text, &new_controls, &new_field_ranges);
+
+        // PARA_HEADER instanceId는 문단별 식별자다. Enter로 만든 문단이 원문 tail을
+        // 그대로 복제하면 동일한 비영 ID가 반복된다. 새 문단의 ID만 초기화하고 뒤의
+        // 변경 추적 suffix는 보존한다. 병합 undo는 `apply_meta`가 원래 tail을 복원한다.
+        let mut new_raw_header_extra = self.raw_header_extra.clone();
+        if new_raw_header_extra.len() >= 10 {
+            new_raw_header_extra[6..10].fill(0);
+        }
+
+        let mut new_para = Paragraph {
+            text: new_text,
+            text_element_origins: Some(new_text_element_origins),
+            char_offsets: new_char_offsets,
+            literal_figure_spaces: new_literal_figure_spaces,
+            nb_space_control_indices: Some(new_nb_spaces),
+            char_shapes: new_char_shapes,
+            line_segs: new_line_segs,
+            layout_space_metrics: Vec::new(),
+            hwp3_saved_space_corrections: Vec::new(),
+            layout_object_projection: false,
+            layout_float_band: false,
+            layout_field_values: Vec::new(),
+            // 분리된 문단의 줄은 새로 계산된 것이라 조판 전용 보강 줄이 없다 (#4677).
+            layout_only_fill_lines: 0,
+            // 편집으로 갈라진 문단의 원본 vertpos 스냅샷은 무효다 (#5847).
+            source_line_seg_vertical_pos: None,
+            // 새 줄은 본문 축을 이어 붙인 저장 줄이 아니다.
+            layout_rebased_body_axis: false,
+            // 갈라진 문단은 앞 문단의 새 저장 줄에 이어 계산된다.
+            stored_flow_shifted: false,
+            layout_cell_grid: None,
+            // 새로 계산된 줄은 `char_offsets` 와 같은 HWP5 축에서 나오므로 보정이 없다 (#5961).
+            hwpx_axis_shift: 0,
+            range_tags: new_range_tags,
+            field_ranges: new_field_ranges, // 새 문단으로 이관된 필드 범위
+            orphan_field_ends: new_orphan_field_ends,
+            char_count: new_char_count,
+            para_shape_id: self.para_shape_id,
+            hwpx_missing_para_shape: self.hwpx_missing_para_shape,
+            style_id: self.style_id,
+            column_type: ColumnBreakType::None,
+            raw_break_type: 0,
+            page_break_synthesized: false,
+            control_mask: new_control_mask,
+            controls: new_controls,
+            ctrl_data_records: new_ctrl_data_records,
+            char_count_msb: false,
+            raw_header_extra: new_raw_header_extra,
+            has_para_text: new_has_para_text,
+            tab_extended: new_tab_extended,
+            title_marks: new_title_marks,
+            // [#6956] 형광펜 표지도 분할 위치 기준으로 갈라 준다.
+            markpen_marks: new_markpen_marks,
+            numbering_restart: None,
+            stored_text_partition_dirty: false,
+            cell_format_vpos_dirty: self.cell_format_vpos_dirty,
+            cell_vpos_reset: Some(false),
+            // 번호는 문서 순서로 다시 계산해야 하는 파생값이다 (#7436).
+            numbering_marker: NumberingMarker::Unresolved,
+        };
+        new_para.refresh_nb_space_control_mask();
+        for &char_idx in cut_field_ends.iter().rev() {
+            new_para.remove_gap_slot(char_idx);
+        }
+        new_para.reserve_split_gap_slots(moved_gap_controls);
+        new_para
+    }
+
+    /// 다른 문단의 텍스트와 메타데이터를 현재 문단 끝에 결합한다.
+    ///
+    /// 병합 후 other 문단의 내용은 현재 문단에 포함된다.
+    /// 반환값: 병합 지점의 char offset (원래 텍스트의 길이).
+    pub fn merge_from(&mut self, other: &Paragraph) -> usize {
+        match self.merge_from_with_storage(other, &crate::storage::Unbounded) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    pub(crate) fn merge_from_with_storage<S: crate::storage::Storage>(
+        &mut self,
+        other: &Paragraph,
+        storage: &S,
+    ) -> Result<usize, S::Error> {
+        // 텍스트 없이 컨트롤만 있는 문단(예: 그림 복사 클립보드)도 병합 대상 (#1323)
+        if other.text.is_empty() && other.controls.is_empty() {
+            // [hwpx-cowork] 빈 문단의 다단락 필드 끝(차례 마지막 빈 줄)은 이어 받는다 — 버리면 차례 필드가 닫히지 않는다
+            let at = self.text.chars().count();
+            for o in &other.orphan_field_ends {
+                self.orphan_field_ends.push(OrphanFieldEnd { char_idx: at, ..o.clone() });
+                self.char_count += CTRL_CHAR_CODE_UNITS;
+            }
+            return Ok(at);
+        }
+        let self_text_len = self.text.chars().count();
+        let mut origins = self.resolved_text_element_origins();
+        origins.extend(
+            other
+                .resolved_text_element_origins()
+                .into_iter()
+                .map(|i| self_text_len + i),
+        );
+        self.text_element_origins = Some(origins);
+
+        // [hwpx-cowork] The storage-aware tab merge below pads each paragraph
+        // independently and preserves the same character-order contract.
+        let mut nb_spaces = self.materialized_nb_space_controls();
+        nb_spaces.extend(
+            other
+                .materialized_nb_space_controls()
+                .into_iter()
+                .map(|index| index + self_text_len),
+        );
+        self.nb_space_control_indices = Some(nb_spaces);
+
+        // 현재 문단 끝의 UTF-16 위치.
+        // 마지막 문자 뒤(trailing) 컨트롤과 거기서 끝나는 누름틀의 끝 표지는 char_offsets에
+        // 갭이 인코딩되어 있지 않으므로 하나당 8 code unit을 가산해야 other 텍스트가 그
+        // 뒤로 이어진다 (#1323). 끝 표지를 빠뜨리면 이어 붙인 글자가 그 자리를 덮는다.
+        // 문단 끝 자동 번호는 자리표 글자가 번호의 8유닛을 차지하므로 따로 세지 않는다.
+        let control_positions = self.try_control_text_positions(storage)?;
+        let trailing_number = self.trailing_auto_number(&control_positions);
+        let trailing_slots = control_positions
+            .iter()
+            .enumerate()
+            .filter(|&(ci, &p)| p >= self_text_len && Some(ci) != trailing_number)
+            .count()
+            + self
+                .field_ranges
+                .iter()
+                .filter(|range| range.end_char_idx >= self_text_len)
+                .count();
+        let trailing_ctrl_units = trailing_slots as u32 * 8;
+        let utf16_end: u32 = if !self.char_offsets.is_empty() {
+            let text_chars = storage.collect(self.text.chars())?;
+            self.char_stream_end(&text_chars, self.char_offsets.len() - 1, trailing_number)
+        } else {
+            0
+        } + trailing_ctrl_units;
+
+        // 0. tab_extended: 두 문단의 짝을 각자 탭 수에 맞춘 뒤 잇는다
+        if !self.tab_extended.is_empty() || !other.tab_extended.is_empty() {
+            let own_tabs = self.text.chars().filter(|&ch| ch == '\t').count();
+            self.tab_extended.truncate(own_tabs);
+            let missing_tabs = own_tabs - self.tab_extended.len();
+            storage.reserve(&mut self.tab_extended, missing_tabs)?;
+            self.tab_extended.resize(own_tabs, TAB_EXT_PLACEHOLDER);
+            let other_tabs = other.text.chars().filter(|&ch| ch == '\t').count();
+            storage.extend(
+                &mut self.tab_extended,
+                other
+                    .tab_extended
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat(TAB_EXT_PLACEHOLDER))
+                    .take(other_tabs),
+            )?;
+        }
+
+        // 1. 텍스트 결합
+        storage.push_str(&mut self.text, &other.text)?;
+        storage.extend(
+            &mut self.literal_figure_spaces,
+            other
+                .literal_figure_spaces
+                .iter()
+                .map(|&position| position + self_text_len),
+        )?;
+
+        // 2. char_offsets 결합 (other의 오프셋에 utf16_end 추가)
+        for &off in &other.char_offsets {
+            storage.push(&mut self.char_offsets, off + utf16_end)?;
+        }
+
+        // 2-1. 제목 차례 표시 결합 — 문자 인덱스 축이라 앞 문단 길이만큼 민다.
+        storage.extend(
+            &mut self.markpen_marks,
+            other.markpen_marks.iter().map(|m| MarkpenMark {
+                char_idx: m.char_idx + self_text_len,
+                color: m.color.clone(),
+                utf16_pos: m.utf16_pos.map(|pos| pos + utf16_end),
+            }),
+        )?;
+        for m in &other.title_marks {
+            storage.push(
+                &mut self.title_marks,
+                TitleMark {
+                    char_idx: m.char_idx + self_text_len,
+                    ignore: m.ignore,
+                },
+            )?;
+        }
+
+        // 3. char_shapes 결합 (other의 start_pos에 utf16_end 추가)
+        // [hwpx-cowork] 글 없이 부호만 있는 문단(메모만 남은 빈 줄)의 글자 모양은 받지 않는다 — 덮을 글자가 없어 빈 글 조각(run)만
+        // 남고, 빈 문단의 글자 모양(마지막 조각)을 바꿔 공유 문서와 서식이 어긋났다. 합친 부호는 앞 문단 끝 글자 모양을 따른다
+        let carry_shapes = !other.text.is_empty() || self.char_shapes.is_empty();
+        for cs in other.char_shapes.iter().filter(|_| carry_shapes) {
+            let new_pos = cs.start_pos + utf16_end;
+            // 중복 위치에 같은 스타일이면 스킵
+            if self
+                .char_shapes
+                .last()
+                .map(|last| last.start_pos == new_pos && last.char_shape_id == cs.char_shape_id)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            storage.push(
+                &mut self.char_shapes,
+                CharShapeRef {
+                    start_pos: new_pos,
+                    char_shape_id: cs.char_shape_id,
+                },
+            )?;
+        }
+
+        // 4. line_segs: 원본 치수를 보존하여 리플로우 시 올바른 줄간격 유지
+        let orig_line_seg = self.line_segs.first().cloned();
+        let (lh, th, bd, ls, sw, tag) = match orig_line_seg {
+            Some(ref o) if o.line_height > 0 => (
+                o.line_height,
+                o.text_height,
+                o.baseline_distance,
+                o.line_spacing,
+                o.segment_width,
+                o.tag,
+            ),
+            _ => (400, 400, 320, 0, 0, LineSeg::TAG_SINGLE_SEGMENT_LINE),
+        };
+        // [Task #2299] split_at 과 동일하게 호스트(self)의 원본 vertical_pos 를
+        // 유지한다 — 병합해도 문단 첫 줄 위치는 변하지 않으며, 0 placeholder 로
+        // 재생성하면 편집발 vpos 재계산이 이를 저장 단/쪽 리셋으로 오인해 병합
+        // 문단을 구역 상단 좌표에 동결시킨다 (밴드 내 range-delete 시 +1 팬텀 쪽).
+        let orig_vpos = orig_line_seg.as_ref().map(|o| o.vertical_pos).unwrap_or(0);
+        self.replace_line_segs(storage.collect([LineSeg {
+            text_start: 0,
+            vertical_pos: orig_vpos,
+            line_height: lh,
+            text_height: th,
+            baseline_distance: bd,
+            line_spacing: ls,
+            segment_width: sw,
+            tag,
+            ..Default::default()
+        }])?);
+
+        // 5. range_tags 결합 (other의 start/end에 utf16_end 추가)
+        for rt in &other.range_tags {
+            storage.push(
+                &mut self.range_tags,
+                RangeTag {
+                    start: rt.start + utf16_end,
+                    end: rt.end + utf16_end,
+                    tag: rt.tag,
+                },
+            )?;
+        }
+
+        // 5-1. field_ranges 결합 (other의 char 인덱스에 self_text_len 추가)
+        //      ctrl_offset은 병합 전 self.controls.len() — 5-2의 controls 병합보다 먼저 캡처
+        let ctrl_offset = self.controls.len();
+        for fr in &other.field_ranges {
+            storage.push(
+                &mut self.field_ranges,
+                FieldRange {
+                    start_char_idx: fr.start_char_idx + self_text_len,
+                    end_char_idx: fr.end_char_idx + self_text_len,
+                    control_idx: fr.control_idx + ctrl_offset,
+                    end_field_id: fr.end_field_id,
+                    inner_slot_count: fr.inner_slot_count,
+                },
+            )?;
+        }
+        // [hwpx-cowork] 다단락 필드 끝(차례 필드 끝)도 이어 받는다 — 차례 마지막 줄에서 Backspace 해도 차례가 닫힌 채로 남는다
+        for o in &other.orphan_field_ends {
+            self.orphan_field_ends.push(OrphanFieldEnd { char_idx: o.char_idx + self_text_len, ..o.clone() });
+        }
+
+        // 5-2. controls / ctrl_data_records / control_mask 병합 (#1323)
+        //      ctrl_data_records[i]는 controls[i] 대응이므로 self 쪽을 None 패딩 후 이어붙인다.
+        if !other.controls.is_empty() {
+            while self.ctrl_data_records.len() < self.controls.len() {
+                storage.push(&mut self.ctrl_data_records, None)?;
+            }
+            for i in 0..other.controls.len() {
+                let record = other
+                    .ctrl_data_records
+                    .get(i)
+                    .map(|record| crate::storage::try_clone(record, storage))
+                    .transpose()?
+                    .flatten();
+                storage.push(&mut self.ctrl_data_records, record)?;
+            }
+            for control in &other.controls {
+                let control = storage.clone_record(control)?;
+                storage.push(&mut self.controls, control)?;
+            }
+        }
+        // control_mask는 tab/개행 등 텍스트 기반 비트(#1323 이후 확장분)도 포함하므로,
+        // other.controls가 비어 있어도 other.text의 tab/개행이 손실되지 않도록
+        // split_at과 동일하게 병합 후 상태 전체를 재계산한다.
+        self.control_mask =
+            Self::compute_control_mask_for(&self.text, &self.controls, &self.field_ranges)
+                | self.text_element_control_mask();
+        self.refresh_nb_space_control_mask();
+
+        // 6. char_count 갱신: 텍스트 + 컨트롤·누름틀 끝 표지(각 8 code unit) + 문단끝(1)
+        //    split_at의 ctrl_code_units 계산과 정합. HWPX 직렬화가 char_count에서
+        //    컨트롤 수를 역산하므로 컨트롤 유닛 포함 필수.
+        self.char_count = self.text.chars().map(Self::char_stream_len).sum::<u32>()
+            + (self.controls.len() + self.field_ranges.len()) as u32 * 8
+            // [hwpx-cowork] 컨트롤 없는 8유닛 칸(다단락 필드 끝·제목 차례 표시)도 센다
+            + (self.orphan_field_ends.len() + self.title_marks.len()) as u32 * 8
+            + 1;
+
+        // 7. has_para_text: 병합 후 텍스트/컨트롤이 있으면 PARA_TEXT 필요
+        if !self.text.is_empty() || !self.controls.is_empty() {
+            self.has_para_text = true;
+        }
+
+        Ok(self_text_len)
+    }
+
+    /// `controls[ci]` 가 갭의 슬롯 대신 `at` 번째 글자 자체를 차지하는가.
+    ///
+    /// 자동 번호의 공백 자리표시자와 HWP3 개체 표식(`U+FFFC`)은 글자 하나가 8유닛을 쓴다.
+    /// `control_text_positions` 는 그런 컨트롤에 그 글자 번호를 준다.
+    fn control_owns_char(&self, ci: usize, at: usize, chars: &[char], offsets: &[u32]) -> bool {
+        let marker = match chars.get(at) {
+            Some('\u{FFFC}') => true,
+            Some(' ') => matches!(
+                self.controls.get(ci),
+                Some(Control::AutoNumber(_) | Control::NewNumber(_))
+            ),
+            _ => false,
+        };
+        marker
+            && offsets.get(at).is_some_and(|&start| {
+                offsets
+                    .get(at + 1)
+                    .is_none_or(|&next| next >= start + CTRL_CHAR_CODE_UNITS)
+            })
+    }
+
+    /// 컨트롤이 놓인 글자 자리를 받아 원시 갭과 `char_count` 를 그 배치에 맞춘다.
+    ///
+    /// `positions[i]` 는 `controls[i]` 가 앞에 놓인 글자 번호이고, 글자 수면 문단 끝이다
+    /// (`control_text_positions` 와 같은 축). 누름틀 BEGIN 은 범위 시작 갭, END 는 범위 끝
+    /// 갭에 둔다. 편집한 쪽은 편집 **전** 자리를 넘겨야 한다 — 편집 뒤 갭은 이미 어긋나서
+    /// 어느 슬롯이 누구 것인지 다시 셀 수 없다.
+    ///
+    /// 갭은 8유닛 단위로만 늘리고 줄인다. 글자 폭·자리표시자처럼 그 밖의 배치는 그대로 두고,
+    /// 같은 좌표를 쓰는 글자모양·영역 태그·줄 시작·형광펜 표지도 함께 옮긴다.
+    pub(crate) fn rebuild_char_offsets(&mut self, positions: &[usize]) {
+        let chars: Vec<char> = self.text.chars().collect();
+        let len = chars.len();
+        let old: Vec<u32> = if self.char_offsets.len() == len {
+            self.char_offsets.clone()
+        } else {
+            // 좌표가 글자와 맞지 않으면 갭 없이 이어 붙인 배치에서 시작한다.
+            chars
+                .iter()
+                .scan(0, |end, &ch| {
+                    let start = *end;
+                    *end += Self::char_stream_len(ch);
+                    Some(start)
+                })
+                .collect()
+        };
+
+        // 갭마다 와야 할 슬롯 수. 마지막 칸은 문단 끝 표시 앞이다.
+        let mut want = vec![0i64; len + 1];
+        let mut last_char_owned = false;
+        for ci in 0..self.controls.len() {
+            let begin = self
+                .field_ranges
+                .iter()
+                .filter(|range| range.control_idx == ci)
+                .map(|range| range.start_char_idx)
+                .min();
+            let at = begin
+                .or_else(|| positions.get(ci).copied())
+                .unwrap_or(len)
+                .min(len);
+            if begin.is_none() && self.control_owns_char(ci, at, &chars, &old) {
+                last_char_owned |= at + 1 == len;
+                continue;
+            }
+            want[at] += 1;
+        }
+        let hidden = self
+            .field_ranges
+            .iter()
+            .map(|range| range.end_char_idx)
+            .chain(self.orphan_field_ends.iter().map(|end| end.char_idx))
+            .chain(self.title_marks.iter().map(|mark| mark.char_idx));
+        for at in hidden {
+            want[at.min(len)] += 1;
+        }
+
+        let unit = i64::from(CTRL_CHAR_CODE_UNITS);
+        let mut shifts = Vec::with_capacity(len);
+        let mut shift = 0i64;
+        let mut prev_end = 0u32;
+        for (i, &start) in old.iter().enumerate() {
+            let have = i64::from(start.saturating_sub(prev_end) / CTRL_CHAR_CODE_UNITS);
+            shift += unit * (want[i] - have);
+            shifts.push(shift);
+            prev_end = start + Self::char_stream_len(chars[i]);
+        }
+        let moved = |x: u32, by: i64| u32::try_from(i64::from(x) + by).unwrap_or(0);
+        // 옛 좌표 x 는 x 이하에서 시작한 마지막 글자와 함께 움직인다. 문단 시작은 그대로다.
+        let map = |x: u32| match old.partition_point(|&start| start <= x) {
+            _ if x == 0 => 0,
+            0 => x,
+            i => moved(x, shifts[i - 1]),
+        };
+
+        for shape in &mut self.char_shapes {
+            shape.start_pos = map(shape.start_pos);
+        }
+        // 같은 자리로 모인 글자모양은 그 자리 글자에 쓰이는 뒤의 것만 남긴다.
+        self.char_shapes.dedup_by(|later, kept| {
+            let same = later.start_pos == kept.start_pos;
+            if same {
+                kept.char_shape_id = later.char_shape_id;
+            }
+            same
+        });
+        for tag in &mut self.range_tags {
+            tag.start = map(tag.start);
+            tag.end = map(tag.end);
+        }
+        for seg in &mut self.line_segs {
+            seg.text_start = map(seg.text_start);
+        }
+        for mark in &mut self.markpen_marks {
+            if let Some(pos) = &mut mark.utf16_pos {
+                *pos = map(*pos);
+            }
+        }
+
+        let text_end = if last_char_owned {
+            prev_end.max(old[len - 1] + CTRL_CHAR_CODE_UNITS)
+        } else {
+            prev_end
+        };
+        let tail = unit * want[len] + 1;
+        self.char_count = u32::try_from(i64::from(text_end) + shift + tail).unwrap_or(1);
+        self.char_offsets = old
+            .iter()
+            .zip(&shifts)
+            .map(|(&start, &by)| moved(start, by))
+            .collect();
+    }
+
+    /// 글자 `char_offset..+delete_count` 를 `text` 로 바꾸고 실제로 지운 글자 수를 돌려준다.
+    /// 누름틀 경계와 다른 컨트롤의 원시 슬롯은 바꾸기 전 자리를 지킨다.
+    ///
+    /// 바꾸기는 지운 글자 앞 갭의 슬롯을 새 글자 앞에, 지운 글자 사이·뒤 갭의 슬롯을 새 글자
+    /// 뒤에 둔다. 누름틀 경계도 지운 글자를 기준으로 남는다.
+    ///
+    /// 넣기는 그 자리 갭의 슬롯 가운데 새 글자 앞에 남길 수를 고른다. `active` 누름틀이 그
+    /// 자리에서 시작하거나 끝나면 새 글자를 품고, 다음으로 그 자리의 첫 빈 누름틀이 품는다.
+    /// 다른 누름틀과 하이퍼링크는 새 글자를 밖에 두고 다른 종류 필드는 품는다. 남은 선택은
+    /// 개체 바로 앞, 개체가 없거나 `after_inline_control` 이면 갭 끝이다.
+    pub(crate) fn replace_text_keeping_slots(
+        &mut self,
+        char_offset: usize,
+        delete_count: usize,
+        text: &str,
+        active: Option<usize>,
+        after_inline_control: bool,
+    ) -> usize {
+        /// 갭 하나의 슬롯. 직렬화기가 같은 갭 안에서 내는 순서대로 늘어놓는다.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Slot {
+            Orphan(usize),
+            Title(usize),
+            End(usize),
+            Control(usize),
+        }
+
+        let chars: Vec<char> = self.text.chars().collect();
+        let len = chars.len();
+        let at = char_offset.min(len);
+        let deleted = delete_count.min(len - at);
+        let inserted = text.chars().count();
+        let mut positions = self.control_text_positions();
+        // Cell-frame paint has a paragraph-start anchor, including in an empty
+        // cell whose other controls use synthetic logical slot positions.
+        for (ci, at) in positions.iter_mut().enumerate() {
+            if super::border_paint::is_cell_frame_paint(&self.controls[ci]) {
+                *at = 0;
+            }
+        }
+        // 문단 끝 자동 번호는 갭 슬롯이 아니라 자리표 글자(마지막 글자)를 차지한다. 그 글자
+        // 자리로 두어야 끝에 친 글자가 번호 앞 갭으로 들어가지 않고, 다시 셀 때 빈 슬롯이 생기지 않는다.
+        if let Some(ci) = self.trailing_auto_number(&positions) {
+            positions[ci] = len - 1;
+        }
+        let ranges = self.field_ranges.clone();
+
+        // 넣기는 그 자리 갭의 슬롯 가운데 새 글자 앞에 남을 수(`left`)를 고른다.
+        let mut gap = Vec::new();
+        let mut left = 0;
+        if deleted == 0 {
+            let empty_here = |r: &FieldRange| r.start_char_idx == at && r.end_char_idx == at;
+            gap.extend(
+                (self.orphan_field_ends.iter().enumerate())
+                    .filter(|(_, end)| end.char_idx == at)
+                    .map(|(i, _)| Slot::Orphan(i)),
+            );
+            gap.extend(
+                (self.title_marks.iter().enumerate())
+                    .filter(|(_, mark)| mark.char_idx == at)
+                    .map(|(i, _)| Slot::Title(i)),
+            );
+            gap.extend(
+                (ranges.iter().enumerate())
+                    .filter(|(_, r)| r.start_char_idx < at && r.end_char_idx == at)
+                    .map(|(ri, _)| Slot::End(ri)),
+            );
+            for ci in 0..self.controls.len() {
+                let mut own = ranges.iter().filter(|r| r.control_idx == ci).peekable();
+                let here = if own.peek().is_some() {
+                    own.any(|r| r.start_char_idx == at)
+                } else {
+                    positions.get(ci) == Some(&at)
+                        && !self.control_owns_char(ci, at, &chars, &self.char_offsets)
+                };
+                if here {
+                    gap.push(Slot::Control(ci));
+                }
+                // 빈 누름틀 END 는 자기 BEGIN(감싼 안쪽 슬롯이 있으면 그 뒤) 바로 뒤에 온다.
+                gap.extend(
+                    (ranges.iter().enumerate())
+                        .filter(|(_, r)| empty_here(r) && r.control_idx + r.inner_slot_count == ci)
+                        .map(|(ri, _)| Slot::End(ri)),
+                );
+            }
+            for (ri, r) in ranges.iter().enumerate() {
+                if empty_here(r) && !gap.contains(&Slot::End(ri)) {
+                    gap.push(Slot::End(ri));
+                }
+            }
+
+            let order = |slot: Slot| gap.iter().position(|&s| s == slot);
+            let first_empty = (ranges.iter().enumerate())
+                .filter(|(_, r)| empty_here(r) && Some(r.control_idx) != active)
+                .filter_map(|(ri, r)| order(Slot::Control(r.control_idx)).map(|p| (p, ri)))
+                .min()
+                .map(|(_, ri)| ri);
+            // (우선순위, BEGIN 차례, END 차례, 새 글자를 품을지). 다른 빈 누름틀은 고른 자리를 따른다.
+            let wants: Vec<_> = (ranges.iter().enumerate())
+                .filter_map(|(ri, r)| {
+                    let begin = (r.start_char_idx == at)
+                        .then(|| order(Slot::Control(r.control_idx)))
+                        .flatten();
+                    let end = order(Slot::End(ri));
+                    // 계산식·날짜·파일 경로 코드 경계의 입력은 필드 밖에 둔다.
+                    let outside = matches!(
+                        self.controls.get(r.control_idx),
+                        Some(Control::Field(field))
+                            if matches!(
+                                field.field_type,
+                                FieldType::ClickHere
+                                    | FieldType::Hyperlink
+                                    | FieldType::Formula
+                                    | FieldType::Date
+                                    | FieldType::Path
+                            )
+                    );
+                    match () {
+                        _ if begin.is_none() && end.is_none() => None,
+                        _ if Some(r.control_idx) == active => Some((0, begin, end, true)),
+                        _ if first_empty == Some(ri) => Some((1, begin, end, true)),
+                        _ if r.start_char_idx == r.end_char_idx => None,
+                        _ => Some((2, begin, end, !outside)),
+                    }
+                })
+                .collect();
+            let object = |slot: &Slot| {
+                matches!(slot, Slot::Control(ci) if !super::border_paint::is_cell_frame_paint(&self.controls[*ci]) && matches!(
+                    self.controls[*ci],
+                    Control::Shape(_)
+                        | Control::Table(_)
+                        | Control::Picture(_)
+                        | Control::Equation(_)
+                        | Control::Form(_)
+                        | Control::Footnote(_)
+                        | Control::Endnote(_)
+                        | Control::AutoNumber(_)
+                ))
+            };
+            // 글자 수를 넘는 자리는 문단 끝 개체 뒤를 가리킨다(`insert_text_at` 과 같은 뜻).
+            let preferred = if char_offset > len {
+                (char_offset - len).min(gap.len())
+            } else if after_inline_control {
+                gap.len()
+            } else {
+                gap.iter().position(object).unwrap_or(gap.len())
+            };
+            let misses = |m: usize, level: u8| {
+                (wants.iter())
+                    .filter(|&&(l, begin, end, inside)| {
+                        let within =
+                            begin.is_none_or(|b: usize| b < m) && end.is_none_or(|e: usize| m <= e);
+                        l == level && within != inside
+                    })
+                    .count()
+            };
+            left = (0..=gap.len())
+                .min_by_key(|&m| {
+                    (
+                        misses(m, 0),
+                        misses(m, 1),
+                        misses(m, 2),
+                        m.abs_diff(preferred),
+                    )
+                })
+                .unwrap_or(0);
+        }
+        // 편집 전 위치 x(그 갭에 든 슬롯이면 `slot`)의 편집 뒤 위치.
+        let place = |x: usize, slot: Slot| -> usize {
+            if deleted > 0 {
+                match x {
+                    _ if x <= at => x,
+                    _ if x <= at + deleted => at + inserted,
+                    _ => x - deleted + inserted,
+                }
+            } else if x < at
+                || (x == at
+                    && gap
+                        .iter()
+                        .position(|&s| s == slot)
+                        .is_some_and(|p| p < left))
+            {
+                x
+            } else {
+                x + inserted
+            }
+        };
+
+        if deleted > 0 {
+            self.delete_text_at(at, deleted);
+        }
+        if inserted > 0 {
+            self.insert_text_at_caret(at, text, after_inline_control);
+        }
+        self.field_ranges = (ranges.iter().enumerate())
+            .map(|(ri, r)| FieldRange {
+                start_char_idx: place(r.start_char_idx, Slot::Control(r.control_idx)),
+                end_char_idx: place(r.end_char_idx, Slot::End(ri)),
+                ..r.clone()
+            })
+            .collect();
+        for (i, end) in self.orphan_field_ends.iter_mut().enumerate() {
+            end.char_idx = place(end.char_idx, Slot::Orphan(i));
+        }
+        for (i, mark) in self.title_marks.iter_mut().enumerate() {
+            mark.char_idx = place(mark.char_idx, Slot::Title(i));
+        }
+        let moved: Vec<usize> = (positions.iter().enumerate())
+            .map(|(ci, &p)| place(p, Slot::Control(ci)))
+            .collect();
+        self.rebuild_char_offsets(&moved);
+        deleted
+    }
+
+    /// Memo fields whose whole non-empty anchor lies in `start..end`. When that
+    /// span is replaced, [`Self::regrow_replaced_memos`] gives them the new text.
+    pub(crate) fn memos_within(&self, start: usize, end: usize) -> Vec<usize> {
+        self.field_ranges
+            .iter()
+            .filter(|fr| {
+                fr.start_char_idx < fr.end_char_idx
+                    && start <= fr.start_char_idx
+                    && fr.end_char_idx <= end
+                    && is_memo_control(self.controls.get(fr.control_idx))
+            })
+            .map(|fr| fr.control_idx)
+            .collect()
+    }
+
+    /// A replacement deletes a memo's whole anchor and then inserts the new
+    /// text where it collapsed. Typing at a zero-length memo does not grow it,
+    /// so the replaced memos take the inserted text here.
+    pub(crate) fn regrow_replaced_memos(&mut self, memos: &[usize], at: usize, inserted: usize) {
+        if inserted == 0 {
+            return;
+        }
+        for fr in &mut self.field_ranges {
+            if memos.contains(&fr.control_idx) && fr.start_char_idx == at && fr.end_char_idx == at {
+                fr.end_char_idx += inserted;
+            }
+        }
+    }
+
+    /// [#7866] 글자 `char_offset..+delete_count` 를 `text` 로 바꾸되, 새 글자가 지운 글자의
+    /// 글자 모양을 **자리대로** 잇는다: i번째 새 글자는 i번째 지운 글자의 모양, 지운 글자
+    /// 수를 넘는 꼬리는 마지막 지운 글자의 모양이다. 한/글 2024 찾아 바꾸기 실측
+    /// (`samples/issue7866/*_before.hwpx` → `*_after.hwpx`): 「굵게」의 첫 글자만 굵으면
+    /// 「새말」의 「새」만 굵고, 「굵(굵게)게(빨강)」→「일이삼」은 「일」 굵게·「이삼」 빨강이다.
+    ///
+    /// 지우고 넣는 두 단계만 거치면 낱말이 모양 구간을 통째로 차지할 때 그 구간이 사라져
+    /// 새 글자가 앞 글자의 모양에 붙는다. 지울 글자가 없거나 넣을 글자가 없으면 각각
+    /// 넣기·지우기와 같다. 반환값은 실제로 지운 글자 수.
+    pub fn replace_text_inheriting_char_shapes(
+        &mut self,
+        char_offset: usize,
+        delete_count: usize,
+        text: &str,
+    ) -> usize {
+        let len = self.text.chars().count();
+        let at = char_offset.min(len);
+        let old_end = at.saturating_add(delete_count).min(len);
+        let old_ids: Vec<u32> = (at..old_end)
+            .map(|offset| self.char_shape_id_at(offset).unwrap_or(0))
+            .collect();
+        let replaced_memos = self.memos_within(at, old_end);
+        let deleted = self.delete_text_at(at, delete_count);
+        let inserted_at = self.insert_text_at(at, text);
+        let new_len = text.chars().count();
+        self.regrow_replaced_memos(&replaced_memos, inserted_at, new_len);
+        let Some(&last_id) = old_ids.last() else {
+            return deleted;
+        };
+        if new_len == 0 {
+            return deleted;
+        }
+        let mut runs: Vec<CharShapeRun> = Vec::new();
+        for i in 0..new_len {
+            let id = old_ids.get(i).copied().unwrap_or(last_id);
+            let offset = inserted_at + i;
+            match runs.last_mut() {
+                Some(run) if run.char_shape_id == id => run.end_offset = offset + 1,
+                _ => runs.push(CharShapeRun {
+                    start_offset: offset,
+                    end_offset: offset + 1,
+                    char_shape_id: id,
+                }),
+            }
+        }
+        self.restore_char_shape_runs(inserted_at, inserted_at + new_len, &runs);
+        deleted
+    }
+
+    /// 주어진 문자 오프셋(char index)에 해당하는 CharShapeRef의 char_shape_id를 반환한다.
+    ///
+    /// char_shapes가 비어있으면 None을 반환한다.
+    /// char_offset에 해당하는 UTF-16 위치를 찾아서 가장 적절한 CharShapeRef를 선택한다.
+    pub fn char_shape_id_at(&self, char_offset: usize) -> Option<u32> {
+        if self.char_shapes.is_empty() {
+            return None;
+        }
+
+        // char_offset → UTF-16 위치 변환
+        let utf16_pos = if char_offset < self.char_offsets.len() {
+            self.char_offsets[char_offset]
+        } else if !self.char_offsets.is_empty() {
+            // 문단 끝 위치
+            let last = *self.char_offsets.last().unwrap();
+            let last_char = self.text.chars().nth(self.char_offsets.len() - 1);
+            last + last_char
+                .map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 })
+                .unwrap_or(1)
+        } else {
+            0
+        };
+
+        // utf16_pos 이하인 가장 큰 start_pos를 가진 CharShapeRef 찾기
+        let mut result_id = self.char_shapes[0].char_shape_id;
+        for csr in &self.char_shapes {
+            if csr.start_pos <= utf16_pos {
+                result_id = csr.char_shape_id;
+            } else {
+                break;
+            }
+        }
+        Some(result_id)
+    }
+
+    /// 제어 전용 문단이 완전한 8유닛 스트림일 때 control의 원시 위치.
+    pub(crate) fn empty_control_stream_position(&self, control_index: usize) -> Option<u32> {
+        // 논리 커서 칸과 달리 secd/cold/head/foot도 원시 스트림에서는 8유닛이다.
+        // 다른 부수 마커나 생략된 제어가 있는 스트림에는 이 완전 대응을 추정하지 않는다.
+        if !self.text.is_empty()
+            || !self.char_offsets.is_empty()
+            // HWPX 구역 머리는 control 개수만으로 축을 역산하지 않는다.
+            // 저장 시작값 자체가 HWP5 축임을 증명하는 경우에만 동일한
+            // 완전 스트림의 control 위치를 재사용한다.
+            || (self.hwpx_axis_shift != 0 && !self.stored_text_starts_on_hwp5_axis())
+            || !self.title_marks.is_empty()
+            || !self.field_ranges.is_empty()
+            || !self.orphan_field_ends.is_empty()
+            || control_index >= self.controls.len()
+            || self.char_count
+                != u32::try_from(self.controls.len())
+                    .ok()?
+                    .checked_mul(8)?
+                    .checked_add(1)?
+        {
+            return None;
+        }
+        u32::try_from(control_index).ok()?.checked_mul(8)
+    }
+
+    /// `char_idx` 번째 글자 바로 앞 갭에서 컨트롤 없이 8유닛 슬롯을 차지하는 수.
+    ///
+    /// 누름틀 끝·다단락 누름틀 끝·제목 차례 표시가 그렇고, 모두 자기 글자 바로 앞 갭에 있다.
+    fn hidden_slots_before(&self, char_idx: usize) -> usize {
+        self.field_ranges
+            .iter()
+            .filter(|r| r.end_char_idx == char_idx)
+            .count()
+            + self
+                .orphan_field_ends
+                .iter()
+                .filter(|o| o.char_idx == char_idx)
+                .count()
+            + self
+                .title_marks
+                .iter()
+                .filter(|m| m.char_idx == char_idx)
+                .count()
+    }
+
+    /// 인라인 컨트롤이 텍스트의 어느 character 인덱스에 위치하는지 반환한다.
+    ///
+    /// 일반 경로에서는 `char_offsets` 갭에서 부수 마커를 제외한 8 UTF-16 유닛 슬롯을
+    /// 분배한다. FIELD_END·제목 차례 표시는 원시 슬롯을 차지하지만 `controls[]`의
+    /// 개체가 아니므로 뒤 개체의 위치를 가져가면 안 된다.
+    ///
+    /// `char_offsets` 가 비어있는 폴백 경로에서는 본문 흐름에서 1칸을 차지하는
+    /// Shape/Table/Picture/Equation/Footnote/Endnote 만 폭 1을 가산하고,
+    /// 그 외 컨트롤은 모두 position 0 에 누적된다 (정밀도 손실 분기).
+    ///
+    /// # Returns
+    ///
+    /// `positions[i]` = `controls[i]` 가 삽입되어야 할 텍스트 character 인덱스.
+    /// 컨트롤이 없으면 빈 벡터.
+    pub fn control_text_positions(&self) -> Vec<usize> {
+        match self.try_control_text_positions(&crate::storage::Unbounded) {
+            Ok(positions) => positions,
+            Err(never) => match never {},
+        }
+    }
+
+    pub(crate) fn try_control_text_positions<S: crate::storage::Storage>(
+        &self,
+        storage: &S,
+    ) -> Result<Vec<usize>, S::Error> {
+        let offsets = &self.char_offsets;
+        let total_controls = self.controls.len();
+
+        if total_controls == 0 {
+            return storage.vec(0);
+        }
+
+        if offsets.is_empty() {
+            // char_offsets가 없는 경우: 인라인 컨트롤을 순차적으로 배치
+            // secd/cold 등 비인라인 컨트롤은 position 0, 인라인 컨트롤은 순차 증가
+            let mut pos = 0usize;
+            let mut positions = storage.vec(total_controls)?;
+            for ctrl in &self.controls {
+                positions.push(pos);
+                if matches!(
+                    ctrl,
+                    Control::Shape(_)
+                        | Control::Table(_)
+                        | Control::Picture(_)
+                        | Control::Equation(_)
+                        | Control::Form(_)
+                        | Control::Footnote(_)
+                        | Control::Endnote(_)
+                        | Control::AutoNumber(_)
+                ) {
+                    pos += 1;
+                }
+            }
+            return Ok(positions);
+        }
+
+        let chars: Vec<char> = storage.collect(self.text.chars())?;
+        let mut positions = storage.vec(total_controls)?;
+        // 파서가 보존한 본문 문자 축으로 갭의 부수 슬롯을 구분한다.
+        // 같은 위치에 여러 필드 종료가 있어도 각각 원시 8유닛을 소비한다.
+        let mut auxiliary_slots = std::collections::HashMap::<usize, usize>::new();
+        for position in self
+            .field_ranges
+            .iter()
+            .map(|range| range.end_char_idx)
+            .chain(self.orphan_field_ends.iter().map(|end| end.char_idx))
+            .chain(self.title_marks.iter().map(|mark| mark.char_idx))
+        {
+            if !auxiliary_slots.contains_key(&position) {
+                storage.reserve_map(&mut auxiliary_slots, 1)?;
+            }
+            *auxiliary_slots.entry(position).or_default() += 1;
+        }
+
+        // 첫 문자 이전의 갭: 확장 컨트롤이 텍스트 시작 전에 있는 경우
+        let gap_before = offsets[0] as usize;
+        let n_ctrls_before =
+            (gap_before / 8).saturating_sub(auxiliary_slots.get(&0).copied().unwrap_or(0));
+        for _ in 0..n_ctrls_before {
+            if positions.len() >= total_controls {
+                break;
+            }
+            positions.push(0);
+        }
+
+        // 연속된 문자 사이의 갭
+        for i in 0..offsets.len().saturating_sub(1) {
+            if positions.len() >= total_controls {
+                break;
+            }
+            let mut current_off = offsets[i] as usize;
+            let next_off = offsets[i + 1] as usize;
+            let char_width = if chars.get(i).map_or(false, |&c| c as u32 > 0xFFFF) {
+                2
+            } else {
+                1
+            };
+            // [#3466] 자동번호(제어문자 0x12)는 8 코드 유닛을 점유하면서 가시 placeholder 를
+            // **한 글자 남긴다**(파서 두 경로 공통). 그래서 그 글자 뒤에는 8 갭이 남지 않고
+            // (8 − 1 = 7 → 7/8 = 0) 갭 분배에서 누락돼, 뒤따르는 컨트롤이 한 칸씩 앞당겨졌다
+            // — 수식 k 가 수식 k+1 자리로 가고 마지막 수식은 폴백으로 문단 끝에 붙었다.
+            //
+            // 판별자는 셋을 **모두** 요구한다. stride 8 하나로는 부족하다 — 탭도 가시 글자를
+            // 남기며 8 코드 유닛을 점유하지만(HWP5 `0x09`, HWPX `'\t'` 폭 8) `controls[]` 에는
+            // 들어가지 않으므로, stride 만 보면 탭이 컨트롤 자리를 가로채 반대 방향으로 어순이
+            // 깨진다.
+            //   (1) 이 글자의 stride 가 정확히 8 — 일반 글자는 자기 폭 + 8k 라 8 이 될 수 없다
+            //   (2) 그 글자가 자동번호 placeholder 인 공백
+            //   (3) 지금 자리를 기다리는 컨트롤이 번호 컨트롤
+            // (3) 덕분에 HWPX `newNum`(placeholder 없이 순수 8 갭)은 종전 경로를 그대로 탄다.
+            let pending_is_number_control = matches!(
+                self.controls.get(positions.len()),
+                Some(Control::AutoNumber(_) | Control::NewNumber(_))
+            );
+            if pending_is_number_control
+                && char_width == 1
+                && chars.get(i) == Some(&' ')
+                && next_off >= current_off + 8
+                && (next_off - current_off).is_multiple_of(8)
+            {
+                // [hwpx-cowork] The number owns this placeholder even when a
+                // field-end slot follows it (caption + memo). Consume its seven
+                // extra units before assigning the remaining gap controls.
+                positions.push(i);
+                current_off += 7;
+            }
+            if next_off > current_off + char_width {
+                let gap = next_off - current_off - char_width;
+                let n_ctrls =
+                    (gap / 8).saturating_sub(auxiliary_slots.get(&(i + 1)).copied().unwrap_or(0));
+                for _ in 0..n_ctrls {
+                    if positions.len() >= total_controls {
+                        break;
+                    }
+                    positions.push(i + 1); // 현재 문자 다음에 삽입
+                }
+            }
+        }
+
+        // 마지막 자동 번호 자리에는 다음 문자가 없어 stride를 읽을 수 없다.
+        // 문단 끝 마커 전의 원시 8유닛이 확인되면 마지막 공백 자체가 번호 슬롯이다.
+        // 새 번호의 순수 갭이나 일반 말미 공백은 번호 자리로 소비하지 않는다.
+        if positions.len() < total_controls
+            && offsets.len() == chars.len()
+            && matches!(
+                self.controls.get(positions.len()),
+                Some(Control::AutoNumber(_))
+            )
+            && offsets
+                .last()
+                .zip(chars.last())
+                .is_some_and(|(offset, ch)| {
+                    *ch == ' '
+                        && offset
+                            .checked_add(CTRL_CHAR_CODE_UNITS)
+                            .is_some_and(|end| end <= self.char_count.saturating_sub(1))
+                })
+        {
+            positions.push(chars.len() - 1);
+        }
+
+        // 갭 분석으로 발견되지 않은 컨트롤의 위치를 텍스트의 `\u{FFFC}` marker
+        // 위치로 매핑한다. HWP3 파서가 char_offsets 에 control gap (8) 을 추가하지
+        // 않고 sequential [0,1,2,...] 만 push 하는 경우 갭 분석이 실패하여 control
+        // 들이 모두 paragraph 끝에 몰리는 회귀를 차단 (sample16 paragraph 394:
+        // 3 picture 가 같은 line 에 중복 emit). 갭 분석으로 채워진 positions 의
+        // 마지막 인덱스 이후를 search start 로 사용하여 중복 매핑 방지.
+        let already_filled = positions.len();
+        let mut search_start = positions.last().copied().unwrap_or(0);
+        while positions.len() < total_controls {
+            // search_start 위치부터 다음 \u{FFFC} marker 찾기
+            let next_marker = chars[search_start..]
+                .iter()
+                .position(|&c| c == '\u{FFFC}')
+                .map(|rel| search_start + rel);
+            match next_marker {
+                Some(abs_pos) => {
+                    positions.push(abs_pos);
+                    search_start = abs_pos + 1;
+                }
+                None => {
+                    // marker 더 이상 없으면 기존 동작 (chars.len() push)
+                    positions.push(chars.len());
+                }
+            }
+        }
+        let _ = already_filled; // 향후 디버그용 (현재 미사용)
+
+        Ok(positions)
+    }
+
+    /// 갭의 제어와 원문 자리표를 소유하는 제어의 실제 UTF-16 시작 위치.
+    pub(crate) fn control_utf16_positions(&self) -> Vec<u32> {
+        match self.control_utf16_positions_with_storage(&crate::storage::Unbounded) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    pub(crate) fn control_utf16_positions_with_storage<S: crate::storage::Storage>(
+        &self,
+        storage: &S,
+    ) -> Result<Vec<u32>, S::Error> {
+        let sources = self.control_source_positions_with_storage(storage)?;
+        storage.collect(sources.into_iter().map(|source| source.utf16))
+    }
+
+    /// 편집/커서 이동용 control position 을 반환한다.
+    ///
+    /// [`Self::control_text_positions`] 는 HWP/HWPX record stream 의 raw text position 을
+    /// 보존한다. 반면 커서 이동은 `SectionDef`, `ColumnDef` 같은 구조 컨트롤을 건너뛰고,
+    /// Shape/Table/Picture/Equation/Footnote/Endnote 같은 인라인 개체만 한 글자 폭으로 센다.
+    pub fn logical_control_positions(&self) -> Vec<usize> {
+        if self.text.is_empty() && self.char_offsets.is_empty() {
+            let mut inline_seen = 0usize;
+            let mut positions = Vec::with_capacity(self.controls.len());
+            for ctrl in &self.controls {
+                positions.push(inline_seen);
+                if ctrl.is_logical_inline() {
+                    inline_seen += 1;
+                }
+            }
+            return positions;
+        }
+
+        let text_positions = self.control_text_positions();
+        let text_len = self.text.chars().count();
+        let mut inline_seen = 0usize;
+        let mut positions = Vec::with_capacity(self.controls.len());
+        for (ci, ctrl) in self.controls.iter().enumerate() {
+            let text_pos = text_positions.get(ci).copied().unwrap_or(text_len);
+            positions.push(text_pos + inline_seen);
+            if ctrl.is_logical_inline() {
+                inline_seen += 1;
+            }
+        }
+        positions
+    }
+
+    /// [#5961] `line_segs[idx].text_start` 를 **HWP5 문단 축**으로 올려 반환한다.
+    ///
+    /// `char_count`·`char_offsets`·`char_shapes` 와 같은 자를 쓰게 해 주는 유일한
+    /// 진입점이다. `text_start` 를 그 셋과 비교하거나 그 셋으로 투영하는 곳은 반드시
+    /// 이 메서드를 거쳐야 한다 — 날값을 쓰면 HWPX 출처 구역 첫 문단에서 축이 섞인다
+    /// ([`Paragraph::hwpx_axis_shift`] 참고).
+    ///
+    /// 반대로 **같은 문단의 두 `text_start` 를 서로 비교**하는 곳은 이 메서드를 쓰면 안
+    /// 된다. 균일 보정이라 차이가 상쇄되므로 날값 비교가 이미 옳고, 굳이 거치면 의미만
+    /// 흐려진다.
+    ///
+    /// 문단 시작(0)은 두 축에서 같은 자리이므로 올리지 않는다. 보정폭이 0 인 문단
+    /// (HWP5·HWP3·HML 출처, 그리고 구역 첫 문단이 아닌 HWPX 문단)은 날값과 같다.
+    pub fn line_seg_text_start(&self, idx: usize) -> u32 {
+        let raw = self.line_segs.get(idx).map_or(0, |seg| seg.text_start);
+        self.line_seg_text_start_of(raw)
+    }
+
+    /// [#5961] 이 문단에 속한 `text_start` 값 하나를 HWP5 축으로 올린다.
+    ///
+    /// 인덱스를 들고 있지 않은 호출부(이미 `&LineSeg` 를 쥔 자리)를 위한 형태로,
+    /// [`Paragraph::line_seg_text_start`] 와 같은 규칙을 쓴다.
+    pub fn line_seg_text_start_of(&self, raw_text_start: u32) -> u32 {
+        if raw_text_start == 0 || self.hwpx_axis_shift == 0 {
+            return raw_text_start;
+        }
+        if self.stored_text_starts_on_hwp5_axis() {
+            raw_text_start
+        } else {
+            raw_text_start + self.hwpx_axis_shift
+        }
+    }
+
+    /// [#5961·#7190] 이 문단의 저장 `text_start` 들이 이미 HWP5 축인지.
+    ///
+    /// 보정폭은 파서가 만들어 넣은 슬롯 수에서 오지만, 그 슬롯까지 세어 `textpos` 를 적는
+    /// 생산자도 있다(같은 한/글 2020 저장본끼리도 갈린다). 그런 문단에서 올려 보면 줄이
+    /// 보정폭만큼 늦게 끊긴다. 축은 문단 하나에 하나이므로 **문단 단위**로 판정한다 —
+    /// 줄마다 따로 판정하면 한 문단에 두 축이 섞여 줄 시작이 거꾸로 가기도 한다
+    /// (36294034 `[0, 95, 93]`).
+    ///
+    /// 어느 한 줄이라도 올린 값이 줄이 시작할 수 없는 자리면 그 문단은 이미 HWP5 축이다.
+    /// - **문단 끝을 넘는다.** `char_count` 는 언제나 HWP5 축이고 줄은 문단 안에서
+    ///   시작한다(`issue5595_rotated_picture_topbottom.hwpx` 문단 0: `cc=25`, `ts=24` 를
+    ///   40 으로 올리면 15 넘는다). 끝 마커를 가리키는 `== char_count` 는 정상이다.
+    /// - **글자·컨트롤 슬롯의 경계가 아니다**(원래 값은 경계). 3011411 문단 0 은 `ts=82`
+    ///   를 90 으로 올리면 그림 컨트롤 슬롯 89..97 의 한가운데다. 한/글 PDF 도 82 에서 끊는다.
+    ///
+    /// 축 증거가 없는 합성 IR(`char_count == 0`)에는 판정을 걸지 않는다 — #5563 비교 축과
+    /// 같은 규약.
+    fn stored_text_starts_on_hwp5_axis(&self) -> bool {
+        if self.char_count == 0 {
+            return false;
+        }
+        self.line_segs.iter().any(|seg| {
+            let raw = seg.text_start;
+            if raw == 0 {
+                return false;
+            }
+            let lifted = raw + self.hwpx_axis_shift;
+            lifted > self.char_count
+                || (!self.is_hwp5_slot_boundary(lifted) && self.is_hwp5_slot_boundary(raw))
+                // 완전한 제어 전용 스트림의 개체 줄을 보정하면 마지막
+                // 문단부호로 이동하는 경우다. 개체 시작 슬롯은 줄을 소유하지만
+                // 문단부호는 그 개체 줄의 시작이 될 수 없다.
+                || (self.text.is_empty()
+                    && self.char_offsets.is_empty()
+                    && self.char_count == self.controls.len() as u32 * 8 + 1
+                    && raw.is_multiple_of(8)
+                    && lifted >= self.char_count - 1
+                    && self
+                        .controls
+                        .get((raw / 8) as usize)
+                        .is_some_and(Control::is_logical_inline))
+        })
+    }
+
+    /// [#7190] HWP5 축 위치 `pos` 가 글자·컨트롤 슬롯의 경계인지.
+    ///
+    /// 글자는 `char_offsets` 에서 시작해 폭 1(BMP)·2(보충평면)·8(탭 등)을 차지하고, 두 글자
+    /// 사이 남는 자리는 8유닛 컨트롤 슬롯이다. 폭을 확정할 수 없는 자리는 경계로 본다 —
+    /// 불확실하면 증거로 쓰지 않는다.
+    fn is_hwp5_slot_boundary(&self, pos: u32) -> bool {
+        let offsets = &self.char_offsets;
+        let (Some(&first), Some(&last)) = (offsets.first(), offsets.last()) else {
+            return true;
+        };
+        if pos >= self.char_count.saturating_sub(1) || offsets.binary_search(&pos).is_ok() {
+            return true;
+        }
+        let slot_boundary = |slots_start: u32, slots_end: u32| {
+            slots_start > slots_end
+                || !(slots_end - slots_start).is_multiple_of(CTRL_CHAR_CODE_UNITS)
+                || (pos - slots_start).is_multiple_of(CTRL_CHAR_CODE_UNITS)
+        };
+        if pos < first {
+            return slot_boundary(0, first);
+        }
+        if pos > last {
+            let width = match self.text.chars().last() {
+                Some('\t') => CTRL_CHAR_CODE_UNITS,
+                Some(ch) => ch.len_utf16() as u32,
+                None => return true,
+            };
+            let end = self.char_count.saturating_sub(1);
+            return pos >= last + width && slot_boundary(last + width, end);
+        }
+        let next = offsets.partition_point(|&off| off < pos);
+        let (start, end) = (offsets[next - 1], offsets[next]);
+        let width = match (end - start) % CTRL_CHAR_CODE_UNITS {
+            0 => CTRL_CHAR_CODE_UNITS,
+            w => w,
+        };
+        pos >= start + width && slot_boundary(start + width, end)
+    }
+
+    /// `char_offsets` 중 UTF-16 위치 `utf16_pos` 이상인 첫 번째 codepoint 의
+    /// 인덱스를 반환한다. 모든 entry 가 작으면 `char_offsets.len()` (텍스트 끝).
+    ///
+    /// `char_shapes[i].start_pos` 와 `line_segs[i].text_start` 같은 UTF-16
+    /// 단위 위치 필드를 codepoint 인덱스로 정규화할 때 사용한다.
+    ///
+    /// 본 메서드는 `document_core::helpers::utf16_pos_to_char_idx` 와 동일
+    /// 알고리즘이나, 시그니처 호환성 (raw `&[u32]` vs `&self`) 때문에 본체를
+    /// 자체 보유한다 — 의존성 방향 (model ← document_core) 보존. 알고리즘이
+    /// 1줄 (`iter().position`) 이라 silent drift 위험은 무시 가능.
+    ///
+    /// # Returns
+    ///
+    /// `char_offsets` 첫 entry 가 `utf16_pos` 이상인 인덱스. 모든 entry 가
+    /// 작으면 `char_offsets.len()`.
+    pub fn utf16_pos_to_char_idx(&self, utf16_pos: u32) -> usize {
+        self.char_offsets
+            .iter()
+            .position(|&off| off >= utf16_pos)
+            .unwrap_or(self.char_offsets.len())
+    }
+
+    /// [start_char_offset, end_char_offset) 범위에 new_char_shape_id를 적용한다.
+    ///
+    /// CharShapeRef 배열을 분할/교체하여 지정 범위만 새 ID로 변경한다.
+    /// 범위 경계에서 기존 CharShapeRef가 부분적으로 겹치면 분할한다.
+    /// 적용 후 연속 동일 ID는 병합한다.
+    pub fn apply_char_shape_range(
+        &mut self,
+        start_char_offset: usize,
+        end_char_offset: usize,
+        new_char_shape_id: u32,
+    ) {
+        self.try_map_char_shape_range(start_char_offset, end_char_offset, |_| {
+            Ok::<_, std::convert::Infallible>(new_char_shape_id)
+        })
+        .unwrap_or_else(|never| match never {});
+    }
+
+    /// 범위 적용과 원본 ID 수집이 같은 UTF-16 경계를 사용한다.
+    /// 마지막 텍스트 뒤의 문단 끝 모양은 적용 범위에 포함하지 않는다.
+    /// 글자가 없는 문단은 문단 끝 모양이 곧 이어 입력할 글자의 모양이므로 문단 전체가 범위다.
+    fn char_shape_range_bounds(&self, start: usize, end: usize) -> Option<(u32, u32, u32)> {
+        if self.text.is_empty() {
+            return (start == 0).then_some((0, u32::MAX, 0));
+        }
+        if start >= end {
+            return None;
+        }
+        let utf16_start = *self.char_offsets.get(start)?;
+        let last_idx = self.char_offsets.len() - 1;
+        let text_end = self.char_offsets[last_idx]
+            + self
+                .text
+                .chars()
+                .nth(last_idx)
+                .map_or(1, |c| c.len_utf16() as u32);
+        // 링크 서식은 마지막 표시 글자까지만 적용한다. FIELD_END와 다음
+        // FIELD_BEGIN 사이의 갭까지 칠하면 인접 링크 사이의 일반 서식이 사라진다.
+        let ends_hyperlink = self.field_ranges.iter().any(|range| {
+            range.end_char_idx == end
+                && matches!(self.controls.get(range.control_idx),
+                    Some(Control::Field(field)) if field.field_type == FieldType::Hyperlink)
+        });
+        let utf16_end = if ends_hyperlink {
+            *self.char_offsets.get(end - 1)?
+                + self
+                    .text
+                    .chars()
+                    .nth(end - 1)
+                    .map_or(1, Self::char_stream_len)
+        } else {
+            self.char_offsets.get(end).copied().unwrap_or(text_end)
+        };
+        (utf16_start < utf16_end).then_some((utf16_start, utf16_end, text_end))
+    }
+
+    /// 첫 ref는 시작 위치 앞에도 유효하다(char_shape_id_at과 같은 상속 규칙).
+    /// ID 수집과 적용이 이 iterator의 동일한 겹침 판정을 사용한다.
+    fn char_shape_segments(
+        &self,
+        from: u32,
+        to: u32,
+    ) -> impl Iterator<Item = (CharShapeRef, u32, bool)> + '_ {
+        self.char_shapes
+            .iter()
+            .enumerate()
+            .map(move |(i, shape)| {
+                let start = if i == 0 { 0 } else { shape.start_pos };
+                let end = self
+                    .char_shapes
+                    .get(i + 1)
+                    .map_or(u32::MAX, |s| s.start_pos);
+                (
+                    CharShapeRef {
+                        start_pos: start,
+                        char_shape_id: shape.char_shape_id,
+                    },
+                    end,
+                    start < to && end > from,
+                )
+            })
+            .chain(self.char_shapes.is_empty().then_some((
+                CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                },
+                u32::MAX,
+                true,
+            )))
+    }
+
+    /// [#6788] 선택과 겹치는 원본 ID를 변경 전에 수집한다. 중복 ID는 호출자가 재사용한다.
+    pub(crate) fn char_shape_ids_in_range(&self, start: usize, end: usize) -> Vec<u32> {
+        let Some((utf16_start, utf16_end, _)) = self.char_shape_range_bounds(start, end) else {
+            return Vec::new();
+        };
+        self.char_shape_segments(utf16_start, utf16_end)
+            .filter(|(_, _, overlaps)| *overlaps)
+            .map(|(shape, _, _)| shape.char_shape_id)
+            .collect()
+    }
+
+    /// 기존 구간별 ID를 변환한다. 범위 분할·범위 밖 복원은 단일 ID 적용과 공유한다.
+    /// 호출자는 구간마다 재조판하지 않고 문단 갱신 뒤 한 번만 후처리한다.
+    pub(crate) fn try_map_char_shape_range<E>(
+        &mut self,
+        start: usize,
+        end: usize,
+        mut map_id: impl FnMut(u32) -> Result<u32, E>,
+    ) -> Result<(), E> {
+        let Some((utf16_start, utf16_end, text_utf16_end)) =
+            self.char_shape_range_bounds(start, end)
+        else {
+            return Ok(());
+        };
+
+        // 링크가 문단 끝까지 있어도 링크 밖의 원래 서식을 남긴다.
+        // 이어 쓰기와 방문 색 변경이 링크 색/밑줄을 다음 입력으로 전파하지 않게 한다.
+        let preserve_link_end = self.field_ranges.iter().any(|range| {
+            range.end_char_idx == end
+                && matches!(self.controls.get(range.control_idx),
+                    Some(Control::Field(field)) if field.field_type == FieldType::Hyperlink)
+        });
+        // 새 CharShapeRef 배열을 구축
+        let mut new_refs: Vec<CharShapeRef> = Vec::new();
+
+        for (csr, seg_end, overlaps) in self.char_shape_segments(utf16_start, utf16_end) {
+            let seg_start = csr.start_pos;
+            if !overlaps {
+                // 범위와 겹치지 않음 — 그대로 유지
+                new_refs.push(csr);
+            } else {
+                // 겹침 발생
+                let new_char_shape_id = map_id(csr.char_shape_id)?;
+                // 범위 앞부분 (seg_start < utf16_start)
+                if seg_start < utf16_start {
+                    new_refs.push(CharShapeRef {
+                        start_pos: seg_start,
+                        char_shape_id: csr.char_shape_id,
+                    });
+                }
+
+                // 새 ID 삽입 (범위 시작점)
+                let insert_start = utf16_start.max(seg_start);
+                // 이미 같은 위치에 new_char_shape_id가 있는지 확인
+                let already_inserted = new_refs
+                    .last()
+                    .map(|r| r.start_pos == insert_start && r.char_shape_id == new_char_shape_id)
+                    .unwrap_or(false);
+                if !already_inserted {
+                    // 이전 ref가 같은 start_pos인데 다른 ID이면 교체
+                    if let Some(last) = new_refs.last_mut() {
+                        if last.start_pos == insert_start {
+                            last.char_shape_id = new_char_shape_id;
+                        } else {
+                            new_refs.push(CharShapeRef {
+                                start_pos: insert_start,
+                                char_shape_id: new_char_shape_id,
+                            });
+                        }
+                    } else {
+                        new_refs.push(CharShapeRef {
+                            start_pos: insert_start,
+                            char_shape_id: new_char_shape_id,
+                        });
+                    }
+                }
+
+                // 범위 뒷부분 복원 (utf16_end < seg_end, 텍스트 범위 내일 때만)
+                if utf16_end < seg_end && (utf16_end < text_utf16_end || preserve_link_end) {
+                    new_refs.push(CharShapeRef {
+                        start_pos: utf16_end,
+                        char_shape_id: csr.char_shape_id,
+                    });
+                }
+            }
+        }
+
+        // 연속 동일 ID 병합
+        let mut merged: Vec<CharShapeRef> = Vec::new();
+        for r in new_refs {
+            if let Some(last) = merged.last() {
+                if last.char_shape_id == r.char_shape_id {
+                    continue; // 동일 ID 연속 → 뒤의 것 제거
+                }
+            }
+            merged.push(r);
+        }
+
+        self.char_shapes = merged;
+        Ok(())
+    }
+
+    /// 검증된 문자 범위의 모양을 연속 구간으로 조회한다(문자별 WASM 왕복 없음).
+    pub(crate) fn char_shape_runs(&self, start: usize, end: usize) -> Vec<CharShapeRun> {
+        let mut runs: Vec<CharShapeRun> = Vec::new();
+        let mut shape_index = 0;
+        for offset in start..end {
+            let pos = self.char_offsets[offset];
+            while shape_index + 1 < self.char_shapes.len()
+                && self.char_shapes[shape_index + 1].start_pos <= pos
+            {
+                shape_index += 1;
+            }
+            let id = self
+                .char_shapes
+                .get(shape_index)
+                .map_or(0, |r| r.char_shape_id);
+            if let Some(last) = runs.last_mut() {
+                if last.char_shape_id == id {
+                    last.end_offset = offset + 1;
+                    continue;
+                }
+            }
+            runs.push(CharShapeRun {
+                start_offset: offset,
+                end_offset: offset + 1,
+                char_shape_id: id,
+            });
+        }
+        runs
+    }
+
+    /// 사전 검증된 구간 목록을 한 번에 복원한다. 선택 밖/문단 끝 ref는 유지한다.
+    pub(crate) fn restore_char_shape_runs(
+        &mut self,
+        start: usize,
+        end: usize,
+        runs: &[CharShapeRun],
+    ) {
+        let Some((from, to, text_end)) = self.char_shape_range_bounds(start, end) else {
+            return;
+        };
+        let mut refs: Vec<CharShapeRef> = self
+            .char_shapes
+            .iter()
+            .take_while(|r| r.start_pos < from)
+            .cloned()
+            .collect();
+        if refs.is_empty() && from > 0 {
+            refs.push(CharShapeRef {
+                start_pos: 0,
+                char_shape_id: self.char_shapes.first().map_or(0, |r| r.char_shape_id),
+            });
+        }
+        refs.extend(runs.iter().map(|run| CharShapeRef {
+            start_pos: self.char_offsets[run.start_offset],
+            char_shape_id: run.char_shape_id,
+        }));
+        // 경계에 원본 ref가 있으면 그것만 유지한다. 합성 tail과 같은 위치로 중복하지 않는다.
+        if to < text_end && !self.char_shapes.iter().any(|r| r.start_pos == to) {
+            let id = self.char_shape_id_at(end).unwrap_or(0);
+            refs.push(CharShapeRef {
+                start_pos: to,
+                char_shape_id: id,
+            });
+        }
+        refs.extend(
+            self.char_shapes
+                .iter()
+                .filter(|r| r.start_pos >= to)
+                .cloned(),
+        );
+        refs.dedup_by(|a, b| a.char_shape_id == b.char_shape_id);
+        self.char_shapes = refs;
+    }
+
+    /// 문단의 글자 모양을 단일 CharShapeRef로 초기화한다.
+    pub fn set_single_char_shape(&mut self, char_shape_id: u32) {
+        self.char_shapes.clear();
+        self.char_shapes.push(CharShapeRef {
+            start_pos: 0,
+            char_shape_id,
+        });
+    }
+
+    /// 스타일 기본 글자 모양 run만 새 ID로 바꾸고 직접 지정된 run은 유지한다.
+    pub fn replace_style_char_shape_preserving_overrides(
+        &mut self,
+        old_char_shape_id: u32,
+        new_char_shape_id: u32,
+    ) {
+        if self.char_shapes.is_empty() {
+            self.set_single_char_shape(new_char_shape_id);
+            return;
+        }
+
+        let mut replaced = false;
+        for csr in &mut self.char_shapes {
+            if csr.char_shape_id == old_char_shape_id {
+                csr.char_shape_id = new_char_shape_id;
+                replaced = true;
+            }
+        }
+
+        if replaced {
+            self.merge_adjacent_char_shapes();
+        }
+    }
+
+    /// 문단 전체에 글자 스타일의 CharShape를 적용한다.
+    pub fn apply_char_shape_to_entire_text(&mut self, char_shape_id: u32) {
+        let text_len = self.text.chars().count();
+        if text_len == 0 || self.char_offsets.is_empty() {
+            self.set_single_char_shape(char_shape_id);
+            return;
+        }
+        self.apply_char_shape_range(0, text_len, char_shape_id);
+    }
+
+    fn merge_adjacent_char_shapes(&mut self) {
+        let mut merged: Vec<CharShapeRef> = Vec::new();
+        for csr in self.char_shapes.drain(..) {
+            if let Some(last) = merged.last() {
+                if last.char_shape_id == csr.char_shape_id {
+                    continue;
+                }
+            }
+            merged.push(csr);
+        }
+        self.char_shapes = merged;
+    }
+}
+
+/// A memo field: `FieldType::Memo`, or a field whose command names a memo
+/// (Hancom writes a memo's control id as `%unk`).
+fn is_memo_control(ctrl: Option<&Control>) -> bool {
+    matches!(ctrl, Some(Control::Field(field))
+        if field.field_type == FieldType::Memo || field.command.starts_with("MEMO/"))
+}
+
+#[cfg(test)]
+mod tests;

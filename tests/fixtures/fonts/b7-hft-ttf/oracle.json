@@ -1,0 +1,954 @@
+{
+  "hancomVersion": "12, 0, 0, 3146",
+  "pdfSha256": "e0d3ced65c3a7171b1ea6ac9f9231b529824ba8bdf39775daeae8ba262f9d0cb",
+  "inputSha256": "6251b83a9cbfee23ed1d3851c8aa62add57619e6ae25e447d1d132611356b80f",
+  "resavedSha256": "433b6cc88ebe12b5f419160590f1acecbe0ad5a078417373cbc2eac608ec8792",
+  "extraction": "PDF texttrace glyph advance / span.size (size includes Tz)",
+  "text": "가·나 A·B ··· ․",
+  "cases": [
+    {
+      "id": "hft-10-100",
+      "face": "한양신명조",
+      "type": "HFT",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 100,
+      "paragraphIndex": 0,
+      "page": 1,
+      "baseline": 44.352,
+      "expectedEm": 0.384,
+      "pdfDots": [
+        {
+          "font": "T1",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.38399986204465153,
+          "origin": [
+            39.9383544921875,
+            44.351531982421875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3840002452539528,
+          "origin": [
+            66.80350494384766,
+            44.351531982421875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3840002452539528,
+          "origin": [
+            82.63521575927734,
+            44.351531982421875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3840002452539528,
+          "origin": [
+            86.47271728515625,
+            44.351531982421875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3840002452539528,
+          "origin": [
+            90.31021881103516,
+            44.351531982421875
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ttf-10-100",
+      "face": "HY신명조",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 100,
+      "paragraphIndex": 1,
+      "page": 1,
+      "baseline": 69.045,
+      "expectedEm": 1.0,
+      "pdfDots": [
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 1.0,
+          "origin": [
+            39.9383544921875,
+            69.04454803466797
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 1.0,
+          "origin": [
+            72.92066955566406,
+            69.04454803466797
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 1.0,
+          "origin": [
+            94.98851776123047,
+            69.04454803466797
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 1.0,
+          "origin": [
+            104.94312286376953,
+            69.04454803466797
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 1.0,
+          "origin": [
+            114.8977279663086,
+            69.04454803466797
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batang-10-100",
+      "face": "한컴바탕",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 100,
+      "paragraphIndex": 2,
+      "page": 1,
+      "baseline": 87.025,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.33300773316369936,
+          "origin": [
+            39.9383544921875,
+            87.02489471435547
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            65.72449493408203,
+            87.02489471435547
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            80.83618927001953,
+            87.02489471435547
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            84.07441711425781,
+            87.02489471435547
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            87.43209838867188,
+            87.02489471435547
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing-10-100",
+      "face": "B7MissingFontProbe",
+      "type": "TTF",
+      "substitute": "한컴바탕",
+      "sizePt": 10,
+      "ratio": 100,
+      "paragraphIndex": 3,
+      "page": 1,
+      "baseline": 105.005,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.33300773316369936,
+          "origin": [
+            39.9383544921875,
+            105.00524139404297
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            65.72449493408203,
+            105.00524139404297
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            80.83618927001953,
+            105.00524139404297
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            84.07441711425781,
+            105.00524139404297
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.954605102539062,
+          "advanceEm": 0.3330081163730006,
+          "origin": [
+            87.43209838867188,
+            105.00524139404297
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hft-10-97",
+      "face": "한양신명조",
+      "type": "HFT",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 97,
+      "paragraphIndex": 4,
+      "page": 1,
+      "baseline": 122.986,
+      "expectedEm": 0.384,
+      "pdfDots": [
+        {
+          "font": "T1",
+          "pdfSize": 9.655966758728027,
+          "advanceEm": 0.383999826173097,
+          "origin": [
+            39.698486328125,
+            122.985595703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.655966758728027,
+          "advanceEm": 0.38400022123424016,
+          "origin": [
+            65.6041259765625,
+            122.985595703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.655966758728027,
+          "advanceEm": 0.38400022123424016,
+          "origin": [
+            80.95612335205078,
+            122.985595703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.655966758728027,
+          "advanceEm": 0.38400022123424016,
+          "origin": [
+            84.67366790771484,
+            122.985595703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 9.655966758728027,
+          "advanceEm": 0.38400022123424016,
+          "origin": [
+            88.3912124633789,
+            122.985595703125
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ttf-10-97",
+      "face": "HY신명조",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 97,
+      "paragraphIndex": 5,
+      "page": 1,
+      "baseline": 140.966,
+      "expectedEm": 1.0,
+      "pdfDots": [
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.9999998994075608,
+          "origin": [
+            39.698486328125,
+            140.9659423828125
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.9999998994075608,
+          "origin": [
+            71.48089599609375,
+            140.9659423828125
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.9999998994075608,
+          "origin": [
+            92.8296890258789,
+            140.9659423828125
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.9999998994075608,
+          "origin": [
+            102.54443359375,
+            140.9659423828125
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.9999998994075608,
+          "origin": [
+            112.1387710571289,
+            140.9659423828125
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batang-10-97",
+      "face": "한컴바탕",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 10,
+      "ratio": 97,
+      "paragraphIndex": 6,
+      "page": 1,
+      "baseline": 158.946,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            39.698486328125,
+            158.9462890625
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            64.52468872070312,
+            158.9462890625
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            79.03716278076172,
+            158.9462890625
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            82.2757339477539,
+            158.9462890625
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            85.51429748535156,
+            158.9462890625
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing-10-97",
+      "face": "B7MissingFontProbe",
+      "type": "TTF",
+      "substitute": "한컴바탕",
+      "sizePt": 10,
+      "ratio": 97,
+      "paragraphIndex": 7,
+      "page": 1,
+      "baseline": 176.927,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            39.698486328125,
+            176.92665100097656
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            64.52468872070312,
+            176.92665100097656
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            79.03716278076172,
+            176.92665100097656
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            82.2757339477539,
+            176.92665100097656
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 9.480576515197754,
+          "advanceEm": 0.3330076485461123,
+          "origin": [
+            85.51429748535156,
+            176.92665100097656
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hft-15-100",
+      "face": "한양신명조",
+      "type": "HFT",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 100,
+      "paragraphIndex": 8,
+      "page": 1,
+      "baseline": 199.102,
+      "expectedEm": 0.384,
+      "pdfDots": [
+        {
+          "font": "T1",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3840001221364722,
+          "origin": [
+            44.975624084472656,
+            199.1024169921875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3840001221364722,
+          "origin": [
+            85.15384674072266,
+            199.1024169921875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3840001221364722,
+          "origin": [
+            108.9009780883789,
+            199.1024169921875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3840001221364722,
+          "origin": [
+            114.6578598022461,
+            199.1024169921875
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3840001221364722,
+          "origin": [
+            120.41474151611328,
+            199.1024169921875
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ttf-15-100",
+      "face": "HY신명조",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 100,
+      "paragraphIndex": 9,
+      "page": 1,
+      "baseline": 226.073,
+      "expectedEm": 1.0,
+      "pdfDots": [
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 1.0,
+          "origin": [
+            44.975624084472656,
+            226.07293701171875
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 1.0,
+          "origin": [
+            94.26890563964844,
+            226.07293701171875
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 1.0000005089019677,
+          "origin": [
+            127.3709716796875,
+            226.07293701171875
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.9999994910980323,
+          "origin": [
+            142.3628387451172,
+            226.07293701171875
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.9999994910980323,
+          "origin": [
+            157.35472106933594,
+            226.07293701171875
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batang-15-100",
+      "face": "한컴바탕",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 100,
+      "paragraphIndex": 10,
+      "page": 1,
+      "baseline": 253.043,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.33300789052500873,
+          "origin": [
+            44.975624084472656,
+            253.04345703125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            83.71463012695312,
+            253.04345703125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            106.14247131347656,
+            253.04345703125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            111.17974090576172,
+            253.04345703125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            116.09707641601562,
+            253.04345703125
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing-15-100",
+      "face": "B7MissingFontProbe",
+      "type": "TTF",
+      "substitute": "한컴바탕",
+      "sizePt": 15,
+      "ratio": 100,
+      "paragraphIndex": 11,
+      "page": 1,
+      "baseline": 280.014,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.33300789052500873,
+          "origin": [
+            44.975624084472656,
+            280.01397705078125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            83.71463012695312,
+            280.01397705078125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            106.14247131347656,
+            280.01397705078125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            111.17974090576172,
+            280.01397705078125
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.991874694824219,
+          "advanceEm": 0.3330076360740249,
+          "origin": [
+            116.09707641601562,
+            280.01397705078125
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hft-15-97",
+      "face": "한양신명조",
+      "type": "HFT",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 97,
+      "paragraphIndex": 12,
+      "page": 1,
+      "baseline": 306.984,
+      "expectedEm": 0.384,
+      "pdfDots": [
+        {
+          "font": "T1",
+          "pdfSize": 14.542119026184082,
+          "advanceEm": 0.3840000965339777,
+          "origin": [
+            44.49588394165039,
+            306.9844970703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.542119026184082,
+          "advanceEm": 0.3840000965339777,
+          "origin": [
+            83.35552215576172,
+            306.9844970703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.542119026184082,
+          "advanceEm": 0.3840000965339777,
+          "origin": [
+            106.3823471069336,
+            306.9844970703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.542119026184082,
+          "advanceEm": 0.3840000965339777,
+          "origin": [
+            111.89962768554688,
+            306.9844970703125
+          ]
+        },
+        {
+          "font": "T1",
+          "pdfSize": 14.542119026184082,
+          "advanceEm": 0.3840000965339777,
+          "origin": [
+            117.41690826416016,
+            306.9844970703125
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ttf-15-97",
+      "face": "HY신명조",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 97,
+      "paragraphIndex": 13,
+      "page": 1,
+      "baseline": 333.955,
+      "expectedEm": 1.0,
+      "pdfDots": [
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 1.0,
+          "origin": [
+            44.49588394165039,
+            333.9550476074219
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 1.0000002627936488,
+          "origin": [
+            92.23030090332031,
+            333.9550476074219
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 1.0000002627936488,
+          "origin": [
+            124.25265502929688,
+            333.9550476074219
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 1.0000002627936488,
+          "origin": [
+            138.76425170898438,
+            333.9550476074219
+          ]
+        },
+        {
+          "font": "H2mjsM",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 1.0000002627936488,
+          "origin": [
+            153.27584838867188,
+            333.9550476074219
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batang-15-97",
+      "face": "한컴바탕",
+      "type": "TTF",
+      "substitute": null,
+      "sizePt": 15,
+      "ratio": 97,
+      "paragraphIndex": 14,
+      "page": 1,
+      "baseline": 360.926,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            44.49588394165039,
+            360.9255676269531
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            82.03599548339844,
+            360.9255676269531
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            103.7437744140625,
+            360.9255676269531
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            108.54129791259766,
+            360.9255676269531
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            113.33882141113281,
+            360.9255676269531
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing-15-97",
+      "face": "B7MissingFontProbe",
+      "type": "TTF",
+      "substitute": "한컴바탕",
+      "sizePt": 15,
+      "ratio": 97,
+      "paragraphIndex": 15,
+      "page": 1,
+      "baseline": 387.896,
+      "expectedEm": 0.3330078125,
+      "pdfDots": [
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            44.49588394165039,
+            387.8960876464844
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            82.03599548339844,
+            387.8960876464844
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            103.7437744140625,
+            387.8960876464844
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            108.54129791259766,
+            387.8960876464844
+          ]
+        },
+        {
+          "font": "Haansoft Batang",
+          "pdfSize": 14.515941619873047,
+          "advanceEm": 0.333007907198102,
+          "origin": [
+            113.33882141113281,
+            387.8960876464844
+          ]
+        }
+      ]
+    }
+  ]
+}

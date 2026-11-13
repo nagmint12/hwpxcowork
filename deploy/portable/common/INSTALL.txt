@@ -1,0 +1,23 @@
+설치형 릴리즈 안내 (Windows · macOS · Linux)
+===========================================
+이 설치형에는 Node 런타임과 npm 라이브러리를 넣지 않았습니다.
+인터넷이 연결된 실제 사용할 PC에서 설치합니다. Rust나 편집기 빌드는 필요 없습니다.
+
+Windows: ZIP 해제 → install.bat 두 번 클릭 (install-dependencies.bat와 같은 기능).
+  Node.js 22 이상이 없으면 공식 Node.js와 npm을 runtime\에 받습니다.
+  이미 Node만 있고 npm이 없으면 install-node.bat를 먼저 실행하세요.
+macOS/Linux: 압축 해제 후 sh install.sh (install-dependencies.sh와 같은 기능).
+
+설치는 app\package-lock.json 기준 npm ci --omit=dev --ignore-scripts로 수행됩니다.
+실패하면 서버/실행기를 켜지 않으며, 네트워크·프록시를 확인한 뒤 다시 설치합니다.
+설치 후 서버: admin-app.bat 또는 start-server.bat (macOS/Linux: ./start-server.sh)
+개인 AI 실행기: worker-settings.txt를 설정한 뒤 start-worker.bat (./start-worker.sh)
+참여자용 user-app은 브라우저 바로 가기로 Node/npm 설치가 필요 없습니다.
+
+튜토리얼 test1~test5는 서버 관리자의 API만 사용합니다.
+관리자의 Codex·Claude Code 연결은 빌려 쓰지 않으며 API가 없거나 실패하면 처리되지 않습니다.
+개인 계정의 Codex·Claude Code 사용은 일반 사용자용 별도 기능입니다.
+
+Node 공식 파일: https://nodejs.org/ (SHASUMS256.txt와 SHA-256 대조)
+원격 릴리즈 목록: https://cowork.example.com/download
+MCP 연결 예시: https://cowork.example.com/mcp

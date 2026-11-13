@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ?token= 이 Referer 로 새지 않게(정적 import·iframe 요청은 아래 스크립트가 주소를 고치기 전에 나간다) -->
+<meta name="referrer" content="no-referrer">
+<title>cowork 플러그인 시험</title>
+<!-- studio cowork 플러그인 단독 시험용 호스트(Vue 없음). tests/studio_plugin.py 가 연다.
+     /studio-test.html?doc=<문서 id>[&token=<토큰>] — 토큰은 ?token= 또는 localStorage 'hwpx.token'.
+     ?token= 은 읽자마자 주소창(방문 기록)에서 지운다(localStorage 에는 저장하지 않음 — 본 화면 로그인을 바꾸지 않게. 새로 고침하면 다시 줘야 한다).
+     편집기를 같은 출처 /studio/(?chrome=embed)로 띄우고 cowork 플러그인을 올린 뒤, 작업본(최종본)을 열고
+     setBase(문단 목록) → markClean() → setAnnotations(buildAnnotations(메모·제안·변경·요청)).
+     플러그인 이벤트는 모두 window.__events 와 오른쪽 기록 창에 남는다. window.__cowork = iframe 의 rhwpCowork. -->
+<style>
+  html, body { margin: 0; height: 100%; font: 13px/1.4 system-ui, 'Malgun Gothic', sans-serif; color: #212529; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  #bar { display: flex; gap: 12px; align-items: center; padding: 6px 10px; background: #f1f3f5; border-bottom: 1px solid #dee2e6; }
+  #bar b { font-weight: 700; }
+  #status { color: #495057; }
+  #main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+  #editor { min-height: 0; min-width: 0; }
+  #log { margin: 0; overflow: auto; background: #212529; color: #e9ecef; font: 11px/1.35 ui-monospace, Consolas, monospace; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<div id="bar"><b>cowork 플러그인 시험</b><span id="status">준비 중…</span></div>
+<div id="main"><div id="editor"></div><pre id="log"></pre></div>
+<script type="module">
+import { createStudio } from '/vendor/rhwp-editor/index.js';
+import { buildAnnotations } from '/annotations.js';
+
+const EVENTS = ['ready', 'selection', 'menu-action', 'annotation-click', 'annotation-hover', 'anchors', 'edited', 'draft', 'editing', 'key'];
+const qs = new URLSearchParams(location.search);
+let token = qs.get('token') || '';
+if (qs.has('token')) {
+  // 토큰을 주소창·방문 기록에 남기지 않는다
+  qs.delete('token');
+  const rest = qs.toString();
+  try { history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`); } catch { /* 주소 고치기 불가 */ }
+}
+if (!token) { try { token = localStorage.getItem('hwpx.token') || ''; } catch { token = ''; } }
+const docId = qs.get('doc') || '';
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const setStatus = (t) => { statusEl.textContent = t; };
+
+window.__events = [];
+window.__ready = false;
+window.__error = null;
+window.__timing = {};
+
+const lines = [];
+function log(type, payload) {
+  window.__events.push({ type, payload, t: Date.now() });
+  if (type === 'anchors') return void logLine(`${type} ${Array.isArray(payload) ? payload.length : 0}개`);
+  let s = '';
+  try { s = JSON.stringify(payload); } catch { s = String(payload); }
+  logLine(`${type} ${s && s.length > 400 ? `${s.slice(0, 400)}…` : s}`);
+}
+function logLine(t) {
+  lines.push(`${new Date().toISOString().slice(11, 23)} ${t}`);
+  if (lines.length > 400) lines.splice(0, lines.length - 400);
+  logEl.textContent = lines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function api(path) {
+  const r = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+  return r;
+}
+const json = async (path) => (await api(path)).json();
+
+/** 메모·제안·변경·요청을 다시 읽어 플러그인 강조를 통째로 바꾼다(시험이 REST 로 메모를 더한 뒤 부른다) */
+async function refreshAnnotations() {
+  const [memos, proposals, changes, requests, me] = await Promise.all([
+    json(`/api/docs/${docId}/memos`), json(`/api/docs/${docId}/proposals`), json(`/api/docs/${docId}/changes`),
+    json(`/api/docs/${docId}/requests`).catch(() => []), json('/api/me'),
+  ]);
+  const a = buildAnnotations({ memos, proposals, changes, requests, paragraphs: window.__paragraphs || [] }, { me: me.name });
+  window.__annotations = a;
+  window.__me = me;
+  await window.__cowork.setAnnotations(a);
+  return a;
+}
+
+async function main() {
+  if (!docId) throw new Error('주소에 ?doc=<문서 id> 가 없습니다');
+  if (!token) throw new Error('토큰이 없습니다(?token= 또는 localStorage hwpx.token)');
+  setStatus('편집기 띄우는 중…');
+  const t0 = performance.now();
+  const studio = await createStudio('#editor', {
+    studioUrl: `${location.origin}/studio/?chrome=embed`, plugins: ['cowork'], renderer: 'canvas2d', requestTimeoutMs: 120000,
+  });
+  window.__timing.studio = Math.round(performance.now() - t0);
+  const frame = document.querySelector('#editor iframe');
+  const cw = frame?.contentWindow?.rhwpCowork;
+  if (!cw) throw new Error('iframe 에 rhwpCowork 가 없습니다(cowork 플러그인이 올라오지 않음 — npm run build:studio)');
+  window.__studio = studio; window.__frame = frame; window.__cowork = cw;
+  for (const ev of EVENTS) cw.on(ev, (p) => log(ev, p));
+
+  setStatus('문서 여는 중…');
+  const res = await api(`/api/docs/${docId}/file?kind=working`);
+  const version = Number(res.headers.get('X-Doc-Version')) || 0;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const t1 = performance.now();
+  await studio.loadFile(bytes, 'document.hwpx', { suppressDialogs: true, skipUnsavedGuard: true });
+  await cw.ready;
+  window.__timing.load = Math.round(performance.now() - t1);
+
+  const paragraphs = await json(`/api/docs/${docId}/paragraphs`);
+  window.__paragraphs = paragraphs;
+  const t2 = performance.now();
+  await cw.setBase({ version, paragraphs });
+  await cw.markClean();
+  window.__timing.setBase = Math.round(performance.now() - t2);
+  await refreshAnnotations();
+  window.__refreshAnnotations = refreshAnnotations;
+  window.__version = version;
+  window.__ready = true;
+  setStatus(`준비 · v${version} · 문단 ${paragraphs.length} · 플러그인 ${cw.version} · 편집기 ${window.__timing.studio}ms · 열기 ${window.__timing.load}ms`);
+}
+
+main().catch((e) => {
+  window.__error = e?.message || String(e);
+  setStatus(`실패: ${window.__error}`);
+  console.error(e);
+});
+</script>
+</body>
+</html>

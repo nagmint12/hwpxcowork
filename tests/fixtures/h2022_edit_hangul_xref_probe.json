@@ -1,0 +1,20 @@
+{
+ "source": "한/글 2022 COM, 상호 참조 창(UI Automation) 2026-11-12, scratchpad probe_xref.py",
+ "table_page": {
+  "params": "<hp:parameters cnt=\"8\" name=\"\"><hp:booleanParam name=\"Fiexde\">1</hp:booleanParam><hp:integerParam name=\"Prop\">0</hp:integerParam><hp:stringParam name=\"Command\">?#1244863626;0;0;0;0;</hp:stringParam><hp:stringParam name=\"RefPath\">?#1244863626;</hp:stringParam><hp:stringParam name=\"RefType\">TARGET_TABLE</hp:stringParam><hp:stringParam name=\"RefContentType\">OBJECT_TYPE_PAGE</hp:stringParam><hp:booleanParam name=\"RefHyperLink\">false</hp:booleanParam><hp:stringParam name=\"RefOpenType\">HWPHYPERLINK_JUMP_CURRENTTAB</hp:stringParam></hp:parameters>",
+  "text": "1"
+ },
+ "table_number": {
+  "params": "<hp:parameters cnt=\"8\" name=\"\"><hp:booleanParam name=\"Fiexde\">1</hp:booleanParam><hp:integerParam name=\"Prop\">0</hp:integerParam><hp:stringParam name=\"Command\">?#1244863936;0;1;0;0;</hp:stringParam><hp:stringParam name=\"RefPath\">?#1244863936;</hp:stringParam><hp:stringParam name=\"RefType\">TARGET_TABLE</hp:stringParam><hp:stringParam name=\"RefContentType\">OBJECT_TYPE_NUMBER</hp:stringParam><hp:booleanParam name=\"RefHyperLink\">false</hp:booleanParam><hp:stringParam name=\"RefOpenType\">HWPHYPERLINK_JUMP_CURRENTTAB</hp:stringParam></hp:parameters>",
+  "text": "1"
+ },
+ "table_updown": {
+  "params": "<hp:parameters cnt=\"8\" name=\"\"><hp:booleanParam name=\"Fiexde\">1</hp:booleanParam><hp:integerParam name=\"Prop\">0</hp:integerParam><hp:stringParam name=\"Command\">?#1244864638;0;3;0;0;</hp:stringParam><hp:stringParam name=\"RefPath\">?#1244864638;</hp:stringParam><hp:stringParam name=\"RefType\">TARGET_TABLE</hp:stringParam><hp:stringParam name=\"RefContentType\">OBJECT_TYPE_UPDOWNPOS</hp:stringParam><hp:booleanParam name=\"RefHyperLink\">false</hp:booleanParam><hp:stringParam name=\"RefOpenType\">HWPHYPERLINK_JUMP_CURRENTTAB</hp:stringParam></hp:parameters>",
+  "text": "위"
+ },
+ "bookmark_path_from_tree": {
+  "params": "<hp:parameters cnt=\"8\" name=\"\"><hp:booleanParam name=\"Fiexde\">1</hp:booleanParam><hp:integerParam name=\"Prop\">0</hp:integerParam><hp:stringParam name=\"Command\">?표 1;6;0;0;0;</hp:stringParam><hp:stringParam name=\"RefPath\">?표 1;</hp:stringParam><hp:stringParam name=\"RefType\">TARGET_BOOKMARK</hp:stringParam><hp:stringParam name=\"RefContentType\">OBJECT_TYPE_PAGE</hp:stringParam><hp:booleanParam name=\"RefHyperLink\">false</hp:booleanParam><hp:stringParam name=\"RefOpenType\">HWPHYPERLINK_JUMP_CURRENTTAB</hp:stringParam></hp:parameters>",
+  "note": "창의 목록이 표로 남은 채 대상 종류만 책갈피로 바뀌어 고른 이름(표 1)이 경로가 됨 — 꼴(?<이름>;6;…, TARGET_BOOKMARK)만 근거"
+ },
+ "table_tag": "<hp:tbl id=\"1244866837\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"2\" colCnt=\"2\" cellSpacing=\"0\" borderFillIDRef=\"3\" noAdjust=\"0\">"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "hwpx-cowork-mcp-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-concurrency=2 tests/*.test.mjs",
+    "experiment": "node scenarios.mjs",
+    "experiment:formatting": "node formatting-experiment.mjs",
+    "start": "node serve.mjs",
+    "start:stdio": "node serve.mjs --stdio"
+  }
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hwpx-cowork 소개</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d1424; }
+    .tz { position: relative; width: 100%; height: 100%; overflow: hidden; outline: none; font-family: "Pretendard", "Pretendard Variable", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    .tz-viewport { position: absolute; inset: 0; overflow: hidden; cursor: pointer; }
+    .tz-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden;
+      --sans: "Pretendard", "Pretendard Variable", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    .tz-framed .tz-stage { border-radius: 24px; box-shadow: 0 24px 80px rgba(0, 0, 0, .45); }
+    /* --tz-x·--tz-y = 무대 틀의 위치(player.js fit) — 막대와 건너뛰기 단추를 틀 안쪽에 붙인다 */
+    .tz-bar { position: absolute; z-index: 1; left: calc(var(--tz-x, 0px) + 12px); right: calc(var(--tz-x, 0px) + 12px); bottom: calc(var(--tz-y, 0px) + 12px); display: flex; align-items: center; gap: 12px; padding: 6px 12px 6px 6px;
+      border-radius: 10px; background: rgba(13, 20, 36, .72); color: #fff; font-size: 13px; opacity: 0; transition: opacity .2s; }
+    /* 평소 숨김 — 아래 막대 자리(위로 40px 더)에 마우스를 올렸을 때만 보인다. 키보드 이동은 :focus-visible 로 보인다 */
+    .tz-bar::before { content: ""; position: absolute; left: -12px; right: -12px; bottom: -12px; top: -40px; z-index: -1; }
+    .tz-bar:hover, .tz-bar:has(:focus-visible) { opacity: 1; }
+    .tz-bar[hidden] { display: none; }
+    .tz-play { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; }
+    .tz-play:hover { background: rgba(255, 255, 255, .14); }
+    .tz-seek { flex: 1; accent-color: #f5a800; cursor: pointer; }
+    .tz-time { font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .9; }
+    .tz-skip { position: fixed; top: calc(var(--tz-y, 0px) + 16px); right: calc(var(--tz-x, 0px) + 16px); z-index: 2; padding: 8px 14px; border: 1px solid rgba(255, 255, 255, .35); border-radius: 8px;
+      background: rgba(13, 20, 36, .6); color: #fff; font: 14px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif; cursor: pointer; }
+    .tz-framed ~ .tz-skip { top: max(8px, calc(var(--tz-y, 0px) - 46px)); right: var(--tz-x, 0px); } /* PC: 틀 바깥 위 여백에 */
+    .tz-skip:hover, .tz-skip:focus-visible { background: rgba(13, 20, 36, .85); border-color: #f5a800; }
+    .tz-skip[hidden] { display: none; }
+    .tz-err { color: #fff; padding: 24px; font: 14px/1.5 sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="teaser" class="tz" aria-label="hwpx-cowork 소개 영상" role="region"></div>
+  <button type="button" class="tz-skip" hidden>건너뛰기 ›</button>
+  <script type="module">
+    import { mount } from './player.js';
+    const el = document.getElementById('teaser');
+    // 첫 접속 소개(?intro=1&next=/…): 한 번 재생하고 next 로 간다. 건너뛰기·Esc/Enter/스페이스는 바로,
+    // 클릭·키·휠이 2초 안에 3번 이상(조급하게 누름)이어도 바로 넘어간다. next 는 같은 사이트 경로만 받는다.
+    const q = new URLSearchParams(location.search);
+    const intro = q.get('intro') === '1';
+    const raw = q.get('next') || '/';
+    const next = raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\') ? raw : '/';
+    let left = false;
+    const go = () => { if (!left) { left = true; location.replace(next); } };
+    // 단독으로 열면 PC 화면에서 여백을 둔 틀로, 다른 화면 안(iframe)에서는 상자를 가득 채운다
+    let opts = { frame: window.self === window.top };
+    if (intro) {
+      Object.assign(opts, { loop: false, autoplay: true, clickToggle: false, onEnd: () => setTimeout(go, 600) });
+      const skip = document.querySelector('.tz-skip');
+      skip.hidden = false;
+      skip.addEventListener('click', (e) => { e.stopPropagation(); go(); });
+      const hits = [];
+      const poke = (e) => {
+        if (e?.target?.closest?.('.tz-bar')) return; // 재생 막대 조작은 세지 않는다
+        const now = performance.now();
+        hits.push(now);
+        while (hits.length && now - hits[0] > 2000) hits.shift();
+        if (hits.length >= 3) go();
+      };
+      addEventListener('pointerdown', poke, true);
+      addEventListener('wheel', poke, { capture: true, passive: true });
+      addEventListener('keydown', (e) => {
+        e.stopPropagation(); // 소개 중에는 재생기 키(스페이스=멈춤·←/→)를 쓰지 않는다
+        if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } else poke();
+      }, true);
+    }
+    mount(el, opts).catch((e) => {
+      console.error(e);
+      if (intro) return go();
+      el.innerHTML = `<p class="tz-err">소개 영상을 불러오지 못했습니다: ${String(e.message || e).replace(/[<&]/g, '')}</p>`;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "check": "explicit real skill transmission and exact Unicode pagination",
+  "skill": {
+    "name": "conduct-education-research",
+    "version": "969b27081c07d9aa",
+    "source": "user-selected-local-skill"
+  },
+  "readings": [
+    {
+      "resource": "SKILL.md",
+      "pages": 4,
+      "chars": 2769,
+      "sha256": "969b27081c07d9aa431176a4cdf8a1a196b733622e7a5d1db6cd39f5c8a7c90a",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/analysis-and-validation.md",
+      "pages": 3,
+      "chars": 1940,
+      "sha256": "e7a138b94097f4d38e66ab0a7bf9a69d8991c501a36f9f78fd3dd1e7bddcb09e",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/evidence-and-indicators.md",
+      "pages": 2,
+      "chars": 1404,
+      "sha256": "1c9bb0c64d1daf68a9701882efeaea41a925f16077ed446d4e8dd7249924801e",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/intake-and-context.md",
+      "pages": 2,
+      "chars": 1295,
+      "sha256": "3b323afd7e603e7a7da928cfd91bfc07b14e490f7b0349922fe561e35c8980b7",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/output-and-code.md",
+      "pages": 3,
+      "chars": 2032,
+      "sha256": "c356d7d62a55f16b470f0d57f8607db12378bbb781f18295500f639a5f110148",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/portfolio-index-template.md",
+      "pages": 2,
+      "chars": 931,
+      "sha256": "11525d24232ba70cf7798b3553080eb07d56f996a418512d856bfd7eb821fece",
+      "exactMatch": true
+    },
+    {
+      "resource": "references/project-brief-template.md",
+      "pages": 2,
+      "chars": 912,
+      "sha256": "a9f680b32358feaca2eebed1ce28c1751dde6d8ab87825adefd6debfebd987a6",
+      "exactMatch": true
+    }
+  ],
+  "modelReasoningEvaluated": false,
+  "modelTokens": null,
+  "paidApiCalls": 0
+}

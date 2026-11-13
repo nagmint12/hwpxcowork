@@ -1,0 +1,14 @@
+{
+  "title": "hwpx-cowork 소개",
+  "width": 1920,
+  "height": 1080,
+  "background": "#FFFFFF",
+  "scenes": [
+    { "id": "open", "name": "문서가 열린다", "dur": 3.5 },
+    { "id": "propose", "name": "AI 제안", "dur": 6 },
+    { "id": "review", "name": "함께 검토", "dur": 5 },
+    { "id": "end", "name": "마무리", "dur": 5.5 }
+  ],
+  "modules": ["shared.js", "scene-open.js", "scene-propose.js", "scene-review.js", "scene-end.js"],
+  "assets": ["ui-body.webp", "ui-typed.webp", "ui-sent.webp", "ui-completed.webp", "ui-memo.webp", "ui-applied2.webp", "ui-export0.webp"]
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "program": "SPMJ.HFT",
+      "sourceCode": 8671,
+      "paintCode": 8670,
+      "rule": "HFT-upward-double-stroke-arrow",
+      "evidence": "artifacts/hft-ttf-mapping-20261106/verifier/symbol-direction-results.json",
+      "reason": "Source HFT U+21DF has an upward arrowhead; mapped TTF U+21DF points down. TTF U+21DE preserves the source direction."
+    }
+  ]
+}

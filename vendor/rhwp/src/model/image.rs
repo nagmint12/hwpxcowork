@@ -1,0 +1,429 @@
+//! 그림 개체 (Picture, ImageData, CropInfo)
+
+use super::shape::{CommonObjAttr, ShapeComponentAttr};
+use super::style::ShapeBorderLine;
+use super::*;
+
+/// The document keeps the full link for editing/round-trip; a missing-picture
+/// label in exported/displayed content only needs its filename.
+pub(crate) fn external_picture_basename(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or("")
+}
+
+/// 그림 개체 (HWPTAG_SHAPE_COMPONENT_PICTURE)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Picture {
+    /// 개체 공통 속성
+    pub common: CommonObjAttr,
+    /// Integrity seal for a proven PDF stroke fragment, restored by the bounded sidecar.
+    /// Geometry or resource edits invalidate its authority to delete the picture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_paint_fingerprint: Option<[u8; 32]>,
+    /// 개체 요소 속성
+    pub shape_attr: ShapeComponentAttr,
+    /// 테두리 색
+    pub border_color: ColorRef,
+    /// 테두리 두께
+    pub border_width: i32,
+    /// 테두리 속성
+    pub border_attr: ShapeBorderLine,
+    /// 그림 꼭짓점의 앞 네 INT32: [pt0.x, pt0.y, pt1.x, pt1.y].
+    /// 기존 필드명과 달리 X 좌표만의 배열이 아니다.
+    pub border_x: [i32; 4],
+    /// 그림 꼭짓점의 뒤 네 INT32: [pt2.x, pt2.y, pt3.x, pt3.y].
+    pub border_y: [i32; 4],
+    /// 자르기 정보
+    pub crop: CropInfo,
+    /// 안쪽 여백
+    pub padding: Padding,
+    /// 그림 속성
+    pub image_attr: ImageAttr,
+    /// HWPX `<hp:pic href="...">` 값.
+    ///
+    /// 한컴 HWP 저장 결과에서는 이 값이 그림 컨트롤 뒤의 CTRL_DATA ParameterSet
+    /// (`ps_id=0x021b -> ps_id=0x026f -> id=0x0265 string`) 으로 materialize된다.
+    pub href: Option<String>,
+    /// 테두리 투명도
+    pub border_opacity: u8,
+    /// 인스턴스 ID
+    pub instance_id: u32,
+    /// SHAPE_PICTURE 레코드의 파싱된 필드 이후 추가 바이트 (라운드트립 보존용)
+    pub raw_picture_extra: Vec<u8>,
+    /// HWPX `<hp:effects>` 그림 효과 정보.
+    pub effects: PictureEffects,
+    /// 캡션
+    pub caption: Option<super::shape::Caption>,
+    /// HWP5 표 116의 기준 이미지 크기(HWPUNIT 두 개), HWPX `<hp:imgDim>` 대응.
+    ///
+    /// crop과 같은 원본 좌표계의 전체 범위이며 디코딩된 bitmap 픽셀 크기와 구별한다.
+    /// imgClip extent와 독립(전수 측정: 불일치 24/170)인 (dimwidth, dimheight)를
+    /// 그대로 보존한다. HWP5·HWPX 파서가 모두 적재한다.
+    pub img_dim: (u32, u32),
+    /// HWPX `<hp:pic reverse="...">` 값 — 그림 좌우 반전(한컴 Automation
+    /// `InsertPicture`의 `reverse` 옵션과 동일 개념). 파서가 읽지 않고 직렬화기가
+    /// 항상 "0"을 방출해 `reverse="1"`로 저장된 그림이 왕복 시 반전이 풀린다.
+    pub reverse: bool,
+    /// HWPX `<hp:pic lock="...">` 값 — 개체 잠금(보호) 여부. 파서가 읽지 않고
+    /// 직렬화기가 항상 "0"을 방출해 lock="1"로 저장된 그림이 왕복 시 잠금 해제됐다.
+    pub lock: bool,
+}
+
+impl Picture {
+    /// Construct an embedded picture with the existing insertion geometry contract.
+    /// `common` owns placement; the source crop and imgDim both use pixels × 75.
+    pub(crate) fn from_embedded_image(
+        common: CommonObjAttr,
+        bin_data_id: u16,
+        natural_width_px: u32,
+        natural_height_px: u32,
+    ) -> Self {
+        let width = common.width;
+        let height = common.height;
+        let img_dim = (natural_width_px * 75, natural_height_px * 75);
+        Self {
+            common,
+            shape_attr: ShapeComponentAttr {
+                original_width: width,
+                original_height: height,
+                current_width: width,
+                current_height: height,
+                local_file_version: 1,
+                render_sx: 1.0,
+                render_sy: 1.0,
+                ..Default::default()
+            },
+            border_x: [0, 0, width as i32, 0],
+            border_y: [width as i32, height as i32, 0, height as i32],
+            crop: CropInfo {
+                left: 0,
+                top: 0,
+                right: img_dim.0 as i32,
+                bottom: img_dim.1 as i32,
+            },
+            img_dim,
+            image_attr: ImageAttr {
+                bin_data_id,
+                brightness: 0,
+                contrast: 0,
+                effect: ImageEffect::RealPic,
+                transparency: 0,
+                external_path: None,
+            },
+            ..Default::default()
+        }
+    }
+
+    /// 저장된 자르기 폭이 있으면 높이가 비어 있어도 그 선택을 보존한다.
+    /// 빈 선택을 자르기 없음으로 바꾸면 한컴이 그리지 않는 원본 전체가 나타난다.
+    pub fn render_crop_rect(&self) -> Option<(i32, i32, i32, i32)> {
+        let c = &self.crop;
+        (c.right > c.left).then_some((c.left, c.top, c.right, c.bottom))
+    }
+
+    /// 그림 자르기 좌표가 기준으로 삼는 전체 이미지 좌표 범위.
+    ///
+    /// HWPX `imgClip`은 디코딩된 비트맵 픽셀과 항상 75 HU/px 관계가 아니며,
+    /// 이 경우 `imgDim`이 실제 좌표 범위를 보존한다.
+    pub fn crop_reference_size(&self) -> Option<(u32, u32)> {
+        if self.img_dim.0 > 0 && self.img_dim.1 > 0 {
+            return Some(self.img_dim);
+        }
+        // 원본 개체 좌표와 crop이 같은 전체 창이면 별도 imgDim이 없어도
+        // 전체 그림임을 source가 증명한다. 디코딩 픽셀의 두 축에서 배율을
+        // 추정하면 저장 단위의 반올림 차이가 거짓 부분 crop으로 바뀐다.
+        // 실제 부분 선택과 원본 크기를 현재 크기로 보충한 개체는 기존
+        // crop 추론을 유지하며, 명시된 imgDim을 덮어쓰지 않는다.
+        let attr = &self.shape_attr;
+        if attr.original_width_was_zero || attr.original_height_was_zero {
+            return None;
+        }
+        let (width, height) = (attr.original_width, attr.original_height);
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let full = (
+            0,
+            0,
+            i32::try_from(width).ok()?,
+            i32::try_from(height).ok()?,
+        );
+        (self.render_crop_rect()? == full).then_some((width, height))
+    }
+}
+
+/// 자르기 정보
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct CropInfo {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+/// 이미지 속성
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ImageAttr {
+    /// 밝기
+    pub brightness: i8,
+    /// 명암
+    pub contrast: i8,
+    /// 그림 효과
+    pub effect: ImageEffect,
+    /// BinData ID 참조
+    pub bin_data_id: u16,
+    /// 그림 개체 전체 투명도. 한컴 UI 기준으로 0=불투명, 100=완전 투명.
+    pub transparency: u8,
+    /// [Task #741] 외부 file path 그림 (HWP3 spec offset 74 그림 종류 0=외부 파일,
+    /// 1=OLE, 2=Embedded Image / offset 83~339 그림 파일 이름).
+    /// HWP3 외부 link 그림이고 binary 데이터 부재 시 placeholder 표시용.
+    /// `None` = 내부 임베드 그림 (binary 데이터 사용).
+    pub external_path: Option<String>,
+}
+
+/// HWPX 그림 효과 (`hp:effects`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PictureEffects {
+    pub shadow: Option<PictureShadow>,
+    /// [hwpx-cowork] 네온(`hp:glow`) — 종전에는 읽지 않아 저장 때 사라졌다(2026-11-12 한/글 2022 실측으로 그리기도).
+    pub glow: Option<PictureGlow>,
+    /// [hwpx-cowork] 옅은 테두리(`hp:softEdge`) — 읽고 쓰기만(그리기 미구현).
+    pub soft_edge: Option<PictureSoftEdge>,
+    /// [hwpx-cowork] 반사(`hp:reflection`) — 읽고 쓰기만(그리기 미구현).
+    pub reflection: Option<PictureReflection>,
+}
+
+/// [hwpx-cowork] HWPX 그림 네온 효과 (`hp:glow alpha radius` + `hp:effectsColor`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PictureGlow {
+    pub alpha: Option<String>,
+    pub radius: Option<String>,
+    pub color: Option<EffectColor>,
+}
+
+/// [hwpx-cowork] HWPX 그림 옅은 테두리 (`hp:softEdge radius`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PictureSoftEdge {
+    pub radius: Option<String>,
+}
+
+/// [hwpx-cowork] HWPX 그림 반사 (`hp:reflection` + skew·scale·alpha(start,end)·pos(start,end)).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PictureReflection {
+    pub align_style: Option<String>,
+    pub radius: Option<String>,
+    pub direction: Option<String>,
+    pub distance: Option<String>,
+    pub rotation_style: Option<String>,
+    pub fade_direction: Option<String>,
+    pub skew: Option<EffectPoint>,
+    pub scale: Option<EffectPoint>,
+    /// `hp:alpha start end`
+    pub alpha: Option<(Option<String>, Option<String>)>,
+    /// `hp:pos start end`
+    pub pos: Option<(Option<String>, Option<String>)>,
+}
+
+/// HWPX 그림 그림자 효과 (`hp:shadow`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PictureShadow {
+    pub style: Option<String>,
+    pub alpha: Option<String>,
+    pub radius: Option<String>,
+    pub direction: Option<String>,
+    pub distance: Option<String>,
+    pub align_style: Option<String>,
+    pub rotation_style: Option<String>,
+    pub skew: Option<EffectPoint>,
+    pub scale: Option<EffectPoint>,
+    pub color: Option<EffectColor>,
+}
+
+/// HWPX 효과의 x/y 좌표성 값 (`hp:skew`, `hp:scale`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct EffectPoint {
+    pub x: Option<String>,
+    pub y: Option<String>,
+}
+
+/// HWPX 효과 색상 (`hp:effectsColor`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct EffectColor {
+    pub color_type: Option<String>,
+    pub scheme_idx: Option<String>,
+    pub system_idx: Option<String>,
+    pub preset_idx: Option<String>,
+    pub rgb: Option<EffectRgb>,
+}
+
+/// HWPX 효과 RGB 색상 (`hp:rgb`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct EffectRgb {
+    pub r: Option<String>,
+    pub g: Option<String>,
+    pub b: Option<String>,
+}
+
+impl ImageAttr {
+    pub fn clamped_transparency(&self) -> u8 {
+        self.transparency.min(100)
+    }
+
+    pub fn transparency_alpha_byte(&self) -> u8 {
+        transparency_percent_to_alpha_byte(self.clamped_transparency())
+    }
+
+    pub fn opacity(&self) -> f64 {
+        1.0 - (self.clamped_transparency() as f64 / 100.0)
+    }
+
+    /// 워터마크 효과가 적용되어 있는지 식별 (Task #516, Issue #1156 정정).
+    ///
+    /// HWP/HWPX 에는 워터마크 적용을 나타내는 별도 비트/속성이 **존재하지 않는다**
+    /// (한컴 공식 파일구조 3.0/5.0 + water-mark.hwp/.hwpx 두 그림 비교로 확정).
+    /// 한컴 편집기는 "워터마크 효과" 체크를 해제하면 밝기·대비를 모두 0 으로
+    /// 되돌리고, 체크하면 0 이 아닌 밝기·대비 값을 부여한다 (기본 70/-50, 사용자
+    /// 변경 가능). 따라서 워터마크 여부는 **밝기·대비가 둘 다 0 이 아닌 경우**
+    /// 로 판정한다 (effect 종류 무관, 한쪽이라도 0 이면 워터마크 아님).
+    pub fn is_watermark(&self) -> bool {
+        self.brightness != 0 && self.contrast != 0
+    }
+
+    /// 워터마크 preset 분류 (Task #516, AI 메타정보).
+    pub fn watermark_preset(&self) -> Option<&'static str> {
+        if self.is_watermark() {
+            Some("custom")
+        } else {
+            None
+        }
+    }
+}
+
+/// 한컴 UI 투명도(0~100%)를 HWP/HWPX 저장용 alpha byte(0~255)로 변환한다.
+pub fn transparency_percent_to_alpha_byte(transparency: u8) -> u8 {
+    ((transparency.min(100) as u16 * 255) / 100) as u8
+}
+
+/// HWP/HWPX 저장용 alpha byte(0~255)를 한컴 UI 투명도(0~100%)로 변환한다.
+pub fn alpha_byte_to_transparency_percent(alpha: u8) -> u8 {
+    ((alpha as f64 * 100.0) / 255.0).round().clamp(0.0, 100.0) as u8
+}
+
+/// HWP5 SHAPE_COMPONENT_PICTURE 꼬리(`raw_picture_extra`) 안 필드 위치.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PictureExtraLayout {
+    /// 원본 그림 크기(dimwidth u32, dimheight u32)의 시작 위치.
+    pub dim_offset: Option<usize>,
+    /// 그림 투명도(alpha byte) 위치.
+    pub alpha_offset: Option<usize>,
+}
+
+/// 그림 효과 플래그 중 부드러운 가장자리(표 108·111). 뒤에 반경 f32 하나가 온다.
+const PICTURE_EFFECT_SOFT_EDGE: u32 = 0x4;
+
+/// 그림 꼬리의 구조를 판정한다.
+///
+/// 꼬리는 [테두리 투명도 u8][인스턴스 id u32][그림 효과 정보][dimwidth u32]
+/// [dimheight u32][투명도 u8, 생략 가능] 이다(표 107). 그림 효과 정보는 [효과 플래그
+/// u32][효과별 정보] 이고(표 108), 효과가 없으면 플래그 0 뿐이라 꼬리가 17/18 바이트로
+/// 고정된다. 부드러운 가장자리(플래그 4)는 반경 f32 4바이트를 더 둔다(표 111). 고정
+/// 위치 9..17 로 읽으면 반경이 dimwidth 로 읽혀 자르기 영역이 원본의 극히 일부가 된다.
+///
+/// 효과별 정보 길이를 아는 경우(부드러운 가장자리만)에, 그 길이가 꼬리 길이와 정확히
+/// 맞을 때만 건너뛴다. 그림자·네온·반사처럼 색상 정보가 가변인 효과나 길이가 맞지 않는
+/// 꼬리는 종전 해석을 그대로 쓴다.
+pub(crate) fn picture_extra_layout(extra: &[u8]) -> PictureExtraLayout {
+    const EFFECTS_OFFSET: usize = 5;
+    const FIXED_DIM_OFFSET: usize = EFFECTS_OFFSET + 4;
+    let legacy = PictureExtraLayout {
+        dim_offset: (extra.len() >= FIXED_DIM_OFFSET + 8).then_some(FIXED_DIM_OFFSET),
+        alpha_offset: (extra.len() >= FIXED_DIM_OFFSET + 9).then(|| extra.len() - 1),
+    };
+    let Some(flags) = extra
+        .get(EFFECTS_OFFSET..FIXED_DIM_OFFSET)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    else {
+        return legacy;
+    };
+    let effects_len = match flags {
+        PICTURE_EFFECT_SOFT_EDGE => 4,
+        _ => return legacy,
+    };
+    let dim_offset = FIXED_DIM_OFFSET + effects_len;
+    match extra.len().checked_sub(dim_offset) {
+        Some(8) => PictureExtraLayout {
+            dim_offset: Some(dim_offset),
+            alpha_offset: None,
+        },
+        Some(9) => PictureExtraLayout {
+            dim_offset: Some(dim_offset),
+            alpha_offset: Some(dim_offset + 8),
+        },
+        _ => legacy,
+    }
+}
+
+/// 이미지 효과
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum ImageEffect {
+    #[default]
+    RealPic,
+    GrayScale,
+    BlackWhite,
+    Pattern8x8,
+}
+
+/// 이미지 데이터 (실제 바이너리 데이터 보관)
+#[derive(Debug, Clone)]
+pub struct ImageData {
+    /// 이미지 형식
+    pub format: ImageFormat,
+    /// 바이너리 데이터
+    pub data: Vec<u8>,
+}
+
+/// 이미지 형식
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ImageFormat {
+    Bmp,
+    Jpg,
+    Png,
+    Gif,
+    Tiff,
+    Wmf,
+    Emf,
+    Unknown,
+}
+
+impl Default for ImageFormat {
+    fn default() -> Self {
+        ImageFormat::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_picture_default() {
+        let pic = Picture::default();
+        assert_eq!(pic.image_attr.effect, ImageEffect::RealPic);
+        assert_eq!(pic.border_width, 0);
+    }
+
+    #[test]
+    fn test_crop_info() {
+        let crop = CropInfo {
+            left: 100,
+            top: 200,
+            right: 300,
+            bottom: 400,
+        };
+        assert_eq!(crop.left, 100);
+    }
+
+    #[test]
+    fn test_image_format_default() {
+        assert_eq!(ImageFormat::default(), ImageFormat::Unknown);
+    }
+}

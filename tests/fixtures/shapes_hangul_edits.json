@@ -1,0 +1,258 @@
+{
+ "note": "한/글(HWPFrame.HwpObject COM) 결과 — tests/fixtures/shapes_hangul.hwpx 를 열어 i 번째 그리기 개체(그림 제외, 문서 차례)를 개체 속성(HorzOffset·VertOffset·Width·Height)으로 고치거나 DeleteCtrl 로 지우고 PDF 저장 뒤 HWPX 저장(2026-10-30). shapes = 문단 ref → 그 문단 도형 XML",
+ "move": {
+  "ops": [
+   {
+    "op": "move",
+    "i": 0,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 1,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 2,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 3,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 4,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 5,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 6,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 7,
+    "dx": 1000,
+    "dy": 2000
+   },
+   {
+    "op": "move",
+    "i": 8,
+    "dx": 1000,
+    "dy": 2000
+   }
+  ],
+  "shapes": {
+   "s0/p0": [],
+   "s0/p1": [],
+   "s0/p2": [
+    "<hp:line id=\"2112282672\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038540849\" isReverseHV=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"9000\" height=\"3000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"4500\" centerY=\"1500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:startPt x=\"0\" y=\"0\"/><hc:endPt x=\"9000\" y=\"3000\"/><hp:sz width=\"9000\" widthRelTo=\"ABSOLUTE\" height=\"3000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"22000\" horzOffset=\"9000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>선입니다.</hp:shapeComment></hp:line>"
+   ],
+   "s0/p3": [
+    "<hp:rect id=\"2112411928\" zOrder=\"1\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038670105\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"9500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"4750\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"9500\" y=\"0\"/><hc:pt2 x=\"9500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/><hp:sz width=\"9500\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"27500\" horzOffset=\"12000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>사각형입니다.</hp:shapeComment></hp:rect>"
+   ],
+   "s0/p4": [
+    "<hp:ellipse id=\"2112460184\" zOrder=\"2\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038718361\" intervalDirty=\"0\" hasArcPr=\"0\" arcType=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5000\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5000\" y=\"3000\"/><hc:ax1 x=\"10000\" y=\"3000\"/><hc:ax2 x=\"5000\" y=\"6000\"/><hc:start1 x=\"10000\" y=\"3000\"/><hc:end1 x=\"10000\" y=\"3000\"/><hc:start2 x=\"10000\" y=\"3000\"/><hc:end2 x=\"10000\" y=\"3000\"/><hp:sz width=\"10000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"33000\" horzOffset=\"15000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>타원입니다.</hp:shapeComment></hp:ellipse>"
+   ],
+   "s0/p5": [
+    "<hp:arc id=\"2112508440\" zOrder=\"3\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038766617\" type=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5250\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5250\" y=\"3000\"/><hc:ax1 x=\"10500\" y=\"3000\"/><hc:ax2 x=\"5250\" y=\"0\"/><hp:sz width=\"10500\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"38500\" horzOffset=\"18000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>호입니다.</hp:shapeComment></hp:arc>"
+   ],
+   "s0/p6": [
+    "<hp:polygon id=\"2112556696\" zOrder=\"4\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038814873\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"11000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5500\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt x=\"0\" y=\"6000\"/><hc:pt x=\"5000\" y=\"0\"/><hc:pt x=\"10000\" y=\"6000\"/><hp:sz width=\"11000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"44000\" horzOffset=\"21000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>다각형입니다.</hp:shapeComment></hp:polygon>"
+   ],
+   "s0/p7": [
+    "<hp:rect id=\"2112604952\" zOrder=\"5\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038863129\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"11500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5750\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:drawText lastWidth=\"11500\" name=\"\" editable=\"0\"><hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\"><hp:p id=\"6\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>글상자 안 글</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos=\"0\" vertpos=\"0\" vertsize=\"1000\" textheight=\"1000\" baseline=\"850\" spacing=\"600\" horzpos=\"0\" horzsize=\"10932\" flags=\"393216\"/></hp:linesegarray></hp:p></hp:subList><hp:textMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/></hp:drawText><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"11500\" y=\"0\"/><hc:pt2 x=\"11500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/><hp:sz width=\"11500\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"49500\" horzOffset=\"24000\"/><hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/><hp:shapeComment>글상자입니다.</hp:shapeComment></hp:rect>"
+   ],
+   "s0/p8": [
+    "<hp:connectLine id=\"2112653208\" zOrder=\"6\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038911385\" type=\"STRAIGHT_NOARROW\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6000\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:startPt x=\"0\" y=\"0\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:endPt x=\"12000\" y=\"6000\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:sz width=\"12000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"55000\" horzOffset=\"27000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>직선 연결선입니다.</hp:shapeComment></hp:connectLine>"
+   ],
+   "s0/p9": [
+    "<hp:container id=\"1233862604\" zOrder=\"9\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"160120781\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"16000\" height=\"11500\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"8000\" centerY=\"5750\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:rect id=\"0\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"1\" instid=\"1038959641\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6250\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"12500\" y=\"0\"/><hc:pt2 x=\"12500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/></hp:rect><hp:ellipse id=\"0\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"1\" instid=\"1039007897\" intervalDirty=\"0\" hasArcPr=\"0\" arcType=\"NORMAL\"><hp:offset x=\"3000\" y=\"5500\"/><hp:orgSz width=\"13000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6500\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"3000\" e4=\"0\" e5=\"1\" e6=\"5500\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"6500\" y=\"3000\"/><hc:ax1 x=\"13000\" y=\"3000\"/><hc:ax2 x=\"6500\" y=\"6000\"/><hc:start1 x=\"13000\" y=\"3000\"/><hc:end1 x=\"13000\" y=\"3000\"/><hc:start2 x=\"13000\" y=\"3000\"/><hc:end2 x=\"13000\" y=\"3000\"/></hp:ellipse><hp:sz width=\"16000\" widthRelTo=\"ABSOLUTE\" height=\"11500\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"60500\" horzOffset=\"30000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>묶음 개체입니다.</hp:shapeComment></hp:container>"
+   ],
+   "s0/p10": [],
+   "s0/p11": [
+    "<hp:curve id=\"1987654321\" zOrder=\"20\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"913912498\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6000\" centerY=\"3000\" rotateimage=\"1\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#0000FF\" width=\"113\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:seg type=\"CURVE\" x1=\"0\" y1=\"6000\" x2=\"3000\" y2=\"0\"/><hp:seg type=\"CURVE\" x1=\"3000\" y1=\"0\" x2=\"8000\" y2=\"5000\"/><hp:seg type=\"CURVE\" x1=\"8000\" y1=\"5000\" x2=\"12000\" y2=\"1000\"/><hp:sz width=\"12000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"1\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"3000\" horzOffset=\"31000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>곡선입니다.</hp:shapeComment></hp:curve>"
+   ],
+   "s1/p0": [],
+   "s1/p1": []
+  }
+ },
+ "size": {
+  "ops": [
+   {
+    "op": "size",
+    "i": 0,
+    "w": 12000,
+    "h": 4000
+   },
+   {
+    "op": "size",
+    "i": 1,
+    "w": 12500,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 2,
+    "w": 13000,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 3,
+    "w": 13500,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 4,
+    "w": 14000,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 5,
+    "w": 14500,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 6,
+    "w": 15000,
+    "h": 7000
+   },
+   {
+    "op": "size",
+    "i": 7,
+    "w": 19000,
+    "h": 12500
+   },
+   {
+    "op": "size",
+    "i": 8,
+    "w": 15000,
+    "h": 7000
+   }
+  ],
+  "shapes": {
+   "s0/p0": [],
+   "s0/p1": [],
+   "s0/p2": [
+    "<hp:line id=\"2112282672\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038540849\" isReverseHV=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"9000\" height=\"3000\"/><hp:curSz width=\"12000\" height=\"4000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6000\" centerY=\"2000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.333333\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.333333\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:startPt x=\"0\" y=\"0\"/><hc:endPt x=\"9000\" y=\"3000\"/><hp:sz width=\"12000\" widthRelTo=\"ABSOLUTE\" height=\"4000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"20000\" horzOffset=\"8000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>선입니다.</hp:shapeComment></hp:line>"
+   ],
+   "s0/p3": [
+    "<hp:rect id=\"2112411928\" zOrder=\"1\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038670105\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"9500\" height=\"6000\"/><hp:curSz width=\"12500\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6250\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.315789\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"9500\" y=\"0\"/><hc:pt2 x=\"9500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/><hp:sz width=\"12500\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"25500\" horzOffset=\"11000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>사각형입니다.</hp:shapeComment></hp:rect>"
+   ],
+   "s0/p4": [
+    "<hp:ellipse id=\"2112460184\" zOrder=\"2\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038718361\" intervalDirty=\"0\" hasArcPr=\"0\" arcType=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10000\" height=\"6000\"/><hp:curSz width=\"13000\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6500\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.3\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5000\" y=\"3000\"/><hc:ax1 x=\"10000\" y=\"3000\"/><hc:ax2 x=\"5000\" y=\"6000\"/><hc:start1 x=\"10000\" y=\"3000\"/><hc:end1 x=\"10000\" y=\"3000\"/><hc:start2 x=\"10000\" y=\"3000\"/><hc:end2 x=\"10000\" y=\"3000\"/><hp:sz width=\"13000\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"31000\" horzOffset=\"14000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>타원입니다.</hp:shapeComment></hp:ellipse>"
+   ],
+   "s0/p5": [
+    "<hp:arc id=\"2112508440\" zOrder=\"3\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038766617\" type=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10500\" height=\"6000\"/><hp:curSz width=\"13500\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6750\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.285714\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5250\" y=\"3000\"/><hc:ax1 x=\"10500\" y=\"3000\"/><hc:ax2 x=\"5250\" y=\"0\"/><hp:sz width=\"13500\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"36500\" horzOffset=\"17000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>호입니다.</hp:shapeComment></hp:arc>"
+   ],
+   "s0/p6": [
+    "<hp:polygon id=\"2112556696\" zOrder=\"4\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038814873\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"11000\" height=\"6000\"/><hp:curSz width=\"14000\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7000\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.272727\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt x=\"0\" y=\"6000\"/><hc:pt x=\"5000\" y=\"0\"/><hc:pt x=\"10000\" y=\"6000\"/><hp:sz width=\"14000\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"42000\" horzOffset=\"20000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>다각형입니다.</hp:shapeComment></hp:polygon>"
+   ],
+   "s0/p7": [
+    "<hp:rect id=\"2112604952\" zOrder=\"5\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038863129\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"11500\" height=\"6000\"/><hp:curSz width=\"14500\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7250\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.26087\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:drawText lastWidth=\"14500\" name=\"\" editable=\"0\"><hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\"><hp:p id=\"6\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>글상자 안 글</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos=\"0\" vertpos=\"0\" vertsize=\"1000\" textheight=\"1000\" baseline=\"850\" spacing=\"600\" horzpos=\"0\" horzsize=\"13932\" flags=\"393216\"/></hp:linesegarray></hp:p></hp:subList><hp:textMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/></hp:drawText><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"11500\" y=\"0\"/><hc:pt2 x=\"11500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/><hp:sz width=\"14500\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"47500\" horzOffset=\"23000\"/><hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/><hp:shapeComment>글상자입니다.</hp:shapeComment></hp:rect>"
+   ],
+   "s0/p8": [
+    "<hp:connectLine id=\"2112653208\" zOrder=\"6\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038911385\" type=\"STRAIGHT_NOARROW\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12000\" height=\"6000\"/><hp:curSz width=\"15000\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7500\" centerY=\"3500\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.25\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:startPt x=\"0\" y=\"0\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:endPt x=\"12000\" y=\"6000\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:sz width=\"15000\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"53000\" horzOffset=\"26000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>직선 연결선입니다.</hp:shapeComment></hp:connectLine>"
+   ],
+   "s0/p9": [
+    "<hp:container id=\"1233862604\" zOrder=\"9\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"160120781\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"16000\" height=\"11500\"/><hp:curSz width=\"19000\" height=\"12500\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"8000\" centerY=\"5750\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.1875\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.086957\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:rect id=\"0\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"1\" instid=\"1038959641\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12500\" height=\"6000\"/><hp:curSz width=\"14843\" height=\"6521\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7422\" centerY=\"3261\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.1875\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.086957\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"12500\" y=\"0\"/><hc:pt2 x=\"12500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/></hp:rect><hp:ellipse id=\"0\" zOrder=\"0\" numberingType=\"NONE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"1\" instid=\"1039007897\" intervalDirty=\"0\" hasArcPr=\"0\" arcType=\"NORMAL\"><hp:offset x=\"3000\" y=\"5500\"/><hp:orgSz width=\"13000\" height=\"6000\"/><hp:curSz width=\"15437\" height=\"6521\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7718\" centerY=\"3261\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"3000\" e4=\"0\" e5=\"1\" e6=\"5500\"/><hc:scaMatrix e1=\"1.1875\" e2=\"0\" e3=\"562.5\" e4=\"0\" e5=\"1.086957\" e6=\"478.260864\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"6500\" y=\"3000\"/><hc:ax1 x=\"13000\" y=\"3000\"/><hc:ax2 x=\"6500\" y=\"6000\"/><hc:start1 x=\"13000\" y=\"3000\"/><hc:end1 x=\"13000\" y=\"3000\"/><hc:start2 x=\"13000\" y=\"3000\"/><hc:end2 x=\"13000\" y=\"3000\"/></hp:ellipse><hp:sz width=\"19000\" widthRelTo=\"ABSOLUTE\" height=\"12500\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"58500\" horzOffset=\"29000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>묶음 개체입니다.</hp:shapeComment></hp:container>"
+   ],
+   "s0/p10": [],
+   "s0/p11": [
+    "<hp:curve id=\"1987654321\" zOrder=\"20\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"913912498\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12000\" height=\"6000\"/><hp:curSz width=\"15000\" height=\"7000\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"7500\" centerY=\"3500\" rotateimage=\"1\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1.25\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1.166667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#0000FF\" width=\"113\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:seg type=\"CURVE\" x1=\"0\" y1=\"6000\" x2=\"3000\" y2=\"0\"/><hp:seg type=\"CURVE\" x1=\"3000\" y1=\"0\" x2=\"8000\" y2=\"5000\"/><hp:seg type=\"CURVE\" x1=\"8000\" y1=\"5000\" x2=\"12000\" y2=\"1000\"/><hp:sz width=\"15000\" widthRelTo=\"ABSOLUTE\" height=\"7000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"1\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"1000\" horzOffset=\"30000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>곡선입니다.</hp:shapeComment></hp:curve>"
+   ],
+   "s1/p0": [],
+   "s1/p1": []
+  }
+ },
+ "del": {
+  "ops": [
+   {
+    "op": "del",
+    "i": 8
+   },
+   {
+    "op": "del",
+    "i": 7
+   },
+   {
+    "op": "del",
+    "i": 5
+   },
+   {
+    "op": "del",
+    "i": 0
+   }
+  ],
+  "shapes": {
+   "s0/p0": [],
+   "s0/p1": [],
+   "s0/p2": [],
+   "s0/p3": [
+    "<hp:rect id=\"2112411928\" zOrder=\"1\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038670105\" ratio=\"0\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"9500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"4750\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"9500\" y=\"0\"/><hc:pt2 x=\"9500\" y=\"6000\"/><hc:pt3 x=\"0\" y=\"6000\"/><hp:sz width=\"9500\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"25500\" horzOffset=\"11000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>사각형입니다.</hp:shapeComment></hp:rect>"
+   ],
+   "s0/p4": [
+    "<hp:ellipse id=\"2112460184\" zOrder=\"2\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038718361\" intervalDirty=\"0\" hasArcPr=\"0\" arcType=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5000\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5000\" y=\"3000\"/><hc:ax1 x=\"10000\" y=\"3000\"/><hc:ax2 x=\"5000\" y=\"6000\"/><hc:start1 x=\"10000\" y=\"3000\"/><hc:end1 x=\"10000\" y=\"3000\"/><hc:start2 x=\"10000\" y=\"3000\"/><hc:end2 x=\"10000\" y=\"3000\"/><hp:sz width=\"10000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"31000\" horzOffset=\"14000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>타원입니다.</hp:shapeComment></hp:ellipse>"
+   ],
+   "s0/p5": [
+    "<hp:arc id=\"2112508440\" zOrder=\"3\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038766617\" type=\"NORMAL\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"10500\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5250\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:center x=\"5250\" y=\"3000\"/><hc:ax1 x=\"10500\" y=\"3000\"/><hc:ax2 x=\"5250\" y=\"0\"/><hp:sz width=\"10500\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"36500\" horzOffset=\"17000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>호입니다.</hp:shapeComment></hp:arc>"
+   ],
+   "s0/p6": [
+    "<hp:polygon id=\"2112556696\" zOrder=\"4\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038814873\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"11000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"5500\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hc:fillBrush><hc:winBrush faceColor=\"#FFFFFF\" hatchColor=\"#000000\" alpha=\"0\"/></hc:fillBrush><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:pt x=\"0\" y=\"6000\"/><hc:pt x=\"5000\" y=\"0\"/><hc:pt x=\"10000\" y=\"6000\"/><hp:sz width=\"11000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"42000\" horzOffset=\"20000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>다각형입니다.</hp:shapeComment></hp:polygon>"
+   ],
+   "s0/p7": [],
+   "s0/p8": [
+    "<hp:connectLine id=\"2112653208\" zOrder=\"6\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"1038911385\" type=\"STRAIGHT_NOARROW\"><hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"12000\" height=\"6000\"/><hp:curSz width=\"0\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"6000\" centerY=\"3000\" rotateimage=\"0\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#000000\" width=\"33\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hp:startPt x=\"0\" y=\"0\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:endPt x=\"12000\" y=\"6000\" subjectIDRef=\"0\" subjectIdx=\"0\"/><hp:sz width=\"12000\" widthRelTo=\"ABSOLUTE\" height=\"6000\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"53000\" horzOffset=\"26000\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>직선 연결선입니다.</hp:shapeComment></hp:connectLine>"
+   ],
+   "s0/p9": [],
+   "s0/p10": [],
+   "s0/p11": [],
+   "s1/p0": [],
+   "s1/p1": []
+  }
+ },
+ "report": {
+  "note": "tests/samples/2025년_전체종합보고서.hwpx — 0번 선 크기 30000×200(curSz 가 0 이 아닌 선), 1번 선 +1500,-1000 옮김(한/글, PDF 없이 저장)",
+  "ops": [
+   {
+    "op": "size",
+    "i": 0,
+    "w": 30000,
+    "h": 200
+   },
+   {
+    "op": "move",
+    "i": 1,
+    "dx": 1500,
+    "dy": -1000
+   }
+  ],
+  "shapes": {
+   "s0/p0": [
+    "<hp:line id=\"1659662376\" zOrder=\"86\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"585920553\" isReverseHV=\"0\"><hp:offset x=\"0\" y=\"19\"/><hp:orgSz width=\"44250\" height=\"75\"/><hp:curSz width=\"30000\" height=\"200\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"15000\" centerY=\"100\" rotateimage=\"1\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"0.677966\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"2.666667\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#0F1271\" width=\"424\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:startPt x=\"0\" y=\"75\"/><hc:endPt x=\"44250\" y=\"0\"/><hp:sz width=\"30000\" widthRelTo=\"ABSOLUTE\" height=\"200\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"1\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"15780\" horzOffset=\"7313\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>선입니다.</hp:shapeComment></hp:line>"
+   ],
+   "s0/p4": [
+    "<hp:line id=\"1659662380\" zOrder=\"85\" numberingType=\"NONE\" textWrap=\"IN_FRONT_OF_TEXT\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"585920557\" isReverseHV=\"0\"><hp:offset x=\"0\" y=\"4294967221\"/><hp:orgSz width=\"44250\" height=\"75\"/><hp:curSz width=\"44850\" height=\"0\"/><hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"22425\" centerY=\"0\" rotateimage=\"1\"/><hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"-75\"/><hc:scaMatrix e1=\"1.013559\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"0\" e6=\"75\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo><hp:lineShape color=\"#0F1271\" width=\"424\" style=\"SOLID\" endCap=\"FLAT\" headStyle=\"NORMAL\" tailStyle=\"NORMAL\" headfill=\"1\" tailfill=\"1\" headSz=\"MEDIUM_MEDIUM\" tailSz=\"MEDIUM_MEDIUM\" outlineStyle=\"NORMAL\" alpha=\"0\"/><hp:shadow type=\"NONE\" color=\"#B2B2B2\" offsetX=\"0\" offsetY=\"0\" alpha=\"0\"/><hc:startPt x=\"0\" y=\"75\"/><hc:endPt x=\"44250\" y=\"0\"/><hp:sz width=\"44850\" widthRelTo=\"ABSOLUTE\" height=\"1\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/><hp:pos treatAsChar=\"0\" affectLSpacing=\"0\" flowWithText=\"0\" allowOverlap=\"1\" holdAnchorAndSO=\"0\" vertRelTo=\"PAPER\" horzRelTo=\"PAPER\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"72715\" horzOffset=\"8394\"/><hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/><hp:shapeComment>선입니다.</hp:shapeComment></hp:line>"
+   ]
+  }
+ }
+}

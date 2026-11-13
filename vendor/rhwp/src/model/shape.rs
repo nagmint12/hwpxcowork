@@ -1,0 +1,1218 @@
+//! 그리기 개체 (Shape, Line, Rect, Ellipse, Arc, Polygon, Curve, Group, TextBox)
+
+use super::paragraph::Paragraph;
+use super::style::{Fill, ShapeBorderLine};
+use super::*;
+
+pub(crate) mod shadow;
+
+/// `raw_ctrl_data` (CTRL_HEADER) 바이트 오프셋 상수.
+///
+/// `parse_common_obj_attr` 및 `serialize_common_obj_attr` 과 일치해야 한다.
+/// `table_ops.rs`, `object_ops.rs`, `html_table_import.rs` 등에서 직접 바이트
+/// 인덱싱 대신 이 상수를 사용한다.
+pub(crate) mod common_obj_offsets {
+    pub const FLAGS: std::ops::Range<usize> = 0..4;
+    pub const V_OFFSET: std::ops::Range<usize> = 4..8;
+    pub const H_OFFSET: std::ops::Range<usize> = 8..12;
+    pub const WIDTH: std::ops::Range<usize> = 12..16;
+    pub const HEIGHT: std::ops::Range<usize> = 16..20;
+    pub const Z_ORDER: std::ops::Range<usize> = 20..24;
+    pub const MARGIN_LEFT: std::ops::Range<usize> = 24..26;
+    pub const MARGIN_RIGHT: std::ops::Range<usize> = 26..28;
+    pub const MARGIN_TOP: std::ops::Range<usize> = 28..30;
+    pub const MARGIN_BOTTOM: std::ops::Range<usize> = 30..32;
+    pub const INSTANCE_ID: std::ops::Range<usize> = 32..36;
+    pub const PREVENT_PAGE_BREAK: std::ops::Range<usize> = 36..40;
+    pub const MIN_LEN: usize = INSTANCE_ID.end;
+    pub const MIN_LEN_WITH_PREVENT_PAGE_BREAK: usize = PREVENT_PAGE_BREAK.end;
+}
+
+/// 개체 공통 속성 (모든 개체에 공통)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct CommonObjAttr {
+    /// Producer-owned paint anchored to a cell frame, independent of text edits.
+    /// Persisted by the bounded cell-paint sidecar, not by an invented HWP bit.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub cell_frame_paint: bool,
+    /// Retained drawing's proven cell-border role; visible geometry stays native.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cell_border_paint: Option<super::border_paint::CellBorderPaint>,
+    /// Physical page paint with a proven logical cell-edge editing owner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside_cell_border_paint: Option<super::border_paint::OutsideCellBorderPaint>,
+    /// 컨트롤 ID
+    pub ctrl_id: u32,
+    /// 속성 비트 플래그
+    pub attr: u32,
+    /// 세로 오프셋
+    pub vertical_offset: HwpUnit,
+    /// 가로 오프셋
+    pub horizontal_offset: HwpUnit,
+    /// 폭
+    pub width: HwpUnit,
+    /// 높이
+    pub height: HwpUnit,
+    /// [hwpx-cowork] 글상자 높이 자동 늘림(한/글 `protect=0` 규칙)으로 `height` 를 늘렸을 때의 지정 높이.
+    /// 저장(`hp:sz`)은 이 값을 쓴다 — 한/글도 `sz` 는 지정 높이, `curSz` 에 늘어난 높이를 적는다.
+    #[serde(skip)]
+    pub auto_grow_base_height: Option<HwpUnit>,
+    /// [hwpx-cowork] 2026-11-04 HWPX 개체 크기를 한/글 규칙(`hp:sz` 가 유일한 조판 크기)으로 읽었음.
+    /// 한/글 2022 실측(개체 변수 검정 X4): 그림·수식·도형·글상자·차트는 `hp:sz` 만 크기로 쓰고
+    /// `curSz`·`orgSz` 는 조판에 쓰지 않는다(sz 0·음수 = 0, sz 없음 = 기본 크기). 이 표시가 선 개체는
+    /// `layout_size_hu` 가 `current_*` 를 보지 않는다. HWP5 등 다른 출신은 false(종전 규칙 유지).
+    #[serde(skip)]
+    pub hwpx_size_rule: bool,
+    /// Z-order
+    pub z_order: i32,
+    /// 바깥 여백 (좌, 우, 상, 하)
+    pub margin: Padding,
+    /// 인스턴스 ID
+    pub instance_id: u32,
+    /// 쪽나눔 방지 (0=off, 1=on)
+    pub prevent_page_break: i32,
+    /// 글자처럼 취급
+    pub treat_as_char: bool,
+    /// HWPX `hp:pos@flowWithText`.
+    ///
+    /// HWP5 GenShape CTRL_HEADER attr bit 13 후보로 보존한다.
+    pub flow_with_text: bool,
+    /// HWPX `hp:pos@allowOverlap`.
+    ///
+    /// HWP5 GenShape CTRL_HEADER attr bit 14 후보로 보존한다.
+    pub allow_overlap: bool,
+    /// HWPX `hp:pos@affectLSpacing` (개체가 줄 간격에 영향을 주는지).
+    ///
+    /// [#2784] HWP5 개체 공통 속성 attr bit 2 (스펙 표 70). 한컴 원본 파일에서
+    /// bit 2 ⟺ affectLSpacing="1" 를 1:1 대조 검증했다. 이 필드가 없어
+    /// 그림·도형·표 방출이 "0" 으로 하드코딩되던 유실을 해소한다.
+    pub affect_line_spacing: bool,
+    /// VertRelTo가 para일 때 크기 보호 여부 (HWP5 GenShape CTRL_HEADER attr bit 20).
+    pub size_protect: bool,
+    /// HWPX 출처 GenShape 번호 범주 high bit 후보 (HWP5 GenShape CTRL_HEADER attr bit 28).
+    pub hwp5_gen_shape_attr_bit28: bool,
+    /// 세로 위치 기준
+    pub vert_rel_to: VertRelTo,
+    /// 세로 정렬 방식
+    pub vert_align: VertAlign,
+    /// 가로 위치 기준
+    pub horz_rel_to: HorzRelTo,
+    /// 가로 정렬 방식
+    pub horz_align: HorzAlign,
+    /// 텍스트 흐름 방식 (개체 배치 방식 — attr bit 21-23)
+    pub text_wrap: TextWrap,
+    /// 텍스트가 흐르는 방향 (attr bit 24-25)
+    pub text_flow: TextFlow,
+    /// 너비 기준 (bit 15-17): 0=Paper, 1=Page, 2=Column, 3=Para, 4=Absolute
+    pub width_criterion: SizeCriterion,
+    /// 높이 기준 (bit 18-19): 0=Paper, 1=Page, 2=Absolute
+    pub height_criterion: SizeCriterion,
+    /// 개체 설명문
+    pub description: String,
+    /// HWPX `numberingType` (캡션 번호 범주) 보존 (#1379).
+    ///
+    /// HWP5 공통 속성 bits26-28과 HWPX `numberingType`을 같은 범주로 읽는다.
+    /// `None`은 번호를 세지 않는 명시적 범주이며, 표시 번호와 저장 왕복에 사용한다.
+    pub numbering_type: ObjectNumberingType,
+    /// HWPX `dropcapstyle` (개체를 감싼 단락의 드롭캡 표시 방식) 보존.
+    ///
+    /// 파서가 읽지 않으면 방출측(picture.rs 등)이 항상 `dropcapstyle="None"`으로
+    /// 되돌려, 원본이 `DoubleLine`/`TripleLine`/`Margin` 드롭캡으로 개체를 감싼
+    /// 문단이었더라도 저장 시 드롭캡 스타일이 유실된다.
+    pub drop_cap_style: DropCapStyle,
+    /// 파싱된 필드 이후 추가 바이트 (라운드트립 보존용)
+    pub raw_extra: Vec<u8>,
+    /// HWPX `lock`(개체 잠금) 속성 보존 (#2840, #2855, #2931).
+    ///
+    /// 파서가 이 속성을 읽지 않아 직렬화 시 항상 `lock="0"`으로 하드코딩되던 문제
+    /// 해소 — 수식·공용 도형·표·차트/OLE 경로에 배선한다.
+    pub locked: bool,
+}
+
+/// [hwpx-cowork] 2026-11-04 개체(그림·도형·글상자·차트·OLE)의 '조판 크기'(HU) — 한 곳에서 정한다.
+///
+/// * HWPX 출신(`hwpx_size_rule`): 한/글 규칙 그대로 `common.width/height`(= `hp:sz`, 0·음수는 0,
+///   없으면 파서가 기본 크기를 넣음). `curSz`(`current_*`)는 보지 않는다 — 한/글은 curSz 를 조판에
+///   쓰지 않고 재저장 때 고쳐 적는다(검정: 그림 curSz 30000 → 한/글 15000 그대로, 엔진은 30000).
+///   글상자 자동 늘림은 `common.height` 를 늘리므로 이 규칙과 함께 간다.
+/// * 그 밖(HWP5 등): 종전 규칙 — 저장 프레임과 개체 요소 표시 크기 중 큰 값(#4333·#1122).
+pub fn layout_size_hu(common: &CommonObjAttr, shape_attr: &ShapeComponentAttr) -> (i32, i32) {
+    let w = common.width.min(i32::MAX as u32) as i32;
+    let h = common.height.min(i32::MAX as u32) as i32;
+    let cur_w = w.max(if shape_attr.current_width_was_zero { 0 } else { shape_attr.current_width.min(i32::MAX as u32) as i32 });
+    let cur_h = h.max(if shape_attr.current_height_was_zero { 0 } else { shape_attr.current_height.min(i32::MAX as u32) as i32 });
+    if common.hwpx_size_rule {
+        // 상대 크기(widthRelTo·heightRelTo ≠ ABSOLUTE, 값 단위 1/100 %)는 이 축들이 아직 % 를 HU 로 바꾸지
+        // 못한다 — 그 축만 종전 값(재저장본은 한/글이 curSz 에 실제 크기를 적어 둠)을 둔다. 남은 일.
+        let rw = if common.width_criterion == SizeCriterion::Absolute { w } else { cur_w };
+        let rh = if common.height_criterion == SizeCriterion::Absolute { h } else { cur_h };
+        return (rw, rh);
+    }
+    (cur_w, cur_h)
+}
+
+/// HWPX 개체 `numberingType` (캡션 번호 범주)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum ObjectNumberingType {
+    #[default]
+    None,
+    Picture,
+    Table,
+    Equation,
+}
+
+impl ObjectNumberingType {
+    /// [#8335] HWP5 개체 공통 속성 attr 의 번호 범주 비트 자리(bit 26-27, #8294).
+    pub const HWP5_ATTR_MASK: u32 = 0x03 << 26;
+
+    /// HWP5 attr bit 26-27 의 번호 범주. bit 28 은 범주와 별개다(#8294).
+    pub fn from_hwp5_attr(attr: u32) -> Self {
+        match (attr >> 26) & 0x03 {
+            1 => Self::Picture,
+            2 => Self::Table,
+            3 => Self::Equation,
+            _ => Self::None,
+        }
+    }
+
+    /// 이 범주를 HWP5 attr bit 26-27 자리에 둔 값.
+    ///
+    /// 한컴이 같은 문서를 저장한 HWP·HWPX 32쌍의 개체 616개(표 348·그림 117·도형 91·
+    /// 수식 60) 전부에서 bit 26-27 이 `numberingType` 과 같다. 개체 종류와 무관하다 —
+    /// `NONE` 그림은 0, `PICTURE` 표는 1 이다.
+    pub fn hwp5_attr_bits(self) -> u32 {
+        (match self {
+            Self::None => 0,
+            Self::Picture => 1,
+            Self::Table => 2,
+            Self::Equation => 3,
+        }) << 26
+    }
+}
+
+/// HWPX 개체 `dropcapstyle` (드롭캡 표시 방식). OWPML Core 스키마 `DropCapStyleType`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum DropCapStyle {
+    #[default]
+    None,
+    DoubleLine,
+    TripleLine,
+    Margin,
+}
+
+impl DropCapStyle {
+    /// 한/글 12.30(Mac)이 첫 글자 장식 글상자에 싣는 HWP5 CTRL_DATA 앞 20바이트.
+    ///
+    /// 파라미터 셋 539(0x021b) 안 목록 12291(0x3003)의 부호 없는 정수 28673(0x7001)이
+    /// 장식 방식이다(2줄 1·3줄 2·여백 3). HWPX `hp:parameterset name="539"`와 같은 값이다.
+    const HWP5_CTRL_DATA_PREFIX: [u8; 20] = [
+        0x1b, 0x02, 0x01, 0x00, 0x00, 0x00, 0x03, 0x30, 0x00, 0x80, 0x03, 0x30, 0x01, 0x00, 0x00,
+        0x00, 0x01, 0x70, 0x09, 0x00,
+    ];
+
+    /// HWP5 CTRL_DATA가 첫 글자 장식 파라미터 셋이면 그 방식을 돌려준다.
+    pub fn from_hwp5_ctrl_data(data: &[u8]) -> Option<Self> {
+        let (prefix, value) = data.split_at_checked(Self::HWP5_CTRL_DATA_PREFIX.len())?;
+        if prefix != Self::HWP5_CTRL_DATA_PREFIX {
+            return None;
+        }
+        match u32::from_le_bytes(value.try_into().ok()?) {
+            1 => Some(Self::DoubleLine),
+            2 => Some(Self::TripleLine),
+            3 => Some(Self::Margin),
+            _ => None,
+        }
+    }
+
+    /// 장식 방식을 HWP5 CTRL_DATA로 만든다. 장식이 없으면 한/글처럼 싣지 않는다.
+    pub fn hwp5_ctrl_data(self) -> Option<[u8; 24]> {
+        let value: u32 = match self {
+            Self::None => return None,
+            Self::DoubleLine => 1,
+            Self::TripleLine => 2,
+            Self::Margin => 3,
+        };
+        let mut data = [0; 24];
+        data[..20].copy_from_slice(&Self::HWP5_CTRL_DATA_PREFIX);
+        data[20..].copy_from_slice(&value.to_le_bytes());
+        Some(data)
+    }
+}
+
+/// 세로 위치 기준
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum VertRelTo {
+    #[default]
+    Paper,
+    Page,
+    Para,
+}
+
+/// 세로 정렬 방식
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum VertAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+    Inside,
+    Outside,
+}
+
+/// 가로 위치 기준
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum HorzRelTo {
+    #[default]
+    Paper,
+    Page,
+    Column,
+    Para,
+}
+
+/// 가로 정렬 방식
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum HorzAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+    Inside,
+    Outside,
+}
+
+/// 크기 기준 (너비/높이)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum SizeCriterion {
+    /// 종이 기준 (퍼센트)
+    Paper,
+    /// 쪽 기준 (퍼센트)
+    Page,
+    /// 단 기준 (퍼센트, 너비 전용)
+    Column,
+    /// 문단 기준 (퍼센트, 너비 전용)
+    Para,
+    /// 절대값 (HWPUNIT)
+    #[default]
+    Absolute,
+}
+
+/// 텍스트 흐름 방식 (개체 배치 — attr bit 21-23)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum TextWrap {
+    #[default]
+    Square,
+    Tight,
+    Through,
+    TopAndBottom,
+    BehindText,
+    InFrontOfText,
+}
+
+/// 텍스트가 흐르는 방향 (attr bit 24-25)
+///
+/// HWPX `textFlow` 속성값과 대응한다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum TextFlow {
+    #[default]
+    BothSides,
+    LeftOnly,
+    RightOnly,
+    LargestOnly,
+}
+
+/// 개체 요소 속성 (그리기 개체 공통)
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShapeComponentAttr {
+    /// SHAPE_COMPONENT 내 ctrl_id (라운드트립 보존용, 0이면 기본값 사용)
+    pub ctrl_id: u32,
+    /// ctrl_id가 2번 기록되는지 여부
+    pub is_two_ctrl_id: bool,
+    /// 그룹 내 X 오프셋
+    pub offset_x: i32,
+    /// 그룹 내 Y 오프셋
+    pub offset_y: i32,
+    /// 그룹 횟수
+    pub group_level: u16,
+    /// 로컬 파일 버전 (라운드트립 보존용)
+    pub local_file_version: u16,
+    /// 초기 폭
+    pub original_width: u32,
+    /// 초기 높이
+    pub original_height: u32,
+    /// [#4669] HWPX 원본이 `orgSz width="0"`을 기록했고 HWP 저장 계약을 위해
+    /// 유효한 extent로 materialize한 경우 true.
+    pub original_width_was_zero: bool,
+    /// [#4669] HWPX 원본이 `orgSz height="0"`을 기록했고 HWP 저장 계약을 위해
+    /// 유효한 extent로 materialize한 경우 true.
+    pub original_height_was_zero: bool,
+    /// 현재 폭
+    pub current_width: u32,
+    /// 현재 높이
+    pub current_height: u32,
+    /// [#2017] HWPX 원본이 `curSz width="0"`을 기록했고 파싱 시 orgSz로 materialize된 경우 true.
+    /// materialize는 렌더/HWP5 저장이 실크기를 필요로 하기 때문에 유지하되, HWPX 재직렬화는
+    /// 이 플래그로 원본 `0` sentinel을 복원해 roundtrip 충실도를 보존한다.
+    pub current_width_was_zero: bool,
+    /// [#2017] HWPX 원본이 `curSz height="0"`을 기록했고 파싱 시 orgSz로 materialize된 경우 true.
+    pub current_height_was_zero: bool,
+    /// 뒤집기 속성 원본 값 (bit 0: 수평, bit 1: 수직, 상위 비트 보존)
+    pub flip: u32,
+    /// 수평 뒤집기
+    pub horz_flip: bool,
+    /// 수직 뒤집기
+    pub vert_flip: bool,
+    /// 회전각
+    pub rotation_angle: HwpUnit16,
+    /// HWPX rotationInfo@rotateimage 보존.
+    ///
+    /// HWP5 SHAPE_COMPONENT offset 36 storage field의 0x0008_0000 bit로 materialize된다.
+    pub rotate_image: bool,
+    /// 회전 중심 좌표
+    pub rotation_center: Point,
+    /// 렌더링 정보 원본 바이트 (변환 행렬 등, 라운드트립 보존용)
+    pub raw_rendering: Vec<u8>,
+    /// 렌더링 변환 합성 결과: 아핀 행렬 [a, b, tx, c, d, ty]
+    /// (x', y') = (a*x + b*y + tx, c*x + d*y + ty)
+    /// render_sx = a, render_b = b, render_tx = tx
+    /// render_c = c, render_sy = d, render_ty = ty
+    pub render_tx: f64,
+    pub render_ty: f64,
+    pub render_sx: f64,
+    pub render_sy: f64,
+    /// 아핀 행렬 비대각 요소 (회전/전단 성분)
+    pub render_b: f64,
+    pub render_c: f64,
+    /// [#8225] 묶음 안 자식 도형의 CTRL_DATA 원본 (자식 SHAPE_COMPONENT 바로 아래 레코드, 라운드트립 보존용).
+    /// 한컴은 여기에 개체 설명 글 같은 ParameterSet 을 둔다. 맨 위 개체의 CTRL_DATA 는
+    /// `Paragraph.ctrl_data_records` 가 갖는다.
+    #[serde(skip)]
+    pub ctrl_data: Option<Vec<u8>>,
+}
+
+impl ShapeComponentAttr {
+    /// 원본 사각형 안에서 수행하는 로컬 반전. 저장 행렬과 편집 캐시가 공유한다.
+    /// 현재 크기로의 배율과 회전·이동은 이 변환 다음에 합성한다.
+    pub(crate) fn local_reflection_matrix(&self) -> [f64; 6] {
+        [
+            if self.horz_flip { -1.0 } else { 1.0 },
+            0.0,
+            if self.horz_flip {
+                self.original_width as f64
+            } else {
+                0.0
+            },
+            0.0,
+            if self.vert_flip { -1.0 } else { 1.0 },
+            if self.vert_flip {
+                self.original_height as f64
+            } else {
+                0.0
+            },
+        ]
+    }
+}
+
+impl Default for ShapeComponentAttr {
+    fn default() -> Self {
+        Self {
+            ctrl_id: 0,
+            is_two_ctrl_id: false,
+            offset_x: 0,
+            offset_y: 0,
+            group_level: 0,
+            local_file_version: 0,
+            original_width: 0,
+            original_height: 0,
+            original_width_was_zero: false,
+            original_height_was_zero: false,
+            current_width: 0,
+            current_height: 0,
+            current_width_was_zero: false,
+            current_height_was_zero: false,
+            flip: 0,
+            horz_flip: false,
+            vert_flip: false,
+            rotation_angle: 0,
+            rotate_image: false,
+            rotation_center: Point::default(),
+            raw_rendering: Vec::new(),
+            render_tx: 0.0,
+            render_ty: 0.0,
+            render_sx: 1.0,
+            render_sy: 1.0,
+            render_b: 0.0,
+            render_c: 0.0,
+            ctrl_data: None,
+        }
+    }
+}
+
+impl ShapeComponentAttr {
+    /// 명시적으로 저장된 유효한 변환인지 확인한다.
+    /// 기본 identity 블록은 current/original 크기의 저장 경로이므로 별도 기하가 아니다.
+    pub(crate) fn has_saved_affine_geometry(&self) -> bool {
+        let matrix = [
+            self.render_sx,
+            self.render_b,
+            self.render_tx,
+            self.render_c,
+            self.render_sy,
+            self.render_ty,
+        ];
+        !self.raw_rendering.is_empty()
+            && matrix.iter().all(|v| v.is_finite())
+            && self.render_sx * self.render_sy - self.render_b * self.render_c != 0.0
+            && matrix != [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    }
+}
+
+/// 그리기 개체 공통 속성
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct DrawingObjAttr {
+    /// 개체 요소 속성
+    pub shape_attr: ShapeComponentAttr,
+    /// 테두리 선 정보
+    pub border_line: ShapeBorderLine,
+    /// 채우기 정보
+    pub fill: Fill,
+    /// 그림자 종류 (0=없음, 1=왼쪽위, 2=오른쪽위, 3=왼쪽아래, 4=오른쪽아래, 5=뒤쪽등)
+    pub shadow_type: u32,
+    /// 그림자 색상
+    pub shadow_color: u32,
+    /// 그림자 가로 오프셋
+    pub shadow_offset_x: i32,
+    /// 그림자 세로 오프셋
+    pub shadow_offset_y: i32,
+    /// 인스턴스 ID (instid)
+    pub inst_id: u32,
+    /// 그림자 투명도
+    pub shadow_alpha: u8,
+    /// 이 도형이 소유한 내부 문단 영역. 빈 문단/그림 전용 영역도 Some이다.
+    /// 배경 이미지(fill)나 캡션의 문단은 이 영역이 아니다.
+    pub text_box: Option<TextBox>,
+    /// 캡션
+    pub caption: Option<Caption>,
+}
+
+impl DrawingObjAttr {
+    /// SHAPE_COMPONENT 저장 워드(`flip`)의 글상자 비트.
+    pub const TEXT_BOX_STORAGE_BIT: u32 = 0x0100_0000;
+
+    /// 글상자 비트를 `text_box` 유무에 맞춘다 (#8172).
+    ///
+    /// 한컴은 글상자가 있는 도형에 이 비트가 없으면 HWP를 손상 문서로 거부하고,
+    /// 글상자 없는 도형에 세워도 거부한다(`hwpx_to_hwp`의 같은 계약). 편집으로
+    /// 글상자를 만들거나 붙이거나 떼는 경로는 이 함수로 비트를 맞춘다.
+    pub fn sync_text_box_storage_bit(&mut self) {
+        if self.text_box.is_some() {
+            self.shape_attr.flip |= Self::TEXT_BOX_STORAGE_BIT;
+        } else {
+            self.shape_attr.flip &= !Self::TEXT_BOX_STORAGE_BIT;
+        }
+    }
+}
+
+/// 글상자 (그리기 개체 내 텍스트)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct TextBox {
+    /// Text-only local HWPUNIT clipping; paragraphs remain editable and untrimmed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paint_clip: Option<Vec<super::text_clip::TextClipPath>>,
+    /// LIST_HEADER list_attr (라운드트립 보존용)
+    pub list_attr: u32,
+    /// HWPX `textDirection="VERTICALALL"` 구분 보존 (#1379).
+    ///
+    /// `list_attr` bit 0~2 는 VERTICAL/VERTICALALL 을 모두 code 1 로 합치므로
+    /// (renderer 세로쓰기 분기 호환), HWPX 라운드트립용 구분은 본 필드로 보존한다.
+    pub vertical_all: bool,
+    /// 세로 정렬 (list_attr bit 5~6: 0=top, 1=center, 2=bottom)
+    pub vertical_align: crate::model::table::VerticalAlign,
+    /// 왼쪽 여백
+    pub margin_left: HwpUnit16,
+    /// 오른쪽 여백
+    pub margin_right: HwpUnit16,
+    /// 위쪽 여백
+    pub margin_top: HwpUnit16,
+    /// 아래쪽 여백
+    pub margin_bottom: HwpUnit16,
+    /// 명시적인 0 여백을 XML 부재와 구분한다. 기존 생성기의 기본값은 false다.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub text_margin_explicit: bool,
+    /// 텍스트 최대 폭
+    pub max_width: HwpUnit,
+    /// LIST_HEADER 레코드의 파싱된 필드 이후 추가 바이트 (라운드트립 보존용)
+    pub raw_list_header_extra: Vec<u8>,
+    /// 문단 리스트
+    pub paragraphs: Vec<Paragraph>,
+}
+
+/// 그리기 개체 종류
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum ShapeObject {
+    /// 직선
+    Line(LineShape),
+    /// 사각형
+    Rectangle(RectangleShape),
+    /// 타원
+    Ellipse(EllipseShape),
+    /// 호
+    Arc(ArcShape),
+    /// 다각형
+    Polygon(PolygonShape),
+    /// 곡선
+    Curve(CurveShape),
+    /// 묶음 개체
+    Group(GroupShape),
+    /// 그림 개체 (묶음 내 자식으로 포함될 때)
+    Picture(Box<crate::model::image::Picture>),
+    /// 차트 개체 (GSO + HWPTAG_CHART_DATA)
+    Chart(Box<ChartShape>),
+    /// OLE 개체 (HWPTAG_SHAPE_COMPONENT_OLE)
+    Ole(Box<OleShape>),
+}
+
+impl ShapeObject {
+    /// 공통 속성 참조 반환
+    pub fn common(&self) -> &CommonObjAttr {
+        match self {
+            ShapeObject::Line(s) => &s.common,
+            ShapeObject::Rectangle(s) => &s.common,
+            ShapeObject::Ellipse(s) => &s.common,
+            ShapeObject::Arc(s) => &s.common,
+            ShapeObject::Polygon(s) => &s.common,
+            ShapeObject::Curve(s) => &s.common,
+            ShapeObject::Group(g) => &g.common,
+            ShapeObject::Picture(p) => &p.common,
+            ShapeObject::Chart(c) => &c.common,
+            ShapeObject::Ole(o) => &o.common,
+        }
+    }
+
+    /// 공통 속성 가변 참조 반환
+    pub fn common_mut(&mut self) -> &mut CommonObjAttr {
+        match self {
+            ShapeObject::Line(s) => &mut s.common,
+            ShapeObject::Rectangle(s) => &mut s.common,
+            ShapeObject::Ellipse(s) => &mut s.common,
+            ShapeObject::Arc(s) => &mut s.common,
+            ShapeObject::Polygon(s) => &mut s.common,
+            ShapeObject::Curve(s) => &mut s.common,
+            ShapeObject::Group(g) => &mut g.common,
+            ShapeObject::Picture(p) => &mut p.common,
+            ShapeObject::Chart(c) => &mut c.common,
+            ShapeObject::Ole(o) => &mut o.common,
+        }
+    }
+
+    /// 그리기 공통 속성 참조 반환 (Group/Picture/Ole 내용 없는 종류는 None)
+    pub fn drawing(&self) -> Option<&DrawingObjAttr> {
+        match self {
+            ShapeObject::Line(s) => Some(&s.drawing),
+            ShapeObject::Rectangle(s) => Some(&s.drawing),
+            ShapeObject::Ellipse(s) => Some(&s.drawing),
+            ShapeObject::Arc(s) => Some(&s.drawing),
+            ShapeObject::Polygon(s) => Some(&s.drawing),
+            ShapeObject::Curve(s) => Some(&s.drawing),
+            ShapeObject::Chart(c) => Some(&c.drawing),
+            ShapeObject::Ole(o) => Some(&o.drawing),
+            ShapeObject::Group(_) | ShapeObject::Picture(_) => None,
+        }
+    }
+
+    /// 그리기 공통 속성 가변 참조 반환 (Group/Picture는 None)
+    pub fn drawing_mut(&mut self) -> Option<&mut DrawingObjAttr> {
+        match self {
+            ShapeObject::Line(s) => Some(&mut s.drawing),
+            ShapeObject::Rectangle(s) => Some(&mut s.drawing),
+            ShapeObject::Ellipse(s) => Some(&mut s.drawing),
+            ShapeObject::Arc(s) => Some(&mut s.drawing),
+            ShapeObject::Polygon(s) => Some(&mut s.drawing),
+            ShapeObject::Curve(s) => Some(&mut s.drawing),
+            ShapeObject::Chart(c) => Some(&mut c.drawing),
+            ShapeObject::Ole(o) => Some(&mut o.drawing),
+            ShapeObject::Group(_) | ShapeObject::Picture(_) => None,
+        }
+    }
+
+    /// 편집 셀 주소의 글상자 번호. 독립 도형은 0, 묶음은 원본 자식 순서의 깊이 우선 글상자 번호다.
+    /// 장식 도형과 중간 묶음은 번호를 소비하지 않는다. 저장 모델을 풀거나 복제하지 않는다.
+    pub fn textbox_shape_count(&self) -> usize {
+        match self {
+            Self::Group(group) => group.children.iter().map(Self::textbox_shape_count).sum(),
+            _ => usize::from(
+                self.drawing()
+                    .is_some_and(|drawing| drawing.text_box.is_some()),
+            ),
+        }
+    }
+
+    pub fn textbox_shape_at(&self, mut index: usize) -> Option<&Self> {
+        if let Self::Group(group) = self {
+            for child in &group.children {
+                let count = child.textbox_shape_count();
+                if index < count {
+                    return child.textbox_shape_at(index);
+                }
+                index -= count;
+            }
+            None
+        } else {
+            (index == 0 && self.textbox_shape_count() == 1).then_some(self)
+        }
+    }
+
+    pub fn textbox_shape_at_mut(&mut self, mut index: usize) -> Option<&mut Self> {
+        if let Self::Group(group) = self {
+            for child in &mut group.children {
+                let count = child.textbox_shape_count();
+                if index < count {
+                    return child.textbox_shape_at_mut(index);
+                }
+                index -= count;
+            }
+            None
+        } else if index == 0
+            && self
+                .drawing()
+                .is_some_and(|drawing| drawing.text_box.is_some())
+        {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    /// Z-order 값 반환
+    pub fn z_order(&self) -> i32 {
+        self.common().z_order
+    }
+
+    /// 개체 요소 속성 참조 반환
+    pub fn shape_attr(&self) -> &ShapeComponentAttr {
+        match self {
+            ShapeObject::Line(s) => &s.drawing.shape_attr,
+            ShapeObject::Rectangle(s) => &s.drawing.shape_attr,
+            ShapeObject::Ellipse(s) => &s.drawing.shape_attr,
+            ShapeObject::Arc(s) => &s.drawing.shape_attr,
+            ShapeObject::Polygon(s) => &s.drawing.shape_attr,
+            ShapeObject::Curve(s) => &s.drawing.shape_attr,
+            ShapeObject::Group(g) => &g.shape_attr,
+            ShapeObject::Picture(p) => &p.shape_attr,
+            ShapeObject::Chart(c) => &c.drawing.shape_attr,
+            ShapeObject::Ole(o) => &o.drawing.shape_attr,
+        }
+    }
+
+    /// 도형이 줄 흐름에서 차지하는 세로 범위 (HWPUNIT).
+    ///
+    /// 저장 프레임(`common.height`)과 개체 요소의 실제 표시 높이
+    /// (`shape_attr.current_height`)는 어긋날 수 있다 — 한글은 둘 중 큰 값을
+    /// 조판 높이로 쓴다. 조판·측정·렌더가 각자 이 식을 다시 쓰면 같은 속성에
+    /// 정의가 여러 벌 생기므로(#4333) 이 메서드가 유일한 정의다.
+    ///
+    /// [#8167] HWPX `<hp:curSz height="0">` 를 파서가 `orgSz` 로 채운 값
+    /// (`current_height_was_zero`)은 `renderingInfo` 배율을 적용하기 전 원본 크기라
+    /// 실제 표시 높이가 아니다. 이때는 저장 프레임만 쓴다 — 한/글은 `sz` 1284HU ·
+    /// `orgSz` 6768HU 인 글자처럼 글상자를 1284HU 줄에 놓는다(HWP5-nopassword hwpx 18쪽).
+    pub fn flow_height_hu(&self) -> i32 {
+        layout_size_hu(self.common(), self.shape_attr()).1
+    }
+
+    /// [hwpx-cowork] 폭도 높이와 같은 크기 선택 규칙을 사용한다.
+    pub fn flow_width_hu(&self) -> i32 {
+        layout_size_hu(self.common(), self.shape_attr()).0
+    }
+
+    /// 개체 요소 속성 가변 참조 반환
+    pub fn shape_attr_mut(&mut self) -> &mut ShapeComponentAttr {
+        match self {
+            ShapeObject::Line(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Rectangle(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Ellipse(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Arc(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Polygon(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Curve(s) => &mut s.drawing.shape_attr,
+            ShapeObject::Group(g) => &mut g.shape_attr,
+            ShapeObject::Picture(p) => &mut p.shape_attr,
+            ShapeObject::Chart(c) => &mut c.drawing.shape_attr,
+            ShapeObject::Ole(o) => &mut o.drawing.shape_attr,
+        }
+    }
+
+    /// 개체 타입명 반환
+    pub fn shape_name(&self) -> &'static str {
+        match self {
+            ShapeObject::Line(_) => "직선",
+            ShapeObject::Rectangle(_) => "사각형",
+            ShapeObject::Ellipse(_) => "타원",
+            ShapeObject::Arc(_) => "호",
+            ShapeObject::Polygon(_) => "다각형",
+            ShapeObject::Curve(_) => "곡선",
+            ShapeObject::Group(_) => "묶음",
+            ShapeObject::Picture(_) => "그림(묶음내)",
+            ShapeObject::Chart(_) => "차트",
+            ShapeObject::Ole(_) => "OLE",
+        }
+    }
+}
+
+/// 직선 개체 (HWPTAG_SHAPE_COMPONENT_LINE)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct LineShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 시작점
+    pub start: Point,
+    /// 끝점
+    pub end: Point,
+    /// 오른쪽/아래에서 시작했는지 여부 (hwplib: startedRightOrBottom)
+    pub started_right_or_bottom: bool,
+    /// 연결선 데이터 (ctrl_id='$col'일 때만 Some)
+    pub connector: Option<ConnectorData>,
+}
+
+/// 연결선 타입 (9종)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+#[repr(u32)]
+pub enum LinkLineType {
+    #[default]
+    StraightNoArrow = 0,
+    StraightOneWay = 1,
+    StraightBoth = 2,
+    StrokeNoArrow = 3,
+    StrokeOneWay = 4,
+    StrokeBoth = 5,
+    ArcNoArrow = 6,
+    ArcOneWay = 7,
+    ArcBoth = 8,
+}
+
+impl LinkLineType {
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            0 => Self::StraightNoArrow,
+            1 => Self::StraightOneWay,
+            2 => Self::StraightBoth,
+            3 => Self::StrokeNoArrow,
+            4 => Self::StrokeOneWay,
+            5 => Self::StrokeBoth,
+            6 => Self::ArcNoArrow,
+            7 => Self::ArcOneWay,
+            8 => Self::ArcBoth,
+            _ => Self::StraightNoArrow,
+        }
+    }
+
+    /// 꺽인 연결선인지
+    pub fn is_stroke(&self) -> bool {
+        matches!(
+            self,
+            Self::StrokeNoArrow | Self::StrokeOneWay | Self::StrokeBoth
+        )
+    }
+
+    /// 곡선 연결선인지
+    pub fn is_arc(&self) -> bool {
+        matches!(self, Self::ArcNoArrow | Self::ArcOneWay | Self::ArcBoth)
+    }
+}
+
+/// 연결선 제어점
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ConnectorControlPoint {
+    pub x: i32,
+    pub y: i32,
+    pub point_type: u16,
+}
+
+/// 연결선 추가 데이터 (SC_LINE 확장)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ConnectorData {
+    /// 연결선 타입
+    pub link_type: LinkLineType,
+    /// 시작 연결 개체 instance_id
+    pub start_subject_id: u32,
+    /// 시작 연결점 인덱스
+    pub start_subject_index: u32,
+    /// 끝 연결 개체 instance_id
+    pub end_subject_id: u32,
+    /// 끝 연결점 인덱스
+    pub end_subject_index: u32,
+    /// 제어점 목록 (꺽인/곡선용)
+    pub control_points: Vec<ConnectorControlPoint>,
+    /// SC_LINE 끝 패딩/추가 바이트 (라운드트립 보존)
+    pub raw_trailing: Vec<u8>,
+}
+
+/// 사각형 개체 (HWPTAG_SHAPE_COMPONENT_RECTANGLE)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct RectangleShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 모서리 곡률 (%)
+    pub round_rate: u8,
+    /// 꼭짓점 X 좌표 (4개)
+    pub x_coords: [i32; 4],
+    /// 꼭짓점 Y 좌표 (4개)
+    pub y_coords: [i32; 4],
+    /// [hwpx-cowork] 글맵시(`hp:textart`)면 그 글과 모양(`hp:textartPr`) — 종전에는 버려 빈 상자로 그렸고 저장하면
+    /// `hp:rect` 로 바뀌었다(2026-11-12). 채우기·선은 글자 채우기·외곽선이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub textart: Option<Box<TextArtInfo>>,
+}
+
+/// [hwpx-cowork] 글맵시 글·모양 — 속성은 원문 차례로 보존(저장 왕복), 그리기에는 [`TextArtInfo::attr`] 로 읽는다.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TextArtInfo {
+    /// `hp:textart@text` (줄바꿈은 원문 그대로)
+    pub text: String,
+    /// `hp:textartPr` 속성(fontName·fontStyle·fontType·textShape·lineSpacing·charSpacing·align)
+    pub pr_attrs: Vec<(String, String)>,
+    /// `hp:textartPr/hp:shadow` 속성
+    pub shadow_attrs: Vec<(String, String)>,
+}
+
+impl TextArtInfo {
+    pub fn attr(&self, key: &str) -> Option<&str> {
+        self.pr_attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+}
+
+/// 사각형 기하의 구조적 컨트롤 종류. 글자·그림·채움·선 속성과 독립적이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum RectangleControlKind {
+    Rectangle,
+    TextBox,
+}
+
+impl RectangleShape {
+    /// 파서가 보존한 소유 문단 영역으로 식별한다. 구조 파싱 오류를 복구하는 함수가 아니다.
+    /// 문단 수가 0이어도 존재하는 영역을 일반 사각형으로 바꾸지 않는다.
+    pub fn control_kind(&self) -> RectangleControlKind {
+        if self.drawing.text_box.is_some() {
+            RectangleControlKind::TextBox
+        } else {
+            RectangleControlKind::Rectangle
+        }
+    }
+}
+
+/// 타원 개체 (HWPTAG_SHAPE_COMPONENT_ELLIPSE)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct EllipseShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 속성 플래그
+    pub attr: u32,
+    /// 중심 좌표
+    pub center: Point,
+    /// 제1축 좌표
+    pub axis1: Point,
+    /// 제2축 좌표
+    pub axis2: Point,
+    /// 시작점1
+    pub start1: Point,
+    /// 끝점1
+    pub end1: Point,
+    /// 시작점2 (호일 때)
+    pub start2: Point,
+    /// 끝점2 (호일 때)
+    pub end2: Point,
+}
+
+/// 호 개체 (HWPTAG_SHAPE_COMPONENT_ARC)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct ArcShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 호 타입 (0: Arc, 1: CircularSector, 2: Bow)
+    pub arc_type: u8,
+    /// 타원 중심
+    pub center: Point,
+    /// 제1축 좌표
+    pub axis1: Point,
+    /// 제2축 좌표
+    pub axis2: Point,
+}
+
+/// 다각형 편집의 기준 기하. 파일에는 현재 합성 행렬만 저장한다.
+#[derive(Debug, Clone)]
+pub struct PolygonAffineEditReference {
+    pub width: u32,
+    pub height: u32,
+    pub rotation: i16,
+    pub horz_flip: bool,
+    pub vert_flip: bool,
+    pub matrix: [f64; 6],
+}
+
+/// 다각형 개체 (HWPTAG_SHAPE_COMPONENT_POLYGON)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct PolygonShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 꼭짓점 좌표 목록
+    pub points: Vec<Point>,
+    /// 복수 속성 변경과 되돌리기를 같은 기준 행렬에서 계산한다.
+    #[serde(skip)]
+    pub affine_edit_reference: Option<PolygonAffineEditReference>,
+    /// SHAPE_POLYGON 끝 패딩/추가 바이트 (라운드트립 보존)
+    pub raw_trailing: Vec<u8>,
+}
+
+/// 곡선 개체 (HWPTAG_SHAPE_COMPONENT_CURVE)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct CurveShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 곡선이 통과하는 원본 점 체인 (베지어 제어점 배열이 아님)
+    pub points: Vec<Point>,
+    /// 인접한 점 사이의 구간 종류: points.len() - 1개 (0: line, 1: curve)
+    pub segment_types: Vec<u8>,
+}
+
+/// 묶음 개체 (HWPTAG_SHAPE_COMPONENT_CONTAINER)
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct GroupShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 개체 요소 속성
+    pub shape_attr: ShapeComponentAttr,
+    /// 하위 개체 목록
+    pub children: Vec<ShapeObject>,
+    /// 캡션
+    pub caption: Option<Caption>,
+}
+
+/// 캡션 정보
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Caption {
+    /// 방향 (0: left, 1: right, 2: top, 3: bottom)
+    pub direction: CaptionDirection,
+    /// Left/Right 캡션의 세로 정렬 (위/가운데/아래)
+    pub vert_align: CaptionVertAlign,
+    /// 캡션 폭 (세로 방향일 때)
+    pub width: HwpUnit,
+    /// 캡션-틀 간격
+    pub spacing: HwpUnit16,
+    /// 텍스트 최대 길이
+    pub max_width: HwpUnit,
+    /// 캡션 폭에 마진 포함 여부 (가로 방향일 때만 사용)
+    pub include_margin: bool,
+    /// 문단 리스트
+    pub paragraphs: Vec<Paragraph>,
+}
+
+/// 캡션 방향
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum CaptionDirection {
+    Left,
+    Right,
+    Top,
+    #[default]
+    Bottom,
+}
+
+/// Left/Right 캡션의 세로 정렬
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum CaptionVertAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
+// ============================================================
+// 차트 개체 (Task #195)
+// ============================================================
+
+/// 차트 종류 (1차 범위: Bar/Column/Line/Pie/Area/Scatter)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum ChartType {
+    Bar,
+    Column,
+    Line,
+    Pie,
+    Area,
+    Scatter,
+    #[default]
+    Unknown,
+}
+
+/// 범례 위치
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum LegendPosition {
+    #[default]
+    Right,
+    Left,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Hidden,
+}
+
+/// 범례
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct Legend {
+    pub position: LegendPosition,
+    pub visible: bool,
+}
+
+/// 축
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct Axis {
+    pub label: Option<String>,
+    pub labels: Vec<String>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+/// 데이터 시리즈 (한 줄기 막대/선 등)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct DataSeries {
+    /// 시리즈 이름 (범례 표시용)
+    pub name: String,
+    /// Y값 (또는 파이의 각 조각 값)
+    pub values: Vec<f64>,
+    /// X축 레이블 (시리즈 간 공유되지만 편의상 각자 보관)
+    pub categories: Vec<String>,
+    /// RGB 색상 (`0xRRGGBB`)
+    pub color: Option<u32>,
+}
+
+/// 차트 개체 (GSO + HWPTAG_CHART_DATA)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ChartShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 차트 종류
+    pub chart_type: ChartType,
+    /// 타이틀
+    pub title: Option<String>,
+    /// 범례
+    pub legend: Option<Legend>,
+    /// X축
+    pub x_axis: Option<Axis>,
+    /// Y축
+    pub y_axis: Option<Axis>,
+    /// 데이터 시리즈 목록
+    pub series: Vec<DataSeries>,
+    /// CHART_DATA 레코드 원본 바이트(라운드트립 보존용, 하위 태그 전체 병합)
+    pub raw_chart_data: Vec<u8>,
+    /// 캡션
+    pub caption: Option<Caption>,
+}
+
+// ============================================================
+// OLE 개체 (Task #195)
+// ============================================================
+
+/// OLE 프리뷰 이미지 포맷
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub enum OlePreviewFormat {
+    Wmf,
+    Emf,
+    Png,
+    Bmp,
+}
+
+/// OLE 프리뷰 이미지
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OlePreview {
+    pub format: OlePreviewFormat,
+    pub bytes: Vec<u8>,
+}
+
+/// OLE 표시 방식 (DrawingAspect)
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub enum OleDrawingAspect {
+    #[default]
+    Content,
+    Icon,
+    Thumbnail,
+    DocPrint,
+}
+
+/// OLE 개체 (HWPTAG_SHAPE_COMPONENT_OLE)
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct OleShape {
+    /// 공통 속성
+    pub common: CommonObjAttr,
+    /// 그리기 공통 속성
+    pub drawing: DrawingObjAttr,
+    /// 개체 영역 가로 (HWPUNIT)
+    pub extent_x: i32,
+    /// 개체 영역 세로 (HWPUNIT)
+    pub extent_y: i32,
+    /// OLE 속성 플래그
+    pub flags: u8,
+    /// 표시 방식
+    pub drawing_aspect: OleDrawingAspect,
+    /// BinData 참조 ID (`BinData/BIN000N.OLE`)
+    pub bin_data_id: u32,
+    /// 프리뷰 이미지 (단계 4 이후 선택적 채움)
+    pub preview: Option<OlePreview>,
+    /// OLE 레코드 원본 바이트 (라운드트립 보존)
+    pub raw_tag_data: Vec<u8>,
+    /// [#4495] raw_tag_data 출처 봉인 — 봉인 시점 OLE payload 모델 필드
+    /// (extent_x/extent_y/bin_data_id)의 다이제스트. 저장 시 그 필드들이 봉인과
+    /// 같을 때만 raw 를 재사용한다. None 은 종전 계약(raw 우선) 유지.
+    #[serde(skip)]
+    pub raw_tag_seal: Option<[u8; 32]>,
+    /// 캡션
+    pub caption: Option<Caption>,
+    /// [#3546] HWPX `<hp:chart chartIDRef="...">` 출신 표식 — chartIDRef 원문.
+    /// HWPX 파서가 차트를 OLE 모델(bin_data_id=60000+N)로 변환할 때 채우며,
+    /// Some 이면 HWPX 저장기가 hp:ole 대신 hp:chart 를 원형 구조로 재방출한다.
+    pub chart_id_ref: Option<String>,
+    /// [#3546] 원본 `<hp:switch>` 의 `<hp:default>` fallback OLE.
+    /// 저장 시 switch/case/default 구조 재방출의 재료 — None 이면 bare
+    /// `<hp:chart>` 로 되쓴다. default 없는 case-only `<hp:switch>` 도
+    /// None 으로 접힌다(둘 다 미관측 변형 — 이 경우 switch 래핑은
+    /// 재방출되지 않는다).
+    pub chart_switch_fallback: Option<Box<OleShape>>,
+    /// [#4669] HWPX `<hp:ole id="...">` 원문 — `instid` 와 별개 값이다(한컴
+    /// 원산 파일 실측: id=2141242094 / instid=1067500271). 종전에는 `instid` 만
+    /// 파싱해 재방출 `id` 가 instance_id(또는 "0")로 되쓰였다. HWP5 출신은 None.
+    pub hwpx_ole_id: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_common_obj_attr_default() {
+        let attr = CommonObjAttr::default();
+        assert!(!attr.treat_as_char);
+        assert_eq!(attr.text_wrap, TextWrap::Square);
+    }
+
+    #[test]
+    fn test_shape_object_line() {
+        let line = ShapeObject::Line(LineShape::default());
+        assert!(matches!(line, ShapeObject::Line(_)));
+    }
+
+    #[test]
+    fn test_text_wrap_variants() {
+        assert_eq!(TextWrap::default(), TextWrap::Square);
+    }
+}

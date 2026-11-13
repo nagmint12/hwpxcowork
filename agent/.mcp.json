@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "hwpx": {
+      "command": "node",
+      "args": [
+        "<repo>/server/mcp-stdio.js",
+        "--channel",
+        "--lean",
+        "--url",
+        "http://localhost:8787/mcp",
+        "--files-dir",
+        "<repo>/agent/work"
+      ],
+      "env": {
+        "HWPX_COWORK_TOKEN": "${HWPX_COWORK_TOKEN}"
+      }
+    }
+  }
+}

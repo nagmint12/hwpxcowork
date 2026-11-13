@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>rhwp 편집기 단독 시험</title>
+<style>html,body{margin:0;height:100%} #editor{width:100%;height:calc(100% - 40px)} #log{height:40px;font:12px/40px monospace;padding:0 10px;background:#eee}</style></head>
+<body>
+<div id="log">편집기 로딩 중… (studioUrl 은 /api/config 의 값)</div>
+<div id="editor"></div>
+<script type="module">
+  import { createEditor } from '/vendor/rhwp-editor/index.js';
+  const log = (m) => { document.getElementById('log').textContent = m; console.log(m); };
+  try {
+    const cfg = await (await fetch('/api/config')).json();
+    const t0 = Date.now();
+    const editor = await createEditor('#editor', { studioUrl: cfg.studioUrl });
+    log(`편집기 준비 ${Date.now() - t0}ms — ${cfg.studioUrl}`);
+    window.rhwpEditor = editor;
+  } catch (e) { log('편집기 실패: ' + e.message); }
+</script>
+</body>
+</html>

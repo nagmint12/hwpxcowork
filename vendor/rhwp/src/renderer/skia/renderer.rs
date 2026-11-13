@@ -1,0 +1,4816 @@
+use super::region_plan::SkiaRegionPlan;
+use skia_safe::{
+    paint, png_encoder, surfaces, Canvas, Color, Font, FontMgr, FontStyle, Matrix, Paint,
+    PathBuilder, PathEffect, Picture, PictureRecorder, RRect, Rect, Shaper,
+};
+use std::cell::{OnceCell, RefCell};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use crate::error::HwpError;
+use crate::model::image::ImageEffect;
+use crate::model::style::UnderlineType;
+use crate::model::ColorRef;
+use crate::paint::replay_order::layer_node_has_replay_plane;
+use crate::paint::{
+    paint_op_replay_plane_with_layer, text_visual_replay_role, validate_text_variant_scope,
+    CacheHint, GlyphRunOrientation, GlyphRunReplayEligibility, LayerGlyphRunPaint, LayerNode,
+    LayerNodeKind, LayerOutputOptions, PageLayerTree, PaintOp, PaintReplayPlane, ResourceArena,
+    TextDecorationKind, TextVariantKind, TextVariantQuality, TextVisualReplayRole,
+};
+use crate::renderer::layer_renderer::{
+    is_bounded_vertical_hwp5_replay_candidate, LayerRasterRenderer, LayerRenderDiagnostics,
+    LayerRenderResult, RasterOutputFormat, RasterRenderOptions, RasterRenderOutput,
+    TextVariantSelectionReport, VariantSelectionBackend,
+};
+use crate::renderer::raster_pixels::{
+    RasterPixelFormat, RasterPixels, RasterRegion, RasterRegionPixels,
+};
+use crate::renderer::render_tree::RenderLayerInfo;
+use crate::renderer::{svg_arc_to_beziers, LineStyle, PathCommand, ShapeStyle, StrokeDash};
+
+use super::cache::{
+    debug_key, debug_size, inline_resource_estimate, BoundedCache, NativeSkiaCacheStats,
+    ReplayCacheContext, DEFAULT_CACHE_BYTES, DEFAULT_CACHE_ENTRIES,
+};
+use super::diagnostics::ReplayDiagnostics;
+use super::equation_conv::{render_equation, EquationFonts};
+use super::fill_shader::shape_fill;
+use super::font_catalog::TypefaceCatalog;
+#[path = "declared_font_fallbacks.rs"]
+mod declared_font_fallbacks;
+#[path = "native_pua_fonts.rs"]
+mod native_pua_fonts;
+#[path = "text_shadow_fonts.rs"]
+mod text_shadow_fonts;
+use super::font_lookup::{
+    collect_system_families, font_style_for_text, legacy_typeface_for_style, match_supplied_family,
+    match_system_family_style, SystemFontFamilies,
+};
+use super::glyph_replay::{
+    construct_glyph_font, finite_scalar, glyph_run_minimum_byte_cost, prepare_glyph_outline,
+    GlyphPreparationBudget, PreparedGlyph,
+};
+use super::image_cache::ImageResourceCache;
+use super::image_conv::{draw_image_bytes, draw_svg_fragment};
+use super::line_replay::{draw_line, floor_stroke_to_device};
+use super::text_replay::SkiaTextReplay;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativeGlyphRunReplayProofReason {
+    EmptyGlyphIds,
+    GlyphPositionCountMismatch,
+    AdvanceCountMismatch,
+    GlyphTransformUnsupported,
+    VerticalOrientationUnsupported,
+    VerticalAuthorityUnsupported,
+    StrictVisualIneligible,
+    MissingGlyph,
+    ClusterMismatch,
+    UnsupportedQuality,
+    PositionAdjustedResidualTooLarge,
+    ReplayEligibilityNotPortable,
+    UnsupportedPaintEffect,
+    GlyphIdOutOfRange,
+    PlacementNotFinite,
+    PositionNotFinite,
+    FontFaceMissing,
+    FontBlobMissing,
+    FontBlobNotPortable,
+    FontBlobBytesMissing,
+    FontBlobDataRefMismatch,
+    FontBlobDigestMismatch,
+    FaceIndexUnsupported,
+    FontVariationUnsupported,
+    TypefaceConstructionNotImplemented,
+    ExactFaceUnavailable,
+    FontInstanceInvalid,
+    GlyphRunTooLarge,
+    FontResourceTooLarge,
+    FontResourceAmbiguous,
+    DirectionUnsupported,
+}
+
+impl NativeGlyphRunReplayProofReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyGlyphIds => "emptyGlyphIds",
+            Self::GlyphPositionCountMismatch => "glyphPositionCountMismatch",
+            Self::AdvanceCountMismatch => "advanceCountMismatch",
+            Self::GlyphTransformUnsupported => "glyphTransformUnsupported",
+            Self::VerticalOrientationUnsupported => "verticalOrientationUnsupported",
+            Self::VerticalAuthorityUnsupported => "verticalAuthorityUnsupported",
+            Self::StrictVisualIneligible => "strictVisualIneligible",
+            Self::MissingGlyph => "missingGlyph",
+            Self::ClusterMismatch => "clusterMismatch",
+            Self::UnsupportedQuality => "unsupportedQuality",
+            Self::PositionAdjustedResidualTooLarge => "positionAdjustedResidualTooLarge",
+            Self::ReplayEligibilityNotPortable => "replayEligibilityNotPortable",
+            Self::UnsupportedPaintEffect => "unsupportedPaintEffect",
+            Self::GlyphIdOutOfRange => "glyphIdOutOfRange",
+            Self::PlacementNotFinite => "placementNotFinite",
+            Self::PositionNotFinite => "positionNotFinite",
+            Self::FontFaceMissing => "fontFaceMissing",
+            Self::FontBlobMissing => "fontBlobMissing",
+            Self::FontBlobNotPortable => "fontBlobNotPortable",
+            Self::FontBlobBytesMissing => "fontBlobBytesMissing",
+            Self::FontBlobDataRefMismatch => "fontBlobDataRefMismatch",
+            Self::FontBlobDigestMismatch => "fontBlobDigestMismatch",
+            Self::FaceIndexUnsupported => "faceIndexUnsupported",
+            Self::FontVariationUnsupported => "fontVariationUnsupported",
+            Self::TypefaceConstructionNotImplemented => "typefaceConstructionNotImplemented",
+            Self::ExactFaceUnavailable => "exactFaceUnavailable",
+            Self::FontInstanceInvalid => "fontInstanceInvalid",
+            Self::GlyphRunTooLarge => "glyphRunTooLarge",
+            Self::FontResourceTooLarge => "fontResourceTooLarge",
+            Self::FontResourceAmbiguous => "fontResourceAmbiguous",
+            Self::DirectionUnsupported => "directionUnsupported",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeGlyphRunReplayProof {
+    pub contract_replayable: bool,
+    pub typeface_constructible: bool,
+    pub reasons: Vec<NativeGlyphRunReplayProofReason>,
+}
+
+/// The reason a strict alternative was abandoned during Native resource preparation.
+/// Contract and exact-face failures retain the same public proof returned by preflight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeGlyphPreparationFailure {
+    GlyphRunRejected(NativeGlyphRunReplayProof),
+    PreparationBudgetExceeded,
+    UnsupportedOutlinePayload,
+    VariantPartsIncomplete,
+}
+
+/// A bounded observation of one rejected Native text alternative.
+/// Identifiers are UTF-8 prefixes of at most 256 bytes; they are not cache keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeGlyphReplayRejectReport {
+    pub equivalence_group: String,
+    pub variant_id: String,
+    pub variant_kind: TextVariantKind,
+    pub failure: NativeGlyphPreparationFailure,
+}
+
+fn native_skia_can_replay_glyph_run(run: &LayerGlyphRunPaint, resources: &ResourceArena) -> bool {
+    native_skia_glyph_run_replay_proof(run, resources).typeface_constructible
+}
+
+fn native_skia_glyph_run_contract_is_replayable(
+    run: &LayerGlyphRunPaint,
+    resources: &ResourceArena,
+) -> bool {
+    native_skia_glyph_run_replay_proof(run, resources).contract_replayable
+}
+
+/// Checks the glyph/resource declaration. The enclosing leaf's source text is
+/// not available here; replay additionally checks that bounded vertical runs
+/// replace exactly one source scalar before suppressing their TextRun fallback.
+pub fn native_skia_glyph_run_replay_proof(
+    run: &LayerGlyphRunPaint,
+    resources: &ResourceArena,
+) -> NativeGlyphRunReplayProof {
+    prepare_native_glyph_run(run, resources, &FontMgr::default()).0
+}
+
+fn prepare_native_glyph_run(
+    run: &LayerGlyphRunPaint,
+    resources: &ResourceArena,
+    font_mgr: &FontMgr,
+) -> (NativeGlyphRunReplayProof, Option<PreparedGlyph>) {
+    let mut contract_reasons = BTreeSet::new();
+    let mut construction_reasons = BTreeSet::new();
+
+    let vertical_declared =
+        run.diagnostics.reason.as_deref() == Some("boundedVerticalHwp5TableCellV1");
+    let bounded_vertical =
+        is_bounded_vertical_hwp5_replay_candidate(run, VariantSelectionBackend::NativeSkia);
+    if vertical_declared && !bounded_vertical {
+        // A malformed bounded claim must never re-enter the ordinary horizontal lane.
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::VerticalAuthorityUnsupported);
+    }
+    if bounded_vertical {
+        let source_ranges_match = run.source.utf8_range.start == 0
+            && run.source.utf16_range.start == 0
+            && matches!(
+                (run.source.utf8_range.end, run.source.utf16_range.end),
+                (1, 1) | (2, 1) | (3, 1) | (4, 2)
+            );
+        let cluster_matches = matches!(run.clusters.as_slice(), [cluster]
+            if source_ranges_match
+                && run.glyph_ids.len() == 1
+                && cluster.source_range_utf8 == run.source.utf8_range
+                && cluster.source_range_utf16 == Some(run.source.utf16_range)
+                && cluster.text_range_utf8 == Some(run.source.utf8_range)
+                && cluster.glyph_range == crate::paint::GlyphRange::new(0, 1)
+                && cluster.flags.as_slice() == [crate::paint::GlyphClusterFlag::FallbackBoundary]);
+        if !cluster_matches {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::ClusterMismatch);
+        }
+        if run.advances.as_ref().map(Vec::len) != Some(1) {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::AdvanceCountMismatch);
+        }
+        let placement = run.placement.run_to_page;
+        if [
+            placement.a,
+            placement.b,
+            placement.c,
+            placement.d,
+            placement.e,
+            placement.f,
+        ] != [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            || run.placement.baseline_y != 0.0
+            || run.paint_style.font_size != run.shape_key.font_instance.size_px
+            || run.variant.equivalence_group != format!("text-{}", run.source.id.0)
+            || run.variant.anchor_op_id.as_deref() != Some(run.variant.equivalence_group.as_str())
+            || run.diagnostics.max_origin_delta_px != 0.0
+            || run.diagnostics.max_advance_delta_px != 0.0
+            || run.diagnostics.max_residual_after_adjustment_px != 0.0
+        {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::VerticalAuthorityUnsupported);
+        }
+        if !run.paint_style.is_fill_only_glyph_replay() {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::UnsupportedPaintEffect);
+        }
+    }
+
+    if run.glyph_ids.is_empty() {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::EmptyGlyphIds);
+    }
+    if run.glyph_ids.len() > crate::paint::MAX_PORTABLE_GLYPHS_PER_RUN
+        || run.positions.len() > crate::paint::MAX_PORTABLE_GLYPHS_PER_RUN
+        || run.clusters.len() > crate::paint::MAX_PORTABLE_GLYPHS_PER_RUN
+        || run
+            .advances
+            .as_ref()
+            .is_some_and(|values| values.len() > crate::paint::MAX_PORTABLE_GLYPHS_PER_RUN)
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::GlyphRunTooLarge);
+    }
+    if run.direction != crate::paint::TextDirection::Ltr
+        || run.shape_key.direction != crate::paint::TextDirection::Ltr
+        || run.bidi_level != Some(0)
+        || ((!matches!(run.writing_mode, crate::paint::WritingMode::HorizontalTb)
+            || !matches!(
+                run.shape_key.writing_mode,
+                crate::paint::WritingMode::HorizontalTb
+            ))
+            && !bounded_vertical)
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::DirectionUnsupported);
+    }
+    if !crate::paint::font::glyph_font_size_is_portable(run.shape_key.font_instance.size_px) {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::FontInstanceInvalid);
+    }
+    if run.glyph_ids.len() != run.positions.len() {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::GlyphPositionCountMismatch);
+    }
+    if run
+        .advances
+        .as_ref()
+        .is_some_and(|advances| advances.len() != run.glyph_ids.len())
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::AdvanceCountMismatch);
+    }
+    if run.glyph_transforms.is_some() {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::GlyphTransformUnsupported);
+    }
+    if run.orientation != GlyphRunOrientation::Horizontal && !bounded_vertical {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::VerticalOrientationUnsupported);
+    }
+    if !run.diagnostics.strict_visual_eligible {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::StrictVisualIneligible);
+    }
+    if run.diagnostics.missing_glyph_count != 0 {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::MissingGlyph);
+    }
+    if run.diagnostics.used_fallback_font_count != 0 {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::FontBlobNotPortable);
+    }
+    if run.diagnostics.cluster_mismatch_count != 0 {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::ClusterMismatch);
+    }
+    if !matches!(
+        run.diagnostics.quality,
+        TextVariantQuality::Exact | TextVariantQuality::PositionAdjusted
+    ) {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::UnsupportedQuality);
+    }
+    if run.diagnostics.quality == TextVariantQuality::PositionAdjusted {
+        let tolerance = 0.5_f64.min(0.25_f64.max(run.paint_style.font_size * 0.005));
+        if !run.diagnostics.max_residual_after_adjustment_px.is_finite()
+            || run.diagnostics.max_residual_after_adjustment_px > tolerance
+        {
+            contract_reasons
+                .insert(NativeGlyphRunReplayProofReason::PositionAdjustedResidualTooLarge);
+        }
+    }
+    if run.diagnostics.replay_eligibility != GlyphRunReplayEligibility::Portable {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::ReplayEligibilityNotPortable);
+    }
+    if !run.paint_style.is_simple_glyph_run_replay()
+        || !finite_scalar(run.paint_style.font_size)
+        || run.paint_style.font_size <= 0.0
+        || run.paint_style.font_size > crate::paint::MAX_GLYPH_FONT_SIZE_PX
+        || (run.paint_style.shadow_type != 0
+            && (!finite_scalar(run.paint_style.shadow_offset_x)
+                || !finite_scalar(run.paint_style.shadow_offset_y)))
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::UnsupportedPaintEffect);
+    }
+    if run
+        .glyph_ids
+        .iter()
+        .any(|glyph_id| *glyph_id == 0 || *glyph_id > u16::MAX as u32)
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::GlyphIdOutOfRange);
+    }
+    let font_resources = resources.font_resources();
+    let face = font_resources
+        .faces
+        .iter()
+        .find(|face| face.id == run.shape_key.font_instance.face_key);
+    if let Some(face) = face {
+        if font_resources
+            .faces
+            .iter()
+            .filter(|item| item.id == face.id)
+            .count()
+            != 1
+        {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::FontResourceAmbiguous);
+        }
+        let blob = font_resources
+            .blobs
+            .iter()
+            .find(|blob| blob.id == face.blob_key);
+        if let Some(blob) = blob {
+            if font_resources
+                .blobs
+                .iter()
+                .filter(|item| item.id == blob.id)
+                .count()
+                != 1
+            {
+                contract_reasons.insert(NativeGlyphRunReplayProofReason::FontResourceAmbiguous);
+            }
+            if !blob.portability.is_self_contained_replayable() {
+                contract_reasons.insert(NativeGlyphRunReplayProofReason::FontBlobNotPortable);
+            } else if let crate::paint::FontPortability::PortableBlob { data_ref, .. } =
+                &blob.portability
+            {
+                if blob.data_ref.as_ref() != Some(data_ref) {
+                    contract_reasons
+                        .insert(NativeGlyphRunReplayProofReason::FontBlobDataRefMismatch);
+                }
+                match resources.font_blob_bytes_for_ref(data_ref) {
+                    Some(bytes) if bytes.len() > crate::paint::MAX_PORTABLE_FONT_BLOB_BYTES => {
+                        contract_reasons
+                            .insert(NativeGlyphRunReplayProofReason::FontResourceTooLarge);
+                    }
+                    Some(bytes) if font_blob_digest_matches(bytes, blob) => {}
+                    Some(_) => {
+                        contract_reasons
+                            .insert(NativeGlyphRunReplayProofReason::FontBlobDigestMismatch);
+                    }
+                    None => {
+                        contract_reasons
+                            .insert(NativeGlyphRunReplayProofReason::FontBlobBytesMissing);
+                    }
+                }
+            }
+        } else {
+            contract_reasons.insert(NativeGlyphRunReplayProofReason::FontBlobMissing);
+        }
+    } else {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::FontFaceMissing);
+    }
+    let transform = run.placement.run_to_page;
+    if ![
+        transform.a,
+        transform.b,
+        transform.c,
+        transform.d,
+        transform.e,
+        transform.f,
+        run.placement.baseline_y,
+    ]
+    .into_iter()
+    .all(finite_scalar)
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::PlacementNotFinite);
+    }
+    if !run
+        .positions
+        .iter()
+        .all(|position| finite_scalar(position.x) && finite_scalar(position.y))
+        || run.advances.as_ref().is_some_and(|values| {
+            values
+                .iter()
+                .any(|advance| !finite_scalar(advance.dx) || !finite_scalar(advance.dy))
+        })
+    {
+        contract_reasons.insert(NativeGlyphRunReplayProofReason::PositionNotFinite);
+    }
+
+    let contract_replayable = contract_reasons.is_empty();
+    let prepared = if contract_replayable {
+        match construct_glyph_font(run, resources, font_mgr) {
+            Ok(prepared) => Some(prepared),
+            Err(reasons) => {
+                construction_reasons.extend(reasons);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let typeface_constructible = prepared.is_some();
+    let mut reasons = contract_reasons
+        .into_iter()
+        .chain(construction_reasons)
+        .collect::<Vec<_>>();
+    reasons.sort();
+
+    (
+        NativeGlyphRunReplayProof {
+            contract_replayable,
+            typeface_constructible,
+            reasons,
+        },
+        prepared,
+    )
+}
+
+fn font_blob_digest_matches(bytes: &[u8], blob: &crate::paint::FontBlobResource) -> bool {
+    let actual = crate::paint::resource_digest_hex(bytes);
+    let portability_digest_matches = match &blob.portability {
+        crate::paint::FontPortability::PortableBlob { digest, .. } => {
+            font_digest_matches_resource_bytes(digest, &actual)
+        }
+        _ => false,
+    };
+    let blob_digest_matches = blob
+        .digest
+        .as_ref()
+        .is_none_or(|digest| font_digest_matches_resource_bytes(digest, &actual));
+    portability_digest_matches && blob_digest_matches
+}
+
+fn font_digest_matches_resource_bytes(digest: &crate::paint::FontDigest, actual: &str) -> bool {
+    digest.algorithm == crate::paint::RESOURCE_KEY_ALGORITHM && digest.value == actual
+}
+
+const FORM_CJK_FAMILIES: &[&str] = &[
+    "Malgun Gothic",
+    "맑은 고딕",
+    "NanumGothic",
+    "나눔고딕",
+    "AppleGothic",
+    // #3300: 시스템 부재 headless 환경에서는 bundled_typefaces가 이 두 family를 제공한다.
+    "Noto Sans KR ExtraLight",
+    "Noto Sans KR",
+];
+
+#[derive(Clone)]
+struct CachedPicture {
+    picture: Picture,
+    inverse_matrix: Matrix,
+    next_text_source_id: u32,
+    selection_updates: Vec<TextVariantSelectionReport>,
+    native_glyph_rejections: Vec<NativeGlyphReplayRejectReport>,
+    native_glyph_rejections_dropped: usize,
+}
+
+struct PageReplayOutput {
+    diagnostics: LayerRenderDiagnostics,
+    setup_time: Duration,
+    replay_time: Duration,
+}
+
+pub struct SkiaLayerRenderer {
+    viewport_culling: bool,
+    font_mgr: FontMgr,
+    text_shaper: OnceCell<Option<Shaper>>,
+    /// 사용자 지정 경로의 family별 TTC face·스타일 catalog.
+    /// SVG 의 `--font-path` 와 같은 패턴으로 ttfs 디렉토리의 한컴 전용 폰트 (HY견명조 등) 도 사용 가능.
+    custom_typefaces: TypefaceCatalog,
+    /// [#3300] 번들 최후-폴백 폰트(ttfs/opensource). custom 과 분리해 해석
+    /// 체인에서 custom·시스템 매칭 **뒤**에만 선다 — custom 에 섞으면 깊은
+    /// 폴백(Noto Sans KR)이 시스템 1순위(문서 지정 맑은 고딕 등)를 제치고
+    /// 본문 전체를 폴백 서체로 렌더한다(r23 발산 −6.9pp).
+    bundled_typefaces: TypefaceCatalog,
+    /// 시스템에 실제 존재하는 font family 목록.
+    /// headless macOS 에서 missing family 를 CoreText 에 넘기면 downloadable font
+    /// lookup IPC가 영구 대기할 수 있어, match_family_style 호출 전 사전 필터로 사용한다.
+    system_families: SystemFontFamilies,
+    picture_cache: RefCell<BoundedCache<CachedPicture>>,
+    glyph_cache: RefCell<BoundedCache<Rc<PreparedGlyph>>>,
+    image_cache: ImageResourceCache,
+}
+
+impl SkiaLayerRenderer {
+    pub fn new() -> Self {
+        // [perf] FontMgr::default() + collect_system_families() (시스템 폰트 family 전수
+        // 열거) 는 페이지당 ~8ms 가 드는데, 프로세스(스레드) 내에서 불변이다. 매 렌더마다
+        // 재열거하지 않도록 thread-local 로 1회만 계산하고, 이후 new() 는 캐시를 복제
+        // (FontMgr = refcount bump, families = HashSet clone ~수십 µs) 해 재사용한다.
+        // 폰트 매칭 입력이 동일하므로 렌더 출력은 바이트 단위로 불변이다.
+        thread_local! {
+            static SKIA_FONT_BASE: (FontMgr, SystemFontFamilies) = {
+                let font_mgr = FontMgr::default();
+                let system_families = collect_system_families(&font_mgr);
+                (font_mgr, system_families)
+            };
+        }
+        SKIA_FONT_BASE.with(|(font_mgr, system_families)| Self {
+            viewport_culling: true,
+            font_mgr: font_mgr.clone(),
+            text_shaper: OnceCell::new(),
+            custom_typefaces: TypefaceCatalog::default(),
+            bundled_typefaces: TypefaceCatalog::default(),
+            system_families: system_families.clone(),
+            picture_cache: RefCell::new(BoundedCache::new(
+                DEFAULT_CACHE_ENTRIES,
+                DEFAULT_CACHE_BYTES,
+            )),
+            glyph_cache: RefCell::new(BoundedCache::new(
+                DEFAULT_CACHE_ENTRIES,
+                DEFAULT_CACHE_BYTES,
+            )),
+            image_cache: ImageResourceCache::new(DEFAULT_CACHE_ENTRIES, DEFAULT_CACHE_BYTES),
+        })
+    }
+
+    /// Bound each of the picture, glyph and image caches independently. Zero
+    /// disables retention; replay and fallback policy remain unchanged.
+    pub fn with_cache_limits(mut self, max_entries: usize, max_bytes: usize) -> Self {
+        self.picture_cache = RefCell::new(BoundedCache::new(max_entries, max_bytes));
+        self.glyph_cache = RefCell::new(BoundedCache::new(max_entries, max_bytes));
+        self.image_cache = ImageResourceCache::new(max_entries, max_bytes);
+        self
+    }
+
+    /// Cull only proven simple-shape bounds outside a raster canvas clip.
+    /// Unknown text, SVG, image/effect bounds and strict vector replay remain
+    /// fully replayed. Disable for direct pixel/counter comparison.
+    pub fn with_viewport_culling(mut self, enabled: bool) -> Self {
+        self.viewport_culling = enabled;
+        self
+    }
+
+    /// Drop all retained native objects and reset cache diagnostics.
+    pub fn clear_caches(&self) {
+        self.picture_cache.borrow_mut().clear();
+        self.glyph_cache.borrow_mut().clear();
+        self.image_cache.clear();
+    }
+
+    pub fn cache_stats(&self) -> NativeSkiaCacheStats {
+        NativeSkiaCacheStats {
+            pictures: self.picture_cache.borrow().usage(),
+            glyphs: self.glyph_cache.borrow().usage(),
+            images: self.image_cache.usage(),
+        }
+    }
+
+    /// 이미 준비된 native renderer의 font inventory로 decision trace를 보강한다.
+    ///
+    /// 이 호출은 새 font path를 읽거나 typeface를 적재하지 않는다. 호출자가
+    /// `with_font_paths`로 구성한 현재 snapshot을 그대로 관측한다.
+    pub fn get_font_decision_trace(
+        &self,
+        core: &crate::document_core::DocumentCore,
+        page_num: u32,
+        options_json: &str,
+    ) -> Result<String, crate::error::HwpError> {
+        let observe =
+            |requested: &str, character: char, bold: bool, italic: bool, source_ttf: bool| {
+                self.font_decision(requested, character, bold, italic, source_ttf)
+            };
+        core.get_font_decision_trace_with_native_observer(
+            page_num,
+            options_json,
+            Some(&observe),
+            "nativeRendererSnapshotRequired",
+        )
+    }
+
+    /// 사용자 지정 폰트 파일/디렉토리의 모든 collection face를 로드한다.
+    /// SVG 의 `--font-path` 와 동일한 패턴.
+    pub fn with_font_paths(mut self, font_paths: &[std::path::PathBuf]) -> Self {
+        // Static pictures may retain legacy font fallback decisions. A changed
+        // renderer font inventory must never reuse those recorded choices.
+        self.clear_caches();
+        // [#2864] 조달 순서는 renderer::font_paths 가 단일 정의한다.
+        // [#3300] custom(호출자+환경변수)과 번들 최후-폴백을 분리 적재한다 —
+        // 시스템 디렉터리는 어느 쪽에도 넣지 않는다(스타일 매칭은 FontMgr 담당).
+        let custom_dirs = crate::renderer::font_paths::custom_font_dirs(font_paths);
+        self.custom_typefaces = TypefaceCatalog::load(&self.font_mgr, &custom_dirs);
+        let bundled_dirs = crate::renderer::font_paths::bundled_font_dirs();
+        self.bundled_typefaces = TypefaceCatalog::load(&self.font_mgr, &bundled_dirs);
+        self
+    }
+
+    /// Replace custom fonts with explicit immutable byte snapshots. Every
+    /// bounded TTF/OTF/TTC face must load; paths and RHWP_FONT_PATH are not read.
+    /// System fallback remains available, and an existing bundled catalog is
+    /// retained. Failure leaves callers free to keep their previous renderer.
+    pub fn try_with_font_data(mut self, sources: &[Vec<u8>]) -> Result<Self, HwpError> {
+        let catalog = TypefaceCatalog::try_from_data(&self.font_mgr, sources)?;
+        self.clear_caches();
+        self.custom_typefaces = catalog;
+        Ok(self)
+    }
+
+    /// 이미 공급한 family를 문서의 요청 이름에 명시적으로 연결한다.
+    /// `with_font_paths` 이후 호출하며 실제 폰트 메타데이터와 기본 폴백은 변경하지 않는다.
+    /// 이 renderer에 적재된 스타일 목록을 공유하고 글자별 coverage 검사는 그대로 적용한다.
+    pub fn with_font_family_alias(
+        mut self,
+        requested: &str,
+        supplied: &str,
+    ) -> LayerRenderResult<Self> {
+        if requested.trim().is_empty() {
+            return Err(HwpError::RenderError(
+                "요청 글꼴 이름이 비어 있습니다".into(),
+            ));
+        }
+        if !self.custom_typefaces.alias_family(requested, supplied) {
+            return Err(HwpError::RenderError(format!(
+                "공급되지 않은 글꼴 family: {supplied}"
+            )));
+        }
+        self.clear_caches();
+        Ok(self)
+    }
+
+    /// 기본 native Skia paint와 동일한 후보 사다리에서 문자별 typeface 결정을 읽는다.
+    /// 렌더링, surface 생성, font 파일 적재를 시작하지 않는다.
+    pub(crate) fn font_decision(
+        &self,
+        requested: &str,
+        character: char,
+        bold: bool,
+        italic: bool,
+        source_ttf: bool,
+    ) -> crate::renderer::font_decision::BackendDecision {
+        use super::font_lookup::{
+            select_typeface_for_character, text_typeface_candidates_for_source,
+        };
+
+        let style = font_style_for_text(&crate::renderer::TextStyle {
+            font_family: requested.into(),
+            bold,
+            italic,
+            ..Default::default()
+        });
+        let (candidates, typefaces) = text_typeface_candidates_for_source(
+            &self.font_mgr,
+            &self.system_families,
+            &self.custom_typefaces,
+            &self.bundled_typefaces,
+            requested,
+            style,
+            source_ttf,
+        );
+        let selected = select_typeface_for_character(&typefaces, character);
+        let mut failures = Vec::new();
+        if typefaces.is_empty() {
+            failures.push("nativeTypefaceUnavailable".into());
+        } else if selected.is_none() {
+            failures.push("nativeGlyphMissingAllCandidates".into());
+        }
+        crate::renderer::font_decision::BackendDecision {
+            status: "complete".into(),
+            certainty: "observed".into(),
+            requested: Some(requested.into()),
+            candidates,
+            resolved: selected.map(|candidate| candidate.typeface.family_name()),
+            source: selected.map(|candidate| candidate.source.into()),
+            capabilities: vec![
+                "nativeTypefaceChainEnumerated".into(),
+                "nativeGlyphCoverageObserved".into(),
+            ],
+            failures,
+        }
+    }
+
+    pub fn render_raster_with_options(
+        &self,
+        tree: &PageLayerTree,
+        options: RasterRenderOptions,
+    ) -> LayerRenderResult<RasterRenderOutput> {
+        let total_start = Instant::now();
+        let (pixels, mut diagnostics) =
+            self.render_pixels_with_target_width(tree, options, None)?;
+        let encode_start = Instant::now();
+        let mut output = Self::encode_pixels_png(&pixels)?;
+        diagnostics.raster_encode_time_ns = diagnostics
+            .raster_encode_time_ns
+            .saturating_add(encode_start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64);
+        diagnostics.raster_total_time_ns =
+            total_start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        output.diagnostics = diagnostics;
+        Ok(output)
+    }
+
+    /// PNG/Sixel가 공유하는 명시적 RGBA8888 premultiplied CPU 결과.
+    pub fn render_pixels_with_options(
+        &self,
+        tree: &PageLayerTree,
+        options: RasterRenderOptions,
+    ) -> LayerRenderResult<RasterPixels> {
+        self.render_pixels_with_target_width(tree, options, None)
+            .map(|(pixels, _)| pixels)
+    }
+
+    /// 요청 너비는 정확한 정수 픽셀이고 높이는 같은 배율을 적용한 올림값이다.
+    pub fn render_pixels_at_width(
+        &self,
+        tree: &PageLayerTree,
+        width: u32,
+        mut options: RasterRenderOptions,
+    ) -> LayerRenderResult<RasterPixels> {
+        if width == 0
+            || width as u64 > options.max_dimension.max(0) as u64
+            || !tree.page_width.is_finite()
+            || tree.page_width <= 0.0
+        {
+            return Err(HwpError::RenderError("invalid raster target width".into()));
+        }
+        options.scale = width as f64 / tree.page_width;
+        self.render_pixels_with_target_width(tree, options, Some(width as i32))
+            .map(|(pixels, _)| pixels)
+    }
+
+    /// Render only an enclosing integer pixel window on the full-page grid.
+    ///
+    /// Replay uses the full page's surface size and device origin, then copies
+    /// the intersecting pixels without resampling. Even an exact integer CTM
+    /// translation can change Skia antialiasing, so a translated small surface
+    /// cannot satisfy the full-page crop contract. Off-page pixels retain the
+    /// normal clear color. This is not subtree culling or a GPU surface.
+    ///
+    /// Output dimensions/pixels still use `options`. Independently, the working
+    /// raster is limited to 16,384 per dimension and 16,777,216 pixels; working
+    /// N32 plus output RGBA bytes together cannot exceed 128 MiB. These bounds
+    /// exclude Skia intermediates/caches and are not a whole-process RSS limit.
+    /// Geometry and output limits are checked first. A wholly off-page window
+    /// needs no working raster, but still obeys the output and peak-byte limits.
+    /// Page extents/window endpoints must be within [-2^24, 2^24] pixels.
+    pub fn render_region_pixels_with_options(
+        &self,
+        tree: &PageLayerTree,
+        region: RasterRegion,
+        options: RasterRenderOptions,
+    ) -> LayerRenderResult<RasterRegionPixels> {
+        let plan = SkiaRegionPlan::new(tree.page_width, tree.page_height, region, options)?;
+        let (pixels, _) =
+            self.render_pixels_in_window(tree, options, (plan.width(), plan.height()), Some(plan))?;
+        Ok(RasterRegionPixels {
+            pixels,
+            origin_x: plan.origin_x(),
+            origin_y: plan.origin_y(),
+        })
+    }
+
+    pub(super) fn validate_raster_options(options: RasterRenderOptions) -> LayerRenderResult<()> {
+        if let Some(dpi) = options.dpi {
+            if !dpi.is_finite() || dpi <= 0.0 {
+                return Err(HwpError::RenderError(format!("invalid raster dpi: {dpi}")));
+            }
+        }
+        if options.format != RasterOutputFormat::Png {
+            return Err(HwpError::RenderError(
+                "Skia raster renderer currently supports PNG output".to_string(),
+            ));
+        }
+        if !options.scale.is_finite()
+            || options.scale <= 0.0
+            || !(options.scale as f32).is_finite()
+            || options.scale as f32 <= 0.0
+        {
+            return Err(HwpError::RenderError(format!(
+                "invalid raster scale: {}",
+                options.scale
+            )));
+        }
+        if options.max_dimension <= 0 {
+            return Err(HwpError::RenderError(format!(
+                "invalid raster max dimension: {}",
+                options.max_dimension
+            )));
+        }
+        if options.max_pixels == 0 {
+            return Err(HwpError::RenderError(
+                "invalid raster max pixel count: 0".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn render_pixels_with_target_width(
+        &self,
+        tree: &PageLayerTree,
+        options: RasterRenderOptions,
+        target_width: Option<i32>,
+    ) -> LayerRenderResult<(RasterPixels, LayerRenderDiagnostics)> {
+        Self::validate_raster_options(options)?;
+        let raster_dimension = |value: f64, label: &str| -> LayerRenderResult<i32> {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(HwpError::RenderError(format!(
+                    "invalid page {label}: {value}"
+                )));
+            }
+            let scaled = match (label, target_width) {
+                ("width", Some(width)) => f64::from(width),
+                _ => (value * options.scale).ceil(),
+            };
+            if !scaled.is_finite() || scaled <= 0.0 || scaled > options.max_dimension as f64 {
+                return Err(HwpError::RenderError(format!(
+                    "raster {label} out of range: {scaled}"
+                )));
+            }
+            Ok(scaled as i32)
+        };
+        let width = raster_dimension(tree.page_width, "width")?;
+        let height = raster_dimension(tree.page_height, "height")?;
+        self.render_pixels_in_window(tree, options, (width, height), None)
+    }
+
+    fn render_pixels_in_window(
+        &self,
+        tree: &PageLayerTree,
+        options: RasterRenderOptions,
+        (width, height): (i32, i32),
+        region: Option<SkiaRegionPlan>,
+    ) -> LayerRenderResult<(RasterPixels, LayerRenderDiagnostics)> {
+        let total_start = Instant::now();
+        if width <= 0
+            || height <= 0
+            || width > options.max_dimension
+            || height > options.max_dimension
+        {
+            return Err(HwpError::RenderError(
+                "raster window dimensions out of range".into(),
+            ));
+        }
+        let pixel_count = (width as u64)
+            .checked_mul(height as u64)
+            .ok_or_else(|| HwpError::RenderError("raster pixel count overflow".into()))?;
+        if pixel_count > options.max_pixels {
+            return Err(HwpError::RenderError(format!(
+                "raster pixel count out of range: {pixel_count}"
+            )));
+        }
+
+        // N32 is platform-dependent; output always has explicit RGBA channels.
+        let info = skia_safe::ImageInfo::new(
+            (width, height),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Premul,
+            None,
+        );
+        let stride = info.min_row_bytes();
+        let byte_count = stride
+            .checked_mul(height as usize)
+            .ok_or_else(|| HwpError::ResourceLimit("raster byte count overflow".into()))?;
+        let (surface_width, surface_height, origin_x, origin_y) = match region {
+            Some(plan) => (
+                plan.page_width(),
+                plan.page_height(),
+                plan.origin_x(),
+                plan.origin_y(),
+            ),
+            None => (width, height, 0, 0),
+        };
+        // Region copy bounds and working/output budgets come from the same
+        // allocation-free preflight exposed to callers. A plan cannot be forged.
+        let intersection = match region {
+            Some(plan) => plan.intersection(),
+            None => Some((0, 0, width, height)),
+        };
+
+        let clear_color = if let Some(color) = options.background_color {
+            colorref_to_skia(color, 1.0)
+        } else if options.transparent {
+            Color::from_argb(0, 0, 0, 0)
+        } else {
+            Color::WHITE
+        };
+        let mut bytes = vec![0u8; byte_count];
+        if region.is_some() && clear_color.a() != 0 {
+            // The clear policy is either fully opaque or transparent black, so
+            // these channels already satisfy the premultiplied RGBA contract.
+            let rgba = [
+                clear_color.r(),
+                clear_color.g(),
+                clear_color.b(),
+                clear_color.a(),
+            ];
+            for pixel in bytes.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&rgba);
+            }
+        }
+        let nanos = |duration: Duration| duration.as_nanos().min(u128::from(u64::MAX)) as u64;
+        let mut diagnostics = LayerRenderDiagnostics::default();
+        if let Some((left, top, right, bottom)) = intersection {
+            let mut surface = surfaces::raster_n32_premul((surface_width, surface_height))
+                .ok_or_else(|| {
+                    HwpError::RenderError("Skia raster surface 생성 실패".to_string())
+                })?;
+            let canvas = surface.canvas();
+            canvas.clear(clear_color);
+            // Full-page and region replay have identical CTM and device clip.
+            if options.scale != 1.0 {
+                canvas.scale((options.scale as f32, options.scale as f32));
+            }
+            let outer_setup_time = total_start.elapsed();
+            let replay =
+                self.render_page_to_canvas_with_options(canvas, tree, options.scale as f32, false)?;
+
+            let encode_start = Instant::now();
+            let image = surface.image_snapshot();
+            let copy_info = skia_safe::ImageInfo::new(
+                (right - left, bottom - top),
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::AlphaType::Premul,
+                None,
+            );
+            let destination_x = (i64::from(left) - i64::from(origin_x)) as usize;
+            let destination_y = (i64::from(top) - i64::from(origin_y)) as usize;
+            let destination = destination_y
+                .checked_mul(stride)
+                .and_then(|row| {
+                    destination_x
+                        .checked_mul(4)
+                        .and_then(|column| row.checked_add(column))
+                })
+                .ok_or_else(|| HwpError::ResourceLimit("raster copy offset overflow".into()))?;
+            if !image.read_pixels(
+                &copy_info,
+                &mut bytes[destination..],
+                stride,
+                (left, top),
+                skia_safe::image::CachingHint::Disallow,
+            ) {
+                return Err(HwpError::RenderError("Skia RGBA pixel read failed".into()));
+            }
+            diagnostics = replay.diagnostics;
+            diagnostics.raster_setup_time_ns =
+                nanos(outer_setup_time.saturating_add(replay.setup_time));
+            diagnostics.raster_replay_time_ns = nanos(replay.replay_time);
+            diagnostics.raster_encode_time_ns = nanos(encode_start.elapsed());
+        } else {
+            diagnostics.raster_setup_time_ns = nanos(total_start.elapsed());
+        }
+        diagnostics.raster_total_time_ns = nanos(total_start.elapsed());
+        Ok((
+            RasterPixels {
+                bytes,
+                width,
+                height,
+                stride,
+                format: RasterPixelFormat::Rgba8Premultiplied,
+                color_space: options.color_space,
+                dpi: options.dpi,
+            },
+            diagnostics,
+        ))
+    }
+
+    /// 공통 픽셀 결과에서 PNG를 인코딩한다. 기존 alpha·배경·압축 정책을 유지한다.
+    pub fn encode_pixels_png(pixels: &RasterPixels) -> LayerRenderResult<RasterRenderOutput> {
+        pixels.validate()?;
+        let info = skia_safe::ImageInfo::new(
+            (pixels.width, pixels.height),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Premul,
+            None,
+        );
+        let image = skia_safe::images::raster_from_data(
+            &info,
+            skia_safe::Data::new_copy(&pixels.bytes),
+            pixels.stride,
+        )
+        .ok_or_else(|| HwpError::RenderError("Skia RGBA image creation failed".into()))?;
+        let mut png_options = png_encoder::Options::default();
+        // PNG is lossless at every zlib level. Level 1 avoids spending most of
+        // native export time on compression while preserving decoded pixels.
+        png_options.z_lib_level = 1;
+        let data = png_encoder::encode_image(
+            None::<&mut skia_safe::gpu::DirectContext>,
+            &image,
+            &png_options,
+        )
+        .ok_or_else(|| HwpError::RenderError("Skia PNG 인코딩 실패".to_string()))?;
+        let bytes = data.as_bytes().to_vec();
+        Ok(RasterRenderOutput {
+            bytes,
+            format: RasterOutputFormat::Png,
+            width: pixels.width,
+            height: pixels.height,
+            dpi: pixels.dpi,
+            color_space: pixels.color_space,
+            diagnostics: LayerRenderDiagnostics::default(),
+        })
+    }
+
+    /// Replay a page into an existing Skia canvas.
+    ///
+    /// Raster surfaces and vector recording surfaces must consume the same
+    /// replay-plane, clip, text-variant, and fallback policy. Surface setup
+    /// such as clearing, CSS-pixel scaling, and page finalization remains the
+    /// caller's responsibility.
+    pub(crate) fn render_page_to_canvas_strict(
+        &self,
+        canvas: &Canvas,
+        tree: &PageLayerTree,
+        fallback_raster_scale: f32,
+    ) -> LayerRenderResult<()> {
+        self.render_page_to_canvas_with_options(canvas, tree, fallback_raster_scale, true)
+            .map(|_| ())
+    }
+
+    /// Shared non-strict raster replay for immutable prepared-page snapshots.
+    pub(super) fn render_prepared_raster(
+        &self,
+        canvas: &Canvas,
+        tree: &PageLayerTree,
+        scale: f32,
+    ) -> LayerRenderResult<()> {
+        self.render_page_to_canvas_with_options(canvas, tree, scale, false)
+            .map(|_| ())
+    }
+
+    fn render_page_to_canvas_with_options(
+        &self,
+        canvas: &Canvas,
+        tree: &PageLayerTree,
+        fallback_raster_scale: f32,
+        strict_resource_failures: bool,
+    ) -> LayerRenderResult<PageReplayOutput> {
+        let setup_start = Instant::now();
+        validate_text_variant_scope(tree).map_err(|error| {
+            HwpError::RenderError(format!("invalid PageLayerTree text contract: {error}"))
+        })?;
+        if !fallback_raster_scale.is_finite() || fallback_raster_scale <= 0.0 {
+            return Err(HwpError::RenderError(format!(
+                "invalid Skia fallback raster scale: {fallback_raster_scale}"
+            )));
+        }
+        let mut next_text_source_id = 0_u32;
+        let diagnostics = RefCell::new(ReplayDiagnostics::new(tree));
+        let cache_before = self.cache_stats();
+        let image_before = self.image_cache.observations();
+        let culling = super::culling::CullingIndex::new(
+            &tree.root,
+            self.viewport_culling && !strict_resource_failures,
+        );
+        // Resource bytes are fingerprinted once per page, not once per group.
+        let mut cache_context = ReplayCacheContext::new(
+            tree,
+            fallback_raster_scale,
+            strict_resource_failures,
+            canvas.image_info().color_type() != skia_safe::ColorType::Unknown,
+            &diagnostics,
+            &culling,
+        );
+        let matrix = canvas.local_to_device_as_3x3();
+        if tree.profile == crate::paint::RenderProfile::Print
+            && cache_context.raster_target
+            && !matrix.has_perspective()
+        {
+            cache_context.bitmap_paper_grid = crate::renderer::bitmap_raster::PrintPaperGrid::new(
+                [tree.page_width, tree.page_height],
+                [
+                    matrix.scale_x() as f64,
+                    matrix.skew_y() as f64,
+                    matrix.skew_x() as f64,
+                    matrix.scale_y() as f64,
+                    matrix.translate_x() as f64,
+                    matrix.translate_y() as f64,
+                ],
+            );
+            cache_context.seed = cache_context
+                .seed
+                .and_then(|seed| super::cache::debug_key(&(seed, cache_context.bitmap_paper_grid)));
+        }
+        let setup_time = setup_start.elapsed();
+        let replay_start = Instant::now();
+        for replay_plane in PaintReplayPlane::ORDERED {
+            if !layer_node_has_replay_plane(&tree.root, replay_plane) {
+                continue;
+            }
+            self.render_node(
+                canvas,
+                &tree.root,
+                &tree.output_options,
+                tree.profile,
+                &tree.resources,
+                replay_plane,
+                None,
+                &mut next_text_source_id,
+                fallback_raster_scale,
+                strict_resource_failures,
+                &cache_context,
+            )?;
+        }
+        let replay_time = replay_start.elapsed();
+        let mut diagnostics = diagnostics.into_inner();
+        diagnostics.finish_caches(
+            cache_before,
+            self.cache_stats(),
+            image_before,
+            self.image_cache.observations(),
+        );
+        Ok(PageReplayOutput {
+            diagnostics: diagnostics.output,
+            setup_time,
+            replay_time,
+        })
+    }
+
+    fn prepare_cached_glyph(
+        &self,
+        op: &PaintOp,
+        resources: &ResourceArena,
+        scale: f32,
+        context: &ReplayCacheContext<'_>,
+    ) -> Result<Rc<PreparedGlyph>, NativeGlyphPreparationFailure> {
+        let key = context.seed.and_then(|seed| debug_key(&(seed, op)));
+        let cached = key.and_then(|key| self.glyph_cache.borrow_mut().get(key));
+        if let Some(prepared) = cached {
+            return Ok(prepared);
+        }
+        let prepared = Rc::new(match op {
+            PaintOp::GlyphRun { run, .. } => {
+                let (proof, prepared) = prepare_native_glyph_run(run, resources, &self.font_mgr);
+                prepared.ok_or(NativeGlyphPreparationFailure::GlyphRunRejected(proof))?
+            }
+            PaintOp::GlyphOutline { outline, bbox, .. } => {
+                prepare_glyph_outline(outline, *bbox, resources, scale)
+                    .ok_or(NativeGlyphPreparationFailure::UnsupportedOutlinePayload)?
+            }
+            _ => return Err(NativeGlyphPreparationFailure::UnsupportedOutlinePayload),
+        });
+        if let Some(key) = key {
+            self.glyph_cache
+                .borrow_mut()
+                .insert(key, prepared.clone(), prepared.byte_cost);
+        }
+        Ok(prepared)
+    }
+
+    fn render_node(
+        &self,
+        canvas: &Canvas,
+        node: &LayerNode,
+        output_options: &LayerOutputOptions,
+        profile: crate::paint::RenderProfile,
+        resources: &ResourceArena,
+        replay_plane: PaintReplayPlane,
+        inherited_layer: Option<RenderLayerInfo>,
+        next_text_source_id: &mut u32,
+        fallback_raster_scale: f32,
+        strict_resource_failures: bool,
+        cache_context: &ReplayCacheContext<'_>,
+    ) -> LayerRenderResult<()> {
+        if cache_context.culling.is_outside(node, canvas) {
+            let mut diagnostics = cache_context.diagnostics.borrow_mut();
+            diagnostics.output.layer_nodes_culled =
+                diagnostics.output.layer_nodes_culled.saturating_add(1);
+            return Ok(());
+        }
+        {
+            let mut diagnostics = cache_context.diagnostics.borrow_mut();
+            diagnostics.output.layer_nodes_replayed =
+                diagnostics.output.layer_nodes_replayed.saturating_add(1);
+        }
+        let hft_outline_enabled = matches!(
+            profile,
+            crate::paint::RenderProfile::Print | crate::paint::RenderProfile::HighQuality
+        );
+        let active_layer = node.layer.or(inherited_layer);
+        let clip_enabled = output_options.clip_enabled;
+        let antialias = cache_context.policy.antialias();
+        let raster_target = cache_context.raster_target;
+        let apply_dash = |paint: &mut Paint, dash: StrokeDash| {
+            let mut intervals = dash.intervals(f64::from(paint.stroke_width()));
+            // 기존 범용 Skia 패턴은 종전 선 굵기 배율을 유지한다.
+            if !dash.is_absolute_pattern() {
+                for value in &mut intervals {
+                    *value *= f64::from(paint.stroke_width().max(1.0));
+                }
+            }
+            if dash.uses_round_cap() {
+                paint.set_stroke_cap(paint::Cap::Round);
+            }
+            if !intervals.is_empty() {
+                let intervals = intervals
+                    .iter()
+                    .map(|value| *value as f32)
+                    .collect::<Vec<_>>();
+                if let Some(effect) = PathEffect::dash(&intervals, 0.0) {
+                    paint.set_path_effect(effect);
+                }
+            }
+        };
+        let make_stroke_paint = |style: &ShapeStyle| -> Option<Paint> {
+            let mut paint = Paint::default();
+            paint.set_anti_alias(antialias);
+            paint.set_style(paint::Style::Stroke);
+            paint.set_stroke_width(if style.stroke_width > 0.0 {
+                style.stroke_width as f32
+            } else {
+                1.0
+            });
+            paint.set_color(colorref_to_skia(style.stroke_color?, style.opacity as f32));
+            apply_dash(&mut paint, style.stroke_dash);
+            floor_stroke_to_device(canvas, &mut paint, raster_target);
+            Some(paint)
+        };
+        let make_line_paint = |style: &LineStyle| {
+            let mut paint = Paint::default();
+            paint.set_anti_alias(antialias);
+            paint.set_style(paint::Style::Stroke);
+            paint.set_stroke_width(if style.width > 0.0 {
+                style.width as f32
+            } else {
+                1.0
+            });
+            paint.set_color(colorref_to_skia(style.color, 1.0));
+            apply_dash(&mut paint, style.dash);
+            if let Some(intervals) = &style.dash_pattern {
+                let intervals = intervals.iter().map(|v| *v as f32).collect::<Vec<_>>();
+                paint.set_path_effect(PathEffect::dash(&intervals, 0.0));
+            }
+            floor_stroke_to_device(canvas, &mut paint, raster_target);
+            paint
+        };
+        let draw_placeholder = |bbox: crate::renderer::render_tree::BoundingBox, label: &str| {
+            if bbox.width <= 0.0 || bbox.height <= 0.0 {
+                return;
+            }
+            let rect = Rect::from_xywh(
+                bbox.x as f32,
+                bbox.y as f32,
+                bbox.width as f32,
+                bbox.height as f32,
+            );
+            let mut fill = Paint::default();
+            fill.set_anti_alias(true);
+            fill.set_style(paint::Style::Fill);
+            fill.set_color(Color::from_argb(48, 96, 96, 96));
+            canvas.draw_rect(rect, &fill);
+            let mut stroke = Paint::default();
+            stroke.set_anti_alias(true);
+            stroke.set_style(paint::Style::Stroke);
+            stroke.set_stroke_width(1.0);
+            stroke.set_color(Color::from_argb(160, 96, 96, 96));
+            canvas.draw_rect(rect, &stroke);
+            let mut font = Font::default();
+            font.set_size(10.0);
+            let mut text = Paint::default();
+            text.set_anti_alias(true);
+            text.set_color(Color::from_argb(220, 64, 64, 64));
+            canvas.draw_str(
+                label,
+                (bbox.x as f32 + 4.0, (bbox.y + bbox.height / 2.0) as f32),
+                &font,
+                &text,
+            );
+        };
+        let draw_image = |data: &[u8],
+                          bbox: crate::renderer::render_tree::BoundingBox,
+                          fill_mode,
+                          original_size,
+                          crop,
+                          crop_reference_size,
+                          effect,
+                          brightness,
+                          contrast,
+                          print_area| {
+            draw_image_bytes(
+                canvas,
+                &self.image_cache,
+                data,
+                bbox.x as f32,
+                bbox.y as f32,
+                bbox.width as f32,
+                bbox.height as f32,
+                fill_mode,
+                original_size,
+                crop,
+                crop_reference_size,
+                effect,
+                brightness,
+                contrast,
+                cache_context
+                    .policy
+                    .image_sampling()
+                    .with_strict_resources(strict_resource_failures)
+                    .with_paper_grid(cache_context.bitmap_paper_grid)
+                    .with_print_page((print_area && cache_context.raster_target).then_some((
+                        cache_context.page_extent.0,
+                        cache_context.page_extent.1,
+                        f64::from(fallback_raster_scale),
+                    ))),
+            )
+        };
+        let equation_fonts = EquationFonts {
+            font_mgr: &self.font_mgr,
+            system_families: &self.system_families,
+            custom_typefaces: &self.custom_typefaces,
+            bundled_typefaces: &self.bundled_typefaces,
+        };
+        let text_replay = SkiaTextReplay {
+            canvas,
+            raster_target: cache_context.raster_target,
+            geometric_text: cache_context.raster_target && cache_context.geometric_text,
+            hft_outline_enabled,
+            font_mgr: &self.font_mgr,
+            text_shaper: &self.text_shaper,
+            custom_typefaces: &self.custom_typefaces,
+            bundled_typefaces: &self.bundled_typefaces,
+            system_families: &self.system_families,
+            output_options,
+        };
+        let open_shape_transform =
+            |transform: crate::renderer::render_tree::ShapeTransform,
+             bbox: &crate::renderer::render_tree::BoundingBox| {
+                canvas.save();
+                let cx = (bbox.x + bbox.width / 2.0) as f32;
+                let cy = (bbox.y + bbox.height / 2.0) as f32;
+                if transform.horz_flip {
+                    canvas.translate((cx * 2.0, 0.0));
+                    canvas.scale((-1.0, 1.0));
+                }
+                if transform.vert_flip {
+                    canvas.translate((0.0, cy * 2.0));
+                    canvas.scale((1.0, -1.0));
+                }
+                if transform.rotation != 0.0 {
+                    canvas.rotate(transform.reflected_rotation() as f32, Some((cx, cy).into()));
+                }
+            };
+
+        match &node.kind {
+            LayerNodeKind::Group {
+                children,
+                cache_hint,
+                group_kind,
+            } => {
+                let _restore = if let crate::paint::GroupKind::Group(group) = group_kind {
+                    group.paint_transform.map(|[a, b, c, d, e, f]| {
+                        let guard = skia_safe::AutoCanvasRestore::guard(canvas, true);
+                        canvas.concat(&skia_safe::Matrix::new_all(
+                            a as f32, c as f32, e as f32, b as f32, d as f32, f as f32, 0.0, 0.0,
+                            1.0,
+                        ));
+                        guard
+                    })
+                } else {
+                    None
+                };
+                let child_context = cache_context.with_hint(*cache_hint);
+                let render_children = |target: &Canvas, next_id: &mut u32| {
+                    for child in children {
+                        self.render_node(
+                            target,
+                            child,
+                            output_options,
+                            profile,
+                            resources,
+                            replay_plane,
+                            active_layer,
+                            next_id,
+                            fallback_raster_scale,
+                            strict_resource_failures,
+                            &child_context,
+                        )?;
+                    }
+                    Ok::<(), HwpError>(())
+                };
+                let current_matrix = canvas.local_to_device_as_3x3();
+                let cache_key = (*cache_hint == CacheHint::StaticSubtree
+                    && self.picture_cache.borrow().enabled())
+                .then_some(cache_context.seed)
+                .flatten()
+                .and_then(|seed| {
+                    debug_key(&(
+                        seed,
+                        node,
+                        replay_plane,
+                        active_layer,
+                        *next_text_source_id,
+                        current_matrix,
+                        child_context.policy,
+                    ))
+                });
+                let cached = cache_key.and_then(|key| self.picture_cache.borrow_mut().get(key));
+                if let Some(cached) = cached {
+                    for report in cached.selection_updates {
+                        cache_context
+                            .diagnostics
+                            .borrow_mut()
+                            .apply_selection(report);
+                    }
+                    {
+                        let mut diagnostics = cache_context.diagnostics.borrow_mut();
+                        for report in cached.native_glyph_rejections {
+                            diagnostics.apply_native_rejection(report);
+                        }
+                        diagnostics.output.native_glyph_rejections_dropped = diagnostics
+                            .output
+                            .native_glyph_rejections_dropped
+                            .saturating_add(cached.native_glyph_rejections_dropped);
+                    }
+                    canvas.draw_picture(&cached.picture, Some(&cached.inverse_matrix), None);
+                    *next_text_source_id = cached.next_text_source_id;
+                    return Ok(());
+                }
+                let recording = cache_key.and_then(|key| {
+                    let inverse = current_matrix.invert()?;
+                    let (bounds, _) = current_matrix.map_rect(cache_context.page_bounds);
+                    (bounds.is_finite() && !bounds.is_empty()).then_some((key, inverse, bounds))
+                });
+                if let Some((key, inverse_matrix, bounds)) = recording {
+                    let (update_start, rejection_start, dropped_start) = {
+                        let diagnostics = cache_context.diagnostics.borrow();
+                        (
+                            diagnostics.selection_updates.len(),
+                            diagnostics.output.native_glyph_rejections.len(),
+                            diagnostics.output.native_glyph_rejections_dropped,
+                        )
+                    };
+                    let mut recorder = PictureRecorder::new();
+                    let recording_canvas = recorder.begin_recording(bounds, true);
+                    // Preserve device-scale-dependent SVG rasterization while
+                    // recording; the inverse cancels this matrix at playback.
+                    recording_canvas.concat(&current_matrix);
+                    render_children(recording_canvas, next_text_source_id)?;
+                    let picture = recorder.finish_recording_as_picture(None).ok_or_else(|| {
+                        HwpError::RenderError("Skia static picture recording failed".into())
+                    })?;
+                    let (
+                        selection_updates,
+                        native_glyph_rejections,
+                        native_glyph_rejections_dropped,
+                    ) = {
+                        let mut diagnostics = cache_context.diagnostics.borrow_mut();
+                        diagnostics.output.static_picture_cache_recordings = diagnostics
+                            .output
+                            .static_picture_cache_recordings
+                            .saturating_add(1);
+                        (
+                            diagnostics.selection_updates[update_start..].to_vec(),
+                            diagnostics.output.native_glyph_rejections[rejection_start..].to_vec(),
+                            diagnostics
+                                .output
+                                .native_glyph_rejections_dropped
+                                .saturating_sub(dropped_start),
+                        )
+                    };
+                    canvas.draw_picture(&picture, Some(&inverse_matrix), None);
+                    // A saturated page-level report can hide this subtree's
+                    // first rejections if an earlier sibling already used some
+                    // of the allowance. Such a snapshot depends on the preceding
+                    // siblings, which are deliberately absent from this key.
+                    // Replay it again rather than retain incomplete diagnostics.
+                    if rejection_start == 0 || native_glyph_rejections_dropped == 0 {
+                        let bytes = picture
+                            .approximate_bytes_used()
+                            .saturating_add(cache_context.retained_resource_estimate)
+                            .saturating_add(inline_resource_estimate(node, fallback_raster_scale))
+                            .saturating_add(debug_size(&selection_updates).unwrap_or(usize::MAX))
+                            .saturating_add(
+                                debug_size(&native_glyph_rejections).unwrap_or(usize::MAX),
+                            );
+                        self.picture_cache.borrow_mut().insert(
+                            key,
+                            CachedPicture {
+                                picture,
+                                inverse_matrix,
+                                next_text_source_id: *next_text_source_id,
+                                selection_updates,
+                                native_glyph_rejections,
+                                native_glyph_rejections_dropped,
+                            },
+                            bytes,
+                        );
+                    }
+                } else {
+                    render_children(canvas, next_text_source_id)?;
+                }
+            }
+            LayerNodeKind::ClipPath { paths, child } => {
+                use crate::model::text_clip::ClipCommand;
+                canvas.save();
+                for clip in paths {
+                    let mut path = skia_safe::PathBuilder::new();
+                    for command in &clip.commands {
+                        match *command {
+                            ClipCommand::Move(x, y) => {
+                                path.move_to((x as f32, y as f32));
+                            }
+                            ClipCommand::Line(x, y) => {
+                                path.line_to((x as f32, y as f32));
+                            }
+                            ClipCommand::Cubic(a, b, c, d, e, f) => {
+                                path.cubic_to(
+                                    (a as f32, b as f32),
+                                    (c as f32, d as f32),
+                                    (e as f32, f as f32),
+                                );
+                            }
+                            ClipCommand::Close => {
+                                path.close();
+                            }
+                        }
+                    }
+                    path.set_fill_type(if clip.even_odd {
+                        skia_safe::PathFillType::EvenOdd
+                    } else {
+                        skia_safe::PathFillType::Winding
+                    });
+                    canvas.clip_path(&path.detach(), None, Some(antialias));
+                }
+                let result = self.render_node(
+                    canvas,
+                    child,
+                    output_options,
+                    profile,
+                    resources,
+                    replay_plane,
+                    active_layer,
+                    next_text_source_id,
+                    fallback_raster_scale,
+                    strict_resource_failures,
+                    cache_context,
+                );
+                canvas.restore();
+                result?;
+            }
+            LayerNodeKind::ClipRect { clip, child, .. } => {
+                if !clip_enabled {
+                    return self.render_node(
+                        canvas,
+                        child,
+                        output_options,
+                        profile,
+                        resources,
+                        replay_plane,
+                        active_layer,
+                        next_text_source_id,
+                        fallback_raster_scale,
+                        strict_resource_failures,
+                        cache_context,
+                    );
+                }
+                canvas.save();
+                let clip = if cache_context.raster_target && cache_context.device_clip {
+                    let matrix = canvas.local_to_device_as_3x3();
+                    (!matrix.has_perspective())
+                        .then(|| {
+                            crate::paint::device_clip::rectangle(
+                                *clip,
+                                [
+                                    matrix.scale_x(),
+                                    matrix.skew_y(),
+                                    matrix.skew_x(),
+                                    matrix.scale_y(),
+                                    matrix.translate_x(),
+                                    matrix.translate_y(),
+                                ]
+                                .map(f64::from),
+                            )
+                        })
+                        .flatten()
+                        .unwrap_or(*clip)
+                } else {
+                    *clip
+                };
+                canvas.clip_rect(
+                    Rect::from_xywh(
+                        clip.x as f32,
+                        clip.y as f32,
+                        clip.width as f32,
+                        clip.height as f32,
+                    ),
+                    None,
+                    Some(antialias),
+                );
+                let result = self.render_node(
+                    canvas,
+                    child,
+                    output_options,
+                    profile,
+                    resources,
+                    replay_plane,
+                    active_layer,
+                    next_text_source_id,
+                    fallback_raster_scale,
+                    strict_resource_failures,
+                    cache_context,
+                );
+                canvas.restore();
+                result?;
+            }
+            LayerNodeKind::Leaf { ops } => {
+                let fallback_sources = ops
+                    .iter()
+                    .filter_map(|op| match op {
+                        PaintOp::TextRun { source, run, .. } => source
+                            .as_ref()
+                            .map(|source| (source.id.0, run.text.chars().take(2).count() == 1)),
+                        _ => None,
+                    })
+                    .collect::<HashMap<_, _>>();
+                let mut variant_order = 0usize;
+                let mut prepared_glyphs = HashMap::<usize, Rc<PreparedGlyph>>::new();
+                let mut preparation_budget = GlyphPreparationBudget::new();
+                let mut glyph_variants = HashMap::<
+                    String,
+                    HashMap<
+                        String,
+                        (
+                            usize,
+                            u32,
+                            HashSet<u32>,
+                            Option<NativeGlyphPreparationFailure>,
+                            TextVariantKind,
+                        ),
+                    >,
+                >::new();
+                let mut glyph_variant_sources = HashMap::<String, u32>::new();
+                for (op_index, op) in ops.iter().enumerate() {
+                    if paint_op_replay_plane_with_layer(op, active_layer) != replay_plane {
+                        continue;
+                    }
+                    let candidate = match op {
+                        PaintOp::GlyphRun { run, .. } => Some((
+                            &run.variant,
+                            run.source.id.0,
+                            preparation_budget.prepare(
+                                glyph_run_minimum_byte_cost(run, resources).unwrap_or(0),
+                                || {
+                                    // Four UTF-8 bytes / two UTF-16 units can
+                                    // represent one supplementary scalar or
+                                    // multiple BMP scalars. The source span
+                                    // alone cannot prove the producer subset.
+                                    if run.diagnostics.reason.as_deref()
+                                        == Some("boundedVerticalHwp5TableCellV1")
+                                        && fallback_sources.get(&run.source.id.0) != Some(&true)
+                                    {
+                                        return Err(NativeGlyphPreparationFailure::GlyphRunRejected(
+                                            NativeGlyphRunReplayProof {
+                                                contract_replayable: false,
+                                                typeface_constructible: false,
+                                                reasons: vec![NativeGlyphRunReplayProofReason::VerticalAuthorityUnsupported],
+                                            },
+                                        ));
+                                    }
+                                    self.prepare_cached_glyph(
+                                        op,
+                                        resources,
+                                        fallback_raster_scale,
+                                        cache_context,
+                                    )
+                                },
+                            ),
+                        )),
+                        PaintOp::GlyphOutline { outline, .. } => Some((
+                            &outline.variant,
+                            outline.source.id.0,
+                            preparation_budget.prepare(0, || {
+                                self.prepare_cached_glyph(
+                                    op,
+                                    resources,
+                                    fallback_raster_scale,
+                                    cache_context,
+                                )
+                            }),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((variant, source_id, prepared)) = candidate {
+                        glyph_variant_sources
+                            .entry(variant.equivalence_group.clone())
+                            .or_insert(source_id);
+                        let group = glyph_variants
+                            .entry(variant.equivalence_group.clone())
+                            .or_default();
+                        let state = group.entry(variant.variant_id.clone()).or_insert_with(|| {
+                            let order = variant_order;
+                            variant_order = variant_order.saturating_add(1);
+                            (
+                                order,
+                                variant.part_count,
+                                HashSet::new(),
+                                None,
+                                variant.variant_kind,
+                            )
+                        });
+                        if state.1 != variant.part_count || variant.part_count == 0 {
+                            state.3.get_or_insert(
+                                NativeGlyphPreparationFailure::VariantPartsIncomplete,
+                            );
+                        }
+                        if !state.2.insert(variant.part_index) {
+                            state.3.get_or_insert(
+                                NativeGlyphPreparationFailure::VariantPartsIncomplete,
+                            );
+                        }
+                        match prepared {
+                            Ok(prepared) => {
+                                prepared_glyphs.insert(op_index, prepared);
+                            }
+                            Err(failure) => {
+                                state.3.get_or_insert(failure);
+                            }
+                        }
+                    }
+                }
+                let glyph_variant_source_ids = glyph_variant_sources
+                    .values()
+                    .copied()
+                    .collect::<HashSet<_>>();
+                let mut selected_text_variants = HashMap::new();
+                let mut groups = glyph_variants.into_iter().collect::<Vec<_>>();
+                groups.sort_by_key(|(_, variants)| variants.values().map(|state| state.0).min());
+                for (group, variants) in groups {
+                    let mut candidates = variants.into_iter().collect::<Vec<_>>();
+                    candidates.sort_by_key(|(_, state)| state.0);
+                    let mut selected = None;
+                    let mut rejected = Vec::new();
+                    for (variant_id, (_, expected_part_count, parts, failure, kind)) in candidates {
+                        let parts_complete = parts.len() as u32 == expected_part_count
+                            && (0..expected_part_count).all(|index| parts.contains(&index));
+                        if failure.is_none() && parts_complete {
+                            if selected.is_none() {
+                                selected = Some((variant_id, kind));
+                            }
+                        } else {
+                            rejected.push((
+                                variant_id,
+                                kind,
+                                failure.unwrap_or(
+                                    NativeGlyphPreparationFailure::VariantPartsIncomplete,
+                                ),
+                            ));
+                        }
+                    }
+                    if let Some((id, _)) = &selected {
+                        selected_text_variants.insert(group.clone(), id.clone());
+                    }
+                    let fallback = glyph_variant_sources
+                        .get(&group)
+                        .is_some_and(|source| fallback_sources.contains_key(source));
+                    cache_context.diagnostics.borrow_mut().actual_selection(
+                        &group,
+                        selected.as_ref().map(|(id, kind)| (id.as_str(), *kind)),
+                        fallback,
+                        &rejected,
+                    );
+                }
+                let selected_text_sources = selected_text_variants
+                    .keys()
+                    .filter_map(|group| glyph_variant_sources.get(group).copied())
+                    .collect::<HashSet<_>>();
+                for (op_index, op) in ops.iter().enumerate() {
+                    if paint_op_replay_plane_with_layer(op, active_layer) != replay_plane {
+                        continue;
+                    }
+                    let skip_unselected_text_variant = match op {
+                        PaintOp::TextRun { source, .. } => {
+                            let source_id = source
+                                .as_ref()
+                                .map_or(*next_text_source_id, |source| source.id.0);
+                            *next_text_source_id =
+                                (*next_text_source_id).max(source_id.saturating_add(1));
+                            selected_text_sources.contains(&source_id)
+                        }
+                        PaintOp::GlyphRun { run, .. } => {
+                            match selected_text_variants.get(&run.variant.equivalence_group) {
+                                Some(selected) => selected != &run.variant.variant_id,
+                                None => true,
+                            }
+                        }
+                        PaintOp::GlyphOutline { outline, .. } => {
+                            match selected_text_variants.get(&outline.variant.equivalence_group) {
+                                Some(selected) => selected != &outline.variant.variant_id,
+                                None => true,
+                            }
+                        }
+                        _ => false,
+                    };
+                    if skip_unselected_text_variant {
+                        continue;
+                    }
+                    if let PaintOp::TextRun { source, .. } = op {
+                        let source_id = source
+                            .as_ref()
+                            .map_or(next_text_source_id.saturating_sub(1), |source| source.id.0);
+                        if !glyph_variant_source_ids.contains(&source_id) {
+                            cache_context.diagnostics.borrow_mut().actual_selection(
+                                &format!("text-{source_id}"),
+                                Some(("textRun", TextVariantKind::TextRun)),
+                                true,
+                                &[],
+                            );
+                        }
+                    }
+                    {
+                        let mut diagnostics = cache_context.diagnostics.borrow_mut();
+                        diagnostics.output.paint_ops_replayed =
+                            diagnostics.output.paint_ops_replayed.saturating_add(1);
+                    }
+                    if !op.glyph_paint_transform_is_valid() {
+                        return Err(crate::error::HwpError::RenderError(
+                            "invalid glyph paint transform".to_string(),
+                        ));
+                    }
+                    let _glyph_frame_guard = op.glyph_paint_transform().map(|t| {
+                        let guard = skia_safe::AutoCanvasRestore::guard(canvas, true);
+                        canvas.concat(&skia_safe::Matrix::from_affine(&[
+                            t.a as f32, t.b as f32, t.c as f32, t.d as f32, t.e as f32, t.f as f32,
+                        ]));
+                        guard
+                    });
+                    match op {
+                        PaintOp::PageBackground { bbox, background } => {
+                            let rect = Rect::from_xywh(
+                                bbox.x as f32,
+                                bbox.y as f32,
+                                bbox.width as f32,
+                                bbox.height as f32,
+                            );
+                            if let Some(paint) = shape_fill(
+                                bbox,
+                                &ShapeStyle {
+                                    fill_color: background.background_color,
+                                    ..Default::default()
+                                },
+                                background.gradient.as_deref(),
+                                antialias,
+                            ) {
+                                canvas.draw_rect(rect, &paint);
+                            }
+                            if let Some(image) = &background.image {
+                                // 일반 RealPic 쪽 배경의 밝기·대비는 색조 조정일 뿐
+                                // 워터마크 표식이 아니다. 검증된 RealPic 프리셋과 기존
+                                // 비-RealPic 워터마크만 반투명 합성한다.
+                                let preserve_color_watermark =
+                                    image.is_real_picture_watermark_tone_preset();
+                                let legacy_non_realpic_watermark = !matches!(
+                                    image.effect,
+                                    crate::model::image::ImageEffect::RealPic
+                                ) && image.is_watermark();
+                                let needs_watermark_opacity =
+                                    preserve_color_watermark || legacy_non_realpic_watermark;
+                                if needs_watermark_opacity {
+                                    use crate::renderer::render_tree::{
+                                        LEGACY_IMAGE_WATERMARK_OPACITY,
+                                        REAL_PICTURE_WATERMARK_PAGE_OPACITY,
+                                    };
+                                    let wm_opacity = if preserve_color_watermark {
+                                        REAL_PICTURE_WATERMARK_PAGE_OPACITY
+                                    } else {
+                                        LEGACY_IMAGE_WATERMARK_OPACITY
+                                    };
+                                    let alpha = (255.0 * wm_opacity).round() as u32;
+                                    canvas.save_layer_alpha(Some(rect), alpha);
+                                }
+                                let rendered = draw_image(
+                                    &image.data,
+                                    *bbox,
+                                    Some(
+                                        if image.fill_mode
+                                            == crate::model::style::ImageFillMode::None
+                                        {
+                                            crate::model::style::ImageFillMode::FitToSize
+                                        } else {
+                                            image.fill_mode
+                                        },
+                                    ),
+                                    None,
+                                    None,
+                                    None,
+                                    image.effect,
+                                    if preserve_color_watermark {
+                                        0
+                                    } else {
+                                        image.display_brightness_contrast().0
+                                    },
+                                    if preserve_color_watermark {
+                                        0
+                                    } else {
+                                        image.display_brightness_contrast().1
+                                    },
+                                    false,
+                                );
+                                if needs_watermark_opacity {
+                                    canvas.restore();
+                                }
+                                if !rendered && strict_resource_failures {
+                                    return Err(HwpError::RenderError(
+                                        "Skia page background image decode failed".to_string(),
+                                    ));
+                                }
+                            }
+                            if let Some(color) = background.border_color {
+                                let mut paint = Paint::default();
+                                paint.set_anti_alias(true);
+                                paint.set_style(paint::Style::Stroke);
+                                paint.set_stroke_width(if background.border_width > 0.0 {
+                                    background.border_width as f32
+                                } else {
+                                    1.0
+                                });
+                                floor_stroke_to_device(canvas, &mut paint, raster_target);
+                                paint.set_color(colorref_to_skia(color, 1.0));
+                                canvas.draw_rect(rect, &paint);
+                            }
+                        }
+                        PaintOp::TextRun { bbox, run, .. }
+                        | PaintOp::CharOverlap { bbox, run, .. }
+                        | PaintOp::TextControlMark { bbox, run, .. }
+                        | PaintOp::TabLeader { bbox, run, .. }
+                        | PaintOp::TextDecoration { bbox, run, .. } => {
+                            let role = text_visual_replay_role(op);
+                            if role == TextVisualReplayRole::SuppressedFallback {
+                                continue;
+                            }
+                            if role == TextVisualReplayRole::CharOverlap {
+                                if let Some(plan) =
+                                    crate::renderer::char_overlap::project(run, *bbox)
+                                {
+                                    text_replay.draw_composed_overlap(&plan, run.rotation, *bbox);
+                                    continue;
+                                }
+                            }
+                            let decoration_replay = op.decoration_replay();
+                            let (bbox, run) = decoration_replay
+                                .as_ref()
+                                .map(|(bbox, run)| (*bbox, run.as_ref()))
+                                .unwrap_or((*bbox, run.as_ref()));
+                            let mut projected = run.clone();
+                            projected.char_overlap = None;
+                            projected.style.tab_leaders.clear();
+                            projected.style.underline = UnderlineType::None;
+                            projected.style.strikethrough = false;
+                            projected.style.emphasis_dot = 0;
+                            let (suppress_glyphs, render_marks) = match role {
+                                TextVisualReplayRole::BaseText => (false, false),
+                                TextVisualReplayRole::CharOverlap => {
+                                    projected.char_overlap = run.char_overlap.clone();
+                                    (false, false)
+                                }
+                                TextVisualReplayRole::ControlMark => (true, true),
+                                TextVisualReplayRole::TabLeader => {
+                                    projected
+                                        .style
+                                        .tab_leaders
+                                        .clone_from(&run.style.tab_leaders);
+                                    (true, false)
+                                }
+                                TextVisualReplayRole::Decoration(kind) => {
+                                    match kind {
+                                        TextDecorationKind::Underline => {
+                                            projected.style.underline = run.style.underline;
+                                        }
+                                        TextDecorationKind::Strikethrough => {
+                                            projected.style.strikethrough = run.style.strikethrough;
+                                        }
+                                        TextDecorationKind::EmphasisDot => {
+                                            projected.style.emphasis_dot = run.style.emphasis_dot;
+                                        }
+                                    }
+                                    (true, false)
+                                }
+                                TextVisualReplayRole::SuppressedFallback
+                                | TextVisualReplayRole::Other => continue,
+                            };
+                            let decoration_trim = match op {
+                                PaintOp::TextDecoration {
+                                    trim_trailing_spaces,
+                                    ..
+                                } => *trim_trailing_spaces,
+                                _ => 0,
+                            };
+                            let is_marker = !matches!(
+                                projected.field_marker,
+                                crate::renderer::render_tree::FieldMarkerType::None
+                            );
+                            text_replay.draw_text(
+                                projected.metric_or_display_text(),
+                                bbox,
+                                &projected.style,
+                                projected.baseline,
+                                projected.rotation,
+                                projected.is_vertical,
+                                projected.char_overlap.as_ref(),
+                                is_marker,
+                                projected.is_para_end,
+                                projected.is_line_break_end,
+                                projected
+                                    .validated_layout_positions_for(projected.display_or_text()),
+                                decoration_trim,
+                                suppress_glyphs,
+                                render_marks,
+                            );
+                        }
+                        PaintOp::GlyphRun { .. } | PaintOp::GlyphOutline { .. } => {
+                            // Every selected part was prepared before its TextRun
+                            // fallback was suppressed. Drawing cannot re-resolve
+                            // a different face or re-decode a failed resource.
+                            if let Some(prepared) = prepared_glyphs.get(&op_index) {
+                                prepared.draw(
+                                    canvas,
+                                    !matches!(op, PaintOp::GlyphOutline { .. }) || antialias,
+                                    cache_context.policy.image_sampling().options(),
+                                    cache_context.raster_target,
+                                );
+                            }
+                        }
+                        PaintOp::FootnoteMarker { bbox, marker } => {
+                            let style = crate::renderer::TextStyle {
+                                font_family: marker.font_family.clone(),
+                                font_size:
+                                    crate::renderer::render_tree::FootnoteMarkerNode::font_size(
+                                        marker.base_font_size,
+                                    ),
+                                color: marker.color,
+                                ..Default::default()
+                            };
+                            text_replay.draw_text(
+                                &marker.text,
+                                *bbox,
+                                &style,
+                                marker.baseline,
+                                0.0,
+                                false,
+                                None,
+                                false,
+                                false,
+                                false,
+                                None,
+                                0,
+                                false,
+                                false,
+                            );
+                        }
+                        PaintOp::ControlLabel { bbox, label } => {
+                            let style = crate::renderer::TextStyle {
+                                font_size: 10.0,
+                                color: 0x003333CC,
+                                ..Default::default()
+                            };
+                            text_replay.draw_text(
+                                label, *bbox, &style, 10.0, 0.0, false, None, false, false, false,
+                                None, 0, false, false,
+                            );
+                        }
+                        PaintOp::Line { bbox, line } => {
+                            if line.transform.has_transform() {
+                                open_shape_transform(line.transform, bbox);
+                            }
+                            let minimum_width = cache_context
+                                .policy
+                                .print_stroke_adjustment()
+                                .then(|| canvas.local_to_device_as_3x3())
+                                .filter(|matrix| !matrix.has_perspective())
+                                .and_then(|matrix| {
+                                    crate::renderer::raster_stroke::minimum_width([
+                                        f64::from(matrix.scale_x()),
+                                        f64::from(matrix.skew_y()),
+                                        f64::from(matrix.skew_x()),
+                                        f64::from(matrix.scale_y()),
+                                    ])
+                                });
+                            draw_line(
+                                canvas,
+                                line,
+                                &make_line_paint(&line.style),
+                                antialias,
+                                profile,
+                                raster_target,
+                            );
+                            draw_arrow_heads(
+                                canvas,
+                                &crate::renderer::arrow::line_heads(
+                                    (line.x1, line.y1, line.x2, line.y2),
+                                    &line.style,
+                                ),
+                                &line.style,
+                                antialias,
+                            );
+                            if line.transform.has_transform() {
+                                canvas.restore();
+                            }
+                        }
+                        PaintOp::Rectangle { bbox, rect } => {
+                            if rect.transform.has_transform() {
+                                open_shape_transform(rect.transform, bbox);
+                            }
+                            let sk_rect = Rect::from_xywh(
+                                bbox.x as f32,
+                                bbox.y as f32,
+                                bbox.width as f32,
+                                bbox.height as f32,
+                            );
+                            if let Some(mut fill) =
+                                shape_fill(bbox, &rect.style, rect.gradient.as_deref(), antialias)
+                            {
+                                if let Some(fill_rect) = super::rectangle_fill::bounds(
+                                    canvas,
+                                    *bbox,
+                                    rect,
+                                    cache_context.raster_target
+                                        && cache_context.policy.print_stroke_adjustment(),
+                                ) {
+                                    fill.set_anti_alias(false);
+                                    canvas.draw_rect(fill_rect, &fill);
+                                } else if rect.corner_radius > 0.0 {
+                                    canvas.draw_round_rect(
+                                        sk_rect,
+                                        rect.corner_radius as f32,
+                                        rect.corner_radius as f32,
+                                        &fill,
+                                    );
+                                } else {
+                                    canvas.draw_rect(sk_rect, &fill);
+                                }
+                            }
+                            if let Some(mut stroke) = make_stroke_paint(&rect.style) {
+                                if cache_context.raster_target
+                                    && cache_context.policy.print_stroke_adjustment()
+                                {
+                                    let matrix = canvas.local_to_device_as_3x3();
+                                    let minimum = (!matrix.has_perspective())
+                                        .then(|| {
+                                            crate::renderer::raster_stroke::minimum_width([
+                                                f64::from(matrix.scale_x()),
+                                                f64::from(matrix.skew_y()),
+                                                f64::from(matrix.skew_x()),
+                                                f64::from(matrix.scale_y()),
+                                            ])
+                                        })
+                                        .flatten();
+                                    if let Some(width) = rect.print_picture_pen.and_then(|pen| {
+                                        crate::renderer::print_picture_pen::raster_width(
+                                            pen, minimum,
+                                        )
+                                    }) {
+                                        stroke.set_stroke_width(width as f32);
+                                    }
+                                }
+                                if rect.round_stroke_join {
+                                    stroke.set_stroke_join(skia_safe::paint::Join::Round);
+                                }
+                                if rect.corner_radius > 0.0 {
+                                    canvas.draw_round_rect(
+                                        sk_rect,
+                                        rect.corner_radius as f32,
+                                        rect.corner_radius as f32,
+                                        &stroke,
+                                    );
+                                } else {
+                                    canvas.draw_rect(sk_rect, &stroke);
+                                }
+                            }
+                            if rect.transform.has_transform() {
+                                canvas.restore();
+                            }
+                        }
+                        PaintOp::Ellipse { bbox, ellipse } => {
+                            if ellipse.transform.has_transform() {
+                                open_shape_transform(ellipse.transform, bbox);
+                            }
+                            let oval = Rect::from_xywh(
+                                bbox.x as f32,
+                                bbox.y as f32,
+                                bbox.width as f32,
+                                bbox.height as f32,
+                            );
+                            if let Some(fill) = shape_fill(
+                                bbox,
+                                &ellipse.style,
+                                ellipse.gradient.as_deref(),
+                                antialias,
+                            ) {
+                                canvas.draw_oval(oval, &fill);
+                            }
+                            if let Some(stroke) = make_stroke_paint(&ellipse.style) {
+                                canvas.draw_oval(oval, &stroke);
+                            }
+                            if ellipse.transform.has_transform() {
+                                canvas.restore();
+                            }
+                        }
+                        PaintOp::Path { bbox, path } => {
+                            if path.transform.has_transform() {
+                                open_shape_transform(path.transform, bbox);
+                            }
+                            let mut builder = PathBuilder::new();
+                            let mut current = (0.0, 0.0);
+                            for command in &path.commands {
+                                match *command {
+                                    PathCommand::MoveTo(x, y) => {
+                                        builder.move_to((x as f32, y as f32));
+                                        current = (x, y);
+                                    }
+                                    PathCommand::LineTo(x, y) => {
+                                        builder.line_to((x as f32, y as f32));
+                                        current = (x, y);
+                                    }
+                                    PathCommand::CurveTo(x1, y1, x2, y2, x, y) => {
+                                        builder.cubic_to(
+                                            (x1 as f32, y1 as f32),
+                                            (x2 as f32, y2 as f32),
+                                            (x as f32, y as f32),
+                                        );
+                                        current = (x, y);
+                                    }
+                                    PathCommand::ArcTo(
+                                        rx,
+                                        ry,
+                                        rotation,
+                                        large_arc,
+                                        sweep,
+                                        x,
+                                        y,
+                                    ) => {
+                                        for segment in svg_arc_to_beziers(
+                                            current.0, current.1, rx, ry, rotation, large_arc,
+                                            sweep, x, y,
+                                        ) {
+                                            if let PathCommand::CurveTo(x1, y1, x2, y2, ex, ey) =
+                                                segment
+                                            {
+                                                builder.cubic_to(
+                                                    (x1 as f32, y1 as f32),
+                                                    (x2 as f32, y2 as f32),
+                                                    (ex as f32, ey as f32),
+                                                );
+                                                current = (ex, ey);
+                                            }
+                                        }
+                                    }
+                                    PathCommand::ClosePath => {
+                                        builder.close();
+                                    }
+                                }
+                            }
+                            let sk_path = builder.detach();
+                            if let Some(fill) =
+                                shape_fill(bbox, &path.style, path.gradient.as_deref(), antialias)
+                            {
+                                canvas.draw_path(&sk_path, &fill);
+                            }
+                            if let Some(stroke) = make_stroke_paint(&path.style) {
+                                canvas.draw_path(&sk_path, &stroke);
+                            }
+                            if let Some(style) = &path.line_style {
+                                draw_arrow_heads(
+                                    canvas,
+                                    &crate::renderer::arrow::connector_heads(path),
+                                    style,
+                                    antialias,
+                                );
+                            }
+                            if path.transform.has_transform() {
+                                canvas.restore();
+                            }
+                        }
+                        PaintOp::Image {
+                            bbox,
+                            image,
+                            resolved,
+                        } => {
+                            let fallback = resolved
+                                .is_none()
+                                .then(|| {
+                                    crate::renderer::image_resolver::resolve_image_payload(image)
+                                })
+                                .flatten();
+                            let resolved = resolved.as_deref().or(fallback.as_ref());
+                            let prepared =
+                                crate::renderer::image_resolver::image_for_resolved_window(
+                                    image, resolved,
+                                );
+                            let image = prepared.as_ref();
+                            let effective_bbox = image.transformed_paint_bbox(bbox);
+                            // 저장 viewport는 그림 변환 바깥의 페이지 좌표 clip이다.
+                            let _source_clip_restore = image.source_clip_path(bbox).map(|points| {
+                                let restore = skia_safe::AutoCanvasRestore::guard(canvas, true);
+                                let mut path = skia_safe::PathBuilder::new();
+                                path.move_to((points[0][0] as f32, points[0][1] as f32));
+                                for point in &points[1..] {
+                                    path.line_to((point[0] as f32, point[1] as f32));
+                                }
+                                path.close();
+                                canvas.clip_path(&path.detach(), None, true);
+                                restore
+                            });
+                            if image.transform.has_transform() {
+                                open_shape_transform(image.transform, &effective_bbox);
+                            }
+                            let effective_bbox = super::image_coverage::bounds(
+                                canvas,
+                                effective_bbox,
+                                image,
+                                cache_context.raster_target
+                                    && cache_context.policy.print_stroke_adjustment(),
+                            );
+                            let data = resolved
+                                .map(|payload| &payload.data[..])
+                                .or(image.data.as_deref());
+                            if let Some(data) = data {
+                                let suppress_effects =
+                                    resolved.is_some_and(|payload| payload.suppress_effects);
+                                let effect = if suppress_effects {
+                                    ImageEffect::RealPic
+                                } else {
+                                    image.effect
+                                };
+                                let opacity = image.opacity.clamp(0.0, 1.0);
+                                if opacity < 1.0 {
+                                    let rect = Rect::from_xywh(
+                                        effective_bbox.x as f32,
+                                        effective_bbox.y as f32,
+                                        effective_bbox.width as f32,
+                                        effective_bbox.height as f32,
+                                    );
+                                    let alpha = (255.0 * opacity).round() as u32;
+                                    canvas.save_layer_alpha(Some(rect), alpha);
+                                }
+                                let rendered = draw_image(
+                                    data,
+                                    effective_bbox,
+                                    image.fill_mode,
+                                    image.original_size,
+                                    image.crop,
+                                    crate::renderer::image_resolver::resolved_image_crop_reference_size(image),
+                                    effect,
+                                    if suppress_effects {
+                                        0
+                                    } else {
+                                        image.brightness
+                                    },
+                                    if suppress_effects { 0 } else { image.contrast },
+                                    crate::renderer::image_resolver::print_area_sampling(
+                                        image, resolved,
+                                    ),
+                                );
+                                if opacity < 1.0 {
+                                    canvas.restore();
+                                }
+                                if image.transform.has_transform() {
+                                    canvas.restore();
+                                }
+                                if !rendered && strict_resource_failures {
+                                    return Err(HwpError::RenderError(format!(
+                                        "Skia image decode failed for binData {}",
+                                        image.bin_data_id
+                                    )));
+                                }
+                            } else {
+                                if strict_resource_failures {
+                                    if image.transform.has_transform() {
+                                        canvas.restore();
+                                    }
+                                    return Err(HwpError::RenderError(format!(
+                                        "Skia image data is missing for binData {}",
+                                        image.bin_data_id
+                                    )));
+                                }
+                                draw_placeholder(effective_bbox, "image");
+                                if image.transform.has_transform() {
+                                    canvas.restore();
+                                }
+                            }
+                        }
+                        PaintOp::Equation { bbox, equation } => {
+                            canvas.save();
+                            let scale_y = crate::renderer::equation::stored_vertical_scale(
+                                bbox.height,
+                                equation.layout_box.height,
+                                equation.font_size,
+                            );
+                            if (scale_y - 1.0).abs() > 0.01 {
+                                canvas.translate((bbox.x as f32, bbox.y as f32));
+                                canvas.scale((1.0, scale_y as f32));
+                                render_equation(
+                                    canvas,
+                                    &equation_fonts,
+                                    &equation.layout_box,
+                                    0.0,
+                                    0.0,
+                                    equation.color,
+                                    equation.font_size,
+                                );
+                            } else {
+                                render_equation(
+                                    canvas,
+                                    &equation_fonts,
+                                    &equation.layout_box,
+                                    bbox.x,
+                                    bbox.y,
+                                    equation.color,
+                                    equation.font_size,
+                                );
+                            }
+                            canvas.restore();
+                        }
+                        PaintOp::FormObject { bbox, form } => {
+                            self.draw_form_control(canvas, *bbox, form);
+                        }
+                        PaintOp::Placeholder { bbox, placeholder } => {
+                            draw_placeholder(*bbox, placeholder.label.as_str());
+                        }
+                        PaintOp::RawSvg { bbox, raw } => {
+                            if !draw_svg_fragment(
+                                canvas,
+                                &self.image_cache,
+                                raw.svg.as_str(),
+                                bbox.x as f32,
+                                bbox.y as f32,
+                                bbox.width as f32,
+                                bbox.height as f32,
+                                cache_context.policy.image_sampling(),
+                                fallback_raster_scale,
+                            ) {
+                                if strict_resource_failures {
+                                    return Err(HwpError::RenderError(
+                                        "Skia raw SVG raster fallback failed".to_string(),
+                                    ));
+                                }
+                                draw_placeholder(*bbox, "svg");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LayerRasterRenderer for SkiaLayerRenderer {
+    fn render_raster(
+        &self,
+        tree: &PageLayerTree,
+        options: RasterRenderOptions,
+    ) -> LayerRenderResult<RasterRenderOutput> {
+        self.render_raster_with_options(tree, options)
+    }
+}
+
+impl SkiaLayerRenderer {
+    fn make_form_font(&self, size: f32) -> Font {
+        let style = FontStyle::default();
+        for family in FORM_CJK_FAMILIES {
+            if let Some(tf) = match_supplied_family(&self.custom_typefaces, family, style) {
+                return Font::new(tf, size);
+            }
+            if let Some(tf) =
+                match_system_family_style(&self.font_mgr, &self.system_families, family, style)
+            {
+                return Font::new(tf, size);
+            }
+            // [#3300] 시스템 폰트가 없는 headless 환경에서는 번들 폰트가
+            // custom·system 뒤의 최후 폴백으로 form caption의 한국어를 구제한다.
+            if let Some(tf) = match_supplied_family(&self.bundled_typefaces, family, style) {
+                return Font::new(tf, size);
+            }
+        }
+        if let Some(tf) = legacy_typeface_for_style(&self.font_mgr, style) {
+            return Font::new(tf, size);
+        }
+        let mut f = Font::default();
+        f.set_size(size);
+        f
+    }
+
+    fn draw_form_control(
+        &self,
+        canvas: &Canvas,
+        bbox: crate::renderer::render_tree::BoundingBox,
+        form: &crate::renderer::render_tree::FormObjectNode,
+    ) {
+        use crate::renderer::form_appearance::{form_drawing, FormPrimitive};
+        let drawing = form_drawing(form, bbox);
+        // 컨트롤은 자기 영역 밖을 그리지 않는다. 폭보다 긴 캡션은 영역 경계에서 잘린다.
+        canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                bbox.x as f32,
+                bbox.y as f32,
+                bbox.width as f32,
+                bbox.height as f32,
+            ),
+            None,
+            Some(true),
+        );
+        for primitive in drawing.primitives {
+            let mut paint = Paint::default();
+            paint.set_anti_alias(true);
+            match primitive {
+                FormPrimitive::Rect { bbox: b, color } => {
+                    paint.set_color(parse_css_color(&color).unwrap_or(Color::BLACK));
+                    canvas.draw_rect(
+                        Rect::from_xywh(b.x as f32, b.y as f32, b.width as f32, b.height as f32),
+                        &paint,
+                    );
+                }
+                FormPrimitive::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                } => {
+                    paint.set_color(parse_css_color(&color).unwrap_or(Color::BLACK));
+                    canvas.draw_circle((x as f32, y as f32), radius as f32, &paint);
+                }
+                FormPrimitive::Polyline {
+                    points,
+                    color,
+                    width,
+                    closed,
+                } => {
+                    paint.set_color(parse_css_color(&color).unwrap_or(Color::BLACK));
+                    if !closed {
+                        paint.set_style(paint::Style::Stroke);
+                        paint.set_stroke_width(width as f32);
+                    }
+                    let mut builder = PathBuilder::new();
+                    for (i, p) in points.iter().enumerate() {
+                        if i == 0 {
+                            builder.move_to((p[0] as f32, p[1] as f32));
+                        } else {
+                            builder.line_to((p[0] as f32, p[1] as f32));
+                        }
+                    }
+                    if closed {
+                        builder.close();
+                    }
+                    canvas.draw_path(&builder.detach(), &paint);
+                }
+            }
+        }
+        if let Some(label) = drawing.label {
+            let style = FontStyle::new(
+                if label.bold {
+                    skia_safe::font_style::Weight::BOLD
+                } else {
+                    skia_safe::font_style::Weight::NORMAL
+                },
+                skia_safe::font_style::Width::NORMAL,
+                if label.italic {
+                    skia_safe::font_style::Slant::Italic
+                } else {
+                    skia_safe::font_style::Slant::Upright
+                },
+            );
+            let typeface = match_supplied_family(&self.custom_typefaces, &label.font_family, style)
+                .or_else(|| {
+                    match_system_family_style(
+                        &self.font_mgr,
+                        &self.system_families,
+                        &label.font_family,
+                        style,
+                    )
+                })
+                .or_else(|| {
+                    match_supplied_family(&self.bundled_typefaces, &label.font_family, style)
+                });
+            let font = typeface
+                .map(|tf| Font::new(tf, label.font_size as f32))
+                .unwrap_or_else(|| self.make_form_font(label.font_size as f32));
+            let mut paint = Paint::default();
+            paint.set_anti_alias(true);
+            paint.set_color(parse_css_color(&label.color).unwrap_or(Color::BLACK));
+            canvas.draw_str(
+                &label.text,
+                (label.x as f32, label.baseline as f32),
+                &font,
+                &paint,
+            );
+        }
+        canvas.restore();
+    }
+}
+
+fn parse_css_color(s: &str) -> Option<Color> {
+    let s = s.trim().trim_start_matches('#');
+    if s.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some(Color::from_rgb(r, g, b))
+}
+
+pub(super) fn colorref_to_skia(color: ColorRef, alpha_scale: f32) -> Color {
+    let b = ((color >> 16) & 0xFF) as u8;
+    let g = ((color >> 8) & 0xFF) as u8;
+    let r = (color & 0xFF) as u8;
+    let a = (255.0 * alpha_scale.clamp(0.0, 1.0)).round() as u8;
+    Color::from_argb(a, r, g, b)
+}
+
+fn draw_arrow_heads(
+    canvas: &Canvas,
+    heads: &[crate::renderer::arrow::ArrowHead],
+    style: &LineStyle,
+    antialias: bool,
+) {
+    for head in heads {
+        let mut builder = PathBuilder::new();
+        for command in &head.commands {
+            match *command {
+                PathCommand::MoveTo(x, y) => {
+                    builder.move_to((x as f32, y as f32));
+                }
+                PathCommand::LineTo(x, y) => {
+                    builder.line_to((x as f32, y as f32));
+                }
+                PathCommand::CurveTo(a, b, c, d, e, f) => {
+                    builder.cubic_to(
+                        (a as f32, b as f32),
+                        (c as f32, d as f32),
+                        (e as f32, f as f32),
+                    );
+                }
+                PathCommand::ClosePath => {
+                    builder.close();
+                }
+                PathCommand::ArcTo(..) => unreachable!("arrow outlines use cubic ellipses"),
+            }
+        }
+        let path = builder.detach();
+        let mut fill = Paint::default();
+        fill.set_anti_alias(antialias);
+        fill.set_color(if head.filled {
+            colorref_to_skia(style.color, 1.0)
+        } else {
+            Color::WHITE
+        });
+        canvas.draw_path(&path, &fill);
+        if !head.filled {
+            let mut outline = Paint::default();
+            outline.set_anti_alias(antialias);
+            outline.set_style(paint::Style::Stroke);
+            outline.set_color(colorref_to_skia(style.color, 1.0));
+            outline.set_stroke_width((style.width * 0.3).max(0.5) as f32);
+            canvas.draw_path(&path, &outline);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::image_conv::ImageSampling;
+    use super::*;
+    use crate::model::control::FormType;
+    use crate::model::shape::TextWrap;
+    use crate::model::style::{ImageFillMode, UnderlineType};
+    use crate::paint::{
+        font_blob_resource_key, resource_digest_hex, BinaryResourceKind, BinaryResourceRef,
+        CacheHint, FontBlobKey, FontBlobResource, FontDigest, FontFaceKey, FontFaceResource,
+        FontFallbackPolicyId, FontInstanceKey, FontPortability, FontResourceSource, GlyphCluster,
+        GlyphRange, GroupKind, LayerAffineTransform, LayerBuilder, LayerNode, LayerOutputOptions,
+        LayerPoint, PaintTextStyle, PaintVariantMeta, RenderProfile, ScriptTag, ShapeKey,
+        ShapingEngineId, TextDirection, TextSourceId, TextSourceRange, TextSourceSpan,
+        TextVariantKind, WritingMode,
+    };
+    use crate::renderer::composer::CharOverlapInfo;
+    use crate::renderer::equation::ast::EqNode;
+    use crate::renderer::equation::layout::EqLayout;
+    use crate::renderer::render_tree::{
+        BoundingBox, EquationNode, FootnoteMarkerNode, FormObjectNode, ImageNode,
+        PageBackgroundImage, PageBackgroundNode, PageNode, PageRenderTree, PathNode,
+        PlaceholderNode, RawSvgNode, RectangleNode, RenderLayerInfo, RenderNode, RenderNodeType,
+        TextRunNode,
+    };
+    use crate::renderer::{GradientFillInfo, PatternFillInfo, TabLeaderInfo, TextStyle};
+    use image::{ImageFormat, Rgba, RgbaImage};
+    use std::io::Cursor;
+
+    fn decode_rgba(bytes: &[u8]) -> image::RgbaImage {
+        image::load_from_memory(bytes)
+            .expect("decode png")
+            .to_rgba8()
+    }
+
+    #[test]
+    fn issue_3300_form_family_chain_includes_bundled_noto_fallbacks() {
+        assert_eq!(
+            &FORM_CJK_FAMILIES[FORM_CJK_FAMILIES.len() - 2..],
+            &["Noto Sans KR ExtraLight", "Noto Sans KR"],
+            "form caption은 system 후보 뒤에 bundled Noto 최후 폴백까지 탐색해야 한다"
+        );
+    }
+
+    fn assert_channel(pixel: image::Rgba<u8>, channel: usize, min: u8, max: u8) {
+        assert!(
+            pixel[channel] >= min && pixel[channel] <= max,
+            "pixel={pixel:?}, channel={channel}, expected {min}..={max}"
+        );
+    }
+
+    fn count_ink(image: &image::RgbaImage) -> usize {
+        image.pixels().filter(|pixel| pixel[3] > 0).count()
+    }
+
+    /// 잉크 픽셀의 세로 범위 `(min_y, max_y)`. 잉크가 없으면 `None`.
+    fn ink_y_range(image: &image::RgbaImage) -> Option<(u32, u32)> {
+        let mut min_y: Option<u32> = None;
+        let mut max_y = 0_u32;
+        for (_, y, pixel) in image.enumerate_pixels() {
+            if pixel[3] > 0 {
+                min_y = Some(min_y.map_or(y, |m| m.min(y)));
+                max_y = max_y.max(y);
+            }
+        }
+        min_y.map(|min| (min, max_y))
+    }
+
+    fn portable_font_resources() -> ResourceArena {
+        let mut resources = ResourceArena::default();
+        let font_bytes = [0_u8, 1, 2, 3];
+        resources.intern_font_blob_bytes(&font_bytes);
+        let blob_key = FontBlobKey("blob-0".to_string());
+        let face_key = FontFaceKey("face-0".to_string());
+        let digest_value = resource_digest_hex(font_bytes);
+        let digest = FontDigest {
+            algorithm: "blake3".to_string(),
+            value: digest_value.clone(),
+        };
+        let data_ref = BinaryResourceRef {
+            kind: BinaryResourceKind::FontBlob,
+            id: font_blob_resource_key(font_bytes.len(), &digest_value),
+        };
+        resources.font_resources_mut().blobs.push(FontBlobResource {
+            id: blob_key.clone(),
+            digest: Some(digest.clone()),
+            source: FontResourceSource::Embedded,
+            data_ref: Some(data_ref.clone()),
+            portability: FontPortability::PortableBlob { digest, data_ref },
+        });
+        resources.font_resources_mut().faces.push(FontFaceResource {
+            id: face_key,
+            blob_key,
+            face_index: 0,
+            postscript_name: None,
+            family_names: Vec::new(),
+            style_names: Vec::new(),
+            weight_class: None,
+            width_class: None,
+            italic: None,
+        });
+        resources
+    }
+
+    fn portable_glyph_run(orientation: GlyphRunOrientation) -> LayerGlyphRunPaint {
+        let mut variant = PaintVariantMeta::text_run_default("text-0");
+        variant.variant_id = "glyphRun".to_string();
+        variant.variant_kind = TextVariantKind::GlyphRun;
+        variant.is_default_fallback = false;
+        variant.requires = vec!["fontResources".to_string(), "text.glyphRun".to_string()];
+        variant.quality = Some(TextVariantQuality::Exact);
+
+        LayerGlyphRunPaint {
+            source: TextSourceSpan {
+                id: TextSourceId(0),
+                utf8_range: TextSourceRange::new(0, 1),
+                utf16_range: TextSourceRange::new(0, 1),
+                stable_source_key: None,
+            },
+            variant,
+            paint_style: PaintTextStyle::from(&TextStyle {
+                font_family: "Test".to_string(),
+                font_size: 12.0,
+                ..Default::default()
+            }),
+            shape_key: ShapeKey {
+                font_instance: FontInstanceKey {
+                    face_key: FontFaceKey("face-0".to_string()),
+                    size_px: 12.0,
+                    variations: Vec::new(),
+                    synthetic_bold: false,
+                    synthetic_italic: false,
+                },
+                direction: TextDirection::Ltr,
+                writing_mode: WritingMode::HorizontalTb,
+                script: Some(ScriptTag("DFLT".to_string())),
+                language: None,
+                features: Vec::new(),
+                shaping_engine: ShapingEngineId("test".to_string()),
+                fallback_policy: FontFallbackPolicyId("none".to_string()),
+            },
+            placement: crate::paint::TextRunPlacement {
+                run_to_page: LayerAffineTransform {
+                    a: 1.0,
+                    b: 0.0,
+                    c: 0.0,
+                    d: 1.0,
+                    e: 0.0,
+                    f: 0.0,
+                },
+                baseline_y: 0.0,
+            },
+            glyph_ids: vec![42],
+            positions: vec![LayerPoint { x: 0.0, y: 0.0 }],
+            advances: None,
+            clusters: vec![GlyphCluster {
+                source_range_utf8: TextSourceRange::new(0, 1),
+                source_range_utf16: Some(TextSourceRange::new(0, 1)),
+                text_range_utf8: Some(TextSourceRange::new(0, 1)),
+                glyph_range: GlyphRange::new(0, 1),
+                flags: Vec::new(),
+            }],
+            direction: TextDirection::Ltr,
+            bidi_level: Some(0),
+            writing_mode: WritingMode::HorizontalTb,
+            orientation,
+            glyph_transforms: None,
+            diagnostics: crate::paint::GlyphRunDiagnostics {
+                quality: TextVariantQuality::Exact,
+                replay_eligibility: GlyphRunReplayEligibility::Portable,
+                strict_visual_eligible: true,
+                max_origin_delta_px: 0.0,
+                max_advance_delta_px: 0.0,
+                max_residual_after_adjustment_px: 0.0,
+                cluster_mismatch_count: 0,
+                missing_glyph_count: 0,
+                used_fallback_font_count: 0,
+                reason: None,
+            },
+        }
+    }
+
+    fn solid_png(color: [u8; 4]) -> Vec<u8> {
+        let image = RgbaImage::from_pixel(2, 2, Rgba(color));
+        let mut cursor = Cursor::new(Vec::new());
+        image
+            .write_to(&mut cursor, ImageFormat::Png)
+            .expect("encode png");
+        cursor.into_inner()
+    }
+
+    fn split_png(
+        width: u32,
+        height: u32,
+        first: [u8; 4],
+        second: [u8; 4],
+        vertical: bool,
+    ) -> Vec<u8> {
+        let mut image = RgbaImage::from_pixel(width, height, Rgba(first));
+        for y in 0..height {
+            for x in 0..width {
+                let second_half = if vertical {
+                    y >= height / 2
+                } else {
+                    x >= width / 2
+                };
+                if second_half {
+                    image.put_pixel(x, y, Rgba(second));
+                }
+            }
+        }
+        let mut cursor = Cursor::new(Vec::new());
+        image
+            .write_to(&mut cursor, ImageFormat::Png)
+            .expect("encode png");
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn native_skia_keeps_glyph_run_fallback_when_exact_blob_cannot_instantiate() {
+        // Failed preparations consume work just like successful ones, even when
+        // no font/path object is retained. Test through the production budget API.
+        let mut entry_budget = GlyphPreparationBudget::new();
+        let failure = NativeGlyphPreparationFailure::UnsupportedOutlinePayload;
+        for _ in 0..4096 {
+            let result = entry_budget.prepare::<PreparedGlyph>(0, || Err(failure.clone()));
+            assert!(matches!(result, Err(value) if value == failure));
+        }
+        assert!(matches!(
+            entry_budget.prepare::<PreparedGlyph>(0, || panic!(
+                "exhausted entry budget must skip construction"
+            )),
+            Err(NativeGlyphPreparationFailure::PreparationBudgetExceeded)
+        ));
+        let mut byte_budget = GlyphPreparationBudget::new();
+        let max_bytes = super::super::glyph_replay::MAX_PREPARED_GLYPH_BYTES;
+        assert!(matches!(
+            byte_budget.prepare::<PreparedGlyph>(max_bytes + 1, || panic!(
+                "oversized minimum must skip construction"
+            )),
+            Err(NativeGlyphPreparationFailure::PreparationBudgetExceeded)
+        ));
+        let failed = byte_budget.prepare::<PreparedGlyph>(max_bytes, || Err(failure.clone()));
+        assert!(matches!(failed, Err(value) if value == failure));
+        assert!(matches!(
+            byte_budget.prepare::<PreparedGlyph>(0, || panic!(
+                "failed work must not restore its byte allowance"
+            )),
+            Err(NativeGlyphPreparationFailure::PreparationBudgetExceeded)
+        ));
+        let resources = portable_font_resources();
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(proof.contract_replayable);
+        assert!(!proof.typeface_constructible);
+        assert_eq!(
+            proof.reasons,
+            vec![NativeGlyphRunReplayProofReason::ExactFaceUnavailable]
+        );
+        assert_eq!(proof.reasons[0].as_str(), "exactFaceUnavailable");
+        assert!(native_skia_glyph_run_contract_is_replayable(
+            &run, &resources
+        ));
+        assert!(!native_skia_can_replay_glyph_run(&run, &resources));
+    }
+
+    #[test]
+    fn native_skia_rejects_vertical_glyph_runs_without_bounded_authority() {
+        let resources = portable_font_resources();
+        let run = portable_glyph_run(GlyphRunOrientation::VerticalUpright);
+
+        assert!(!native_skia_glyph_run_contract_is_replayable(
+            &run, &resources
+        ));
+        assert!(!native_skia_can_replay_glyph_run(&run, &resources));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_missing_font_blob_bytes() {
+        let mut resources = ResourceArena::default();
+        let blob_key = FontBlobKey("blob-0".to_string());
+        let face_key = FontFaceKey("face-0".to_string());
+        let digest = FontDigest {
+            algorithm: "blake3".to_string(),
+            value: resource_digest_hex([0_u8, 1, 2, 3]),
+        };
+        let data_ref = BinaryResourceRef {
+            kind: BinaryResourceKind::FontBlob,
+            id: font_blob_resource_key(4, &digest.value),
+        };
+        resources.font_resources_mut().blobs.push(FontBlobResource {
+            id: blob_key.clone(),
+            digest: Some(digest.clone()),
+            source: FontResourceSource::Embedded,
+            data_ref: Some(data_ref.clone()),
+            portability: FontPortability::PortableBlob { digest, data_ref },
+        });
+        resources.font_resources_mut().faces.push(FontFaceResource {
+            id: face_key,
+            blob_key,
+            face_index: 0,
+            postscript_name: None,
+            family_names: Vec::new(),
+            style_names: Vec::new(),
+            weight_class: None,
+            width_class: None,
+            italic: None,
+        });
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobBytesMissing));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_portability_font_blob_digest_mismatch() {
+        let mut resources = portable_font_resources();
+        let wrong_digest = FontDigest {
+            algorithm: "blake3".to_string(),
+            value: resource_digest_hex([9_u8, 9, 9, 9]),
+        };
+        if let FontPortability::PortableBlob { digest, .. } =
+            &mut resources.font_resources_mut().blobs[0].portability
+        {
+            *digest = wrong_digest.clone();
+        }
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobDigestMismatch));
+        assert_eq!(
+            NativeGlyphRunReplayProofReason::FontBlobDigestMismatch.as_str(),
+            "fontBlobDigestMismatch"
+        );
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_blob_font_digest_mismatch() {
+        let mut resources = portable_font_resources();
+        resources.font_resources_mut().blobs[0].digest = Some(FontDigest {
+            algorithm: "blake3".to_string(),
+            value: resource_digest_hex([9_u8, 9, 9, 9]),
+        });
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobDigestMismatch));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_rejects_unsupported_font_digest_algorithm() {
+        {
+            let mut resources = portable_font_resources();
+            if let FontPortability::PortableBlob { digest, .. } =
+                &mut resources.font_resources_mut().blobs[0].portability
+            {
+                digest.algorithm = "sha256".to_string();
+            }
+            let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+            let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+            assert!(!proof.contract_replayable);
+            assert!(proof
+                .reasons
+                .contains(&NativeGlyphRunReplayProofReason::FontBlobDigestMismatch));
+        }
+
+        {
+            let mut resources = portable_font_resources();
+            if let Some(digest) = &mut resources.font_resources_mut().blobs[0].digest {
+                digest.algorithm = "sha256".to_string();
+            }
+            let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+            let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+            assert!(!proof.contract_replayable);
+            assert!(proof
+                .reasons
+                .contains(&NativeGlyphRunReplayProofReason::FontBlobDigestMismatch));
+        }
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_missing_blob_data_ref_metadata() {
+        let mut resources = portable_font_resources();
+        resources.font_resources_mut().blobs[0].data_ref = None;
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobDataRefMismatch));
+        assert_eq!(
+            NativeGlyphRunReplayProofReason::FontBlobDataRefMismatch.as_str(),
+            "fontBlobDataRefMismatch"
+        );
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_mismatched_blob_data_ref_metadata() {
+        let mut resources = portable_font_resources();
+        resources.font_resources_mut().blobs[0].data_ref = Some(BinaryResourceRef {
+            kind: BinaryResourceKind::FontBlob,
+            id: "font:blake3:4:wrong".to_string(),
+        });
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobDataRefMismatch));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_separates_replay_eligibility_from_blob_portability() {
+        let resources = portable_font_resources();
+        let mut run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        run.diagnostics.replay_eligibility = GlyphRunReplayEligibility::ConditionalExternalFont;
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::ReplayEligibilityNotPortable));
+        assert!(!proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontBlobNotPortable));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_face_index_and_variation_limits() {
+        let mut resources = portable_font_resources();
+        resources.font_resources_mut().faces[0].face_index = 2;
+        let mut run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        run.shape_key.font_instance.variations = vec![crate::paint::VariationAxisValue {
+            tag: "wght".to_string(),
+            value: 700.0,
+        }];
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(proof.contract_replayable);
+        assert!(!proof.typeface_constructible);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FaceIndexUnsupported));
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontVariationUnsupported));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_keeps_glyph_id_range_guard() {
+        let resources = portable_font_resources();
+        let mut run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        run.glyph_ids[0] = u16::MAX as u32 + 1;
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::GlyphIdOutOfRange));
+    }
+
+    #[test]
+    fn native_skia_glyph_run_proof_reports_missing_face() {
+        let resources = ResourceArena::default();
+        let run = portable_glyph_run(GlyphRunOrientation::Horizontal);
+        let proof = native_skia_glyph_run_replay_proof(&run, &resources);
+
+        assert!(!proof.contract_replayable);
+        assert!(proof
+            .reasons
+            .contains(&NativeGlyphRunReplayProofReason::FontFaceMissing));
+    }
+
+    fn solid_rect_tree(
+        page_width: f64,
+        page_height: f64,
+        bbox: BoundingBox,
+        fill_color: ColorRef,
+    ) -> PageLayerTree {
+        let style = ShapeStyle {
+            fill_color: Some(fill_color),
+            ..Default::default()
+        };
+        PageLayerTree::new(
+            page_width,
+            page_height,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, page_width, page_height),
+                None,
+                vec![PaintOp::rectangle(
+                    bbox,
+                    RectangleNode::new(0.0, style, None),
+                )],
+            ),
+        )
+    }
+
+    fn solid_rect_op(bbox: BoundingBox, fill_color: ColorRef) -> PaintOp {
+        PaintOp::rectangle(
+            bbox,
+            RectangleNode::new(
+                0.0,
+                ShapeStyle {
+                    fill_color: Some(fill_color),
+                    ..Default::default()
+                },
+                None,
+            ),
+        )
+    }
+
+    fn solid_image_op(bbox: BoundingBox, color: [u8; 4], wrap: TextWrap) -> PaintOp {
+        let mut image = ImageNode::new(1, Some(solid_png(color)));
+        image.text_wrap = Some(wrap);
+        PaintOp::image(bbox, image, None)
+    }
+
+    #[test]
+    fn renders_png_for_basic_layer_tree() {
+        let tree = solid_rect_tree(
+            32.0,
+            24.0,
+            BoundingBox::new(4.0, 4.0, 16.0, 12.0),
+            0x000000ff,
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render png");
+
+        assert_eq!(output.format, RasterOutputFormat::Png);
+        assert_eq!(output.width, 32);
+        assert_eq!(output.height, 24);
+        assert_eq!(&output.bytes[..8], b"\x89PNG\r\n\x1a\n");
+        let decoded = image::load_from_memory(&output.bytes).expect("decode png");
+        assert_eq!(decoded.width(), 32);
+        assert_eq!(decoded.height(), 24);
+    }
+
+    #[test]
+    fn raster_options_scale_output_size() {
+        let tree = PageLayerTree::new(
+            10.0,
+            12.0,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 10.0, 12.0), None, vec![]),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(
+                &tree,
+                RasterRenderOptions {
+                    scale: 2.0,
+                    transparent: false,
+                    ..Default::default()
+                },
+            )
+            .expect("render scaled png");
+
+        assert_eq!(output.width, 20);
+        assert_eq!(output.height, 24);
+
+        // 독립 한컴 Print의 정수 종이 격자와 옅은 선을 실제 PNG 진입점에서 보호한다.
+        // 세 기존 대조군 모두 Native/fresh WASM 전쪽 100% 및 확대 판독 후 고정했다.
+        // 출처·시각 선행 조건은 fixture의 provenance.json에 기록한다.
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/print_bitmap_paper_grid");
+        for case in ["phase", "color", "faint"] {
+            let source = std::fs::read(fixtures.join(format!("{case}.hwpx"))).unwrap();
+            let core = crate::document_core::DocumentCore::from_bytes(&source).unwrap();
+            assert_eq!(core.page_count(), 1, "{case}: 그림 소속 쪽 보존");
+            let reference = image::open(fixtures.join(format!("{case}-print-96dpi.png")))
+                .unwrap()
+                .to_rgb8();
+            let png = core
+                .render_page_png_native_with_profile_and_export_options(
+                    0,
+                    RenderProfile::Print,
+                    &crate::document_core::queries::rendering::PngExportOptions {
+                        dpi: Some(96.0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let actual = image::load_from_memory(&png).unwrap().to_rgb8();
+            assert_eq!(
+                actual.dimensions(),
+                reference.dimensions(),
+                "{case}: 종이 격자"
+            );
+            let ink = |image: &image::RgbImage, x: u32, y: u32| {
+                image.get_pixel(x, y).0.into_iter().min().unwrap() < 232
+            };
+            let nearby = |image: &image::RgbImage, x: u32, y: u32| {
+                (y.saturating_sub(2)..=(y + 2).min(image.height() - 1)).any(|ny| {
+                    (x.saturating_sub(2)..=(x + 2).min(image.width() - 1))
+                        .any(|nx| ink(image, nx, ny))
+                })
+            };
+            let (mut union, mut missing) = (0u64, 0u64);
+            for y in 0..actual.height() {
+                for x in 0..actual.width() {
+                    let (a, b) = (ink(&actual, x, y), ink(&reference, x, y));
+                    union += u64::from(a || b);
+                    missing += u64::from(
+                        (a && !nearby(&reference, x, y)) || (b && !nearby(&actual, x, y)),
+                    );
+                }
+            }
+            assert!(union > 0, "{case}: 빈 출력·누락된 그림은 통과시키지 않는다");
+            assert!(
+                missing * 100 <= union * 2,
+                "{case}: 독립 Print 대비 2px 내용 보존이 98% 미만: {missing}/{union}"
+            );
+        }
+    }
+
+    #[test]
+    fn preserves_colorref_channel_order_in_pixels() {
+        let tree = solid_rect_tree(12.0, 12.0, BoundingBox::new(2.0, 2.0, 8.0, 8.0), 0x000000ff);
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render red rect");
+        let image = decode_rgba(&output.bytes);
+        let pixel = image.get_pixel(4, 4);
+
+        assert!(pixel[0] > 220, "red channel should be high: {pixel:?}");
+        assert!(pixel[1] < 32, "green channel should be low: {pixel:?}");
+        assert!(pixel[2] < 32, "blue channel should be low: {pixel:?}");
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn clears_transparent_by_default_and_opaque_when_requested() {
+        let tree = PageLayerTree::new(
+            4.0,
+            4.0,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 4.0, 4.0), None, vec![]),
+        );
+        let renderer = SkiaLayerRenderer::new();
+        let transparent = renderer
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render transparent");
+        let opaque = renderer
+            .render_raster_with_options(
+                &tree,
+                RasterRenderOptions {
+                    transparent: false,
+                    ..Default::default()
+                },
+            )
+            .expect("render opaque");
+
+        assert_eq!(decode_rgba(&transparent.bytes).get_pixel(0, 0)[3], 0);
+        assert_eq!(
+            decode_rgba(&opaque.bytes).get_pixel(0, 0).0,
+            [255, 255, 255, 255]
+        );
+    }
+
+    #[test]
+    fn output_options_control_clip_rect_replay() {
+        let style = ShapeStyle {
+            fill_color: Some(0x000000ff),
+            ..Default::default()
+        };
+        let child = LayerNode::leaf(
+            BoundingBox::new(0.0, 0.0, 20.0, 20.0),
+            None,
+            vec![PaintOp::rectangle(
+                BoundingBox::new(0.0, 0.0, 20.0, 20.0),
+                RectangleNode::new(0.0, style, None),
+            )],
+        );
+        let clipped = PageLayerTree::new(
+            20.0,
+            20.0,
+            LayerNode::clip_rect(
+                BoundingBox::new(0.0, 0.0, 20.0, 20.0),
+                None,
+                BoundingBox::new(0.0, 0.0, 10.0, 10.0),
+                child.clone(),
+                crate::paint::ClipKind::Generic,
+            ),
+        );
+        let unclipped = clipped.clone().with_output_options(LayerOutputOptions {
+            clip_enabled: false,
+            ..Default::default()
+        });
+        let renderer = SkiaLayerRenderer::new();
+        let clipped_png = renderer
+            .render_raster_with_options(&clipped, RasterRenderOptions::default())
+            .expect("render clipped");
+        let unclipped_png = renderer
+            .render_raster_with_options(&unclipped, RasterRenderOptions::default())
+            .expect("render unclipped");
+        let clipped = decode_rgba(&clipped_png.bytes);
+        let unclipped = decode_rgba(&unclipped_png.bytes);
+
+        assert_eq!(clipped.get_pixel(15, 15)[3], 0);
+        assert_eq!(unclipped.get_pixel(15, 15)[3], 255);
+    }
+
+    #[test]
+    fn rejects_invalid_raster_options_before_surface_creation() {
+        let tree = PageLayerTree::new(
+            10.0,
+            10.0,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 10.0, 10.0), None, vec![]),
+        );
+        let renderer = SkiaLayerRenderer::new();
+
+        let invalid_scale = renderer.render_raster_with_options(
+            &tree,
+            RasterRenderOptions {
+                scale: 0.0,
+                ..Default::default()
+            },
+        );
+        assert!(invalid_scale.is_err());
+
+        let invalid_dpi = renderer.render_raster_with_options(
+            &tree,
+            RasterRenderOptions {
+                dpi: Some(0.0),
+                ..Default::default()
+            },
+        );
+        assert!(invalid_dpi.is_err());
+
+        let oversized = renderer.render_raster_with_options(
+            &tree,
+            RasterRenderOptions {
+                max_dimension: 8,
+                ..Default::default()
+            },
+        );
+        assert!(oversized.is_err());
+
+        let too_many_pixels = renderer.render_raster_with_options(
+            &tree,
+            RasterRenderOptions {
+                max_pixels: 99,
+                ..Default::default()
+            },
+        );
+        assert!(too_many_pixels.is_err());
+
+        let invalid_pixel_budget = renderer.render_raster_with_options(
+            &tree,
+            RasterRenderOptions {
+                max_pixels: 0,
+                ..Default::default()
+            },
+        );
+        assert!(invalid_pixel_budget.is_err());
+    }
+
+    #[test]
+    fn raster_output_preserves_metadata_and_background_color() {
+        let tree = PageLayerTree::new(
+            3.0,
+            2.0,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 3.0, 2.0), None, vec![]),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(
+                &tree,
+                RasterRenderOptions {
+                    dpi: Some(144.0),
+                    background_color: Some(0x0000ff00),
+                    ..Default::default()
+                },
+            )
+            .expect("render with metadata");
+        let image = decode_rgba(&output.bytes);
+        let pixel = *image.get_pixel(0, 0);
+
+        assert_eq!(output.dpi, Some(144.0));
+        assert_eq!(
+            output.color_space,
+            crate::renderer::layer_renderer::RasterColorSpace::Srgb
+        );
+        assert_channel(pixel, 0, 0, 16);
+        assert_channel(pixel, 1, 220, 255);
+        assert_channel(pixel, 2, 0, 16);
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn rejects_invalid_page_dimensions() {
+        let renderer = SkiaLayerRenderer::new();
+        let zero_width = PageLayerTree::new(
+            0.0,
+            10.0,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 0.0, 10.0), None, vec![]),
+        );
+        let nan_height = PageLayerTree::new(
+            10.0,
+            f64::NAN,
+            LayerNode::leaf(BoundingBox::new(0.0, 0.0, 10.0, 10.0), None, vec![]),
+        );
+
+        assert!(renderer
+            .render_raster_with_options(&zero_width, RasterRenderOptions::default())
+            .is_err());
+        assert!(renderer
+            .render_raster_with_options(&nan_height, RasterRenderOptions::default())
+            .is_err());
+    }
+
+    #[test]
+    fn renders_page_background_fill_border_and_image() {
+        let tree = PageLayerTree::new(
+            8.0,
+            8.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                None,
+                vec![PaintOp::page_background(
+                    BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                    PageBackgroundNode {
+                        background_color: Some(0x0000ff00),
+                        border_color: Some(0x00ff0000),
+                        border_width: 2.0,
+                        gradient: None,
+                        image: None,
+                    },
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render background");
+        let image = decode_rgba(&output.bytes);
+        let fill = *image.get_pixel(4, 4);
+        let border = *image.get_pixel(0, 0);
+
+        assert_channel(fill, 0, 0, 32);
+        assert_channel(fill, 1, 180, 255);
+        assert_channel(fill, 2, 0, 32);
+        assert_eq!(fill[3], 255);
+        assert_channel(border, 0, 0, 64);
+        assert_channel(border, 1, 0, 64);
+        assert_channel(border, 2, 180, 255);
+        assert_eq!(border[3], 255);
+
+        let tree = PageLayerTree::new(
+            8.0,
+            8.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                None,
+                vec![PaintOp::page_background(
+                    BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                    PageBackgroundNode {
+                        background_color: None,
+                        border_color: None,
+                        border_width: 0.0,
+                        gradient: None,
+                        image: Some(PageBackgroundImage {
+                            data: solid_png([0, 0, 255, 255]),
+                            fill_mode: ImageFillMode::FitToSize,
+                            brightness: 0,
+                            contrast: 0,
+                            effect: crate::model::image::ImageEffect::RealPic,
+                        }),
+                    },
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render background image");
+        let image = decode_rgba(&output.bytes);
+        let pixel = *image.get_pixel(4, 4);
+
+        assert_channel(pixel, 0, 0, 32);
+        assert_channel(pixel, 1, 0, 32);
+        assert_channel(pixel, 2, 220, 255);
+        // [Issue #1156 _v2] 밝기·대비 0/0 배경 이미지는 워터마크가 아니므로
+        // 불투명으로 합성한다(is_watermark() = brightness!=0 && contrast!=0).
+        // PR #1163 은 _v2 이전의 "RealPic 배경=항상 워터마크 opacity" 가정으로
+        // 반투명을 기대했으나, 권위 자료로 확정된 _v2 기준에 맞춰 불투명으로 정정.
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn renders_gradient_and_fallback_fills_for_pattern_ellipse_path_and_line() {
+        let gradient = GradientFillInfo {
+            gradient_type: 1,
+            angle: 0,
+            center_x: 0,
+            center_y: 0,
+            colors: vec![0x00ff0000, 0x000000ff],
+            positions: vec![0.0, 1.0],
+        };
+        let gradient_rect = RectangleNode::new(
+            0.0,
+            ShapeStyle {
+                fill_color: Some(0x000000ff),
+                ..Default::default()
+            },
+            Some(Box::new(gradient)),
+        );
+        let pattern_rect = RectangleNode::new(
+            0.0,
+            ShapeStyle {
+                pattern: Some(PatternFillInfo {
+                    pattern_type: 1,
+                    tile_size: 7.68,
+                    pattern_color: 0x000000ff,
+                    background_color: 0x0000ff00,
+                }),
+                ..Default::default()
+            },
+            None,
+        );
+        let ellipse = crate::renderer::render_tree::EllipseNode::new(
+            ShapeStyle {
+                fill_color: Some(0x000000ff),
+                ..Default::default()
+            },
+            None,
+        );
+        let path = PathNode::new(
+            vec![
+                PathCommand::MoveTo(2.0, 24.0),
+                PathCommand::LineTo(12.0, 24.0),
+                PathCommand::LineTo(12.0, 34.0),
+                PathCommand::LineTo(2.0, 34.0),
+                PathCommand::ClosePath,
+            ],
+            ShapeStyle {
+                fill_color: Some(0x00ff0000),
+                ..Default::default()
+            },
+            None,
+        );
+        let line = crate::renderer::render_tree::LineNode::new(
+            18.0,
+            30.0,
+            34.0,
+            30.0,
+            LineStyle {
+                color: 0x000000ff,
+                width: 3.0,
+                ..Default::default()
+            },
+        );
+        let gradient_bounds = BoundingBox::new(2.0, 2.0, 10.0, 8.0);
+        let tree = PageLayerTree::new(
+            40.0,
+            40.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 40.0, 40.0),
+                None,
+                vec![
+                    PaintOp::rectangle(gradient_bounds, gradient_rect),
+                    PaintOp::rectangle(BoundingBox::new(16.0, 2.0, 10.0, 8.0), pattern_rect),
+                    PaintOp::ellipse(BoundingBox::new(2.0, 12.0, 10.0, 10.0), ellipse),
+                    PaintOp::path(BoundingBox::new(2.0, 24.0, 10.0, 10.0), path),
+                    PaintOp::line(BoundingBox::new(18.0, 28.0, 16.0, 4.0), line),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render shapes");
+        let image = decode_rgba(&output.bytes);
+        let gradient_x = (gradient_bounds.x + gradient_bounds.width * 0.5) as u32;
+        let gradient_upper = *image.get_pixel(
+            gradient_x,
+            (gradient_bounds.y + gradient_bounds.height * 0.25) as u32,
+        );
+        let gradient_lower = *image.get_pixel(
+            gradient_x,
+            (gradient_bounds.y + gradient_bounds.height * 0.75) as u32,
+        );
+        let pattern_pixel = *image.get_pixel(18, 4);
+        let ellipse_pixel = *image.get_pixel(7, 17);
+        let path_pixel = *image.get_pixel(7, 29);
+        let line_pixel = *image.get_pixel(24, 30);
+
+        // Source stops are blue at the top and red at the bottom. A solid
+        // first-color fallback cannot satisfy both halves of this contract.
+        assert!(gradient_upper[2] > gradient_upper[0]);
+        assert!(gradient_lower[0] > gradient_lower[2]);
+        assert!(gradient_upper[2] > gradient_lower[2]);
+        assert_channel(pattern_pixel, 1, 180, 255);
+        assert_channel(ellipse_pixel, 0, 180, 255);
+        assert_channel(path_pixel, 2, 180, 255);
+        assert_channel(line_pixel, 0, 180, 255);
+    }
+
+    // 합성 스타일 fixture: 기존 OFL 글꼴의 윤곽/advance는 그대로 두고
+    // 선언 weight·style만 Bold로 바꾼다. 원하는 style의 프로그램 선택을 검증한다.
+    fn synthetic_bold_font(mut bytes: Vec<u8>) -> Vec<u8> {
+        fn u16_at(b: &[u8], p: usize) -> u16 {
+            u16::from_be_bytes(b[p..p + 2].try_into().unwrap())
+        }
+        fn u32_at(b: &[u8], p: usize) -> u32 {
+            u32::from_be_bytes(b[p..p + 4].try_into().unwrap())
+        }
+        let count = usize::from(u16_at(&bytes, 4));
+        let records: Vec<_> = (0..count)
+            .map(|i| {
+                let r = 12 + i * 16;
+                (
+                    r,
+                    bytes[r..r + 4].to_vec(),
+                    u32_at(&bytes, r + 8) as usize,
+                    u32_at(&bytes, r + 12) as usize,
+                )
+            })
+            .collect();
+        let head = records.iter().find(|r| r.1 == b"head").unwrap().2;
+        let os2 = records.iter().find(|r| r.1 == b"OS/2").unwrap().2;
+        bytes[os2 + 4..os2 + 6].copy_from_slice(&700u16.to_be_bytes());
+        let selection = (u16_at(&bytes, os2 + 62) & !0x40) | 0x20;
+        bytes[os2 + 62..os2 + 64].copy_from_slice(&selection.to_be_bytes());
+        let mac_style = u16_at(&bytes, head + 44) | 1;
+        bytes[head + 44..head + 46].copy_from_slice(&mac_style.to_be_bytes());
+        let name = records.iter().find(|r| r.1 == b"name").unwrap().2;
+        let pool = name + usize::from(u16_at(&bytes, name + 4));
+        let names = usize::from(u16_at(&bytes, name + 2));
+        for i in 0..names {
+            let r = name + 6 + i * 12;
+            if ![2, 4, 6, 17].contains(&u16_at(&bytes, r + 6)) {
+                continue;
+            }
+            let start = pool + usize::from(u16_at(&bytes, r + 10));
+            let len = usize::from(u16_at(&bytes, r + 8));
+            let unicode = [0, 3].contains(&u16_at(&bytes, r));
+            let text = if unicode {
+                String::from_utf16(
+                    &bytes[start..start + len]
+                        .chunks_exact(2)
+                        .map(|x| u16::from_be_bytes([x[0], x[1]]))
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap()
+            } else {
+                String::from_utf8_lossy(&bytes[start..start + len]).into_owned()
+            };
+            if !text.contains("Regular") {
+                continue;
+            }
+            let replacement = text.replace("Regular", "Bold");
+            let replacement: Vec<u8> = if unicode {
+                replacement
+                    .encode_utf16()
+                    .flat_map(u16::to_be_bytes)
+                    .collect()
+            } else {
+                replacement.into_bytes()
+            };
+            assert!(replacement.len() <= len);
+            bytes[start..start + replacement.len()].copy_from_slice(&replacement);
+            bytes[r + 8..r + 10].copy_from_slice(&(replacement.len() as u16).to_be_bytes());
+        }
+        bytes[head + 8..head + 12].fill(0);
+        let checksum = |data: &[u8]| {
+            data.chunks(4).fold(0u32, |sum, c| {
+                let mut word = [0u8; 4];
+                word[..c.len()].copy_from_slice(c);
+                sum.wrapping_add(u32::from_be_bytes(word))
+            })
+        };
+        for (r, _, off, len) in records {
+            let sum = checksum(&bytes[off..off + len]);
+            bytes[r + 4..r + 8].copy_from_slice(&sum.to_be_bytes());
+        }
+        let adjustment = 0xB1B0_AFBAu32.wrapping_sub(checksum(&bytes));
+        bytes[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn svg_images_and_raw_fragments_keep_bounded_input_and_raster_area() {
+        let mut surface = surfaces::raster_n32_premul((8, 8)).unwrap();
+        let canvas = surface.canvas();
+        let cache = super::super::image_cache::ImageResourceCache::new(8, 1024 * 1024);
+        let image = |bytes: &[u8], width, height| {
+            draw_image_bytes(
+                canvas,
+                &cache,
+                bytes,
+                0.0,
+                0.0,
+                width,
+                height,
+                None,
+                None,
+                None,
+                None,
+                ImageEffect::RealPic,
+                0,
+                0,
+                ImageSampling::linear(),
+            )
+        };
+        assert!(!image(&vec![b' '; 16 * 1024 * 1024 + 1], 8.0, 8.0));
+        assert!(!draw_svg_fragment(
+            canvas,
+            &cache,
+            &" ".repeat(4 * 1024 * 1024 + 1),
+            0.0,
+            0.0,
+            8.0,
+            8.0,
+            ImageSampling::linear(),
+            1.0
+        ));
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>"#;
+        assert!(!image(svg, 10000.0, 10000.0));
+        assert!(!image(svg, f32::NAN, 8.0));
+        assert!(!draw_svg_fragment(
+            canvas,
+            &cache,
+            "<rect width=\"8\" height=\"8\"/>",
+            0.0,
+            0.0,
+            10000.0,
+            10000.0,
+            ImageSampling::linear(),
+            1.0
+        ));
+    }
+
+    #[test]
+    fn custom_font_paths_select_style_within_the_first_family_owner() {
+        let regular = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("ttfs/opensource/NotoSansKR-Regular.ttf"),
+        )
+        .unwrap();
+        let bold = synthetic_bold_font(regular.clone());
+        let root = std::env::temp_dir().join(format!(
+            "rhwp-native-font-style-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bold_dir = root.join("complete-family-first");
+        let regular_dir = root.join("regular-second");
+        std::fs::create_dir_all(&bold_dir).unwrap();
+        std::fs::create_dir_all(&regular_dir).unwrap();
+        std::fs::write(bold_dir.join("01-bold.ttf"), &bold).unwrap();
+        std::fs::write(bold_dir.join("02-regular.ttf"), &regular).unwrap();
+        std::fs::write(regular_dir.join("regular.ttf"), &regular).unwrap();
+        let renderer =
+            SkiaLayerRenderer::new().with_font_paths(&[bold_dir.clone(), regular_dir.clone()]);
+        let declared_bold = renderer
+            .font_mgr
+            .new_from_data(skia_safe::Data::new_copy(&bold), None)
+            .unwrap();
+        assert_eq!(
+            *declared_bold.font_style().weight(),
+            700,
+            "합성 입력은 실제 Bold 선언을 갖는다"
+        );
+        for wanted in [FontStyle::normal(), FontStyle::bold()] {
+            let (_, chain) = crate::renderer::skia::font_lookup::text_typeface_candidates(
+                &renderer.font_mgr,
+                &renderer.system_families,
+                &renderer.custom_typefaces,
+                &renderer.bundled_typefaces,
+                "Noto Sans KR",
+                wanted,
+            );
+            assert_eq!(
+                *chain[0].typeface.font_style().weight(),
+                *wanted.weight(),
+                "파일 순서로 요청 굵기를 바꾸지 않는다"
+            );
+            assert_eq!(chain[0].source, "custom");
+        }
+        // upstream P47의 첫 경로 family 소유권을 유지한다. 첫 경로에 없는
+        // 스타일을 뒤 경로의 동명 프로그램으로 보충하지 않는다.
+        std::fs::remove_file(bold_dir.join("02-regular.ttf")).unwrap();
+        let renderer = SkiaLayerRenderer::new().with_font_paths(&[bold_dir, regular_dir]);
+        let selected = match_supplied_family(
+            &renderer.custom_typefaces,
+            "Noto Sans KR",
+            FontStyle::normal(),
+        )
+        .expect("첫 경로의 family 공급");
+        assert_eq!(
+            *selected.font_style().weight(),
+            700,
+            "뒤 경로의 가까운 스타일이 첫 family 소유자를 덮어쓰지 않는다"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn renders_valid_images_and_invalid_image_placeholders() {
+        let tree = PageLayerTree::new(
+            20.0,
+            10.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 20.0, 10.0),
+                None,
+                vec![
+                    PaintOp::image(
+                        BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                        ImageNode::new(1, Some(solid_png([0, 0, 255, 255]))),
+                        None,
+                    ),
+                    PaintOp::image(
+                        BoundingBox::new(10.0, 0.0, 8.0, 8.0),
+                        ImageNode::new(2, Some(vec![1, 2, 3, 4])),
+                        None,
+                    ),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render images");
+        let image = decode_rgba(&output.bytes);
+        let valid = *image.get_pixel(4, 4);
+        let invalid_placeholder = *image.get_pixel(12, 4);
+
+        assert_channel(valid, 2, 220, 255);
+        assert!(invalid_placeholder[3] > 0);
+    }
+
+    #[test]
+    fn renders_perpendicular_images_with_effective_bounds() {
+        let mut image = ImageNode::new(1, Some(solid_png([0, 0, 255, 255])));
+        image.transform = crate::renderer::render_tree::ShapeTransform {
+            rotation: 90.0,
+            ..Default::default()
+        };
+        let tree = PageLayerTree::new(
+            20.0,
+            20.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 20.0, 20.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(5.0, 7.0, 10.0, 4.0),
+                    image,
+                    None,
+                )],
+            ),
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render perpendicular image");
+        let rendered = decode_rgba(&output.bytes);
+
+        assert_channel(*rendered.get_pixel(6, 9), 2, 220, 255);
+        assert_eq!(rendered.get_pixel(10, 5)[3], 0);
+    }
+
+    #[test]
+    fn missing_perpendicular_image_placeholder_uses_transformed_bounds() {
+        let mut image = ImageNode::new(1, None);
+        image.transform = crate::renderer::render_tree::ShapeTransform {
+            rotation: 90.0,
+            ..Default::default()
+        };
+        let tree = PageLayerTree::new(
+            20.0,
+            20.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 20.0, 20.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(5.0, 7.0, 10.0, 4.0),
+                    image,
+                    None,
+                )],
+            ),
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render transformed missing image placeholder");
+        let rendered = decode_rgba(&output.bytes);
+
+        assert!(rendered.get_pixel(6, 9)[3] > 0);
+        assert_eq!(rendered.get_pixel(10, 5)[3], 0);
+    }
+
+    #[test]
+    fn behind_text_image_replays_below_flow_across_tree_branches() {
+        let bbox = BoundingBox::new(0.0, 0.0, 12.0, 12.0);
+        let flow = LayerNode::leaf(bbox, None, vec![solid_rect_op(bbox, 0x000000ff)]);
+        let behind = LayerNode::leaf(
+            bbox,
+            None,
+            vec![solid_image_op(bbox, [0, 0, 255, 255], TextWrap::BehindText)],
+        );
+        let tree = PageLayerTree::new(
+            12.0,
+            12.0,
+            LayerNode::group(
+                bbox,
+                None,
+                vec![flow, behind],
+                CacheHint::None,
+                GroupKind::Generic,
+            ),
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render behind text order");
+        let image = decode_rgba(&output.bytes);
+        let center = *image.get_pixel(6, 6);
+
+        assert_channel(center, 0, 180, 255);
+        assert_channel(center, 1, 0, 64);
+        assert_channel(center, 2, 0, 64);
+        assert_eq!(center[3], 255);
+    }
+
+    #[test]
+    fn behind_text_layered_vector_replays_below_flow_across_tree_branches() {
+        let bbox = BoundingBox::new(0.0, 0.0, 12.0, 12.0);
+        let flow = LayerNode::leaf(bbox, None, vec![solid_rect_op(bbox, 0x000000ff)]);
+        let behind = LayerNode::leaf(bbox, None, vec![solid_rect_op(bbox, 0x00ff0000)])
+            .with_layer(Some(RenderLayerInfo::new(Some(TextWrap::BehindText), 1, 1)));
+        let tree = PageLayerTree::new(
+            12.0,
+            12.0,
+            LayerNode::group(
+                bbox,
+                None,
+                vec![flow, behind],
+                CacheHint::None,
+                GroupKind::Generic,
+            ),
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render layered vector order");
+        let image = decode_rgba(&output.bytes);
+        let center = *image.get_pixel(6, 6);
+
+        assert_channel(center, 0, 180, 255);
+        assert_channel(center, 1, 0, 64);
+        assert_channel(center, 2, 0, 64);
+        assert_eq!(center[3], 255);
+    }
+
+    #[test]
+    fn in_front_of_text_image_replays_above_flow_when_raw_order_is_earlier() {
+        let bbox = BoundingBox::new(0.0, 0.0, 12.0, 12.0);
+        let tree = PageLayerTree::new(
+            12.0,
+            12.0,
+            LayerNode::leaf(
+                bbox,
+                None,
+                vec![
+                    solid_image_op(bbox, [0, 0, 255, 255], TextWrap::InFrontOfText),
+                    solid_rect_op(bbox, 0x000000ff),
+                ],
+            ),
+        );
+
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render in-front text order");
+        let image = decode_rgba(&output.bytes);
+        let center = *image.get_pixel(6, 6);
+
+        assert_channel(center, 0, 0, 64);
+        assert_channel(center, 1, 0, 64);
+        assert_channel(center, 2, 180, 255);
+        assert_eq!(center[3], 255);
+    }
+
+    #[test]
+    fn renders_cropped_image_source_rects() {
+        let mut node = ImageNode::new(
+            1,
+            Some(split_png(4, 4, [255, 0, 0, 255], [0, 0, 255, 255], true)),
+        );
+        node.crop = Some((0, 2, 4, 4));
+        node.original_size_hu = Some((4, 4));
+        let tree = PageLayerTree::new(
+            8.0,
+            8.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                    node,
+                    None,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render cropped image");
+        let image = decode_rgba(&output.bytes);
+        let pixel = *image.get_pixel(4, 4);
+
+        assert_channel(pixel, 0, 0, 48);
+        assert_channel(pixel, 2, 180, 255);
+    }
+
+    #[test]
+    fn renders_tiled_images_using_original_size() {
+        let mut node = ImageNode::new(
+            1,
+            Some(split_png(8, 4, [255, 0, 0, 255], [0, 255, 0, 255], false)),
+        );
+        node.fill_mode = Some(ImageFillMode::TileAll);
+        node.original_size = Some((8.0, 4.0));
+        let tree = PageLayerTree::new(
+            16.0,
+            4.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 16.0, 4.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(0.0, 0.0, 16.0, 4.0),
+                    node,
+                    None,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render tiled image");
+        let image = decode_rgba(&output.bytes);
+        let first_tile_left = *image.get_pixel(2, 2);
+        let second_tile_left = *image.get_pixel(10, 2);
+        let first_tile_right = *image.get_pixel(6, 2);
+        let second_tile_right = *image.get_pixel(14, 2);
+
+        assert_channel(first_tile_left, 0, 180, 255);
+        assert_channel(second_tile_left, 0, 180, 255);
+        assert_channel(first_tile_right, 1, 180, 255);
+        assert_channel(second_tile_right, 1, 180, 255);
+    }
+
+    #[test]
+    fn applies_grayscale_image_effect() {
+        let mut node = ImageNode::new(1, Some(solid_png([255, 0, 0, 255])));
+        node.effect = ImageEffect::GrayScale;
+        let tree = PageLayerTree::new(
+            8.0,
+            8.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                    node,
+                    None,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render grayscale image");
+        let pixel = *decode_rgba(&output.bytes).get_pixel(4, 4);
+        let max_channel = pixel[0].max(pixel[1]).max(pixel[2]);
+        let min_channel = pixel[0].min(pixel[1]).min(pixel[2]);
+
+        assert!(max_channel.abs_diff(min_channel) <= 2, "pixel={pixel:?}");
+        assert!(pixel[0] > 40 && pixel[0] < 140, "pixel={pixel:?}");
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn ignores_invalid_image_rects() {
+        let tree = PageLayerTree::new(
+            8.0,
+            8.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 8.0, 8.0),
+                None,
+                vec![PaintOp::image(
+                    BoundingBox::new(f64::NAN, 0.0, 8.0, 8.0),
+                    ImageNode::new(1, Some(solid_png([255, 0, 0, 255]))),
+                    None,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render invalid image rect");
+        let image = decode_rgba(&output.bytes);
+
+        assert_eq!(count_ink(&image), 0);
+    }
+
+    #[test]
+    fn renders_text_and_footnote_marker_as_ink() {
+        let run = TextRunNode {
+            text: "A".to_string(),
+            style: TextStyle {
+                font_size: 18.0,
+                color: 0x00000000,
+                ..Default::default()
+            },
+            char_shape_id: None,
+            para_shape_id: None,
+            section_index: None,
+            para_index: None,
+            char_start: None,
+            cell_context: None,
+            is_para_end: false,
+            is_line_break_end: false,
+            rotation: 0.0,
+            is_vertical: false,
+            char_overlap: None,
+            border_fill_id: 0,
+            baseline: 20.0,
+            field_marker: Default::default(),
+            layout_positions: None,
+            display_text: None,
+        };
+        let marker = FootnoteMarkerNode {
+            number: 1,
+            text: "1)".to_string(),
+            base_font_size: 18.0,
+            baseline: 7.0,
+            font_family: String::new(),
+            color: 0x00000000,
+            section_index: 0,
+            para_index: 0,
+            control_index: 0,
+        };
+        let tree = PageLayerTree::new(
+            64.0,
+            32.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 64.0, 32.0),
+                None,
+                vec![
+                    PaintOp::text_run(BoundingBox::new(4.0, 4.0, 24.0, 24.0), run),
+                    PaintOp::footnote_marker(BoundingBox::new(32.0, 4.0, 24.0, 24.0), marker),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render text");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 0);
+    }
+
+    #[test]
+    fn renders_char_overlap_text_run_as_ink() {
+        let run = TextRunNode {
+            text: "①".to_string(),
+            style: TextStyle {
+                font_size: 20.0,
+                color: 0x00000000,
+                ..Default::default()
+            },
+            char_shape_id: None,
+            para_shape_id: None,
+            section_index: None,
+            para_index: None,
+            char_start: None,
+            cell_context: None,
+            is_para_end: false,
+            is_line_break_end: false,
+            rotation: 0.0,
+            is_vertical: false,
+            char_overlap: Some(CharOverlapInfo {
+                border_type: 1,
+                inner_char_size: 90,
+                composition: None,
+                empty_ink: false,
+            }),
+            border_fill_id: 0,
+            baseline: 22.0,
+            field_marker: Default::default(),
+            layout_positions: None,
+            display_text: None,
+        };
+        let bounds = BoundingBox::new(8.0, 8.0, 24.0, 24.0);
+        let tree = PageLayerTree::new(
+            40.0,
+            40.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 40.0, 40.0),
+                None,
+                vec![
+                    PaintOp::text_run(bounds, run.clone()),
+                    PaintOp::char_overlap(bounds, run),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render char overlap");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 0);
+    }
+
+    #[test]
+    fn renders_tab_leader_for_empty_text_run() {
+        let run = TextRunNode {
+            text: String::new(),
+            style: TextStyle {
+                font_size: 18.0,
+                color: 0x00000000,
+                tab_leaders: vec![TabLeaderInfo {
+                    start_x: 8.0,
+                    end_x: 72.0,
+                    fill_type: 1,
+                }],
+                ..Default::default()
+            },
+            char_shape_id: None,
+            para_shape_id: None,
+            section_index: None,
+            para_index: None,
+            char_start: None,
+            cell_context: None,
+            is_para_end: false,
+            is_line_break_end: false,
+            rotation: 0.0,
+            is_vertical: false,
+            char_overlap: None,
+            border_fill_id: 0,
+            baseline: 22.0,
+            field_marker: Default::default(),
+            layout_positions: None,
+            display_text: None,
+        };
+        let bounds = BoundingBox::new(4.0, 4.0, 80.0, 28.0);
+        let tree = PageLayerTree::new(
+            88.0,
+            36.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 88.0, 36.0),
+                None,
+                vec![
+                    PaintOp::text_run(bounds, run.clone()),
+                    PaintOp::tab_leader(bounds, run),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render tab leader");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 0);
+    }
+
+    #[test]
+    fn renders_output_control_marks_as_ink() {
+        let run = TextRunNode {
+            text: " \t".to_string(),
+            style: TextStyle {
+                font_size: 18.0,
+                color: 0x00000000,
+                ..Default::default()
+            },
+            char_shape_id: None,
+            para_shape_id: None,
+            section_index: None,
+            para_index: None,
+            char_start: None,
+            cell_context: None,
+            is_para_end: true,
+            is_line_break_end: false,
+            rotation: 0.0,
+            is_vertical: false,
+            char_overlap: None,
+            border_fill_id: 0,
+            baseline: 22.0,
+            field_marker: Default::default(),
+            layout_positions: None,
+            display_text: None,
+        };
+        let bounds = BoundingBox::new(4.0, 4.0, 60.0, 28.0);
+        let tree = PageLayerTree::new(
+            72.0,
+            36.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 72.0, 36.0),
+                None,
+                vec![
+                    PaintOp::text_run(bounds, run.clone()),
+                    PaintOp::text_control_mark(bounds, run),
+                ],
+            ),
+        )
+        .with_output_options(LayerOutputOptions {
+            show_control_codes: true,
+            ..Default::default()
+        });
+        let output = SkiaLayerRenderer::new()
+            .try_with_font_data(&[include_bytes!(
+                "../../../ttfs/opensource/RHWPPublicBatang-Regular.ttf"
+            )
+            .to_vec()])
+            .expect("load licensed test font")
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render control marks");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 0);
+    }
+
+    #[test]
+    fn renders_decorated_text_as_ink() {
+        let run = TextRunNode {
+            text: "A".to_string(),
+            style: TextStyle {
+                font_size: 18.0,
+                color: 0x00000000,
+                underline: UnderlineType::Bottom,
+                strikethrough: true,
+                emphasis_dot: 1,
+                shade_color: 0x0000ffff,
+                ..Default::default()
+            },
+            char_shape_id: None,
+            para_shape_id: None,
+            section_index: None,
+            para_index: None,
+            char_start: None,
+            cell_context: None,
+            is_para_end: false,
+            is_line_break_end: false,
+            rotation: 0.0,
+            is_vertical: false,
+            char_overlap: None,
+            border_fill_id: 0,
+            baseline: 24.0,
+            field_marker: Default::default(),
+            layout_positions: None,
+            display_text: None,
+        };
+        let bounds = BoundingBox::new(8.0, 8.0, 32.0, 28.0);
+        let tree = PageLayerTree::new(
+            48.0,
+            40.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 48.0, 40.0),
+                None,
+                vec![
+                    PaintOp::text_run(bounds, run.clone()),
+                    PaintOp::text_decoration(bounds, run.clone(), TextDecorationKind::Underline),
+                    PaintOp::text_decoration(
+                        bounds,
+                        run.clone(),
+                        TextDecorationKind::Strikethrough,
+                    ),
+                    PaintOp::text_decoration(bounds, run, TextDecorationKind::EmphasisDot),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render decorated text");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 0);
+    }
+
+    #[test]
+    fn issue_2771_script_run_shrinks_glyph_and_shifts_baseline() {
+        // [#2771] skia 경로에는 첨자 분기가 아예 없어 위첨자/아래첨자를 본문과
+        // 같은 크기·같은 baseline 으로 그렸다. SVG/Canvas/HTML 과 동일한
+        // 계약(0.7 배 글꼴 + baseline 이동)을 따라야 한다.
+        let render_script = |superscript: bool, subscript: bool| {
+            let run = TextRunNode {
+                text: "A".to_string(),
+                style: TextStyle {
+                    font_size: 24.0,
+                    color: 0x00000000,
+                    superscript,
+                    subscript,
+                    ..Default::default()
+                },
+                char_shape_id: None,
+                para_shape_id: None,
+                section_index: None,
+                para_index: None,
+                char_start: None,
+                cell_context: None,
+                is_para_end: false,
+                is_line_break_end: false,
+                rotation: 0.0,
+                is_vertical: false,
+                char_overlap: None,
+                border_fill_id: 0,
+                baseline: 32.0,
+                field_marker: Default::default(),
+                layout_positions: None,
+                display_text: None,
+            };
+            let tree = PageLayerTree::new(
+                64.0,
+                64.0,
+                LayerNode::leaf(
+                    BoundingBox::new(0.0, 0.0, 64.0, 64.0),
+                    None,
+                    vec![PaintOp::text_run(
+                        BoundingBox::new(4.0, 0.0, 56.0, 64.0),
+                        run,
+                    )],
+                ),
+            );
+            let output = SkiaLayerRenderer::new()
+                .render_raster_with_options(&tree, RasterRenderOptions::default())
+                .expect("render script text");
+            ink_y_range(&decode_rgba(&output.bytes)).expect("글리프 잉크가 있어야 함")
+        };
+
+        let (base_top, base_bottom) = render_script(false, false);
+        let (sup_top, sup_bottom) = render_script(true, false);
+        let (sub_top, sub_bottom) = render_script(false, true);
+
+        assert!(
+            sup_bottom < base_bottom,
+            "위첨자는 본문보다 위 baseline 이어야 함: sup={sup_bottom}, base={base_bottom}"
+        );
+        assert!(
+            sub_bottom > base_bottom,
+            "아래첨자는 본문보다 아래 baseline 이어야 함: sub={sub_bottom}, base={base_bottom}"
+        );
+        let base_height = base_bottom - base_top;
+        assert!(
+            sup_bottom - sup_top < base_height,
+            "위첨자 글리프는 0.7 배로 작아야 함: sup={}, base={base_height}",
+            sup_bottom - sup_top
+        );
+        assert!(
+            sub_bottom - sub_top < base_height,
+            "아래첨자 글리프는 0.7 배로 작아야 함: sub={}, base={base_height}",
+            sub_bottom - sub_top
+        );
+    }
+
+    #[test]
+    fn renders_equation_layout_as_colored_ink() {
+        let font_size = 18.0;
+        let layout_box = EqLayout::new(font_size).layout(&EqNode::Fraction {
+            numer: Box::new(EqNode::Text("a".to_string())),
+            denom: Box::new(EqNode::Text("b".to_string())),
+        });
+        let equation = EquationNode {
+            script: String::new(),
+            svg_content: String::new(),
+            layout_box,
+            color_str: "#ff0000".to_string(),
+            color: 0x000000ff,
+            font_size,
+            section_index: Some(0),
+            para_index: Some(0),
+            control_index: Some(0),
+            cell_index: None,
+            cell_para_index: None,
+            note_ref: None,
+        };
+        let tree = PageLayerTree::new(
+            64.0,
+            48.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 64.0, 48.0),
+                None,
+                vec![PaintOp::equation(
+                    BoundingBox::new(6.0, 6.0, 44.0, 32.0),
+                    equation,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render equation");
+        let image = decode_rgba(&output.bytes);
+        let red_ink = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 160 && pixel[1] < 96 && pixel[2] < 96 && pixel[3] > 0)
+            .count();
+
+        assert!(
+            red_ink > 0,
+            "equation should render using its configured color"
+        );
+    }
+
+    #[test]
+    fn renders_atop_equation_layout_as_colored_ink() {
+        let font_size = 18.0;
+        let layout_box = EqLayout::new(font_size).layout(&EqNode::Atop {
+            top: Box::new(EqNode::Text("a".to_string())),
+            bottom: Box::new(EqNode::Text("b".to_string())),
+        });
+        let equation = EquationNode {
+            script: String::new(),
+            svg_content: String::new(),
+            layout_box,
+            color_str: "#00aa00".to_string(),
+            color: 0x0000aa00,
+            font_size,
+            section_index: Some(0),
+            para_index: Some(0),
+            control_index: Some(0),
+            cell_index: None,
+            cell_para_index: None,
+            note_ref: None,
+        };
+        let tree = PageLayerTree::new(
+            64.0,
+            48.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 64.0, 48.0),
+                None,
+                vec![PaintOp::equation(
+                    BoundingBox::new(6.0, 6.0, 44.0, 32.0),
+                    equation,
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .try_with_font_data(&[include_bytes!(
+                "../../../assets/fonts/LatinModernMath-VariableOutline-subset.otf"
+            )
+            .to_vec()])
+            .expect("load licensed test font")
+            .with_font_family_alias("Latin Modern Math", "RHWP LMM Variable Outline")
+            .expect("bind equation family to the supplied fixture")
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render atop equation");
+        let image = decode_rgba(&output.bytes);
+        let green_ink = image
+            .pixels()
+            .filter(|pixel| pixel[0] < 96 && pixel[1] > 96 && pixel[2] < 96 && pixel[3] > 0)
+            .count();
+
+        assert!(
+            green_ink > 0,
+            "atop equation should render using its configured color"
+        );
+    }
+
+    #[test]
+    fn renders_placeholder_style_ops_as_ink() {
+        let form = FormObjectNode {
+            form_type: FormType::PushButton,
+            caption: "OK".to_string(),
+            text: String::new(),
+            display_text: None,
+            appearance: Default::default(),
+            fore_color: "#000000".to_string(),
+            back_color: "#ffffff".to_string(),
+            value: 0,
+            enabled: true,
+            section_index: 0,
+            para_index: 0,
+            control_index: 0,
+            name: "button".to_string(),
+            cell_location: None,
+        };
+        let tree = PageLayerTree::new(
+            48.0,
+            16.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 48.0, 16.0),
+                None,
+                vec![
+                    PaintOp::placeholder(
+                        BoundingBox::new(0.0, 0.0, 14.0, 14.0),
+                        PlaceholderNode::new(0, 0, "ph".to_string()),
+                    ),
+                    PaintOp::raw_svg(
+                        BoundingBox::new(16.0, 0.0, 14.0, 14.0),
+                        RawSvgNode::new("<invalid".to_string()),
+                    ),
+                    PaintOp::form_object(BoundingBox::new(32.0, 0.0, 14.0, 14.0), form),
+                ],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render placeholders");
+        let image = decode_rgba(&output.bytes);
+
+        assert!(count_ink(&image) > 40);
+    }
+
+    #[test]
+    fn missing_picture_placeholder_follows_render_profile() {
+        let mut render_tree = PageRenderTree::new(0, 32.0, 24.0);
+        render_tree.root.node_type = RenderNodeType::Page(PageNode {
+            page_index: 0,
+            width: 32.0,
+            height: 24.0,
+            section_index: 0,
+        });
+        render_tree.root.children.push(RenderNode::new(
+            1,
+            RenderNodeType::Placeholder(PlaceholderNode::missing_picture(None, None, None, None)),
+            BoundingBox::new(4.0, 4.0, 20.0, 14.0),
+        ));
+        let screen_tree = LayerBuilder::new(RenderProfile::Screen).build(&render_tree);
+        let print_tree = LayerBuilder::new(RenderProfile::Print).build(&render_tree);
+        assert!(matches!(screen_tree.root.kind, LayerNodeKind::Group { .. }));
+        let LayerNodeKind::Group { children, .. } = &print_tree.root.kind else {
+            panic!("page root must remain a group");
+        };
+        assert!(
+            children.is_empty(),
+            "print tree must omit editor placeholder"
+        );
+        let renderer = SkiaLayerRenderer::new();
+        let screen = renderer
+            .render_raster_with_options(&screen_tree, RasterRenderOptions::default())
+            .expect("render screen placeholder");
+        let print = renderer
+            .render_raster_with_options(&print_tree, RasterRenderOptions::default())
+            .expect("render print placeholder");
+
+        assert!(count_ink(&decode_rgba(&screen.bytes)) > 40);
+        assert_eq!(count_ink(&decode_rgba(&print.bytes)), 0);
+    }
+
+    #[test]
+    fn raw_svg_replay_does_not_load_external_file_hrefs() {
+        let external_path = std::env::temp_dir().join(format!(
+            "rhwp-skia-raw-svg-external-{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&external_path, solid_png([255, 0, 0, 255])).expect("write external png");
+        let external_href = external_path.to_string_lossy();
+        let tree = PageLayerTree::new(
+            32.0,
+            24.0,
+            LayerNode::leaf(
+                BoundingBox::new(0.0, 0.0, 32.0, 24.0),
+                None,
+                vec![PaintOp::raw_svg(
+                    BoundingBox::new(4.0, 4.0, 20.0, 16.0),
+                    RawSvgNode::new(format!(
+                        "<image href=\"{}\" x=\"0\" y=\"0\" width=\"20\" height=\"16\"/>",
+                        external_href
+                    )),
+                )],
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render raw svg with external href");
+        let _ = std::fs::remove_file(&external_path);
+        let image = decode_rgba(&output.bytes);
+        let red_ink = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 180 && pixel[1] < 48 && pixel[2] < 48 && pixel[3] > 0)
+            .count();
+
+        assert_eq!(red_ink, 0, "raw SVG replay must not load file hrefs");
+    }
+
+    #[test]
+    fn group_children_replay_in_order() {
+        let red = LayerNode::leaf(
+            BoundingBox::new(0.0, 0.0, 12.0, 12.0),
+            None,
+            vec![PaintOp::rectangle(
+                BoundingBox::new(0.0, 0.0, 12.0, 12.0),
+                RectangleNode::new(
+                    0.0,
+                    ShapeStyle {
+                        fill_color: Some(0x000000ff),
+                        ..Default::default()
+                    },
+                    None,
+                ),
+            )],
+        );
+        let blue = LayerNode::leaf(
+            BoundingBox::new(3.0, 3.0, 6.0, 6.0),
+            None,
+            vec![PaintOp::rectangle(
+                BoundingBox::new(3.0, 3.0, 6.0, 6.0),
+                RectangleNode::new(
+                    0.0,
+                    ShapeStyle {
+                        fill_color: Some(0x00ff0000),
+                        ..Default::default()
+                    },
+                    None,
+                ),
+            )],
+        );
+        let tree = PageLayerTree::new(
+            12.0,
+            12.0,
+            LayerNode::group(
+                BoundingBox::new(0.0, 0.0, 12.0, 12.0),
+                None,
+                vec![red, blue],
+                CacheHint::None,
+                GroupKind::Generic,
+            ),
+        );
+        let output = SkiaLayerRenderer::new()
+            .render_raster_with_options(&tree, RasterRenderOptions::default())
+            .expect("render group");
+        let image = decode_rgba(&output.bytes);
+        let center = *image.get_pixel(6, 6);
+
+        assert_channel(center, 0, 0, 64);
+        assert_channel(center, 1, 0, 64);
+        assert_channel(center, 2, 180, 255);
+        assert_eq!(center[3], 255);
+    }
+}
