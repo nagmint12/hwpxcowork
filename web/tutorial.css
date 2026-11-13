@@ -13,7 +13,7 @@
 .tour-press-btn:not(:disabled) { box-shadow: 0 0 0 3px #1E9E5A; }
 .tour .tour-bubble { transition: opacity .25s; }
 .tour.tour-body-shown .tour-bubble { opacity: 0; pointer-events: none; }
-.tour.tour-body-shown .tour-shade { pointer-events: none; }
+.tour.tour-body-shown .tour-shade { pointer-events: auto; }
 .tour-bubble { position: fixed; width: min(360px, calc(100vw - 16px)); background: #fff; color: #1b1f2a; border-radius: 12px; padding: 12px 14px 10px;
   box-shadow: 0 10px 34px rgba(0, 18, 64, .35); border-top: 4px solid #001A70; pointer-events: auto; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
 .tour-head, .tour-row { flex-shrink: 0; }
@@ -134,6 +134,10 @@
 @media (prefers-reduced-motion: reduce) { .tour-scene *, .tour-scene *::before, .tour-scene *::after { transition: none !important; animation: none !important; } }
 .tour-review-note { margin: 0 0 8px; font-size: 12px; color: #6b7280; }
 .tour-row .spacer { flex: 1; }
+.tour-recovery { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; margin-top: 9px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+.tour-recovery p { flex-basis: 100%; margin: 0 0 4px; font-size: 12px; line-height: 1.5; color: #475569; }
+.tour-recovery button { font-size: 12px; }
+.tour-row { flex-wrap: wrap; }
 .tour-row .tour-quit, .tour-row .tour-skip { color: #6b7280; }
 .tour-row .tour-act { border-color: #F5A800; color: #7a5200; }
 /* 문서함의 체험 띠 */

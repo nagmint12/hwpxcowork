@@ -214,6 +214,7 @@ app.post('/api/tutorial/entry', auth, wrap(async (req, res) => res.json(await tu
 app.post('/api/tutorial/start', auth, wrap(async (req, res) => res.json(await tutorial.start(req.user, { auto: !!req.body?.auto, tutorialId: req.body?.tutorialId }))));
 app.get('/api/tutorial/:id/progress', auth, wrap(async (req, res) => res.set('Cache-Control', 'no-store').json(tutorial.progress(req.user, req.params.id))));
 app.put('/api/tutorial/:id/progress', auth, wrap(async (req, res) => res.json(await tutorial.saveProgress(req.user, req.params.id, req.body))));
+app.post('/api/tutorial/:id/restore', auth, wrap(async (req, res) => res.set('Cache-Control', 'no-store').json(await tutorial.restore(req.user, req.params.id, req.body))));
 app.post('/api/tutorial/:id/complete', auth, wrap(async (req, res) => res.json(await tutorial.complete(req.user, req.params.id))));
 app.delete('/api/tutorial/:id', auth, wrap(async (req, res) => res.json(await tutorial.discard(req.user, req.params.id))));
 // 내 AI 키(개인 키를 서버에 맡겨 서버가 내 요청을 처리): 키는 다시 내보내지 않는다(끝 4자리만). check 는 모델 정보 조회만(과금 없음)

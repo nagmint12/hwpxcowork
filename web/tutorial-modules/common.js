@@ -89,9 +89,10 @@ export function stepHelpers(env) {
   const frameDialog = kind => shapeDialog(fdoc(), kind);
   const closeFrameDialog = kind => { const box = frameDialog(kind); const b = box?.querySelector('.dialog-close') || [...(box?.querySelectorAll('button') || [])].find(b => /^(취소|닫기|Cancel)/.test(b.textContent.replace(/\s/g, ''))); b?.click(); };
   const openShape = async (kind, title) => {
+    const ticket = env.stepIdentity?.();
     // 글자 모양은 실제 선택 범위가 있어야 열린다. 앞 단계를 건너뛰었어도 같은 예시를 선택한다.
     const selected = await selectFor(kind === 'char' ? '장평 50%' : '줄 간격 250%');
-    if (env.isCurrentStep?.(title) === false) return;
+    if (env.isCurrentStep?.(title) === false || (env.stepIdentity && env.stepIdentity() !== ticket)) return;
     if (!selected) throw new Error('모양을 확인할 예시 글을 찾지 못했습니다');
     closeFrameDialog(kind === 'char' ? 'para' : 'char');
     const b = fdoc()?.querySelector(`button[data-cmd="format:${kind === 'char' ? 'char' : 'para'}-shape"]`);

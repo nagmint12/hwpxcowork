@@ -949,7 +949,7 @@ export function mountEditor(el, d) {
       if (paraVersion && paraVersion >= (Number(s.paraVersion) || 0)) { s.paragraphs = paragraphs; s.paraVersion = paraVersion; }
       // 내 수정본이 옛 기준이면 칩에 '최신 반영 필요'(서버가 센 뒤처진 버전 수), 작업본이면 기준 = 지금
       const behind = source === 'draft' ? Math.max(0, Number(mine?.cr?.behind) || 0) : 0;
-      Object.assign(s.draft, { ...emptyDraft(), baseVersion: version, behind, unsupported: mine?.cr?.unsupported || [], ...draftFields(draftToCur(st)) });
+      Object.assign(s.draft, { ...emptyDraft(), tutorialRestored: false, baseVersion: version, behind, unsupported: mine?.cr?.unsupported || [], ...draftFields(draftToCur(st)) });
       if (next !== 'live') s.live.error = '';
       h.error = ''; h.loading = false; h.ready = true;
       previewOpenActive = false; h.previewReady = false; applyInert();
@@ -1086,6 +1086,7 @@ export function mountEditor(el, d) {
    * v0.4: 실시간이면 지금 밀어 넣기(못 보내면 칩이 알리고 s.draft.dirty 가 남는다 — 던지지 않는다), 읽기 전용이면 할 것이 없다
    */
   async function saveNow(o = {}) {
+    if (s.draft.tutorialRestored) throw Object.assign(new Error(s.draft.error), { code: 'TUTORIAL_RESTORED' });
     if (mode === 'live') {
       clearTimeout(pushTimer); pushTimer = null;
       if (pushing) { try { await pushing; } catch { /* 칩 */ } }
@@ -1243,7 +1244,7 @@ export function mountEditor(el, d) {
 
   /** 밀어 넣기 예약: 쉼 ms(기본 800ms) — 쉬지 않고 쳐도 첫 입력 뒤 3초 안에 한 번. o.exact: 그 시간 그대로(실패 뒤 다시 — 5·10·15초) */
   function schedulePush(ms = PUSH_IDLE_MS, o = {}) {
-    if (destroyed || mode !== 'live') return;
+    if (destroyed || mode !== 'live' || s.draft.tutorialRestored) return;
     const now = Date.now();
     if (!pushFirstAt) pushFirstAt = now;
     clearTimeout(pushTimer);
@@ -1258,7 +1259,7 @@ export function mountEditor(el, d) {
    * '보내지 못함'(5·10·15초 뒤 저절로). 던지지 않는다 → 응답 | null
    */
   async function pushOnce() {
-    if (mode !== 'live' || !cw || !studio || destroyed || !h.ready || s.readOnly) return null;
+    if (mode !== 'live' || !cw || !studio || destroyed || !h.ready || s.readOnly || s.draft.tutorialRestored) return null;
     if (pushing) { pushAgain = true; return pushing; }
     if (lastSeq <= savedSeq) return null;
     clearTimeout(pushTimer); pushTimer = null; pushFirstAt = 0;
@@ -1325,6 +1326,15 @@ export function mountEditor(el, d) {
   function onPushError(e) {
     const code = e?.code;
     if (destroyed) return null;
+    if (code === 'TUTORIAL_RESTORED' && e?.data?.reload) {
+      clearTimeout(pushTimer); pushTimer = null; pushFirstAt = 0; pushAgain = false;
+      clearTimeout(syncTimer); syncTimer = null; syncWant = null;
+      const message = '다른 창에서 이 연습 문서를 복구했습니다. 이 창의 글은 자동 저장하지 않습니다. [다시 열기]로 복구한 문서를 여세요.';
+      Object.assign(s.draft, { tutorialRestored: true, stale: true, rebased: false, elsewhere: '연습 문서 복구됨', error: message });
+      s.live.error = message;
+      toast(message, { kind: 'warn', ms: 10000 });
+      return null;
+    }
     // (아래 둘은 이 창이 알아서 푼다 — 지난 '보내지 못함'은 지운다)
     if (code === 'STALE_BASE' || code === 'BAD_BASE' || code === 'NOT_REALTIME' || code === 'FORBIDDEN') { s.live.error = ''; s.draft.error = ''; pushFails = 0; }
     // (곧바로 부른다 — 앞부분이 바로 carrying·switching 을 세워 그 사이 맞추기가 옛 기준으로 또 밀어 넣지 않게)
@@ -1378,7 +1388,7 @@ export function mountEditor(el, d) {
   }
   /** 맞춤 대기에 더한다(남의 고침·섞인 밀어 넣기). by·refs = 고친 사람·그 자리(지금 기준 ref — 밑줄 색), force = 판을 몰라도 확인 */
   function wantSync({ version = 0, by = null, refs = [], force = false, formatting = false } = {}) {
-    if (mode === 'review' || destroyed) return;
+    if (mode === 'review' || destroyed || s.draft.tutorialRestored) return;
     if (!syncWant) syncWant = { version: 0, since: Date.now(), by: new Map(), last: null, force: false };
     syncWant.version = Math.max(syncWant.version, Number(version) || 0);
     if (force) syncWant.force = true;

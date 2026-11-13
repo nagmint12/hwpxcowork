@@ -10,6 +10,7 @@ import { seedTutorialExamples } from './tutorial-examples.js';
 import { writeFileAtomic } from './store.js';
 import { tutorialOwnerKey, ownsTutorial } from './tutorial-identity.js';
 import { createTutorialDefinitionStore } from './tutorial-definition-store.js';
+import { createTutorialRecovery, tutorialProgress } from './tutorial-recovery.js';
 import { defaultTutorialDefinition, TUTORIAL_SOURCES } from '../web/tutorial-definition.js';
 
 const list = (v) => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map((x) => String(x).trim()).filter(Boolean);
@@ -80,6 +81,7 @@ export function tutorialConfig(cfg) {
 }
 
 export function createTutorial({ service, config }) {
+  const recovery = createTutorialRecovery({ service });
   const conf = () => tutorialConfig(config);
   /** 공유 계정(config.tutorial.users — 모든 문서에서 공유 AI) */
   const isUser = (name) => conf().on && conf().users.has(String(name ?? ''));
@@ -215,7 +217,7 @@ export function createTutorial({ service, config }) {
 
   function progress(user, id) {
     const meta = ownSession(user, id);
-    return { docId: id, i: 0, ctx: {}, ...meta.tutorialProgress };
+    return tutorialProgress(meta);
   }
   async function saveProgress(user, id, value) {
     if (!Number.isInteger(value?.i) || value.i < 0 || value.i > 10000 || !value.ctx || typeof value.ctx !== 'object' || Array.isArray(value.ctx) || JSON.stringify(value).length > 32768)
@@ -224,9 +226,15 @@ export function createTutorial({ service, config }) {
       const meta = ownSession(user, id);
       if (!meta.tutorialSession) throw new ServiceError('TUTORIAL_SAVED', '이미 완료한 튜토리얼입니다', 409);
       meta.tutorialOwnerKey ||= tutorialOwnerKey(user);
-      meta.tutorialProgress = { docId: id, i: value.i, ctx: value.ctx };
-      service.store.saveMeta(meta);
-      return { saved: true };
+      return recovery.save(meta, value);
+    });
+  }
+
+  async function restore(user, id, value) {
+    return service._tx(id, async () => {
+      const meta = ownSession(user, id);
+      if (!meta.tutorialSession || meta.tutorialCompletedAt) throw new ServiceError('TUTORIAL_SAVED', '문서함에 저장한 완료본은 단계 복구 대상이 아닙니다', 409);
+      return recovery.restore(meta, value, user);
     });
   }
 
@@ -296,5 +304,5 @@ export function createTutorial({ service, config }) {
     });
   }
 
-  return { conf, isUser, canUse, autoFor, introFor, visit, status, entry, progress, saveProgress, start, complete, discard, definition, saveDefinition };
+  return { conf, isUser, canUse, autoFor, introFor, visit, status, entry, progress, saveProgress, restore, start, complete, discard, definition, saveDefinition };
 }

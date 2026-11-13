@@ -73,7 +73,8 @@ test('custom 모듈은 직접 클릭·글 선택·타이핑을 연결하고 전�
   const input = { tagName: 'TEXTAREA', value: '', isConnected: true, focus() {}, dispatchEvent() {} };
   const button = { clicked: 0, click() { this.clicked++; } };
   const env = environment(); env.q = selector => selector === '#input' ? input : button;
-  env.selectFor = async text => { env.selected = text; return { ref: 's0/p1' }; }; env.selHas = text => env.selected === text;
+  env.locate = text => ({ ref: 's0/p1', start: 0, end: [...text].length });
+  env.selectFor = async text => { env.selected = text; return env.s.selection = { ...env.locate(text), endRef: 's0/p1', refs: ['s0/p1'], text }; }; env.selHas = text => env.selected === text;
   const modules = [{ key: 'mine', moduleId: 'custom', motion: false, steps: [
     { key: 'click', kind: 'custom', actionId: 'click-target', title: '직접 클릭', text: '버튼을 직접 누릅니다.', params: { scope: 'document', selector: '#button' } },
     { key: 'type', kind: 'custom', actionId: 'type-text', title: '예시 입력', text: '문장을 입력합니다.', params: { scope: 'document', selector: '#input', value: '입력 예시' } },

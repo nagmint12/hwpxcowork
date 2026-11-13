@@ -10,7 +10,8 @@ export function buildAiReview(env) {
     const aLead = () => { const p = sample('A'); return p ? [...String(p.text).replace(/^예시 문단 A\s*[—–-]\s*/, '')].slice(0, 14).join('') : null; };
     const aPicked = () => env.toolbarShown?.() && (env.selHas?.('본 조사') || env.selHas?.('예시 문단 A'));
     const sample = letter => (s.paragraphs || []).find(p => new RegExp(`^예시 문단 ${letter}\\s*[—–-]\\s*`).test(String(p.text || '')));
-    const done = () => (s.requests || []).find(r => r.example && r.status === 'done') || s.requests?.find(r => r.status === 'done');
+    const done = () => (s.requests || []).find(r => r.example && r.status === 'done');
+    const sampleTarget = target => { const p = sample('A'); const body = p && String(p.text).replace(/^예시 문단 A\s*[—–-]\s*/, ''); return !!p && !!target && target.ref === p.ref && (!target.endRef || target.endRef === p.ref) && String(target.text || '').includes(body); };
     const proposal = index => (s.proposals || []).filter(p => p.rid === done()?.rid)[index];
     const showRequest = request => { if (!request) return; s.tab = 'ai'; s.activeRid = request.rid; s.active = { kind: 'request', id: String(request.rid) }; s.panelPing = (Number(s.panelPing) || 0) + 1; };
     const control = (index, action) => proposalControl(document, proposal(index)?.pid, action, done()?.rid);
@@ -30,7 +31,7 @@ export function buildAiReview(env) {
       { title: '글을 골라 요청 준비하기', text: () => (aPicked() ? '도구 막대의 [AI에게 맡기기]를 누르세요. 요청에는 원하는 결과를 구체적으로 적고, 자료가 있으면 첨부합니다.' : `4장 ‘예시 문단 A’의 본문을 ${env.dragHow || '끌어'} 고르세요. 문단이 길어 고르기 어려우면 아래 [예시 문단의 AI 요청 열기]를 누르세요.`),
         enter: () => { const p = sample('A'); if (p) focusIn(d, { ref: p.ref }, { quiet: true }); },
         ring: () => (aPicked() ? pad(inFrame(env.toolbarBtn('instruct')), 4) : phraseRect(aLead() || '예시 문단 A')), open: frameRect,
-        action: { label: '예시 문단의 AI 요청 열기', run: async () => { const p = sample('A'); if (!p) throw new Error('4장의 예시 문단 A를 찾지 못했습니다'); const body = String(p.text).replace(/^예시 문단 A\s*[—–-]\s*/, ''); const t = await selectFor(body); if (!t) throw new Error('예시 문단 본문을 찾지 못했습니다'); if (env.isCurrentStep?.('글을 골라 요청 준비하기') === false) return; d.openComposer(t, 'instruct', { instruction: exampleInstruction }); ctx.reviewPromptPending = true; } }, until: () => !!s.composer },
+        action: { label: '예시 문단의 AI 요청 열기', run: async () => { const ticket = env.stepIdentity?.(); const p = sample('A'); if (!p) throw new Error('4장의 예시 문단 A를 찾지 못했습니다'); const body = String(p.text).replace(/^예시 문단 A\s*[—–-]\s*/, ''); const t = await selectFor(body); if (env.stepIdentity && env.stepIdentity() !== ticket) return; if (!t) throw new Error('예시 문단 본문을 찾지 못했습니다'); if (env.isCurrentStep?.('글을 골라 요청 준비하기') === false) return; d.openComposer(t, 'instruct', { instruction: exampleInstruction }); ctx.reviewPromptPending = true; } }, until: () => s.composer?.kind === 'instruct' && sampleTarget(s.composer.target) },
       { title: '요청·자료·보낼 곳 확인', text: '요청 창의 지시와 첨부, 보낼 곳을 확인합니다. 실제 [보내기]는 연결된 AI로 작업을 보냅니다. 이번에는 준비된 결과를 사용하므로 다음 버튼으로 요청 창을 닫습니다.', ring: top('.composer-win'), open: () => rectOf(q('.composer-win')), next: '준비된 결과 보기',
         enter: () => { if (ctx.reviewPromptPending && s.composer?.phase === 'edit' && s.composer.instruction === exampleInstruction) { ctx.reviewPromptPending = false; s.composer.instruction = ''; typeInTutorialComposer(env, exampleInstruction, '요청·자료·보낼 곳 확인').catch(() => {}); } },
         action: { label: '예시 요청 타이핑', run: () => typeInTutorialComposer(env, exampleInstruction, '요청·자료·보낼 곳 확인') }, leave: () => d.closeWindow('composer') },
@@ -42,8 +43,8 @@ export function buildAiReview(env) {
         ring: () => pad(rectOf(control(1, 'reject')), 4), open: () => pad(rectOf(control(1, 'reject')?.closest('[data-pid]')), 6), click: () => control(1, 'reject'), until: () => proposal(1)?.status === 'rejected' },
       { title: '반영한 제안 되돌리기', press: '되돌리기', text: '방금 반영한 첫 제안의 초록 테두리 [되돌리기]를 직접 누르세요. 다른 편집과 겹친 경우에는 현재 문서 상태를 확인해야 하므로 되돌림이 보류될 수 있습니다.', enter: () => showControl(0, 'undo'),
         ring: () => pad(rectOf(control(0, 'undo')), 4) || top('.panel, .review-rail')(), open: () => pad(rectOf(control(0, 'undo')?.closest('[data-pid]')), 6), click: () => control(0, 'undo'), reveal: () => control(0, 'undo'),
-        action: { label: '첫 제안 반영 되돌리기', show: () => !control(0, 'undo'), run: async () => { const p = proposal(0); if (p?.status === 'applied') await d.undoProposal(p); ctx.undone = true; } },
-        until: () => !!ctx.undone || (!!proposal(0) && proposal(0).status !== 'applied') },
+        action: { label: '첫 제안 반영 되돌리기', show: () => !control(0, 'undo'), run: async () => { const ticket = env.stepIdentity?.(); const p = proposal(0); if (p?.status !== 'applied') throw new Error('되돌릴 반영 제안이 없습니다. [이 단계 다시하기]로 복구해 주세요.'); await d.undoProposal(p); if (env.stepIdentity && env.stepIdentity() !== ticket) return; ctx.undone = p.pid; } },
+        until: () => proposal(0)?.status === 'undone' || (!!proposal(0) && ctx.undone === proposal(0).pid && proposal(0).status === 'pending') },
       { title: '대기 중인 요청', text: '대기는 요청을 가져갈 AI를 기다리는 상태입니다. 내 API 키, ChatGPT MCP, 개인 실행기 중 사용할 연결이 있어야 처리됩니다. 예시 요청을 실제로 보낼 필요는 없습니다.', enter: () => showRequest((s.requests || []).find(r => r.status === 'pending')), ring: top('.panel'), next: '실패한 요청 보기' },
       { title: '실패 원인과 다시 요청', text: '실패한 요청의 오류를 먼저 확인합니다. 이 예시는 첨부 파일이 없어 실패한 경우입니다. 실제 작업에서는 자료나 연결을 보완한 뒤 다시 요청합니다.', enter: () => showRequest((s.requests || []).find(r => r.status === 'failed')), ring: top('.panel'), next: '메모와 답글 보기' },
       { title: '메모의 근거와 답글', text: '예시 문단 C의 87%에는 수치의 근거를 요청한 메모와 답글이 있습니다. 메모에서 의견을 주고받고, 필요하면 그 의견을 AI에게 요청할 수 있습니다.', enter: () => { const p = sample('C'); if (p) focusIn(d, { ref: p.ref }, { quiet: true }); s.tab = 'review'; }, ring: () => phraseRect('87%'), open: frameRect, next: '내 AI 연결 안내로 이어가기' },

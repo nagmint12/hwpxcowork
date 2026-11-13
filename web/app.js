@@ -16,7 +16,7 @@ import { isMobileDevice } from './mobile-settings.js';
 import { mountEditor } from './editor.js';
 import { startClientLog } from './client-log.js';
 import { FloatWin, Composer, EditPopover, MemoEditor, InlineConfirm, openCr as openCrIn, requestGlance, askAiLabel, ASK_AI_TIP } from './ui.js';
-import { loadTour, saveTour, clearTour } from './tutorial.js';
+import { loadTour, saveTour, clearTour, flushTour } from './tutorial.js';
 import { TutorialMenu } from './tutorial-menu.js';
 import { prepareTutorialEntry } from './tutorial-entry.js';
 import { consumeWelcomeIntent } from './onboarding-model.js';
@@ -60,7 +60,7 @@ window.addEventListener('hashchange', async () => {
   const guard = leaveGuard;
   if (guard && next !== state.route && docOf(next) !== docOf(state.route)) {
     // 잇달아 옮기면(두 번 누름) 확인은 한 번만
-    if (!leaving) leaving = Promise.resolve().then(guard).catch(() => true).finally(() => { leaving = null; });
+    if (!leaving) leaving = Promise.resolve().then(guard).catch(e => { toastError(e, '문서를 나가기 전에 상태를 확인하지 못했습니다: '); return false; }).finally(() => { leaving = null; });
     const go = await leaving;
     if (gen !== routeGen) return;   // 그사이 또 옮겼다 — 나중 것이 맡는다
     if (go === false) { try { history.replaceState(null, '', state.route); } catch { /* 옛 브라우저 */ } return; }
@@ -469,7 +469,7 @@ const DocView = {
       <button class="pill ver" v-if="verLabel" data-testid="version-pill" :title="verTitle" @click="s.tab = 'history'">{{ verLabel }}</button>
       <span class="pill pcpill" v-if="s.info?.local" :class="'st-' + s.info.local.state" :title="localTip(s.info.local)" data-testid="pc-pill">{{ localLabel(s.info.local) }}</span>
       <span class="draftchip" :class="chip.cls" :title="chip.tip" data-testid="draft-chip"><span class="dot" aria-hidden="true"></span><span class="chip-text">{{ chip.text }}</span>
-        <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="s.draft.stale && !liveMode ? '서버의 지금 수정본을 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ s.draft.stale && !liveMode ? '다시 열기' : '다시' }}</button>
+        <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="s.draft.tutorialRestored || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ s.draft.tutorialRestored || (s.draft.stale && !liveMode) ? '다시 열기' : '다시' }}</button>
         <button v-if="chip.keep" class="linkbtn" data-testid="chip-keep" title="서버의 내 수정본을 이 창의 글로 덮어씁니다" @click="keepMine">이 글로 저장</button>
         <button v-if="chip.carry" class="linkbtn" data-testid="chip-carry" :disabled="carrying" title="서버의 지금 수정본을 열고 이 창에서 고친 문단을 그 위에 다시 넣습니다" @click="carryMine">내 글 옮기기</button></span>
       <template v-if="!liveDoc">
@@ -671,6 +671,7 @@ const DocView = {
     const behind = computed(() => s.draft.behind > 0 && (!!s.myCr || s.draft.dirty) && !s.draft.rebased);
     const chip = computed(() => {
       const dr = s.draft; const cr = s.myCr; const e = s.editor;
+      if (dr.tutorialRestored) return { text: '연습 문서 복구됨 —', cls: 'error', retry: true, tip: dr.error };
       // v0.4 실시간·읽기 전용(§2.4-8): '실시간 · 저장됨 10:31' / '보내는 중…' / '보내지 못함 — [다시]' / '읽기 전용'
       if (e?.ready && (e.mode === 'live' || e.mode === 'follow')) {
         const c = liveChip({ ready: true, readOnly: e.mode === 'follow', error: s.live.error, pushing: s.live.pushing, progress: s.live.progress, dirty: dr.dirty, savedAt: hhmm(s.live.savedAt) });
@@ -703,6 +704,10 @@ const DocView = {
     const behindTip = computed(() => `${myBaseV.value ? `v${myBaseV.value} 이후 바뀜 — ` : ''}다른 사람의 반영으로 공유 문서에 새 버전이 생겼습니다. [최신으로 맞추기]를 누르면 내 수정본이 새 버전 위로 옮겨집니다`);
     const unsupportedTip = computed(() => (s.draft.unsupported || []).map((u) => `${u.ref || ''} ${u.detail || u.what}`).join('\n') + '\n— 이 변경은 공유 문서에 들어가지 않습니다');
     async function retrySave() {
+      if (s.draft.tutorialRestored) {
+        if (s.draft.dirty && !confirm('이 창에서 아직 저장하지 못한 글은 복구한 문서에 넣지 않습니다. 복구한 문서를 다시 열까요?')) return;
+        location.reload(); return;
+      }
       if (s.draft.stale) {
         // 다시 열기 = 서버의 지금 내 수정본(없으면 공유 문서)을 연다 — 이 창에서 친 저장 안 된 글은 버린다
         const more = s.draft.rebased ? '\n(버리지 않으려면 [취소] 뒤 [내 글 옮기기])' : '';
@@ -807,6 +812,8 @@ const DocView = {
      * 저장 실패·아직 저장 중) 나가면 편집기 안 글이 사라지므로 묻는다 → false 면 머문다
      */
     async function guard() {
+      if (tour && tourOn.value && !await tour.requestLeave()) return false;
+      if (tourOn.value) await flushTour(props.id).catch(() => {});
       if (s.draft.dirty || s.draft.saving) {
         try { await Promise.race([d.saveDraftNow(), new Promise((r) => setTimeout(r, 8000))]); } catch { /* 아래에서 묻는다 */ }
       }
@@ -1213,6 +1220,11 @@ const DocView = {
       addEventListener('blur', onViewportLeave);
       mount();
       await d.refresh(); d.connect();
+      try {
+        const key = `hwpx.tutorial-recovery-notice:${props.id}`;
+        const notice = sessionStorage.getItem(key); sessionStorage.removeItem(key);
+        if (notice === 'AI_IN_FLIGHT') toast('진행 중인 AI 작업을 다시 보내지 않도록 요청 전 단계로 돌아왔습니다.');
+      } catch { /* 알림 저장을 사용할 수 없어도 복구한 문서는 엽니다. */ }
       // 체험 따라 하기: 이 문서가 진행 중인 체험 문서면 편집기가 뜬 뒤 붙인다(web/tutorial.js)
       if (s.info?.tutorialSession && s.info?.tutorialGuided) {
         try {
@@ -1263,19 +1275,30 @@ const DocView = {
       } catch (e) { toastError(e, '튜토리얼을 저장하지 못했습니다: '); return false; }
       finally { tutorialSaving.value = false; }
     }
-    let tour = null; let tutorialClosed = false; const tourPaused = ref(false);
+    let tour = null; let tutorialClosed = false; let tourStartGeneration = 0; const tourPaused = ref(false);
     async function startTourHere({ showIntro = false, resume = false } = {}) {
-      for (let k = 0; k < 150 && !(s.editor?.ready && s.paragraphs?.length); k++) await new Promise((r) => setTimeout(r, 200));
-      if (tutorialClosed || !tourOn.value) return;
+      const generation = ++tourStartGeneration;
+      for (let k = 0; k < 150 && !(s.editor?.ready && s.paragraphs?.length) && !tutorialClosed && generation === tourStartGeneration; k++) await new Promise((r) => setTimeout(r, 200));
+      if (tutorialClosed || !tourOn.value || generation !== tourStartGeneration) return;
+      if (!(s.editor?.ready && s.paragraphs?.length)) { tourPaused.value = true; toast('편집기가 아직 준비되지 않았습니다. 준비된 뒤 [튜토리얼 계속하기]를 눌러 주세요.'); return; }
       if (tour) tour.stop();
       const m = await import('./tutorial.js');
       await refreshTutorialCatalog().catch(() => { tutorialItems.value = []; });
-      if (tutorialClosed || !tourOn.value) return;
+      if (tutorialClosed || !tourOn.value || generation !== tourStartGeneration) return;
       const saved = m.tourState(props.id);
       if (saved?.ctx?.guidePaused && !resume) { tourPaused.value = true; return; }
       if (saved?.ctx) saved.ctx.guidePaused = false;
       tourPaused.value = false;
-      tour = m.runTour({ d, docId: props.id, me: state.me, config: state.config, showIntro, onComplete: completeTutorial, onNext: nextCourse.value ? startNextTutorial : null, onEnd: ({ done }) => {
+      tour = m.runTour({ d, docId: props.id, me: state.me, config: state.config, showIntro, onComplete: completeTutorial,
+        onRestore: async value => {
+          tour = null;
+          if (value.recoveryFallback?.reason === 'AI_IN_FLIGHT') {
+            try { sessionStorage.setItem(`hwpx.tutorial-recovery-notice:${props.id}`, 'AI_IN_FLIGHT'); } catch { /* 알림만 생략 */ }
+          }
+          // 편집기의 undo·자동 저장·지연 응답을 함께 버리고 서버 복구본으로 새 실행을 시작합니다.
+          location.reload();
+        },
+        onNext: nextCourse.value ? startNextTutorial : null, onEnd: ({ done }) => {
         tour = null; tourPaused.value = !done;
         if (!done) toast('안내를 닫았습니다. 자유롭게 편집한 뒤 [튜토리얼 계속하기]로 이어가세요.');
       } });
@@ -1287,6 +1310,7 @@ const DocView = {
     }
     onBeforeUnmount(() => {
       tutorialClosed = true;
+      tourStartGeneration++;
       automationClosed = true; clearInterval(automationPoll); clearInterval(overTimer); clearTimeout(peekTimer); clearTimeout(edgeTimer); clearTimeout(foldTimer);
       document.removeEventListener('pointerdown', onDownOutside, true); document.removeEventListener('pointermove', onHostMove, true);
       document.documentElement.removeEventListener('pointerleave', onViewportLeave);

@@ -92,7 +92,9 @@ test('새 연습은 모듈 구성을 고정하고 기존 연습·진행을 구�
     assert.equal((await A(`/api/docs/${before.docId}`)).tutorialDefinitionRevision, initial.revision);
     assert.equal((await A(`/api/docs/${before.docId}`)).tutorialTitle, oldInfo.tutorialTitle);
     assert.equal((await A(`/api/docs/${before.docId}`)).tutorialDescription, oldInfo.tutorialDescription);
-    assert.deepEqual(await A(`/api/tutorial/${before.docId}/progress`), { docId: before.docId, i: 120, ctx: { test: 'saved' } });
+    const progress = await A(`/api/tutorial/${before.docId}/progress`);
+    assert.deepEqual({ docId: progress.docId, i: progress.i, ctx: progress.ctx }, { docId: before.docId, i: 120, ctx: { test: 'saved' } });
+    assert.equal(progress.revision, 1); assert.ok(progress.checkpointId);
     // 구버전 세션은 모듈 snapshot이 없더라도 원래 ID로 열 수 있다.
     const metaFile = path.join(srv.dataDir, 'tutorial-sessions', 'docs', before.docId, 'meta.json');
     const legacy = JSON.parse(fs.readFileSync(metaFile, 'utf8'));

@@ -23,8 +23,7 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
     // Legacy sessions recover by tutorialStep; composed modules only recover their own requests.
     const newRequest = (task) => reqOf(ridOf(task))
       || (!env.moduleKey && [...(s.requests || [])].reverse().find(r => r.tutorialStep === task.id))
-      || (ctx[`before${task.id}`] && [...(s.requests || [])].reverse().find((r) => r.tutorialStep === task.id && !ctx[`before${task.id}`].includes(r.rid)))
-      || (ctx[`before${task.id}`] && (s.requests || []).find((r) => !ctx[`before${task.id}`].includes(r.rid) && !r.tutorialStep));
+      || (ctx[`before${task.id}`] && [...(s.requests || [])].reverse().find((r) => r.tutorialStep === task.id && !ctx[`before${task.id}`].includes(r.rid)));
     const finished = (task) => ['done', 'failed', 'cancelled'].includes(reqOf(ridOf(task))?.status);
     const propsOf = (task) => (s.proposals || []).filter((p) => p.rid === ridOf(task));
     const pendingOf = (task) => propsOf(task).filter((p) => p.status === 'pending' && !d.proposalDone?.(p));
@@ -35,21 +34,23 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
     const attachNames = (task) => (task.attach || []).flatMap((part) => (s.attachments || []).filter((a) => String(a.name || '').toLowerCase().includes(String(part).toLowerCase())).map((a) => a.name));
     const chips = () => q('.composer-win .cmp-chips');
     async function openTask(task, stepTitle) {
+      const ticket = env.stepIdentity?.();
       if (s.composer || newRequest(task)) return;
       let t;
       if (task.target.doc) t = { scope: 'document', display: '문서 전체', refs: [] };
       else { t = await selectFor(titleOf(task)); if (!t) throw new Error(`‘${titleOf(task)}’을(를) 문서에서 찾지 못했습니다`); }
-      if (env.isCurrentStep?.(stepTitle) === false || s.composer) return;
+      if ((env.stepIdentity && env.stepIdentity() !== ticket) || env.isCurrentStep?.(stepTitle) === false || s.composer) return;
       d.openComposer(t, 'instruct', { instruction: '', tutorialStep: task.id, attachments: attachmentsOf(task) });
       await typePrompt(task, stepTitle);
     }
     // 요청 글을 한 글자씩 쳐 넣는 연출(2026-11-04) — 치는 동안은 [보내기] 테두리를 숨기고, 단계를 떠나거나 창을 닫으면 멈춘다
     let typing = null;
     async function typePrompt(task, stepTitle) {
+      const ticket = env.stepIdentity?.();
       const composer = s.composer; const me = typing = {};
       try {
         await typeTutorialPrompt({ composer, text: task.prompt,
-          current: () => typing === me && s.composer === composer && env.isCurrentStep?.(stepTitle) !== false,
+          current: () => (!env.stepIdentity || env.stepIdentity() === ticket) && typing === me && s.composer === composer && env.isCurrentStep?.(stepTitle) !== false,
           reduced: env.motionReduced || (() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) });
       } finally { if (typing === me) typing = null; }
     }
@@ -107,7 +108,7 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
         reveal: () => requestControl(document, ridOf(task)),
         motion: () => ({ rect: rectOf(requestControl(document, ridOf(task))), mode: 'click' }),
         ...(['S3', 'S4'].includes(task.id) ? { example: keyBox(task) } : {}),
-        until: () => finished(task) && propsOf(task).length > 0 && !pendingOf(task).length,
+        until: () => reqOf(ridOf(task))?.status === 'done' && propsOf(task).length > 0 && !pendingOf(task).length,
         next: n === tasks.length - 1 ? '완료 단계로' : '반영하지 않고 다음', nextPlain: n < tasks.length - 1 });
     });
     steps.unshift(intro(`AI 활용 심화 — 선택한 AI 작업 ${tasks.length}가지`, `가상의 분석 보고서에서 ${tasks.map((t) => t.title).join(' → ')} 순서로 AI에게 맡깁니다. 화면 속 가상 커서와 타이핑 예시를 보고 [보내기]와 [모두 반영]을 직접 누르세요. 가상 커서는 클릭 위치만 보여 주며, 반영하면 바뀐 본문으로 이동합니다. 답변은 미리 준비한 예시라 AI 연결이나 사용료가 필요 없습니다. 수치는 모두 연습용 가상 자료입니다.`));

@@ -11,7 +11,9 @@ test('인증 직후 준비가 끝나기 전에는 화면을 선택하지 않고 
     let resolve; const ready = new Promise(r => { resolve = r; });
     let called = false;
     const entry = prepareTutorialEntry(first, route, async (url, options) => {
-      called = true; assert.equal(url, '/api/tutorial/entry'); assert.equal(options.method, 'POST');
+      called = true;
+      if (url === '/api/docs/shared-report') { assert.equal(options, undefined); return { tutorialSession: false }; }
+      assert.equal(url, '/api/tutorial/entry'); assert.equal(options.method, 'POST');
       return ready;
     });
     assert.equal(called, true);
@@ -42,7 +44,9 @@ test('메뉴 방문·옛 시작 기록과 무관하게 미완료 토큰은 보�
     await srv.restart(); A = srv.api('a');
     assert.equal((await A('/api/me')).tutorialIntroRequired, true, '재접속해도 완료 전에는 시작 안내');
     assert.equal((await A('/api/tutorial/entry', { method: 'POST', body: {} })).docId, docId);
-    assert.deepEqual(await A(`/api/tutorial/${docId}/progress`), { docId, i: 9, ctx: { memoId: 'm1', rid1: 3 } });
+    const progress = await A(`/api/tutorial/${docId}/progress`);
+    assert.deepEqual({ docId: progress.docId, i: progress.i, ctx: progress.ctx }, { docId, i: 9, ctx: { memoId: 'm1', rid1: 3 } });
+    assert.equal(progress.revision, 1); assert.equal(progress.checkpoints.length, 1);
     assert.equal((await srv.api('b')('/api/me')).tutorialIntroRequired, true);
     assert.equal((await srv.api('admin')('/api/me')).tutorialIntroRequired, true);
   } finally { await srv.stop(); }
@@ -135,7 +139,7 @@ test('새 진입·진행 API는 인증과 유효한 단계가 필요하며 비�
     const A = srv.api('a'); const { docId } = await A('/api/tutorial/entry', { method: 'POST', body: {} });
     for (const invalid of [{ i: -1, ctx: {} }, { i: 1.5, ctx: {} }, { i: 10001, ctx: {} }, { i: 1, ctx: [] }, { i: 1, ctx: { long: 'a'.repeat(33000) } }])
       assert.equal((await A.res(`/api/tutorial/${docId}/progress`, { method: 'PUT', body: invalid })).status, 400);
-    assert.deepEqual(await A(`/api/tutorial/${docId}/progress`), { docId, i: 0, ctx: {} });
+    assert.deepEqual(await A(`/api/tutorial/${docId}/progress`), { docId, i: 0, ctx: {}, revision: 0, checkpointId: null, checkpoints: [] });
     await A(`/api/tutorial/${docId}/complete`, { method: 'POST', body: {} });
     assert.equal((await A.res(`/api/tutorial/${docId}/progress`, { method: 'PUT', body: { i: 2, ctx: {} } })).status, 409);
   } finally { await srv.stop(); }

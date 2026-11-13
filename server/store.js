@@ -236,7 +236,8 @@ export class Store {
     meta.versions.push({ n: meta.version, at, by, note });
     if (milestone) this.addMilestone(meta, { ...milestone, n: meta.version, at, by: milestone.by ?? by });
     // 기록 목록을 자르고(최근 30 — 10분 안이면 200까지 — + 사람용 버전·묶음 기록) 잘려 나간 기록의 파일을 지운다(실시간 문서는 기록이 빨리 쌓인다)
-    if (meta.versions.length > RECENT_MIN) { trimVersions(meta); this.gcVersions(id, meta); }
+    // Keep practice-session history while step checkpoints may still refer to it. Completed documents use the normal retention policy.
+    if (!meta.tutorialSession && meta.versions.length > RECENT_MIN) { trimVersions(meta); this.gcVersions(id, meta); }
     this.cache.set(id, { version: meta.version, doc });
     if (typeof this.afterCommit === 'function') { try { this.afterCommit(id, meta, bytes); } catch (e) { console.error('[저장소] afterCommit:', e.message); } }
     return meta; // 호출자가 saveMeta

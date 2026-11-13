@@ -557,6 +557,13 @@ export class LiveEditor {
     const out = await svc._tx(id, async () => {
       const { doc, meta } = await svc._load(id);
       this._gate(meta, user);
+      // A recovered practice session must not merge an old tab's buffered edits back into its restored document.
+      // Check the original base before ownBase advances it, and the version of the document actually opened by the editor.
+      const restoredAt = meta.tutorialRestoreVersion;
+      if (meta.tutorialSession && Number.isInteger(restoredAt) && (n < restoredAt || (loadedV !== null && loadedV < restoredAt))) {
+        throw new ServiceError('TUTORIAL_RESTORED', '연습 문서를 이 단계의 시작 상태로 되돌렸습니다. 현재 문서를 다시 열어 계속하세요.', 409,
+          { baseVersion: meta.version, restoreVersion: restoredAt, reload: true });
+      }
       if (n > meta.version) throw new ServiceError('BAD_BASE', '보낸 기준(base)이 지금 문서보다 새것입니다 — 편집기를 다시 여세요');
       const sentBase = n;
       n = ownBase(meta, n, seqNo, by);
