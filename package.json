@@ -8,6 +8,8 @@
     "test:chart:native": "node --test --test-concurrency=1 tests/native_chart.test.mjs",
     "start": "node server/launcher.js",
     "start:direct": "node server/index.js",
+    "setup": "node scripts/setup-personal.mjs",
+    "setup:personal": "node scripts/setup-personal.mjs",
     "mcp-stdio": "node server/mcp-stdio.js",
     "connections": "node scripts/connection-info.mjs",
     "tunnel": "node scripts/quick-tunnel.mjs",

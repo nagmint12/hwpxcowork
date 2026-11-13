@@ -19,6 +19,7 @@ import { FloatWin, Composer, EditPopover, MemoEditor, InlineConfirm, openCr as o
 import { loadTour, saveTour, clearTour } from './tutorial.js';
 import { TutorialMenu } from './tutorial-menu.js';
 import { prepareTutorialEntry } from './tutorial-entry.js';
+import { consumeWelcomeIntent } from './onboarding-model.js';
 import { nextTutorialId } from './tutorial-navigation.js';
 import { PANEL_TABS, panelTabs } from './panels.js';
 import { ReviewRail } from './rail.js';
@@ -76,7 +77,8 @@ const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('ko-KR', { hour: '
 
 // 사용자 상태를 공개하기 전에 첫 화면을 정해 문서함·문서 화면이 먼저 그려지지 않게 한다.
 async function enterApp(me, requested = state.route) {
-  const entry = await prepareTutorialEntry(me, requested, api);
+  const welcome = consumeWelcomeIntent(location, history);
+  const entry = welcome ? { route: welcome === 'tutorial' && me?.tutorial ? '#/tutorial' : requested } : await prepareTutorialEntry(me, requested, api);
   const route = entry.route;
   if (location.hash !== route) history.replaceState(null, '', route);
   state.route = route;
@@ -92,7 +94,7 @@ const Login = {
     <p class="muted">체험용 접속 토큰: <strong>test1 ~ test100</strong> 중 하나를 입력하세요.</p>
     <input v-model="token" placeholder="토큰" @keyup.enter="go" aria-label="접속 토큰"/>
     <p class="err" v-if="err">{{ err }}</p>
-    <div class="login-actions"><button class="primary" :disabled="busy" @click="go">{{ busy ? '여는 중…' : '들어가기' }}</button><a class="login-guide" href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용설명서</a><a class="login-video" href="/teaser3/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상 다시 보기</a></div>
+    <div class="login-actions"><button class="primary" :disabled="busy" @click="go">{{ busy ? '여는 중…' : '들어가기' }}</button><a class="login-guide" href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용설명서</a><a class="login-video" href="/teaser/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상 다시 보기</a><a class="login-guide" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-replay">나에게 맞게 시작하기</a></div>
     <p class="muted" style="margin-top:16px">본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다. 편집기는 rhwp(MIT)입니다.</p></div>`,
   setup() {
     const token = ref(state.token); const err = ref(''); const busy = ref(false);
@@ -117,6 +119,7 @@ const DocList = {
     <div class="topbar"><span class="title">HWPX 공동 검토</span><span class="muted me-role" :data-role="me.role">{{ me.name }} · {{ roleLabel(me.role) }}</span><span class="spacer"></span>
       <a v-if="me.role==='admin'" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
       <a v-if="me.tutorial" class="btnlike small tutorial-nav" href="#/tutorial" data-testid="tutorial-nav">튜토리얼</a>
+      <a class="btnlike small" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-list">시작 안내</a>
       <a class="btnlike help-link" href="/help.html" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
       <button class="small" @click="logout">나가기</button></div>
     <div class="libpage" :class="{'drive-mode':showDrive}">

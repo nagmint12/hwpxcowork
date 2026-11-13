@@ -7,8 +7,11 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const userDir = path.resolve(process.env.HWPX_COWORK_USERDATA || path.join(appDir, '..', 'userdata'));
+const here = path.dirname(fileURLToPath(import.meta.url));
+const packaged = fs.existsSync(path.join(here, '..', 'server', 'launcher.js'));
+// 소스 배포는 <repo>/deploy/portable, 포터블 배포는 <bundle>/app/portable 에 놓인다.
+export const appDir = packaged ? path.resolve(here, '..') : path.resolve(here, '..', '..');
+export const userDir = path.resolve(process.env.HWPX_COWORK_USERDATA || path.join(packaged ? path.resolve(appDir, '..') : appDir, 'userdata'));
 export const configFile = path.join(userDir, 'config.json');
 
 export function readConfig() {

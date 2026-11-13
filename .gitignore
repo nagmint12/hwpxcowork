@@ -4,6 +4,9 @@ node_modules/
 /.hwpx-cowork-secret
 /data/
 /userdata-personal/
+/userdata-shared/
+/runtime/
+/.hwpx-tools/
 /logs/
 /tests/out/
 *.log

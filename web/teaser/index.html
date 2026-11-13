@@ -38,14 +38,16 @@
   <script type="module">
     import { mount } from './player.js';
     const el = document.getElementById('teaser');
-    // 첫 접속 소개(?intro=1&next=/…): 한 번 재생하고 next 로 간다. 건너뛰기·Esc/Enter/스페이스는 바로,
+    // 첫 접속 소개(?intro=1&next=/…): 한 번 재생한 뒤 맞춤 시작 안내로 간다. 건너뛰기도 같은 안내로 간다.
     // 클릭·키·휠이 2초 안에 3번 이상(조급하게 누름)이어도 바로 넘어간다. next 는 같은 사이트 경로만 받는다.
     const q = new URLSearchParams(location.search);
     const intro = q.get('intro') === '1';
     const raw = q.get('next') || '/';
-    const next = raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\') ? raw : '/';
+    const next = raw.startsWith('/') && !/[\\\u0000-\u0020]/.test(raw) && new URL(raw, location.origin).origin === location.origin ? raw : '/';
+    const welcome = new URL('/onboarding.html', location.origin);
+    welcome.searchParams.set('next', next);
     let left = false;
-    const go = () => { if (!left) { left = true; location.replace(next); } };
+    const go = () => { if (!left) { left = true; location.replace(`${welcome.pathname}${welcome.search}`); } };
     // 단독으로 열면 PC 화면에서 여백을 둔 틀로, 다른 화면 안(iframe)에서는 상자를 가득 채운다
     let opts = { frame: window.self === window.top };
     if (intro) {

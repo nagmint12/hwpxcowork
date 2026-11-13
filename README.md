@@ -10,23 +10,35 @@ MCP 로 문서를 읽고 **제안·메모**를 남기는 도구입니다. 파일
 
 ## 빠른 시작
 
-필요한 것: [Node.js](https://nodejs.org/) 22 이상(24 LTS 권장), Git. Windows·macOS·Linux.
+먼저 **개인 서버 / 공동 서버**와 **ChatGPT 구독 / Claude 구독 / AI 없이 사용**을 고릅니다. 프로그램 ZIP을 새 폴더에 풀거나, 접근 권한이 있는 저장소를 복제해 VS Code에서 여세요. 비공개 저장소는 주소만으로 다른 사람이 내려받을 수 없습니다.
 
-```bash
-git clone https://github.com/nagmint12/hwpxcowork.git
-cd hwpxcowork
-npm ci
-cp config.example.json config.json      # Windows: copy config.example.json config.json
-# config.json 의 users[].token 을 각자 긴 무작위 값으로 바꾼 뒤
-npm start                               # Windows: start-server.bat 두 번 클릭
+VS Code의 Codex·Claude Code에 다음 내용을 붙여넣습니다(두 선택만 바꾸세요).
+
+```text
+이 폴더에 hwpx-cowork를 설치해 줘. 운영 방식은 개인 서버, AI는 ChatGPT 구독이야.
+AGENTS.md와 설치 안내를 읽고 Windows에서는 scripts/setup-user.bat --mode personal --ai codex --install-cli --start 를 실행해 줘.
+기존 config.json·data·전역 CLI 설정·환경 변수는 건드리지 말고 설치 폴더 안에만 준비해 줘.
+구독 로그인·동의가 필요하면 정확한 로그인 명령을 알려 주고 내가 완료한 뒤 같은 설치 명령으로 연결을 확인해 줘.
+API 키로 전환하거나 모델을 시험 호출하지 마. 서버와 실행기 연결 여부를 구분해서 알려 줘.
 ```
 
-브라우저에서 `http://localhost:8787` 을 열고 `config.json` 에 적은 관리자 토큰으로 로그인합니다.
-그 뒤의 사용자 추가·토큰 발급·서버 설정은 웹 상단 **[관리자]** 에서 합니다. 문서는 `data/` 에 저장됩니다.
+직접 실행하는 Windows 명령도 같습니다. 공동 서버는 `--mode shared`, Claude 구독은 `--ai claude-code`, AI 없이 쓰려면 `--ai none`으로 바꿉니다.
+
+```powershell
+.\scripts\setup-user.bat --mode personal --ai codex --install-cli --start
+```
+
+Node.js 22 이상이 없으면 Windows 도우미가 공식 Node 24.22.2를 `runtime/`에 준비하고 SHA-256을 확인합니다. npm 의존성, 선택한 공식 CLI가 없으면 `.hwpx-tools/`, 무작위 관리자 토큰, 설정·기록을 자동 준비합니다. 시스템 PATH와 기존 CLI 설정을 바꾸지 않습니다. macOS·Linux는 Node.js 22 이상을 준비한 뒤 `node scripts/setup-personal.mjs --mode personal --ai codex --install-cli --start`를 씁니다.
+
+기본 주소는 `http://localhost:8790`이며 충돌하면 빈 포트를 고릅니다. 설정·기록은 개인 모드 `userdata-personal/`, 공동 모드 `userdata-shared/`에 있습니다. 같은 명령을 다시 실행하면 켜진 서버·실행기를 재사용하며, 최초 로그인 뒤에도 재실행으로 연결합니다. `--status`는 상태, `--stop`은 이 도우미에서 켠 서버·실행기의 정상 종료입니다. 명령 끝에 `--no-window`를 붙이면 브라우저를 열지 않습니다.
+
+**“설치해 줘”만으로 로그인까지 저절로 완료되지는 않습니다.** CLI가 요구하는 본인 구독 로그인·OAuth 동의는 사용자가 직접 합니다. VS Code 확장 로그인만으로 CLI도 로그인됐다고 단정하지 않습니다. 설치 점검은 모델을 호출하지 않으며 구독·조직 권한·사용량 제한은 실제 요청 때 적용됩니다. API 키로 자동 전환하지 않습니다.
+
+공동 서버도 처음에는 이 PC에서만 엽니다. 관리자 화면에서 참여자를 추가하고 외부 공유는 HTTPS·접속 정책을 따로 설정합니다. 연결한 구독 AI는 관리자 본인 요청만 처리합니다. 참여자는 각자 본인 토큰과 구독으로 실행기를 연결합니다.
 
 ## 내 구독 AI 연결하기
 
-연결은 **① 내 PC의 구독 AI(기본) → ② ChatGPT 앱 연결(선택·고급) → ③ 내 AI 키(API, 사용료 별도)** 순서입니다. 먼저 서버를 켜고, VS Code 터미널(PowerShell)에서 개인 토큰을 한 번 저장합니다.
+새로 설치한 경우에는 위 도우미가 서버 주소와 토큰을 실행기에 전달하므로 아래 수동 등록은 필요하지 않습니다. 아래 절은 **기존 공유 서버에 참여하는 경우**의 수동 연결입니다. 연결은 **① 내 PC의 구독 AI(기본) → ② ChatGPT 앱 연결(선택·고급) → ③ 내 AI 키(API, 사용료 별도)** 순서입니다. 먼저 서버를 켜고, VS Code 터미널(PowerShell)에서 개인 토큰을 한 번 저장합니다.
 
 ```powershell
 setx HWPX_COWORK_TOKEN "내-개인-토큰"

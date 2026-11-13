@@ -1,5 +1,7 @@
 # 내 PC의 AI로 요청 자동 처리 — Codex 실행기
 
+새 설치에는 Windows에서 `.\scripts\setup-user.bat --mode personal --ai codex --install-cli --start` 한 줄을 권합니다. `shared`는 공동 서버 운영, `claude-code`는 Claude 구독, `none`은 AI 없는 편집입니다. Node·의존성·공식 CLI 준비, 새 설정·무작위 토큰 생성, 서버와 별도 실행기 시작을 돕습니다. 본인 구독 로그인·동의는 직접 완료하고 같은 명령을 다시 실행합니다. 설정은 설치 폴더의 `userdata-personal`/`userdata-shared`, CLI는 `.hwpx-tools`에 두며 전역 설정과 기존 운영 데이터를 바꾸지 않습니다. `--status`로 확인하고 `--stop`으로 이 설치만 끕니다. 구독을 확인하지 못하면 AI 연결을 보류하며 유료 API로 바꾸지 않습니다. 자세한 설치 선택은 [연결 안내](AGENT_SETUP.md#새-설치--두-가지-선택으로-시작)를 보세요. 아래 토큰·MCP 수동 설정은 기존 서버에 참여하거나 대화창을 별도로 연결할 때 사용합니다.
+
 2026-10-26 작성, 2026-11-13 개편(사용 설명서와 같은 우선순위). 웹에서 AI에게 맡긴 요청을 **내 PC의 구독 AI**가 바로 처리하게 하는 방법이다. 웹 설명서 `/help.html#agents`가 같은 내용을 그림과 복사 단추로 보여 준다.
 
 ## 고르는 순서

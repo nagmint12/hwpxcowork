@@ -48,7 +48,7 @@ const SERVER_FILES = [
   'tutorial/report-answers.json',
   'deploy/Caddyfile.example',
   // 웹에서 내려 주는 개인 실행기 ZIP·연결 점검·임시 터널·한글 클립보드 도우미·Claude Code 채널 준비
-  'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs', 'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'scripts/native-clipboard.py', 'scripts/seed-manuals.mjs',
+  'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs', 'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/setup-user.bat', 'scripts/setup-user.ps1', 'scripts/run-settings.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'scripts/native-clipboard.py', 'scripts/seed-manuals.mjs',
   'agent/CLAUDE.md', 'agent/.claude/settings.json', 'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md',
   // 편집기 엔진(서버 차례 새로 고침 + /vendor/rhwp-core)과 편집기 연결 모듈(/vendor/rhwp-editor)
   'vendor/rhwp/pkg/rhwp.js', 'vendor/rhwp/pkg/rhwp_bg.wasm', 'vendor/rhwp/pkg/cowork-engine.json',
@@ -60,7 +60,7 @@ const SERVER_FILES = [
 ];
 // 서버 app 의 시작 파일 — 여기서부터 상대 import 를 따라가 빠진 파일이 없는지 묶기 전에 확인한다(checkRelativeImports)
 const SERVER_ENTRIES = ['server/launcher.js', 'server/index.js', 'server/control-cli.js', 'server/mcp-stdio.js', 'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs',
-  'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs'];
+  'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs'];
 const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/.claude/settings.json',
   'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md'];
 // 트리 안에서 빼는 것: 편집기 빌드의 rhwp 예제 문서·쓰지 않는 옛 사본, 파이썬 캐시
@@ -465,7 +465,7 @@ function stageServerApp(stage, install = false) {
   copyTrees(stage, SERVER_TREES, install ? SERVER_FILES.filter((f) => !f.startsWith('node_modules/')) : SERVER_FILES);
   const deps = install ? { packages: 0, stripped: 0 } : copyDependencies(stage, SERVER_DEPENDENCIES);
   fs.writeFileSync(path.join(stage, 'package.json'), appManifest('hwpx-cowork', 'HWPX 공동 검토·편집 서버(포터블)', [...SERVER_DEPENDENCIES, 'vue'], {
-    start: 'node server/launcher.js', worker: 'node scripts/ai-worker.mjs', orchestrator: 'node scripts/orchestration-worker.mjs',
+    start: 'node server/launcher.js', setup: 'node scripts/setup-personal.mjs', 'setup:personal': 'node scripts/setup-personal.mjs', worker: 'node scripts/ai-worker.mjs', orchestrator: 'node scripts/orchestration-worker.mjs',
     connections: 'node scripts/connection-info.mjs', tunnel: 'node scripts/quick-tunnel.mjs', 'mcp-stdio': 'node server/mcp-stdio.js',
   }));
   // 직접 실행해도(포터블 도우미 없이) 예제 토큰·모든 주소 듣기로 켜지지 않는 안전한 예제

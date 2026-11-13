@@ -1,5 +1,19 @@
 # 내 PC의 Claude Code 연결 안내 — 실행기·채널·VS Code
 
+## 새 설치 — 두 가지 선택으로 시작
+
+프로그램 ZIP 또는 접근 권한이 있는 저장소를 새 폴더에 준비한 경우, Windows의 VS Code 터미널에서 다음 한 줄을 실행합니다. Node가 없으면 공식 런타임을 설치 폴더에 준비하고, npm 의존성과 공식 CLI가 없으면 설치 폴더의 `.hwpx-tools`에 설치합니다.
+
+```powershell
+.\scripts\setup-user.bat --mode personal --ai claude-code --install-cli --start
+```
+
+운영 방식은 `personal`(개인 서버) / `shared`(공동 서버), AI는 `codex`(ChatGPT 구독) / `claude-code`(Claude 구독) / `none`입니다. Node 22 이상이 있는 macOS·Linux에서는 `node scripts/setup-personal.mjs` 뒤에 같은 옵션을 붙입니다. 설치 도우미는 `userdata-personal` 또는 `userdata-shared`에 설정·기록과 무작위 관리자 토큰을 만들고, 8790부터 빈 포트에서 이 PC 전용 서버를 엽니다. 기존 `config.json`·`data`·전역 환경 변수·홈 MCP 등록은 바꾸지 않습니다.
+
+CLI의 본인 구독 로그인·OAuth 동의는 사용자가 직접 합니다. 도우미가 출력한 로그인 명령을 실행하고 같은 설치 명령을 다시 실행하면 서버를 재사용하며 실행기를 연결합니다. VS Code 확장 로그인만으로 CLI 로그인을 대신할 수 있는 것은 아닙니다. 설치·상태 확인은 모델을 호출하거나 요청을 선점하지 않습니다. 실행기를 켠 뒤 웹에서 맡긴 실제 요청은 본인의 구독 사용량을 씁니다. API 키로 자동 전환하지 않습니다.
+
+`--status`로 상태, `--stop`으로 이 설치의 서버·실행기를 정상 종료합니다. `--no-window`는 브라우저를 열지 않습니다. 공동 서버는 처음에는 이 PC에서만 열고 사용자 추가·HTTPS 공유를 후속 설정합니다. 관리자의 구독 AI는 본인 요청만 처리하며 참여자는 본인 토큰·구독으로 연결합니다. 아래 수동 절차는 기존 공유 서버에 참여하거나 대화창 MCP·채널을 별도 등록할 때 사용합니다.
+
 웹 편집기에서 **AI에게 맡기기**로 일을 맡기면, 내 PC에 띄워 둔 Claude Code가 곧바로 알림을 받아 처리하게 하는 방법입니다. Claude 구독 사용량 안에서 처리하므로 추가 비용이 없습니다. 결과는 문서에 **제안·메모**로 남고, 반영은 언제나 사람이 편집기에서 합니다. 같은 세션에 **변경 요청 검토**(의견·수정 요청만 — 승인·반영은 못 함)도 시킬 수 있습니다(§8).
 
 웹 설명서 `/help.html#agents`가 같은 절차를 그림과 복사 단추로 보여 줍니다. Codex(ChatGPT 구독) 실행기는 [자동 처리 안내](AUTOMATIC_AI_GUIDE.md), 중앙 서버·외부 접속·유료 API 실행기는 [운영 매뉴얼](DEPLOYMENT_AND_AI_GUIDE.md)에 있습니다.
