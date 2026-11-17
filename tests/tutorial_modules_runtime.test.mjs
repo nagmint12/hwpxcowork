@@ -37,6 +37,7 @@ test('의견만 남은 빈 검토는 수정 지시로 새로 요청하고 실습
   env.s.proposals.push({ rid: 1, status: 'pending' }); assert.equal(step.until(), false);
   env.s.proposals.push({ rid: 2, status: 'pending' }); assert.equal(step.until(), true);
   let retried; env.d.retryRequest = async r => { retried = r.rid; };
+  env.s.requests[1].status = 'failed';
   await step.action.run(); assert.equal(retried, 2);
 });
 
@@ -59,18 +60,22 @@ test('그림 변경만 선택하거나 순서를 바꾸면 선택한 모듈만 �
   assert.equal(steps[3].text, '색을 확인하세요.');
 });
 
-test('보고서의 숫자 이동은 앞에 삽입한 안내와 반복 모듈 뒤에도 자기 모듈 안으로 이동한다', async () => {
+test('보고서 선택 결과와 복구 위치는 안내나 다른 모듈을 끼워도 자기 모듈에 남는다', async () => {
   const env = environment();
-  env.selectFor = async () => ({ ref: 's0/p1' });
-  env.d.openComposer = () => {};
+  const at = { ref: 's0/p1', start: 0, end: 17 };
+  let available = true;
+  env.locate = () => available ? at : null;
+  env.selectExact = async text => { env.s.selection = { ...at, text }; };
   const steps = compose('report', [ref('guide', 'intro-note', { title: '준비', text: '안내입니다.' }), ref('report-flow', 'first'), ref('report-flow', 'second')], env);
   for (const key of ['first', 'second']) {
     const pick = steps.find(step => step.moduleKey === key && step.title === '고칠 글 고르기');
-    const target = await pick.action.run();
-    assert.equal(steps[target].moduleKey, key);
-    assert.equal(steps[target].title, 'AI 에게 말하기');
+    await pick.action.run();
+    assert.equal(pick.until(), true);
+    assert.equal(steps[steps.indexOf(pick) + 1].title, 'AI에게 맡기기');
     const lost = steps.find(step => step.moduleKey === key && step.title === 'AI에게 맡기기');
+    available = false;
     assert.equal(steps[lost.lost()], pick);
+    available = true;
   }
 });
 

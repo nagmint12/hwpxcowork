@@ -27,7 +27,7 @@ test('심화는 5작업 — 작업마다 [보내기]·[모두 반영] 두 단계
   env.ctx.appliedAtS1 -= 3500; assert.equal(gate.reviewWait(), false, '하나가 남아도 3초 동안 그대로면 확인 창을 띄운다');
   assert.match(gate.text(), /남은 제안 1건/);
   env.s.proposals.pop(); assert.equal(gate.until(), true); assert.equal(gate.reviewWait(), false);
-  env.s.proposals[0].status = 'rejected'; assert.equal(gate.until(), true);
+  env.s.proposals[0].status = 'rejected'; assert.equal(gate.until(), false, '거절 상태는 반영 완료가 아니다');
   assert.ok(!steps.some(s => /연결 확인/.test(s.title)), '개인 AI 연결 단계 없음');
 });
 
@@ -81,13 +81,16 @@ test('AI 연결은 내 PC의 Codex·Claude Code 먼저 — 고른 연결의 안�
   assert.ok(!blocks.some(block => /Bearer (?!\$\{HWPX_COWORK_TOKEN\})|sk-|--trust/.test(block.value)), '복사 상자에 실제 토큰·키나 확인 생략 옵션을 넣지 않는다');
 });
 
-test('복사 실습은 자동 선택·단추 대리 클릭 없이 실제 선택과 새 복사 데이터를 확인한다', () => {
+test('복사 실습은 선택을 도와도 직접 만든 새 복사 데이터를 확인한다', async () => {
   const env = environment();
-  env.cw = () => { throw new Error('복사 영역을 자동 선택하면 안 된다'); };
+  const commands = [];
+  env.fdoc = () => ({ defaultView: { rhwpStudio: { automation: { execute: command => commands.push(command) } } } });
   const steps = buildTutorialSteps('clipboard', env);
   const select = steps.find(s => s.title === '복사할 내용을 직접 선택하기');
   const copy = steps.find(s => s.title === '선택한 내용을 실제로 복사하기');
-  assert.equal(select.action, undefined); assert.equal(copy.action, undefined);
+  assert.equal(copy.quick, undefined);
+  await select.quick(); await copy.action.run();
+  assert.deepEqual(commands, ['edit:select-all', 'edit:select-all']);
   env.s.selection = { collapsed: true, text: '영역 시작 ... 영역 끝' }; assert.equal(select.until(), false);
   env.s.selection = { collapsed: false, text: '일부 글만' }; assert.equal(select.until(), false);
   env.s.selection.text = '영역 시작 ... 영역 끝'; assert.equal(select.until(), true);
@@ -97,7 +100,7 @@ test('복사 실습은 자동 선택·단추 대리 클릭 없이 실제 선택�
   copy.enter(); assert.equal(copy.until(), false, '이전 복사 이벤트로 새 연습을 통과시키지 않는다');
 });
 
-test('휴대폰 복사 실습은 도구 막대 안내 후 자동 선택 없이 한/글 붙여넣기 그림으로 이어진다', () => {
+test('휴대폰 복사 실습은 도구 막대 안내 후 직접 실습과 붙여넣기 그림을 제공한다', () => {
   const steps = buildTutorialSteps('clipboard', { ...environment(), touch: true });
   assert.equal(steps[1].title, '편집 도구 막대 켜기');
   const select = steps.find(s => s.title === '복사할 내용을 직접 선택하기');
@@ -107,7 +110,7 @@ test('휴대폰 복사 실습은 도구 막대 안내 후 자동 선택 없이 �
   assert.ok(!buildTutorialSteps('clipboard', environment()).some(s => s.title === '편집 도구 막대 켜기'), 'PC 는 그대로');
 });
 
-test('AI 검토의 반영·거절은 실제 제안 단추를 가리키고 되돌리기만 안내 동작으로 실행한다', async () => {
+test('AI 검토는 실제 제안 단추와 같은 일을 수행하는 빠른 완료를 제공한다', async () => {
   const env = environment(); const calls = [];
   env.s.requests = [{ rid: 1, example: true, status: 'done' }];
   env.s.proposals = [{ pid: 11, rid: 1, status: 'pending' }, { pid: 12, rid: 1, status: 'pending' }];
@@ -119,10 +122,10 @@ test('AI 검토의 반영·거절은 실제 제안 단추를 가리키고 되돌
   const apply = steps.find(s => s.title === '제안 하나 반영하기'); const reject = steps.find(s => s.title === '마음에 들지 않는 제안 거절');
   assert.equal(apply.action, undefined); assert.equal(reject.action, undefined);
   assert.equal(typeof apply.click, 'function'); assert.equal(typeof reject.click, 'function');
-  assert.equal(apply.until(), false); env.s.proposals[0].status = 'applied'; assert.equal(apply.until(), true);
-  assert.equal(reject.until(), false); env.s.proposals[1].status = 'rejected'; assert.equal(reject.until(), true);
+  assert.equal(apply.until(), false); await apply.quick(); assert.equal(apply.until(), true);
+  assert.equal(reject.until(), false); await reject.quick(); assert.equal(reject.until(), true);
   const undo = steps.find(s => s.action?.label === '첫 제안 반영 되돌리기'); await undo.action.run(); assert.equal(undo.until(), true);
-  assert.deepEqual(calls, [['undo', 11]]);
+  assert.deepEqual(calls, [['apply', 11], ['reject', 12], ['undo', 11]]);
 });
 
 test('실제 AI 요청은 예시 제목 대신 문단 본문 전체를 선택한다', async () => {

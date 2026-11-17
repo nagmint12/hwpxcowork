@@ -2,7 +2,7 @@
 // + v0.3 협업 공용 도우미(맨 아래): 나·사람 색·권한·편집기 이동(focusRange)·요청 상태 알약·메모 스레드·그 자리 확인 줄
 // (우클릭 메뉴는 편집기 안 cowork 플러그인이 그린다 — 메뉴 모델은 menumodel.js)
 import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount, nextTick } from '/vendor/vue.esm-browser.prod.js';
-import { state, toast, toastError, fmtShort, fmtSize, clip, kinds, presets, kindLabel, presetLabel, STATUS_LABEL, fileKind, KIND_ICON, copyText, adopterNames, progressText, resolvedText, workEnv, docWorkEnv, routeOptions, agentEnvName, serverEnvName, josa, tocNote, deleteNote, CONNECT_HELP, SUB_AI_TIP, NO_AI_TIP } from './util.js';
+import { state, api, toast, toastError, fmtShort, fmtSize, clip, kinds, presets, kindLabel, presetLabel, STATUS_LABEL, fileKind, KIND_ICON, copyText, adopterNames, progressText, resolvedText, workEnv, docWorkEnv, routeOptions, agentEnvName, serverEnvName, josa, tocNote, deleteNote, bundleLabel, CONNECT_HELP, SUB_AI_TIP, NO_AI_TIP } from './util.js';
 import { diffHtml } from './diff.js';
 import { ICON } from './icons.js';
 import { requestWait } from './request-wait.js';
@@ -148,8 +148,9 @@ export const DropZone = {
 // ───────── 표 미리보기 ─────────
 export const TablePreview = {
   props: { table: Object },
-  template: `<div class="tblprev"><div class="muted" v-if="table?.caption">{{ table.caption }}</div><table><tr v-for="(r, i) in (table?.rows || []).slice(0, 12)" :key="i" :class="{head: i < (table.headerRows ?? 1)}"><td v-for="(c, j) in r" :key="j">{{ c }}</td></tr></table>
-    <div class="muted" v-if="(table?.rows || []).length > 12">… 모두 {{ table.rows.length }}행</div></div>`,
+  // 단위 줄(table.unit)·주석(table.notes — 줄 배열)은 새 연결의 표 제안만 가진다(2026-11-17, docs/MCP_REDESIGN_2026-11-16.md §10.4 나-8). 없으면 예전 그대로
+  template: `<div class="tblprev"><div class="muted" v-if="table?.caption">{{ table.caption }}</div><div class="muted" v-if="table?.unit" style="text-align:right">{{ table.unit }}</div><table><tr v-for="(r, i) in (table?.rows || []).slice(0, 12)" :key="i" :class="{head: i < (table.headerRows ?? 1)}"><td v-for="(c, j) in r" :key="j">{{ c }}</td></tr></table>
+    <div class="muted" v-if="(table?.rows || []).length > 12">… 모두 {{ table.rows.length }}행</div><div class="muted" v-for="(n, k) in (table?.notes || [])" :key="'n' + k">{{ n }}</div></div>`,
 };
 
 // ───────── 작은 '?' 도움말 ─────────
@@ -222,6 +223,7 @@ export const Composer = {
       <div class="chips presets" v-if="m.kind==='polish'" role="radiogroup" aria-label="다듬기 기준">
         <button v-for="p in presetList" :key="p.id" class="chip p" :class="{on: m.preset===p.id}" role="radio" :aria-checked="m.preset===p.id" @click="m.preset=p.id">{{ p.label }}</button></div>
       <textarea ref="ta" v-model="m.instruction" rows="3" :placeholder="placeholder" class="cmp-instr" aria-label="지시"></textarea>
+      <label v-if="workspaceEnabled" class="check" title="내용을 글자·Markdown으로 먼저 정리하고 별도 단계에서 서식을 적용합니다. 결과 사본을 검토한 뒤 한 묶음으로 반영합니다."><input type="checkbox" :checked="m.workflow==='content_format'" @change="m.workflow=$event.target.checked?'content_format':'standard'"/> 내용·서식 나눠 처리(실험)</label>
       <div class="cmp-attach">
         <DropZone ref="dz" compact :class="{over: dragOver}" label="첨부" title="자료 첨부 — 파일을 끌어다 놓거나, 눌러서 고르거나, 붙여 넣으세요" @files="addFiles"/>
         <select v-if="pickable.length" class="cmp-pick" @change="pickExisting" aria-label="문서 첨부함에서 고르기" title="이 문서에 올려 둔 첨부에서 고르기"><option value="">첨부함에서…</option><option v-for="a in pickable" :key="a.aid" :value="a.aid">{{ a.name }}</option></select>
@@ -256,6 +258,8 @@ export const Composer = {
     if (m.ctxKind === undefined) m.ctxKind = CTX_KINDS.includes(m.kind) ? m.kind : null;
     const memoEnabled = computed(() => d.s.settings?.aiMemo !== 'none');
     const showInstrOpt = computed(() => memoEnabled.value && !!String(m.instruction || '').trim());
+    const workspaceEnabled = computed(() => !!state.config?.features?.contentFormatWorkflow && m.kind === 'instruct');
+    watch(workspaceEnabled, on => { if (!on) m.workflow = 'standard'; });
     // 서식: 따로 고르는 칸 없이 지시("굵게", "가운데 정렬" …)를 보고 AI 가 서식 제안을 만든다(server/ai.js SYSTEM·aimock·MCP 안내)
     // 보낼 곳(V3 §2.2·§5.1): 자동 = 채널로 연결된 작업 환경 → 서버(내 AI 키·공용) → 대기열. 고른 길을 못 쓰면 서버가 대기열로 돌린다.
     // 이름은 연결된 환경(API·Codex·Claude Code …, util.workEnv). 공용 서버 AI 는 배포 전이라 따로 고르지 않고 이름도 드러내지 않는다
@@ -355,7 +359,7 @@ export const Composer = {
     onMounted(() => { if (m.pickFile) { m.pickFile = false; dz.value?.pick(); } else if (!props.docked) focusEditingInput(ta.value); });
     // [D] AI 빠른 작업 바로 보내기(store openComposer 의 autoSend — 문서 설정 aiQuick 'send'): 열리자마자 [보내기]와 같은 길로 한 번. 보낼 수 없으면 보내지 않고 창에 경고(warn)만
     onMounted(() => { if (m.autoSend) { m.autoSend = false; if (canSend.value) send(); } });
-    return { m, ta, dz, uploading, busyNames, dragOver, aiOn, memoEnabled, showInstrOpt, isCell, kindList, presetList, placeholder, afterNote, pickable, problem, warn, canSend, clip, setKind, addFiles, pickExisting, removeAtt, paste, drop, onLeave, send, sendAndCopy, again, agent, env, route, routeOpts, routeTip, routeHelp, noAi, NO_AI_TIP, CONNECT_HELP, sendLabel, sendTip, COPY_TIP };
+    return { m, ta, dz, uploading, busyNames, dragOver, aiOn, memoEnabled, showInstrOpt, workspaceEnabled, isCell, kindList, presetList, placeholder, afterNote, pickable, problem, warn, canSend, clip, setKind, addFiles, pickExisting, removeAtt, paste, drop, onLeave, send, sendAndCopy, again, agent, env, route, routeOpts, routeTip, routeHelp, noAi, NO_AI_TIP, CONNECT_HELP, sendLabel, sendTip, COPY_TIP };
   },
 };
 
@@ -400,11 +404,13 @@ const ResultItem = {
         <span class="muted prop-gone" v-else title="그 문단이 그 뒤 지워졌습니다">자리 없음</span><span class="muted" v-if="cellNote(p)">{{ cellNote(p) }}</span>
         <span class="pill" :class="pillCls(p)" v-if="p.status !== 'pending'">{{ statusLabel(p) }}</span></div>
       <template v-if="p.type==='table'"><div class="muted">{{ placeNote(place, (p.table?.rows?.length || 0) + '×' + (p.table?.rows?.[0]?.length || 0) + ' 표') }}</div><TablePreview :table="p.table"/></template>
+      <template v-else-if="p.type==='edit_batch'"><div class="muted">내용·서식 나눠 처리한 묶음 제안</div><div class="difftext">내용 {{p.batch?.contentOperations || 0}}건 · 형식 {{p.batch?.formatOperations || 0}}건</div><div class="row"><button class="small" @click="downloadWorkspace(p,'hwpx')">결과 HWPX</button><button class="small" @click="downloadWorkspace(p,'markdown')">내용 Markdown</button></div></template>
       <template v-else-if="p.type==='toc'"><div class="muted">차례 새로 고침</div><div class="difftext" v-if="tocNote(p)">{{ tocNote(p) }}</div></template>
       <template v-else-if="p.type==='table_edit'"><div class="muted">표{{ p.tableEdit?.caption ? ' 「' + p.tableEdit.caption + '」' : '' }} 고치기{{ p.tableEdit?.size?.[0] != null ? ' — ' + p.tableEdit.size[0] + '×' + p.tableEdit.size[1] + ' → ' + p.tableEdit.result[0] + '×' + p.tableEdit.result[1] : '' }}</div><div class="difftext">{{ (p.tableEdit?.labels || []).join(', ') }}</div></template>
       <template v-else-if="p.type==='delete'"><div class="muted">{{ p.status === 'applied' ? '지운 개체' : '이 문단의 개체 지우기' }}(글은 그대로)</div><div class="difftext">{{ deleteNote(p) }}</div></template>
+      <template v-else-if="p.type==='para_delete' || p.type==='para_move'"><div class="muted">{{ parasNote(p) }}</div><div class="difftext" v-if="p.type==='para_delete'"><del>{{ parasLines(p) }}</del></div><div class="difftext" v-else>{{ parasLines(p) }}</div></template>
       <template v-else-if="p.type==='page_layout'"><div class="muted">쪽 구성</div><div class="difftext">{{ (p.pageLayout?.labels || []).join(', ') }}</div></template>
-      <template v-else-if="p.type==='figure'"><div class="muted">{{ p.figure?.replace ? '이 문단의 그림 교체' : placeNote(place, '그림') }}{{ p.figure?.name ? ' — ' + p.figure.name : '' }}</div><div class="difftext" v-if="p.figure?.caption || p.figure?.replace?.caption">{{ p.figure.caption || p.figure.replace.caption }}</div></template>
+      <template v-else-if="p.type==='figure'"><div class="muted">{{ p.figure?.replace ? '이 문단의 그림 교체' : placeNote(place, '그림') }}{{ p.figure?.name ? ' — ' + p.figure.name : '' }}</div><div class="difftext" v-if="p.figure?.caption || p.figure?.replace?.caption">{{ p.figure.caption || p.figure.replace.caption }}</div><div class="muted" v-for="(n, k) in (p.figure?.notes || [])" :key="'n' + k">{{ n }}</div></template>
       <template v-else-if="p.type==='insert'"><div class="muted">{{ placeNote(place, '새 문단', { many: '문단' }) }}</div><div class="difftext"><ins>{{ p.text }}</ins></div></template>
       <div v-else-if="p.type==='format'" class="difftext">{{ p.find }}</div>
       <div v-else class="difftext" v-html="diff(p.find, p.replace)"></div>
@@ -415,10 +421,10 @@ const ResultItem = {
         <template v-if="p.status==='pending'">
           <button v-if="live" class="small primary rs-adopt rs-live" :disabled="busy" :title="LIVE_TIP" @click="adopt(p)">반영</button>
           <template v-else><span class="pill ok adopted" v-if="adopted(p)" title="내 수정본에 들어 있습니다">반영됨</span>
-            <button v-else-if="!['table','table_edit','toc','figure','page_layout','delete'].includes(p.type)" class="small primary rs-adopt" :disabled="busy" :title="ADOPT_TIP" @click="adopt(p)">반영</button>
-            <span v-else-if="!direct" class="muted" title="표·그림 제안은 내 수정본에 넣을 수 없고 문서에 바로 적용만 됩니다(관리자)">표·그림은 문서에 바로 적용만</span></template>
+            <button v-else-if="!['table','table_edit','toc','figure','page_layout','delete','edit_batch','para_delete','para_move'].includes(p.type)" class="small primary rs-adopt" :disabled="busy" :title="ADOPT_TIP" @click="adopt(p)">반영</button>
+            <span v-else-if="!direct" class="muted" title="개체·묶음 제안은 문서에 바로 적용할 권한이 필요합니다">{{p.type==='edit_batch'?'내용·서식 묶음':String(p.type).startsWith('para_')?'문단 지우기·옮기기':'개체 제안'}}은 문서에 바로 적용만</span></template>
           <button v-if="!live && canUndoFormat(p)" class="small rs-format-undo" :disabled="busy" title="반영한 서식을 되돌립니다" @click="act('undoAdoptFormat',p)">서식 되돌리기</button>
-          <button v-if="direct" class="small rs-apply" :class="{primary: ['table','table_edit','toc','figure','page_layout','delete'].includes(p.type)}" :disabled="busy" :title="DIRECT_TIP" @click="act('applyProposal', p)">문서에 바로 적용</button>
+          <button v-if="direct" class="small rs-apply" :class="{primary: ['table','table_edit','toc','figure','page_layout','delete','edit_batch','para_delete','para_move'].includes(p.type)}" :disabled="busy" :title="DIRECT_TIP" @click="act('applyProposal', p)">문서에 바로 적용</button>
           <button class="small rs-reject" :disabled="busy" @click="act('rejectProposal', p)">거절</button></template>
         <button v-if="p.status==='applied'" class="small rs-undo" :disabled="busy" :title="live ? '' : '문서에 적용한 것을 되돌립니다'" @click="act('undoProposal', p)">{{ live ? '되돌리기' : '복구' }}</button>
         <button v-if="p.status==='rejected' || p.status==='undone' || p.supersededByRequest" class="small rs-reopen" :disabled="busy" @click="act('reopenProposal', p)">다시 열기</button></div>
@@ -430,12 +436,20 @@ const ResultItem = {
     // 묶음(여러 안)이거나 문장 제안 요청이면 '안' 모양(고쳐서 반영 포함), 그 밖은 제안 하나 모양
     const altStyle = computed(() => props.it.gid != null || props.req?.kind === 'suggest');
     const p = computed(() => props.it.list[0] || {});
+    async function downloadWorkspace(p, kind) {
+      try {
+        const query = new URLSearchParams({ kind, attempt: String(p.batch.attempt), revision: String(p.batch.revision) });
+        const bytes = await api(`/api/docs/${encodeURIComponent(d.s.id)}/requests/${p.rid}/workspace-file?${query}`);
+        const url = URL.createObjectURL(new Blob([bytes], { type: kind === 'markdown' ? 'text/markdown' : 'application/vnd.hancom.hwpx' }));
+        const a = document.createElement('a'); a.href = url; a.download = `AI-${p.rid}-결과.${kind === 'markdown' ? 'md' : 'hwpx'}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } catch (e) { toastError(e); }
+    }
     const diff = (a, b) => diffHtml(a || '', b || '');
     const pillCls = (x) => ({ applied: 'ok', pending: 'warn', rejected: '', undone: '', superseded: '' })[x.status] || '';
     function cellNote(x) { const c = d.byRef(x.ref)?.cell; return c ? `${c.row + 1}행 ${c.col + 1}열` : ''; }
     // v0.4 실시간 문서(§4.2): [반영] = 공유 문서에 바로(서버 apply), 적용된 것은 [되돌리기](/undo — 그 뒤 고쳐졌으면 서버 409 STALE 글을 알림)
     const live = computed(() => isRealtimeDoc(d));
-    const statusLabel = (x) => (x.supersededByRequest ? `재검토 #${x.supersededByRequest} — 이전 제안` : live.value && x.status === 'applied' ? '반영' : live.value && x.status === 'undone' ? '되돌림' : STATUS_LABEL[x.status] || x.status);
+    const statusLabel = (x) => (x.supersededByRequest ? `재검토 #${x.supersededByRequest} — 이전 제안` : live.value && x.status === 'applied' ? '반영됨' : live.value && x.status === 'undone' ? '되돌림' : STATUS_LABEL[x.status] || x.status);
     // 기본은 [반영](내 수정본 — 편집기 + /adopt), [문서에 바로 적용]은 관리자 또는 /api/config allowDirectApply 일 때만(v0.2 apply) — 실시간 문서는 [반영]이 곧 그것
     const direct = computed(() => !live.value && canDirectApply());
     const adopted = (x) => adoptedByMe(d, x);
@@ -473,15 +487,92 @@ const ResultItem = {
       // 여러 문단이면 첫 문단 머리부터 마지막 문단 끝까지 깜빡인다(마지막 문단 글을 모르면 첫 문단만)
       focusIn(d, tail ? { ref: pl.ref, start: 0, end: Array.from(String(tail.text ?? '')).length, endRef: pl.endRef } : { ref: pl.ref });
     }
-    return { d, editing, busy, editBusy, altStyle, p, diff, pillCls, cellNote, live, statusLabel, direct, adopted, others, adopt, act, editApply, go, place, placeTip, goPlace, placeNote, STATUS_LABEL, rich: isRichProposal, canUndoFormat, tocNote, deleteNote, ADOPT_TIP, LIVE_TIP, DIRECT_TIP };
+    // 문단 지우기·옮기기 제안(para_delete·para_move — 2026-11-17, server/paragraph-ops.js): 문단 수·옮길 자리 한 줄과 첫 글 몇 줄(제안할 때 서버가 적어 둔 글)
+    function parasNote(x) {
+      const n = Number(x.paras?.count) || 0; const dest = x.paras?.dest || {};
+      if (x.type === 'para_delete') return x.status === 'applied' ? `지운 문단 ${n}개(이 문단 뒤에 있던)` : `문단 ${n}개 지우기(글·표·그림째)`;
+      const where = dest.before ? `「${clip(String(dest.beforeText || ''), 24)}」 앞` : `「${clip(String(dest.text || ''), 24)}」 뒤`;
+      return x.status === 'applied' ? `옮긴 문단 ${n}개(${where})` : `문단 ${n}개 옮기기 → ${where}`;
+    }
+    function parasLines(x) { const f = Array.isArray(x.paras?.first) ? x.paras.first : []; return [...f, ...(x.paras?.last ? ['…', x.paras.last] : [])].join(' / '); }
+    return { d, editing, busy, editBusy, altStyle, p, diff, pillCls, cellNote, live, statusLabel, direct, adopted, others, adopt, act, editApply, go, place, placeTip, goPlace, placeNote, downloadWorkspace, STATUS_LABEL, rich: isRichProposal, canUndoFormat, tocNote, deleteNote, parasNote, parasLines, ADOPT_TIP, LIVE_TIP, DIRECT_TIP };
   },
 };
+
+// 묶음 제안 항목(2026-11-17, docs/UI_TERMS.md §9 — docs/MCP_REDESIGN_2026-11-16.md §10.4 나-11): 한 번에 낸 한 덩어리(논문 절 50문단 + 표·그림, 용어 바꾸기 61곳)를
+// 항목 하나로 — 머리 이름 · 첫 몇 개 미리보기 · [반영 (n)]·[거절 (n)](그 묶음의 남은 제안 — 요청 [모두 반영]·[남은 n건 거절]과 같은 길을 그 pid 로 좁힘, store resolveRequest)
+// · [펼치기](구성원마다 ResultItem — 하나씩 반영·거절·고쳐서 반영 그대로). 단추의 n 은 제안 수(진행 줄의 '건'은 항목 수)
+const BUNDLE_PEEK = 3;
+const BundleItem = {
+  components: { ResultItem, InlineConfirm: null },
+  props: { it: Object, req: Object, ro: Boolean },
+  template: `<div class="rs-item rs-bundle" :class="'st-' + (it.state || 'open')" :data-bundle="it.bundle">
+    <div class="alt-h"><b class="rs-b-label">{{ label }}</b><span class="muted rs-b-count">{{ countText }}</span><span class="spacer"></span>
+      <span class="ref" v-if="placeRef" :title="placeTip" @click="goPlace">{{ placeRef }}</span></div>
+    <div class="rs-b-peek" v-if="!expanded">
+      <div class="difftext" v-for="x in peek" :key="x.pid">{{ peekText(x) }}</div>
+      <div class="muted" v-if="it.list.length > peek.length">… 외 {{ it.list.length - peek.length }}건</div></div>
+    <InlineConfirm v-if="asking" :message="'이 묶음의 남은 ' + left.length + '건을 거절할까요?'" ok-label="거절" danger :busy="busy === 'reject'" @ok="reject" @cancel="asking=false"/>
+    <div class="actions" v-else>
+      <template v-if="!ro && left.length">
+        <button v-if="adoptN" class="small primary rs-b-adopt" :disabled="!!busy" :title="live ? LIVE_TIP : ADOPT_TIP" @click="run('adopt')"><span v-if="busy==='adopt'" class="spin"></span>반영 ({{ adoptN }})</button>
+        <button v-if="direct" class="small rs-b-apply" :class="{ primary: !adoptN }" :disabled="!!busy" :title="DIRECT_TIP" @click="run('apply')"><span v-if="busy==='apply'" class="spin dark"></span>문서에 바로 적용 ({{ left.length }})</button>
+        <span v-else-if="!adoptN" class="muted" title="개체 제안은 문서에 바로 적용할 권한이 필요합니다">개체 제안은 문서에 바로 적용만</span>
+        <button class="small rs-b-reject" :disabled="!!busy" @click="asking=true">거절 ({{ left.length }})</button>
+      </template>
+      <button class="small rs-b-more" :aria-expanded="expanded ? 'true' : 'false'" @click="expanded = !expanded">{{ expanded ? '접기' : '펼치기' }}</button></div>
+    <div class="rs-b-list" v-if="expanded"><ResultItem v-for="m in members" :key="'p' + m.list[0].pid" :it="m" :req="req" :ro="ro"/></div>
+  </div>`,
+  setup(props) {
+    const d = inject('doc');
+    const expanded = ref(false); const busy = ref(''); const asking = ref(false);
+    const live = computed(() => isRealtimeDoc(d));
+    const direct = computed(() => !live.value && canDirectApply());
+    const openSet = computed(() => new Set((props.it.open || []).map(Number)));
+    const left = computed(() => props.it.list.filter((p) => openSet.value.has(Number(p.pid))));
+    // 비실시간 문서의 [반영] = 내 수정본에 넣을 수 있는 바꿈·문단 추가만(표·그림은 [모두 반영]처럼 남는다), 실시간 문서는 남은 것 모두를 공유 문서에
+    const adoptN = computed(() => (live.value ? left.value.length : left.value.filter((p) => !BUNDLE_OBJECTS.includes(p.type)).length));
+    const label = computed(() => bundleLabel(props.it.list));
+    const countText = computed(() => {
+      const n = props.it.list.length; const l = left.value.length;
+      const acc = props.it.list.filter((p) => p.status === 'applied' || (p.status === 'pending' && !openSet.value.has(Number(p.pid)))).length;
+      return props.it.state === 'open' && l < n ? `${n}건 · 반영 ${acc} · 남음 ${l}` : `${n}건`;
+    });
+    const peek = computed(() => (left.value.length ? left.value : props.it.list).slice(0, BUNDLE_PEEK));
+    function peekText(p) {
+      if (p.type === 'insert') return p.blank || !String(p.text ?? '').trim() ? '(빈 줄)' : clip(p.text, 80);
+      if (p.type === 'table') return `표 ${p.table?.rows?.length || 0}×${p.table?.rows?.[0]?.length || 0}${p.table?.caption ? ` 「${clip(p.table.caption, 40)}」` : ''}`;
+      if (p.type === 'figure') return `${p.figure?.nativeChart ? '차트' : '그림'}${p.figure?.caption ? ` 「${clip(p.figure.caption, 40)}」` : ''}`;
+      if (p.type === 'format') return `서식: 「${clip(p.find || '빈 문단', 40)}」`;
+      if (p.type === 'delete') return `개체 지우기: ${deleteNote(p)}`;
+      if (p.type === 'para_delete') return `문단 ${Number(p.paras?.count) || 0}개 지우기${Array.isArray(p.paras?.first) && p.paras.first.length ? `: 「${clip(p.paras.first[0], 40)}」` : ''}`;
+      if (p.type === 'replace' || !p.type) return `「${clip(p.find ?? '', 30)}」 → 「${clip(p.replace ?? '', 30)}」`;
+      return `#${p.pid}`;
+    }
+    // 구성원 카드: 상태는 묶음의 셈과 같게(남음 = 대기 + 반영해 두지 않음)
+    const members = computed(() => props.it.list.map((p) => ({ gid: null, list: [p], state: openSet.value.has(Number(p.pid)) ? 'open' : p.status === 'applied' || p.status === 'pending' ? 'accepted' : 'declined' })));
+    const place = computed(() => proposalPlace(props.it.list[0] || {}));
+    const placeRef = computed(() => (place.value.ref && !place.value.gone ? place.value.ref : ''));
+    const placeTip = computed(() => `${refWords(place.value.ref)} — 누르면 그 자리로 갑니다`);
+    function goPlace() { if (placeRef.value) focusIn(d, { ref: placeRef.value }); }
+    async function run(mode) {
+      if (busy.value || !props.req) return;
+      busy.value = mode;
+      try { await d.resolveRequest(props.req, mode, { pids: left.value.map((p) => Number(p.pid)) }); } catch (e) { toastError(e, `AI 작업 #${props.req.rid}: `); } finally { busy.value = ''; }
+    }
+    async function reject() { await run('reject'); asking.value = false; }
+    watch(() => left.value.length, (n) => { if (!n) asking.value = false; });
+    return { expanded, busy, asking, live, direct, left, adoptN, label, countText, peek, peekText, members, placeRef, placeTip, goPlace, run, reject, ADOPT_TIP, LIVE_TIP, DIRECT_TIP };
+  },
+};
+// 수정본에 넣지 못하는 종류(web/util.js OBJECT_TYPES 와 같다 — 2026-11-17 문단 지우기·옮기기 더함)
+const BUNDLE_OBJECTS = ['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete', 'edit_batch', 'para_delete', 'para_move'];
 
 // 대기 중 안내 — 내 PC 의 구독 AI 를 먼저, ChatGPT 앱(프롬프트 복사)은 그다음(util.js 'AI 연결 차례')
 // '?'는 설명서 ①절(#agents). 체험 계정의 관리자 ChatGPT 이벤트 대기(request-wait.js — wait 가 있을 때)만 ChatGPT 절(#chatgpt-oauth) — 그 요청은 관리자 ChatGPT 가 처리한다
 const WAIT_HINT = `대기열의 요청은 연결된 AI가 가져가 처리합니다. ${SUB_AI_TIP}. ChatGPT Work 등 MCP로 연결한 AI 대화창이면 [프롬프트 복사] 뒤 붙여 넣으세요`;
 export const ResultView = {
-  components: { AttachChips, TablePreview, MemoEditor, ResultItem, Hint, RequestActions: null },
+  components: { AttachChips, TablePreview, MemoEditor, ResultItem, BundleItem, Hint, RequestActions: null },
   // bare: 떠 있는 창 안(창 제목이 이미 'AI 작업 #n') — 머리에 번호를 다시 쓰지 않는다. 슬롯 head = 머리 끝 단추(AI 작업 탭 결과 [×])
   props: { rid: Number, compact: Boolean, bare: Boolean },
   emits: ['new'],
@@ -508,11 +599,11 @@ export const ResultView = {
     <div class="muted rs-ro" v-if="ro && (sec.open.length || sec.accepted.length)" :title="roTip">{{ roWhy }}</div>
 
     <div v-if="sec.open.length" class="rs-sec rs-open"><div class="rs-sec-h">남은 제안 {{ sec.open.length }}건</div>
-      <ResultItem v-for="it in sec.open" :key="itKey(it)" :it="it" :req="r" :ro="ro"/></div>
+      <template v-for="it in sec.open" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></div>
     <div v-if="sec.accepted.length" class="rs-sec rs-accepted"><div class="rs-sec-h">반영한 제안 {{ sec.accepted.length }}건</div>
-      <ResultItem v-for="it in sec.accepted" :key="itKey(it)" :it="it" :req="r" :ro="ro"/></div>
+      <template v-for="it in sec.accepted" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></div>
     <details v-if="sec.declined.length" class="rs-sec rs-declined"><summary class="rs-sec-h" title="다시 열어 고를 수 있습니다">{{ r.recoveredBy ? '거절·이전 제안 보관' : '거절' }} {{ sec.declined.length }}건</summary>
-      <ResultItem v-for="it in sec.declined" :key="itKey(it)" :it="it" :req="r" :ro="ro"/></details>
+      <template v-for="it in sec.declined" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></details>
 
     <div v-if="comments.length" class="rs-sec"><div class="rs-sec-h">의견 {{ comments.length }}건</div>
       <div class="cmt" v-for="c in comments" :key="c.id"><span class="ref" @click="go(c.ref, c.start, c.end)">{{ c.ref }}</span> <span class="pre">{{ c.body ?? c.text }}</span></div></div>
@@ -539,7 +630,7 @@ export const ResultView = {
       const e = g.value?.entries || [];
       return { open: e.filter((x) => x.state === 'open'), accepted: e.filter((x) => x.state === 'accepted'), declined: e.filter((x) => x.state === 'declined') };
     });
-    const itKey = (it) => (it.gid != null ? `g${it.gid}` : `p${it.list[0]?.pid}`);
+    const itKey = (it) => (it.gid != null ? `g${it.gid}` : it.bundle != null ? `b${it.bundle}` : `p${it.list[0]?.pid}`);
     const comments = computed(() => d.commentsOf(r.value));
     const log = computed(() => (Array.isArray(r.value?.log) ? r.value.log : []));
     const showMemo = ref(false);
@@ -969,7 +1060,7 @@ export const RequestActions = {
         <template v-if="bulk">
           <button v-if="adoptable" class="small primary ra-adopt" :disabled="!!busy" :title="live ? '남은 제안을 공유 문서에 바로 반영합니다(모두에게 보임 — 되돌리기는 하나씩)' : hasFormats ? '서식 제안을 차례로 저장·반영합니다(서식 되돌리기는 제안마다)' : '남은 제안을 내 수정본에 한 번에 넣습니다 — 되돌리기는 편집기에서 Ctrl+Z 한 번'" @click="run('adopt')"><span v-if="busy==='adopt'" class="spin"></span>모두 반영 ({{ adoptable }})</button>
           <span v-else-if="g.openAlt" class="muted ra-pick" :title="oneByOne ? '여러 안은 [하나씩 보기]에서 하나를 골라 반영합니다' : '여러 안 중 하나를 골라 반영합니다'">안 고르기</span>
-          <button v-if="direct && g.openPids.length" class="small ra-apply" :disabled="!!busy" title="공유 문서에 바로 적용합니다(변경 추적) — 남은 표 제안도" @click="run('apply')"><span v-if="busy==='apply'" class="spin dark"></span>문서에 바로 적용 ({{ g.openPids.length }})</button>
+          <button v-if="direct && g.openPids.length" class="small ra-apply" :disabled="!!busy" title="공유 문서에 바로 적용합니다(변경 추적) — 남은 표 제안도" @click="run('apply')"><span v-if="busy==='apply'" class="spin dark"></span>문서에 바로 적용 ({{ g.open - g.openAlt }})</button>
           <button class="small ra-reject" :disabled="!!busy" @click="asking=true">남은 {{ g.open }}건 거절</button>
         </template>
         <button v-if="oneByOne" class="small ra-one" @click="showOne">하나씩 보기</button>
@@ -987,7 +1078,8 @@ export const RequestActions = {
     // v0.4 실시간 문서(§4.2): [모두 반영] = 공유 문서에 바로(표 제안 포함 — 서버 resolve { apply }), [문서에 바로 적용]은 같은 것이라 없다
     const live = computed(() => isRealtimeDoc(d));
     const direct = computed(() => !live.value && canDirectApply());
-    const adoptable = computed(() => (g.value ? Math.max(0, g.value.openPids.length - (live.value ? 0 : g.value.tables)) : 0));
+    // 단추의 n 은 남은 항목 수(진행 줄 '남음'과 같은 셈 — 묶음 제안은 하나, docs/UI_TERMS.md §9): 실시간 문서는 여러 안이 아닌 남은 항목 모두, 아니면 수정본에 넣을 바꿈·문단 추가가 있는 항목
+    const adoptable = computed(() => (g.value ? Math.max(0, live.value ? g.value.open - g.value.openAlt : g.value.adoptOpen ?? g.value.openPids.length - g.value.tables) : 0));
     const hasFormats = computed(() => (g.value?.openPids || []).some(pid => isRichProposal(d.proposal(pid))));
     const line = computed(() => progressText(g.value));
     // 상태 칩이 머리에 있으므로 '✓ 완료'·'취소됨' 없이 수만
@@ -1020,6 +1112,7 @@ export const RequestActions = {
   },
 };
 ResultView.components.RequestActions = RequestActions;
+BundleItem.components.InlineConfirm = InlineConfirm;
 
 // ───────── AI 작업 진행 기록(server/activity.js) ─────────
 // AI 가 요청을 처리하며 부른 도구를 한 줄씩(문서 읽기 → 검색 → 수정 제안 20건 → 의견 → 완료). 처리 중에는 맨 위에 '지금' 한 줄
@@ -1048,7 +1141,8 @@ export const RequestActivity = {
     const recent = () => { const x = r.value; return !!x && (x.status === 'working' || (x.doneAt && Date.now() - new Date(x.doneAt).getTime() < 30 * 60 * 1000)); };
     const load = () => { if (recent() && typeof d?.loadActivity === 'function') d.loadActivity(props.rid); };
     onMounted(load);
-    watch(running, (on) => { if (on) { load(); if (props.place !== 'rail') open.value = true; } });
+    // 처리 중에는 펼쳐 두고 끝나면 접는다(누르면 다시 펼침 — docs/UI_TERMS.md §7). 예전에는 끝나도 펼친 채였고 다시 열어야 접혔다(2026-11-16)
+    watch(running, (on) => { if (on) load(); if (props.place !== 'rail') open.value = on; });
     // 처리 중에만 1초마다 다시 그린다('생각 중 n초')
     const now = ref(Date.now()); let timer = null;
     const tick = (on) => { if (on && !timer) timer = setInterval(() => { now.value = Date.now(); }, 1000); else if (!on && timer) { clearInterval(timer); timer = null; } };

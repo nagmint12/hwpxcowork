@@ -82,7 +82,9 @@ def start_server(tmp):
     with open(cfg_path, 'w', encoding='utf-8', newline='') as f:
         json.dump(cfg, f, ensure_ascii=False, indent=1)
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('HWPX_COWORK_')}
-    env.update(HWPX_COWORK_CONFIG=cfg_path, HWPX_COWORK_DATA_DIR=data, HWPX_COWORK_AI='off', HWPX_COWORK_PORT=str(PORT), HWPX_COWORK_HOST='127.0.0.1')
+    # 편집 뒤 조판 검사(V3 — server/layout-check.js, 2026-11-12)는 커밋 뒤 작업자 스레드에서 '조판 확인 · n쪽' 줄을 아무 때나(완료 뒤에도) 끼운다 —
+    # 이 시험은 AI 가 부른 도구의 줄·묶기·접기를 보므로 끈다(그 줄은 tests/edit_verify_layout.test.mjs 가 본다, 2026-11-17)
+    env.update(HWPX_COWORK_CONFIG=cfg_path, HWPX_COWORK_DATA_DIR=data, HWPX_COWORK_AI='off', HWPX_COWORK_PORT=str(PORT), HWPX_COWORK_HOST='127.0.0.1', HWPX_COWORK_LAYOUT_CHECK='0')
     log = open(f'{OUT}/activity_ui_server.log', 'w', encoding='utf-8', newline='')
     srv = subprocess.Popen(['node', 'server/index.js'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     for _ in range(160):
@@ -157,7 +159,9 @@ def main():
             wait_until(lambda: card.locator('.rq-now').count() == 0, msg='지금 줄 사라짐')
             summary = card.locator('.rq-log summary').inner_text().strip()
             ok(summary.startswith('작업 기록 6') and '초' in summary, f'[{summary}]')
-            ok(card.locator('.rq-chat li').last.locator('.rq-l').inner_text().strip() == '수정 제안 1건 · 완료', '마지막 줄 = 수정 제안 1건 · 완료')
+            ok(card.locator('.rq-chat li').last.locator('.rq-l').text_content().strip() == '수정 제안 1건 · 완료', '마지막 줄 = 수정 제안 1건 · 완료')
+            # 처리 중에는 펼쳐 두고 끝나면 접는다(docs/UI_TERMS.md §7 — 2026-11-16 전에는 끝나도 펼친 채였다)
+            wait_until(lambda: card.locator('.rq-log').get_attribute('open') is None, timeout=5, msg='끝나면 작업 기록을 접는다')
             ok(card.evaluate('(e) => e.scrollWidth <= e.clientWidth + 1'), '카드가 옆으로 넘치지 않는다')
             pg.screenshot(path=f'{OUT}/activity_ui_2_done.png')
 

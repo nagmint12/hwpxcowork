@@ -22,6 +22,25 @@ const { josa, roleLabel } = util;
 const crs = await web('crs.js');
 const store = await web('store.js');
 
+test('내용·서식 묶음은 검토 모드의 단건·일괄 개인 수정본 반영에서 제외한다', async () => {
+  const p = { pid: 7, rid: 3, type: 'edit_batch', status: 'pending', ref: 's0/p1' };
+  const request = { rid: 3, status: 'done' };
+  const g = util.requestProgress(request, [p]);
+  assert.equal(g.openPids.length, 1); assert.equal(g.tables, 1);
+  assert.throws(() => store.batchItemOf(p), /문서에 바로 적용/);
+  const { reviewMenuModel } = await web('menumodel.js');
+  const menu = reviewMenuModel({ proposals: [p] }).find(item => item.id === 'rv-proposal:7');
+  assert.equal(menu.sub.find(item => item.action?.type === 'proposal-adopt').disabled, true);
+  const live = reviewMenuModel({ proposals: [{ ...p, adoptLabel: '공유 문서에 반영' }] }).find(item => item.id === 'rv-proposal:7');
+  assert.equal(live.sub.find(item => item.action?.type === 'proposal-adopt').disabled, undefined);
+  const d = store.createDocStore('synthetic-edit-batch');
+  let editorCalls = 0;
+  d.s.requests = [request]; d.s.proposals = [p]; d.s.settings = { editMode: 'review' };
+  d.s.editor = { ready: true, applyBatch: () => { editorCalls++; throw new Error('묶음을 글 수정으로 보내면 안 됨'); } };
+  assert.equal(await d.resolveRequest(request, 'adopt'), null);
+  assert.equal(editorCalls, 0);
+});
+
 test('API 전용 화면에서는 개인 실행기·대기열을 보낼 곳에 제시하지 않는다', () => {
   const personalAi = { active: true, apiOnly: true, provider: 'openai' };
   const env = util.workEnv({ agentMe: { online: true, sessions: [{ channel: true, agent: 'Codex' }] }, personalAi, serverAi: true });
@@ -94,10 +113,24 @@ test('sendToLabel: 바로 보내는 단추·메뉴의 보낼 곳 이름표 — �
   assert.equal(sendToLabel('', 'agent'), '대기열에 넣기');
 });
 
-test('roleLabel: admin → 관리자, editor → 편집자, 모르는 역할은 그대로', () => {
+test('autoSendLabel: 자동 경로의 이름표 — 체험 문서에서 관리자 AI 가 아직 연결되지 않았으면 상태 글(연결 대기·연결 필요)을 붙이지 않고 대기열 · roleLabel 은 보기만도 한글로', () => {
+  const { autoSendLabel, workEnv, roleLabel } = util;
+  assert.equal(autoSendLabel(workEnv({ apiOnly: true, personalAi: { method: 'codex-worker', active: false } })), '대기열에 넣기');
+  assert.equal(autoSendLabel(workEnv({ apiOnly: true, personalAi: { method: 'codex-worker', active: true } })), '관리자 Codex로 보내기');
+  assert.equal(autoSendLabel(workEnv({ apiOnly: true, personalAi: { active: false } })), '대기열에 넣기');
+  assert.equal(autoSendLabel(workEnv({ apiOnly: true, personalAi: { active: true } })), '관리자 API로 보내기');
+  assert.equal(autoSendLabel(workEnv({ serverAi: true })), 'AI로 보내기');
+  assert.equal(autoSendLabel(workEnv({})), '대기열에 넣기');
+  assert.equal(roleLabel('viewer'), '보기만');
+  assert.equal(roleLabel('admin'), '관리자');
+});
+
+// 2026-11-16: viewer 도 한글로 — 그전에는 이 시험이 'viewer' 그대로를 기대했다(문서함 머리에 영문이 보임). 관리자 사용자 표(admin-accounts.js ROLE_LABELS)와 같은 글 '보기만'
+test('roleLabel: admin → 관리자, editor → 편집자, viewer → 보기만, 모르는 역할은 그대로', () => {
   assert.equal(roleLabel('admin'), '관리자');
   assert.equal(roleLabel('editor'), '편집자');
-  assert.equal(roleLabel('viewer'), 'viewer');
+  assert.equal(roleLabel('viewer'), '보기만');
+  assert.equal(roleLabel('guest'), 'guest');
   assert.equal(roleLabel(undefined), '');
 });
 
@@ -231,6 +264,31 @@ test('requestProgress: 항목 규칙(서버 outcome 과 같음) — 반영(적�
   const none = util.requestProgress({ status: 'done' }, [], view());
   assert.deepEqual([none.items, none.open, none.resolved], [0, 0, true]);
   assert.equal(util.requestProgress({ status: 'working' }, [], view()).resolved, false);
+});
+
+test('requestProgress: 묶음 제안(bundle, docs/UI_TERMS.md §9)은 항목 하나 — 남은 구성원이 있으면 남음, 없고 반영이 있으면 반영 · 단추 수(adoptOpen)는 항목', () => {
+  const ins = (pid, x = {}) => P(pid, { type: 'insert', text: `새 ${pid}`, bundle: 'b1', ...x });
+  // 넣기 묶음(문단 3 + 표 1) · 바꿈 하나 · 표만 남은 묶음 · 여러 안
+  const ps = [ins(1), ins(2), ins(3, { type: 'table', table: { rows: [['a']] } }), ins(4), P(5),
+    P(6, { type: 'table', bundle: 'b2' }), P(7, { type: 'figure', bundle: 'b2' }), P(8, { gid: 'g', option: 1 }), P(9, { gid: 'g', option: 2 })];
+  const g = util.requestProgress({ status: 'done' }, ps, view());
+  assert.deepEqual([g.items, g.open, g.openAlt, g.tables, g.adoptOpen], [4, 4, 1, 3, 2]);
+  assert.deepEqual(g.openPids, [1, 2, 3, 4, 5, 6, 7], '묶음은 남은 구성원 모두(여러 안은 빼고)');
+  const b1 = g.entries.find((e) => e.bundle === 'b1');
+  assert.deepEqual([b1.state, b1.open, b1.list.map((p) => p.pid)], ['open', [1, 2, 3, 4], [1, 2, 3, 4]]);
+  assert.equal(util.bundleLabel(b1.list), '새 문단 3 · 표 1 넣기');
+  assert.equal(util.progressText(g), '제안 4건 — 남음 4', '진행 줄은 항목 수');
+  // 일부 반영(적용 1·내 수정본 1 — 편집기에 들어 있음)이어도 남은 구성원이 있으면 남음, 그 구성원만 open
+  const part = util.requestProgress({ status: 'done' }, [ins(1, { status: 'applied' }), ins(2, mineAdopt()), ins(4)], view([2]));
+  assert.deepEqual([part.items, part.open, part.accepted, part.openPids, part.entries[0].open], [1, 1, 0, [4], [4]]);
+  // 남은 것 없음 + 반영 하나 이상 = 반영(적용이 있으면 via applied), 모두 거절 = 거절
+  const done = util.requestProgress({ status: 'done' }, [ins(1, { status: 'applied' }), ins(4, { status: 'rejected' })], view());
+  assert.deepEqual([done.accepted, done.applied, done.open, done.resolved], [1, 1, 0, true]);
+  const nope = util.requestProgress({ status: 'done' }, [ins(1, { status: 'rejected' }), ins(4, { status: 'undone' })], view());
+  assert.deepEqual([nope.declined, nope.accepted], [1, 0]);
+  // 서버 outcome 과 같은 셈(웹 모듈은 서버 함수를 부르지 않는다 — 같은 규칙을 따로 갖는다)
+  assert.equal(util.bundleLabel([{ type: 'replace' }, { type: 'replace' }]), '바꿈 2곳');
+  assert.equal(util.bundleLabel([{ type: 'figure', figure: { nativeChart: {} } }, { type: 'insert' }]), '새 문단 1 · 차트 1 넣기');
 });
 
 test('requestProgress: 내 반영은 지금 편집기 글에 들어 있을 때만 반영 — Ctrl+Z 로 되돌렸으면 다시 남음 · 남이 반영해 둔 것은 반영', () => {

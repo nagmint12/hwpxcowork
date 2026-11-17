@@ -661,7 +661,8 @@ export class ChangeRequests {
   /** '내 수정본에 반영'할 수 있는 제안인지(§3.3): 대기 중(아니면 409 STATE)·표·그림 아님(400 BAD_TYPE) */
   _checkAdoptable(p) {
     if (p.status !== 'pending') throw new ServiceError('STATE', `대기 중인 제안만 수정본에 반영할 수 있습니다(지금: ${p.status})`, 409);
-    if (p.type === 'table' || p.type === 'figure' || p.type === 'table_edit' || p.type === 'toc' || p.type === 'delete') throw new ServiceError('BAD_TYPE', `${p.type === 'figure' ? '그림' : p.type === 'toc' ? '차례 새로 고침' : p.type === 'delete' ? '개체 지우기' : '표'} 제안은 수정본에 반영할 수 없습니다(기준에 바로 적용을 쓰세요)`);
+    // 문단 지우기·옮기기(para_delete·para_move — 2026-11-17 server/paragraph-ops.js)도 문서 구조를 바꿔 수정본(글 맞추기)에 넣을 수 없다
+    if (p.type === 'table' || p.type === 'figure' || p.type === 'table_edit' || p.type === 'toc' || p.type === 'delete' || p.type === 'edit_batch' || p.type === 'para_delete' || p.type === 'para_move') throw new ServiceError('BAD_TYPE', `${p.type === 'edit_batch' ? '내용·서식 묶음' : p.type === 'figure' ? '그림' : p.type === 'toc' ? '차례 새로 고침' : p.type === 'delete' ? '개체 지우기' : p.type === 'para_delete' ? '문단 지우기' : p.type === 'para_move' ? '문단 옮기기' : '표'} 제안은 수정본에 반영할 수 없습니다(기준에 바로 적용을 쓰세요)`);
   }
 
   /**

@@ -279,7 +279,7 @@ export async function main(argv = process.argv.slice(2)) {
       openWindow(setupAppUrl(previous.port, state.user.token));
     }
   } else console.log(`시작: node scripts/setup-personal.mjs --mode ${options.mode} --ai ${state.ai} --start`);
-  if (options.mode === 'shared') console.log('공동 서버는 먼저 이 PC에서만 열립니다. 관리자 화면에서 사용자를 추가하고, 외부 공유는 HTTPS 주소·접속 정책을 정한 뒤 운영 안내를 따르세요. 연결한 구독 AI는 관리자 본인 요청만 처리하며, 참여자는 각자 본인 토큰·구독으로 연결합니다.');
+  if (options.mode === 'shared') console.log('참여자 추가: 문서함 [관리자] → [사용자]. 다른 PC에서 접속하려면 외부 접속 주소를 엽니다(Windows 설치본: 외부 접속 열기.bat). 연결한 구독 AI는 관리자 본인 요청만 처리합니다.');
   console.log(`관리자 토큰은 ${state.file} 에만 저장했습니다. 전역 환경 변수와 CLI 설정은 바꾸지 않았습니다.`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === SELF) main().catch(error => { console.error(`[설치 도우미] ${error.message}`); process.exitCode = 1; });

@@ -12,7 +12,7 @@
   <header class="help-top"><a href="/" class="brand">HWPX 공동 검토</a><span>사용 설명서</span><a class="button" href="/">문서로 돌아가기</a></header>
   <div class="help-layout">
     <nav aria-label="설명서 목차">
-      <a href="#start">시작하기</a><a href="#join">처음 접속하기</a><a href="#library">문서함과 권한</a><a href="#review">AI에게 요청하기</a><a href="#ai">AI 연결</a>
+      <a href="#start">시작하기</a><a href="#join">처음 접속하기</a><a href="#library">문서함과 권한</a><a href="#review">AI에게 맡기기</a><a href="#ai">AI 연결</a>
       <a class="sub" href="#agents">① 내 PC의 구독 AI · 기본</a><a class="sub" href="#chatgpt-oauth">② ChatGPT 앱 연결 · 선택</a><a class="sub" href="#personal-key">③ 내 AI 키 · 사용료 별도</a>
       <a href="#local">내 PC 폴더(개인용 앱)</a><a href="#troubleshooting">문제가 생겼을 때</a>
       <span class="nav-admin" data-admin hidden>관리자</span>
@@ -47,17 +47,22 @@
         </details>
       </section>
 
-      <section id="review"><h2>AI에게 요청하기</h2>
+      <section id="review"><h2>AI에게 맡기기</h2>
         <figure class="see"><a href="/help-assets/request-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/request-steps.webp" width="880" height="253" alt="1 글을 고르거나 문단에서 우클릭, 2 AI에게 맡기기에 할 일을 적음(비우면 검토), 3 AI 작업 탭에서 확인 필요가 되면, 4 반영하거나 거절" decoding="async"></a></figure>
         <ul class="points">
           <li>할 일은 자유롭게 적습니다. 다듬기·표 넣기·서식·여러 안 비교도 지시에 적으면 됩니다. 자료는 <strong>첨부</strong>.</li>
           <li><strong>AI에게 빠르게 맡기기</strong>(보라 ✦)는 누르면 바로 보냅니다.</li>
           <li>AI가 끝내도 문서 글은 그대로입니다. <strong>AI 작업</strong> 탭에서 <strong>반영</strong>해야 들어갑니다.</li>
+          <li>진행은 상태 칩 하나로 봅니다: 대기열 → 전달됨 → 처리 중 → <strong>확인 필요</strong>(내가 반영·거절할 차례) → 완료.</li>
         </ul>
         <p class="muted">화면의 <strong>?</strong>에 마우스를 올리면 설명이, 누르면 이 설명서의 그 절이 열립니다.</p>
         <details class="more"><summary>고치기·메모·자동 반영</summary>
           <p>고치고 잠시 멈추면 저장되고 다른 사람 화면에도 보입니다. 문서 설정이 <strong>승인 후 반영</strong>이면 내 수정본에서 고친 뒤 검토를 받습니다. 의견은 우클릭 → 메모.</p>
           <p>빠르게 맡기기 전에 예시 지시를 보고 싶으면 <strong>⚙ 문서 설정 → AI에게 빠르게 맡기기 → 확인 후 보내기</strong>. 작업이 끝날 때 권장안을 바로 넣으려면 <strong>AI 자동 반영 → 자동 반영</strong>(되돌릴 수 있음). 수정안은 기본 1개, 비교가 필요하면 지시에 “세 가지 안으로”처럼 적습니다.</p>
+        </details>
+        <details class="more"><summary>작업 기록과 제안의 자리</summary>
+          <p>처리 중에는 AI 작업에 AI가 지금 하는 일(문서 읽기·수정 제안 등)이 한 줄로 보이고, <strong>작업 기록 n</strong>을 펼치면 차례대로 봅니다. 문서 글과 지시 내용은 기록에 나오지 않습니다.</p>
+          <p>제안의 주소 칩(<code>s0/p12</code> — 구역 / 위에서부터 센 문단 차례)을 누르면 그 문단으로 갑니다. 넣기 제안은 반영 전에는 <strong>이 문단 뒤에 새 문단</strong>, 반영 뒤에는 <strong>넣은 문단</strong>을 가리키고, 그 문단이 지워졌으면 <strong>자리 없음</strong>으로 보입니다.</p>
         </details>
         <details class="more"><summary>차례 만들기</summary>
           <p><strong>도구 → 차례/색인 → 차례 만들기</strong>는 한글과 같습니다. 개요 문단(또는 고른 스타일, <strong>제목 차례 표시</strong>)으로 제목 차례를, 캡션으로 표·그림·수식 차례를 만들고 쪽 번호와 하이퍼링크를 답니다. <strong>필드로 넣기</strong>로 만든 차례는 차례 안에서 우클릭 → <strong>차례 새로 고침</strong>(또는 <strong>모든 차례 새로 고침</strong>)으로 다시 맞추고, <strong>차례 고치기…</strong>로 선택 사항을 바꿉니다. 빼고 싶은 개요 문단은 <strong>차례 숨기기</strong>. 위치를 <strong>현재 문서의 새 구역</strong>으로 고르면 커서 문단 뒤에서 구역을 나눠 차례만 든 쪽을 만듭니다. 차례를 없애려면 끌어 골라 지웁니다.</p>
@@ -68,7 +73,7 @@
         <details class="more"><summary>화면 넓게 쓰기</summary>
           <p>화면은 <strong>문서</strong>와 오른쪽 <strong>AI 작업 창</strong> 두 칸입니다. 메모·AI 작업·제안은 <strong>문서 옆 여백</strong>에 뜹니다. 메모 머리 줄을 끌면 옮기고, 두 번 누르거나 <strong>↺</strong>로 제자리로 돌립니다(모두: <strong>보기 → 메모 제자리로</strong>).</p>
           <p>오른쪽 끝 <strong>AI 작업</strong> 꼭지로 창을 접고 고정합니다. 접어 둔 동안 오른쪽 끝에 마우스를 대면 잠깐 펼쳐집니다. <strong>메모</strong> 꼭지는 문서 옆 메모를 숨기거나 보입니다. 경계선을 끌어 폭을 바꿉니다(두 번 누르면 기본 폭).</p>
-          <p>휴대전화처럼 좁은 화면에서는 문서 설정·사용 설명서·보기·한글로 저장이 <strong>⋯</strong> 메뉴에 들어가고, 메모는 아래쪽 창의 검토 탭에서 봅니다. 편집 도구 막대는 <strong>⋯ → 편집 도구 막대</strong>.</p>
+          <p>휴대전화처럼 좁은 화면에서는 문서 설정·사용 설명서·보기·한글로 저장이 <strong>⋯</strong> 메뉴에 들어가고, 메모는 아래쪽 창의 <strong>메모</strong> 탭에서 봅니다. 편집 도구 막대는 <strong>⋯ → 편집 도구 막대</strong>.</p>
         </details>
       </section>
 
@@ -178,7 +183,7 @@ codex login</code></pre>
       </section>
 
       <section id="troubleshooting"><h2>문제가 생겼을 때</h2>
-        <details><summary>요청이 계속 ‘대기’에 있어요</summary><p>처리할 AI가 켜져 있지 않습니다. 내 PC의 Codex·Claude Code 실행기나 채널을 켜거나, 대화창에서 “대기열을 처리해 줘”라고 하세요(<a href="#agents">① 내 PC의 AI</a>). <a href="#automatic">내 연결 상태 확인</a>으로 볼 수 있습니다.</p></details>
+        <details><summary>요청이 계속 ‘대기열’·‘전달됨’에 있어요</summary><p>처리할 AI가 켜져 있지 않습니다. 내 PC의 Codex·Claude Code 실행기나 채널을 켜거나, 대화창에서 “대기열을 처리해 줘”라고 하세요(<a href="#agents">① 내 PC의 AI</a>). <a href="#automatic">내 연결 상태 확인</a>으로 볼 수 있습니다.</p></details>
         <details><summary>토큰이 없다고 나와요</summary><p><code>setx</code>는 새로 연 창부터 보입니다. VS Code와 터미널을 완전히 닫았다 다시 엽니다.</p></details>
         <details><summary>MCP 등록에서 이미 있다고 나와요</summary><p>예전 설정이 남아 있습니다. <code>claude mcp remove hwpx -s user</code> 또는 <code>codex mcp remove hwpx</code> 뒤 다시 등록합니다.</p></details>
         <details><summary>AI가 완료했는데 문서 글은 그대로예요</summary><p>완료는 제안이 준비됐다는 뜻입니다. AI 작업 탭에서 <strong>반영</strong>을 눌러야 문서에 들어갑니다.</p></details>
@@ -193,7 +198,7 @@ codex login</code></pre>
 npm run build:studio
 npm start</code></pre>
         <p>같은 사무실 예: <code>http://중앙PC의_IP:8787</code>. 다른 지역에서는 HTTPS 주소나 VPN을 준비합니다. 주소 후보가 보인다고 외부 접속이 확인된 것은 아닙니다.</p>
-        <details><summary>외부 주소·ChatGPT 연결(OAuth)을 준비할 때</summary><p>사설 VPN·Tailscale Serve로 연결하거나, 인터넷 공개에는 Tailscale Funnel·정식 Cloudflare Tunnel·HTTPS 프록시를 씁니다. Cloudflare Quick Tunnel은 실시간 알림 연결을 유지하지 못하므로 자동 처리용 주소로 쓰지 마세요. 실행 터미널에서 <code>$env:HWPX_COWORK_PUBLIC_URL = 'https://실제_서버_주소'</code>로 주소를 지정할 수도 있습니다.</p><p>ChatGPT·claude.ai 연결에는 공개 HTTPS 주소가 필요합니다. <strong>관리자 → 외부 공유 주소</strong>를 실제 HTTPS 주소로 저장하고 재시작하면 OAuth(DCR·PKCE S256)가 켜집니다. HTTP IP 주소에서는 꺼집니다. 콜백 주소가 기본 허용 목록과 다르면 <code>config.json.oauth.redirectUris</code>에 추가하고 재시작합니다.</p></details>
+        <details><summary>외부 주소·ChatGPT 연결(OAuth)을 준비할 때</summary><p>사설 VPN·Tailscale Serve로 연결하거나, 인터넷 공개에는 Tailscale Funnel·정식 Cloudflare Tunnel·HTTPS 프록시를 씁니다. Cloudflare Quick Tunnel은 실시간 알림 연결을 유지하지 못하므로 자동 처리용 주소로 쓰지 마세요. 실행 터미널에서 <code>$env:HWPX_COWORK_PUBLIC_URL = 'https://실제_서버_주소'</code>로 주소를 지정할 수도 있습니다.</p><p>ChatGPT·claude.ai 연결에는 공개 HTTPS 주소가 필요합니다. <strong>관리자 → 서버 접속 → 외부 공유 주소</strong>를 실제 HTTPS 주소로 저장하고 재시작하면 OAuth(DCR·PKCE S256)가 켜집니다. HTTP IP 주소에서는 꺼집니다. 콜백 주소가 기본 허용 목록과 다르면 <code>config.json.oauth.redirectUris</code>에 추가하고 재시작합니다.</p></details>
         <p class="muted">참여자 토큰은 권한을 가진 접속 정보입니다. 공개 링크나 문서 본문에 넣지 마세요. 문서와 수정 이력은 중앙 PC의 data 폴더에 저장됩니다.</p>
       </section>
 
@@ -207,7 +212,7 @@ npm start</code></pre>
       <section id="worker-api" class="admin" data-admin hidden><div class="admin-tag">관리자에게만 보입니다</div><h2>서버 AI·개인 API 실행기</h2>
         <p class="note">둘 다 API 요금이 듭니다. 참여자에게는 ① 내 PC의 AI(구독)를 먼저 안내하세요.</p>
         <h3>중앙 서버 AI (배포 전)</h3>
-        <p>관리자가 서버 설정에 제공업체·모델·API 키를 지정하고 서버 AI를 켜면, 참여자가 따로 연결하지 않아도 서버의 공용 키로 요청을 처리합니다. 비용은 서버 계정에 붙습니다. 관리자 설정 → 사용자의 <strong>서버 AI</strong> 칸을 켠 계정만 씁니다. API 게이트웨이 키를 쓰려면 <code>ai.gateway="baze"</code>와 <code>BAZE_API_KEY</code>를 설정합니다. 자세한 설정은 상세 운영 매뉴얼을 보세요.</p>
+        <p>관리자가 서버 설정에 제공업체·모델·API 키를 지정하고 서버 AI를 켜면, 참여자가 따로 연결하지 않아도 서버의 공용 키로 요청을 처리합니다. 비용은 서버 계정에 붙습니다. <strong>관리자 → 사용자</strong>의 <strong>관리자 AI</strong> 칸을 체크한 계정만 씁니다. 요청별 토큰과 예상 API 비용은 <strong>관리자 → AI 사용량</strong>에서 봅니다. API 게이트웨이 키를 쓰려면 <code>ai.gateway="baze"</code>와 <code>BAZE_API_KEY</code>를 설정합니다. 자세한 설정은 상세 운영 매뉴얼을 보세요.</p>
         <h3>개인 API 실행기 — 제공업체 직접 설정</h3>
         <p>키를 서버에 맡기지 않고 개인 PC에서 API 키로 처리하는 방식입니다. 실행기 ZIP(①의 단추)을 풀고 <code>npm.cmd install</code> 뒤 아래 예제로 실행합니다. 사용료는 그 키의 계정에 붙습니다.</p>
         <div class="worker-form"><label>연결 방식<select id="gateway"><option value="baze">API (--gateway baze)</option><option value="direct">제공업체 API에 직접</option></select></label><label>제공업체·모델 계열<select id="provider"><option value="openai">OpenAI (GPT 계열)</option><option value="anthropic">Anthropic (Claude)</option><option value="gemini">Google (Gemini)</option></select></label><label>모델 ID<input id="model-id" placeholder="예: gpt-6.1-sol" autocomplete="off" spellcheck="false"></label><label>추론 강도<select id="effort"><option value="">모델 기본값</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label></div>

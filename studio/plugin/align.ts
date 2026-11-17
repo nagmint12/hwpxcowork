@@ -410,6 +410,19 @@ export class Alignment {
   paragraphCount(sec: number): number { this.ensure(); return this.cur?.[sec]?.length ?? 0; }
   curKind(sec: number, para: number): string { this.ensure(); return this.cur?.[sec]?.[para]?.kind ?? 'empty'; }
 
+  /**
+   * 편집기 문단 cur 가 기준에 짝이 없는(내 수정본에만 있는 — 내가 넣은) 문단인가(2026-11-17 §10.4 나-3 — insertParagraphAfter 의 skip).
+   * 기준이 없으면 false(편집기 = 기준이라 가릴 수 없다). 칸 문단은 그 본문 문단이 짝 있고 칸 지도(nestedMap)에 없을 때 true —
+   * 내가 넣은 표 안의 칸은 기준 ref 로 가리킬 수 없으니 넣기 자리 계산에 쓰지 않는다(false)
+   */
+  draftOnly(cur: CurPara): boolean {
+    if (!this.ensure() || !this.hasBase || !this.cur![cur.sec]?.[cur.para]) return false;
+    const bi = this.plans[cur.sec]?.c2b[cur.para] ?? -1;
+    if (!cur.cell) return bi < 0;
+    if (bi < 0) return false;
+    return !this.nestedMap(cur.sec, bi, cur.para).r2b.has(posKey(cur.cell.ci, cur.cell.cell, cur.cell.cpara));
+  }
+
   // ───────── 기준 → 편집기 ─────────
 
   locate(ref: string): Located | null {

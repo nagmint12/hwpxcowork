@@ -25,6 +25,10 @@ export const FormatSchema = z.object({
   styleId: optional(shapeId), charPrId: optional(shapeId), paraPrId: optional(shapeId),
   char: optional(CharFormatSchema), paragraph: optional(ParagraphFormatSchema),
 }).strict();
+// 새 연결(v2 — server/mcp2/ops.js)용: 문단 앞 쪽 나눔(pageBreakBefore — engine/formatting.js PARA_KEYS)을 더 받는다(2026-11-17 작업 P).
+// 예전 연결 도구·서버 AI 의 인자 꼴(위 ParagraphFormatSchema·FormatSchema)은 그대로 두고, 서비스 정규화(normalizeFormat)는 이 꼴로 받는다
+export const ParagraphFormatSchemaV2 = ParagraphFormatSchema.extend({ pageBreakBefore: optional(z.boolean()) }).strict();
+export const FormatSchemaV2 = FormatSchema.extend({ paragraph: optional(ParagraphFormatSchemaV2) }).strict();
 export const RunsSchema = z.array(z.object({ text: z.string(), charPrId: optional(shapeId), char: optional(CharFormatSchema) }).strict()).min(1).max(1000);
 
 // 지시 글에 서식 변경 요청이 있어 보이는가 — 요청 창에 서식 칸이 없으므로 AI 가 지시만 보고 서식 제안을 한다.
@@ -41,7 +45,7 @@ function withoutNull(value) {
 }
 export function normalizeFormat(value) {
   if (value == null) return undefined;
-  const clean = withoutNull(FormatSchema.parse(value));
+  const clean = withoutNull(FormatSchemaV2.parse(value));
   if (clean.char?.color) clean.char.color = clean.char.color.toUpperCase();
   if (clean.char?.shadeColor && clean.char.shadeColor !== 'none') clean.char.shadeColor = clean.char.shadeColor.toUpperCase();
   return Object.keys(clean).length ? clean : undefined;

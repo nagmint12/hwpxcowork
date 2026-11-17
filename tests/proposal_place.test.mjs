@@ -35,6 +35,21 @@ test('바꿈·서식·그림 교체: 고칠 문단 그대로, 나눠 반영한 �
   assert.equal(proposalPlace(null).gone, true);
 });
 
+test('덧붙여 넣은 본문 문단(extraRefs — 2026-11-17 표 단위 줄·주석, 문단 옮기기)도 넣은 범위에 든다', () => {
+  // 표 + 아래 주석 문단 둘
+  assert.deepEqual(proposalPlace({ type: 'table', status: 'applied', afterRef: 's0/p2', insertedRef: 's0/p3', captionRef: 's0/p3/n0', extraRefs: ['s0/p4', 's0/p5'] }),
+    { ref: 's0/p3', endRef: 's0/p5', after: false, gone: false, count: 3 });
+  // 위 단위 줄(표 앞) — 시작은 문서 차례로 첫 문단
+  assert.deepEqual(proposalPlace({ type: 'table', status: 'applied', afterRef: 's0/p8', insertedRef: 's0/p10', extraRefs: ['s0/p9'] }),
+    { ref: 's0/p9', endRef: 's0/p10', after: false, gone: false, count: 2 });
+  // 지워진 덧붙임(null)은 빼고, 대기 중이면 쓰지 않는다
+  assert.equal(proposalPlace({ type: 'table', status: 'applied', insertedRef: 's0/p3', extraRefs: [null], insertedGone: true }).gone, true);
+  assert.deepEqual(proposalPlace({ type: 'table', status: 'pending', afterRef: 's0/p2', extraRefs: ['s0/p4'] }), { ref: 's0/p2', endRef: null, after: true, gone: false, count: 1 });
+  // 바꿈 등 그 밖의 제안: 고친 문단부터 덧붙인 마지막 문단까지
+  assert.deepEqual(proposalPlace({ type: 'replace', status: 'applied', ref: 's0/p7', extraRefs: ['s0/p8', 's0/p10'] }), { ref: 's0/p7', endRef: 's0/p10', after: false, gone: false, count: 3 });
+  assert.deepEqual(proposalPlace({ type: 'replace', status: 'applied', ref: 's0/p7', extraRefs: [] }), { ref: 's0/p7', endRef: null, after: false, gone: false, count: 1 });
+});
+
 test('주소를 사람 말로 · 카드 한 줄', () => {
   assert.equal(refWords('s0/p686'), '위에서 687번째 문단');
   assert.equal(refWords('s1/p4'), '구역 2 · 위에서 5번째 문단');

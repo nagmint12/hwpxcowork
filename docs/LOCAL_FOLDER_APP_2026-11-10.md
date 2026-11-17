@@ -9,6 +9,135 @@
 실행기 `deploy/portable/personal.mjs` + `deploy/portable/personal/`(시작 파일·안내), 묶음 `scripts/package-portable.mjs --target personal-lite`.
 시험 `npm run test:personal`(= `tests/local_folders.test.mjs` + `tests/personal_app.test.mjs`).
 
+## Mac의 전체 Cowork 앱으로 통합 — 0.5.1 후보 (2026-11-14)
+
+사용자가 Safari의 개선 기능과 설치 앱의 기능이 다르다고 확인했다. 원인은 같은 WASM 여부보다 **제품 구성**이었다.
+1.0.3 `Hwpx Editor`는 `originalEditorUI:true`, `coworkPlugin:false`인 별도 로컬 편집기이며 웹 보완 124개 중 66개만 포함했다.
+그러므로 앞 절차의 입력 성능 수정·Universal화만으로 웹과 같은 제품이 되었다고 볼 수 없다. 사용자는 자동 저장을 허용하고
+개선된 전체 웹 기능을 Mac 앱에 담도록 요청했다. 기존 `deploy/desktop` 개인용 서버 앱을 사용해 `web/`·cowork 플러그인·
+같은 WASM과 웹 보완 전체를 패키징한다. 웹의 문서함·메모·변경 추적·검토 기능이 이 경로에 포함된다.
+
+- `package:macos`의 기본값은 Intel·Apple Silicon 공용 Universal ZIP 하나다. 앱 버전은 0.5.1이며 기존 1.0.3 standalone과는
+  제품 계열이 다르다. Electron 43.8.10·Node 22.23.5, 최소 OS/모든 Mach-O 검사 대상은 12.1이다.
+- `--studio-dir`·`--engine-pkg`로 artifacts의 동결 후보를 사용한다. 운영 `studio/dist`는 덮어쓰지 않는다.
+  `desktop-product-audit.mjs`는 웹 파일의 바이트, cowork 플러그인, 현재 웹 패치 전체, 서버/화면 WASM 해시를 대조한다.
+  데스크톱 호스트도 한 번 복사한 `desktop-source`로 양쪽 CPU를 빌드한다. 첫 후보는 빌드 중 호스트 소스가 달라져
+  엄격한 공통 자원 검사에서 실패했으며 그 자료를 보존했다.
+- 글꼴은 앱의 같은 출처 편집기 iframe에만 Local Font Access를 허용한다. 파일을 열 때 설치 글꼴을 자동 준비하고,
+  나중에 처음 선택한 글꼴도 실제 클라이언트의 family/fullName/PostScript·굵기 기록으로 등록한 뒤 측정/그리기를 갱신한다.
+  알려진 카탈로그나 실제 설치 기록만 사용하므로 기존 Arial·HFT 대체 규칙은 유지한다. 입력 한 글자마다 전체 글꼴을 재검사하지 않는다.
+- 저장 경고에서 ‘변경 내용 버리기’를 고르면 동기 `will-prevent-unload` 응답으로 원래 닫기/새로고침을 허용한다.
+  취소는 창과 편집 상태를 유지한다. 이미 자동 저장된 내용은 삭제하지 않는다.
+
+검증 도구는 `scripts/verify-desktop-native.mjs`다. `--verification-profile`로 **아직 없는 새 폴더**를 만들고,
+표본 HWPX의 사본만 연결하며 실제 앱·편집기에서 입력/Chromium 조합·글꼴·자동 저장·메모·재열기·종료를 확인한다.
+외부 HTTP(S) 요청은 차단하고 앱의 루프백 서버만 허용한다. 이는 물리적 네트워크 분리나 OS 한글 입력기 시험은 아니다.
+Windows에서는 동결된 호스트와 payload를 Electron으로 실행한다. Mac에서는 실제 `.app`의 실행 파일을 그대로 사용한다.
+
+```sh
+# Mac에서: 앱 안의 Node를 사용한다. OUT은 새 폴더이고 FIXTURE는 시험용 HWPX다.
+"Hwpx Cowork.app/Contents/Resources/runtime/bin/node" scripts/verify-desktop-native.mjs \
+  --app "Hwpx Cowork.app/Contents/MacOS/Hwpx Cowork" --out "$OUT" \
+  --fixture "$FIXTURE" --archive "$RELEASE_ZIP"
+node scripts/macos-release-readiness.mjs --package macos-apps.json --out readiness.json \
+  --native intel/native-result.json,silicon/native-result.json --manual intel/manual.json,silicon/manual.json
+```
+
+`macos-release-readiness.mjs`는 같은 ZIP/WASM의 **macOS 12.1 x64·arm64 실제 실행**, 위 자동 검사,
+codesign/Gatekeeper 결과와 실제 테스트 담당자의 OS 한글 IME·Finder·장시간 작업 기록을 요구한다.
+수동 기록은 `{platform,arch,macos,archiveSha256,wasmSha256,tester,testedAt,checks}`이며 checks의
+`nativeKoreanIme`·`finderLaunch`·`longSession` 각각에 `{status:'pass',notes:'실제 시험 내용'}`이 있어야 한다.
+없는 결과, 다른 OS/해시, 개발용 실행, Windows 결과, Chromium 조합 시험을 Mac 통과로 바꾸지 않는다.
+전체 안정성을 보증하는 도구가 아니라 명시된 배포 검사 범위를 확인하는 도구다.
+
+현재 연결할 Mac이 없으므로 macOS 12.1 실기·OS IME·Finder·Gatekeeper·장시간 시험은 **미검증**이다.
+Developer ID 서명·Apple 공증도 없다. 0.5.1은 로컬 후보이며 기존 공개 다운로드 1.0.3을 이 후보로 교체하지 않았다.
+검증 로그와 패키지: `artifacts/macos-parity-20261114/`. 최종 결과는 아래 기록을 따른다.
+
+최종 후보: `final/package/hwpx-cowork-server-0.5.1-20261114-macos-universal-app.zip`,
+378,875,474바이트, SHA-256 `cc28f272fc191f35d991dc65f23e607e696e0f23f1b7191a7d6d9cbe8269a471`.
+독립 검증에서 ZIP 9,030항목 CRC, Mach-O 16개(내장 Node 포함)의 양 CPU·최소 OS·서명 내부 코드 페이지,
+웹 파일 259개 해시·웹 패치 131개·cowork 플러그인·동결 호스트 ASAR 13파일을 확인했다.
+이는 Apple의 codesign/Gatekeeper 실기 검증이 아니다. WASM은 이전과 같은
+`3324762a9e8f0c8b3d8c397859eec9846ebdd3e97ec8d1c43a5db61985507fd3`이다.
+
+Windows Electron 43.8.10의 실제 전체 앱에서 자동 접속·문서함·플러그인·연속 입력/Chromium 조합 129자·
+미사용 설치 글꼴 Segoe Print의 선택/로딩·HWPX 사본의 글/글꼴 저장·메모 API/화면·새로고침 후 복원·정상 종료
+9개 검사가 통과했다(`final/native-windows-5/native-result.json`). 최초 하네스의 잘못된 DOM 선택자,
+자동 접속/첫 쪽 미리보기 완료 전 조작, 외부 파일 저장 완료 전 읽기를 고쳐 정상 사용 시점부터 확인했고 실패 로그를 보존했다.
+닫기 취소·새로고침 취소·버린 뒤 새로고침(앱 유지)·버린 뒤 종료도 별도 Windows Electron 검사 4개 통과했다
+(`final/close-native-2/result.json`, 네이티브 대화상자 선택은 시험 스텁).
+글꼴 관련 17개·권한/종료 2개와 Studio 타입 검사도 통과했다. 출시 판정 도구의 경계 시험은 2/2이며,
+현재 후보의 `final/macos-readiness.json`은 실제 Mac 자료가 없어서 **ready:false**다.
+
+## 로컬 편집기 1.0.3 — Universal·입력·종료 수정 (2026-11-14, 이전 standalone 배포 기록)
+
+사용자가 확인한 증상은 Safari 웹 편집기가 아니라 설치한 **Hwpx Editor 오프라인 로컬 앱**의 연속 입력 끊김이다.
+Rust/WASM을 다른 엔진으로 바꾸지 않는다. 웹 `studio/dist`·원본 `vendor/rhwp/pkg`·동결 후보·완성 앱의 문서 WASM SHA-256은
+모두 `3324762a9e8f0c8b3d8c397859eec9846ebdd3e97ec8d1c43a5db61985507fd3`이다.
+
+- **입력 경로**: desktop 빌드가 글꼴 패치만 선택해 웹의 `PERFORMANCE_PATCHES`를 빠뜨렸다. 같은 서식의 반복 갱신 100회에서 불필요한 DOM 쓰기 2,100회·글꼴 이름 정규화 32,600회가 발생하고, 문단 변경도 전체 문서의 Canvas 측정을 수집했다. `studio/build/standalone-editor-patches.mjs`로 웹과 같은 성능·측정 패치를 재사용한다. 빌드와 회귀시험이 같은 선택을 사용하고, 패치 누락은 빌드 실패로 처리한다. 본문·서식·조판 기대값은 변경하지 않는다.
+- **한 파일**: 기본 `npm run package:macos:local`은 Intel과 Apple Silicon을 지원하는 Universal `.app` 하나가 든 ZIP 하나를 만든다. 문서 WASM·편집기·글꼴은 한 번만 포함한다. `rcodesign macho-universal-create`로 네이티브 실행파일 15개의 양쪽 CPU 코드를 합치고 최종 번들을 다시 ad-hoc 서명한다. 모든 Mach-O에 두 CPU가 있고 실제 최소 OS가 12.1 이하인지 검사한다. 한쪽 CPU의 V8 snapshot도 빠뜨리지 않는다. Electron은 Monterey를 지원하는 43.8.10을 유지한다([공식 지원 변경](https://www.electronjs.org/blog/electron-44-0), [공식 Universal 구조](https://github.com/electron/universal)).
+- **패키징 수정**: Windows에서 Mac framework의 디렉터리 symlink를 `stat`으로 따라가다 실패하는 경로를 링크 그래프로 처리하고, Electron Packager가 ASAR 무결성 키에 넣는 Windows 임시 절대경로를 실제 헤더 해시와 `Resources/app.asar`로 정규화한다. 공통 파일은 양쪽 해시 일치를 요구한다. 이전 앱 위에 ASAR를 얹던 `--refresh` 대신 새 출력 폴더를 사용한다. 중단된 현재 후보의 `--reuse-web --reuse-apps`는 코드·자원·버전을 대조한 뒤에만 가능하다.
+- **저장하지 않고 종료**: 미저장 상태에서 ‘취소’와 ‘저장하지 않고 종료’를 제공한다. 기본/ESC는 취소다. 명시적으로 버리기를 선택했을 때만 창을 파기해 편집기 `beforeunload`가 두 번째로 막지 않게 한다. 파일 저장을 호출하지 않으며, 취소는 편집 상태를 유지한다. 연속 종료 요청에는 확인창을 중복 띄우지 않는다.
+
+검증 자료는 `artifacts/macos-universal-20261114/`에 보존한다. 수정 전 standalone 검사 9개 중 4개 실패,
+수정 후 standalone 입력/글꼴/비동기 측정 21/21 통과. Windows Electron 43.8.10의 production main/preload/renderer에서
+연속 입력 84자와 Chromium 한글 조합 24음절이 정확히 한 번 들어갔고 원본 저장·사본 저장·저장취소·종료취소·저장하지 않고 종료를 확인했다.
+작은 문서의 동일 입력에서 전체 측정 수집 181회가 3회로 줄고 문단 수집 178회로 바뀌었다. 초기 시험은 문서 열기 완료를 기다리지 않아
+입력 도중 초기화와 경합할 수 있었다. 해당 실패는 보존하고, 실제 입력 가능 상태까지 기다리는 동일 전후 시험으로 교정했다.
+60쪽 시험 보고서도 같은 입력을 보존했고 전체 수집 180→4회, 문단 수집 0→176회였다. 같은 CPU25% 제한 아래 입력 중앙값 31.21→5.26ms,
+95백분위 34.82→7.68ms, 조합 갱신 중앙값 31.90→5.69ms로 줄었다. 최대값 약157~177ms의 긴 처리도 남았으며 측정값은 이 Windows 표본의 관측이지 Mac 성능 보장이 아니다.
+독립 검증은 기본 웹/파일 저장/Mac/Universal 29/29, ZIP 안의 Mach-O 15개·CodeDirectory 30개의 코드 페이지/특수 슬롯·리소스 봉투 9개·symlink 14개·ASAR 원본 7파일·무결성 키가 일치했다.
+`rcodesign verify` 자체는 15개 모두 ad-hoc의 빈 CMS 오류로 실패했고, 도구도 오판 가능 경고를 출력했다. 원문을 `verifier/signature-*.log`에 보존하고 별도 해시 계산을 확인했다. 이를 Apple 서명 검사 통과로 보고하지 않는다.
+창 닫기와 종료 메뉴(`app.quit`) 모두 취소/버리기 경로를 확인했다.
+입력/IME/종료는 AGENTS §2.1의 예외로 실제 Electron 입력 이벤트를 검사했으며 조판 화면 캡처는 하지 않았다.
+이 결과를 macOS의 실제 OS IME나 Safari와의 완전한 동작 일치로 확대하지 않는다. 실제 macOS 12.1·Finder·Gatekeeper와 Developer ID/Apple 공증은 미검증이다.
+사용자의 게시 승인 후 1.0.3을 공개 다운로드에 반영했다. `https://cowork.example.com/download`의 Hwpx Editor는
+Intel·Apple Silicon 공용 버튼 하나이며, 기종 선택 안내는 별도 개인 서버 앱에만 남긴다. 이전 1.0.2 두 파일은 이전 버전으로 옮기고
+기존 22개 파일·주소를 보존했다. `server/download-page.js`의 표시 변경은 지원되는 정상 재시작으로 적용했고 운영 설정은 바이트 그대로 보존했다.
+공개 HTTPS에서 ZIP 전체 265,536,875바이트와 SHA-256 `43d42375c45af7aa5446f1f84201fb2a3a207f12a6f0e83bc9d7aae58d2a758e` 일치,
+23개 파일의 HEAD 응답·크기, 공개 명세·체크섬·공용 버튼을 확인했다. 다운로드 회귀시험은 4/4 통과했다.
+실제 브라우저나 Mac에서 실행한 검사는 아니며 앞의 macOS 실기기·서명 관련 미검증 상태는 그대로다.
+배포 근거는 같은 자료 폴더의 `publication.json`, `ui-deployment.json`, `public-verification.json`, `verifier/publication-review.json`이다.
+
+## macOS 12.1 호환판 (2026-11-14)
+
+현재 Mac 로컬 편집기 **1.0.1**과 개인 서버 앱은 Electron **43.8.10**으로 묶는다. Electron 44부터 macOS 13이 필요하므로, 단순한 Info.plist 숫자 변경 대신 런타임 자체를 교체했다. 공식 앱의 최소 대상은 12.0이며 배포 지원 목표는 **macOS 12.1 이상**이다. 개인 서버의 별도 Node는 22.23.5(최소 11.0)를 사용한다. 두 기종·두 앱 안의 모든 Mach-O CPU/최소 OS를 확인하는 `scripts/macos-binary-audit.mjs`를 패키징 필수 검사로 넣었다. 기존 배포 파일은 보존한다.
+
+macOS 12의 개인 서버 앱은 문서 편집·문서함·공동 검토를 제공한다. **구독 AI 연결은 macOS 13 이상**에서 지원한다. Mac12에서 실행 가능한 구형 CLI를 조사했지만 현재 서버의 필수 연결·격리 옵션을 지원하지 않아 채택하지 않았다. 해당 OS에서 AI 메뉴·설정 진입·자동 연결·설치 및 로그인 실행을 막고, 다른 OS의 현행 CLI와 격리 요구는 유지한다. 로컬 편집기는 원래 서버·AI 기능이 없어 이 제한과 관계없다.
+
+실제 macOS 12.1 기기·Finder·Gatekeeper는 미검증이며 Developer ID 서명·Apple 공증 전이다. Windows의 동일 Electron43에서 네이티브 파일 IPC 저장 경로를 확인했고 개인 서버 payload는 공식 Node22의 임시 서버 검사로 확인한다. 조사·실패 후보·빌드·검증·게시 근거는 `artifacts/macos121-20261114/`에 보존한다.
+
+## 서버 없는 Mac 로컬 편집기 추가 (2026-11-14)
+
+기존 개인 서버 앱은 유지하며 **Hwpx Editor.app**을 별도로 추가했다. `deploy/local-editor/`가 Electron의 전용 보안 스킴으로 내장 편집기를 읽고, 사용자가 고른 파일만 불투명 ID로 연결한다. HTTP 서버·자식 Node 서버·로그인·협업·AI는 필요하지 않다. ZIP을 풀고 앱을 더블클릭해 **파일 → 열기**로 문서를 고른다.
+
+**저장**은 열린 파일을 갱신하고 **다른 이름으로 저장**은 새 위치를 고른다. 새 위치에 저장한 뒤의 저장은 그 사본을 갱신한다. 임시 파일을 완성한 뒤 원자적으로 교체하고, 열기 이후 외부에서 파일이 바뀌거나 읽기 전용이면 덮어쓰기를 거부한다. 취소·쓰기 실패 때 수정 상태를 유지한다. 1.0.3부터 미저장 상태에서 닫으면 취소 또는 저장하지 않고 종료를 선택한다. 선택하지 않은 경로를 renderer가 임의로 읽거나 쓸 수 없다.
+
+- 최초판은 Apple Silicon·Intel 별도 ZIP, macOS 13 이상이었다. 1.0.1부터 macOS 12.1을 대상으로 하며 1.0.3 후보는 Universal ZIP 하나다. 앱 이름·번들 ID가 기존 서버 앱과 달라 함께 둘 수 있다.
+- 빌드: `npm run package:macos:local`, `scripts/package-macos-local.mjs`. 내장 편집기 빌드와 허용 글꼴·라이선스 검사, POSIX 실행 권한·framework symlink, ad-hoc 서명을 포함한다.
+- 실제 Mac·Finder·Gatekeeper·공증은 미검증이다. Developer ID 서명·Apple 공증 전이며 첫 실행 시 macOS의 앱 실행 허용 확인이 필요할 수 있다.
+- 검증: 파일/핸들 단위 4건 및 Windows의 동일 Electron 45에서 production main/preload/renderer로 원본 저장·사본 저장·취소 뒤 수정 상태 보존을 확인했다. 저장 XML에서도 원본/사본의 입력 내용을 구분했다. 이는 실제 Mac 실행이나 한/글 조판 일치 검증이 아니다. 기록: `artifacts/local-editor-20261114/`.
+
+Android 1.0.8(코드11)도 쓰기 가능한 열린 원본 저장을 지원한다. 자체 Android 15 에뮬레이터에서 이전 APK 위 업데이트, 열기·편집·원본 저장·사본 저장을 확인했으며 실물 휴대폰과 문서 제공자별 URI 쓰기는 미검증이다. 기존 APK와 Mac 서버 앱은 보존하고 다운로드 목록 첫 항목은 Windows 통합 ZIP으로 둔다.
+
+## macOS 앱 배포 (2026-11-13, 당시 배포 기록 — 현재 후보는 위 0.5.1절)
+
+개인 **AI 실행기**는 기존 서버에 연결하는 별도 프로그램이다. 이 절의 개인용 **서버 앱**은 각자 자기 Mac에서 서버와 편집기를 함께 켠다.
+`deploy/desktop/`의 Electron 창이 기존 `portable/personal.mjs --no-window`를 내장 Node로 시작하며, 처음 실행하면 무작위 관리자 토큰·빈 포트·127.0.0.1 전용 서버를 자동 준비하고 문서함을 연다.
+사용자가 Node·npm·Rust를 설치하거나 명령·서버 주소·토큰을 입력할 필요가 없다. 앱의 [파일 → 문서 폴더 연결]에서 폴더를 고른다.
+기본은 AI 없이 편집·저장이고 [AI → ChatGPT·Claude 연결]에서 선택한 공식 CLI를 사용자 설정 폴더에 자동 준비하고 브라우저로 구독 로그인을 진행한다. 앱 시작이나 연결 점검만으로 모델을 호출하지 않는다.
+
+- 배포 형식: Apple Silicon과 Intel 각각의 ZIP 안에 `Hwpx Cowork.app`, 짧은 안내, 빌드 정보. Electron 45.3.1·Node 22.23.5·npm·서버 운영 의존성·미리 빌드한 엔진·편집기·허용 글꼴과 원문 라이선스를 포함한다.
+- 최소 실행 대상: 공식 Electron 45의 Info.plist와 Mach-O 기준 macOS 13.0(14 포함). Node 22의 11.0 대상과 구분한다. Mac 앱의 최소값을 11로 소개하지 않는다.
+- 설정·기록: 사용자 `Library/Application Support/Hwpx Cowork/personal`에 보존한다. 앱을 옮기거나 새 ZIP으로 교체해도 이 경로는 유지된다. 연결한 PC 원본·기존 운영 `config.json`·`data/`는 새 설치로 복사하지 않는다.
+- 종료: 편집기의 미저장 경고를 먼저 존중하고, 창이 닫히면 소유 서버·AI 실행기를 IPC로 정상 종료한다. 부모 앱의 비정상 종료도 자식의 disconnect 처리로 정리한다. 다른 설치나 사용자의 프로세스는 종료하지 않는다.
+- 빌드: `npm run package:macos`(`--out`, `--arch arm64|x64`, 기존 본인 후보의 소스 수정 후 `--refresh`). `scripts/package-portable.mjs --target personal-lite`의 허용 목록과 비밀·글꼴 검사를 재사용한다. Windows에서 ZIP을 만들 때 Mach-O/shebang 파일은 0755, 일반 파일은 0644, framework symlink는 POSIX 구분자와 120777로 기록한다.
+- 서명: `apple-codesign 0.29.0`으로 실행 파일·중첩 framework·리소스를 ad-hoc 서명한다. **Developer ID 서명·Apple 공증은 아니다.** macOS의 첫 실행 확인이 필요할 수 있으며 실제 Mac의 Finder 더블클릭·Gatekeeper·AI 로그인은 미검증으로 남긴다. 보안 기능 해제나 터미널 우회 명령을 설치 절차로 제공하지 않는다.
+
+검증·배포 기록은 `artifacts/personal-macos-20261113/`과 `docs/CHANGELOG.md`에 이어 적는다. Windows의 동일 Electron 앱 문서함은 UIA 텍스트로 확인했으며 화면 캡처는 도구 시간 초과로 확인하지 못했다. 실제 Mac 실행이나 엔진의 Mac 화면 일치를 검증한 것으로 확대하지 않는다.
+
 ## 1. 방안 검토
 
 | 방안 | 내용 | 판단 |

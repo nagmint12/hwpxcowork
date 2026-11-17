@@ -65,9 +65,9 @@ export function adaptRhwp090Patches(patches) {
     if (p.id === 'exact-local-faces-before-webfonts') return {
       ...p, replace: a => {
         const out = p.replace(a);
-        const from = '!isDetectedOSFont(name) && !isRegisteredFontFamily(name)))) {';
+        const from = 'undefined, clientFontRecords)) {';
         if (!out.includes(from)) throw new Error('[rhwp090] exact-local-faces-before-webfonts 바꿀 자리를 찾지 못했습니다');
-        return out.replace(from, '!isDetectedOSFont(name) && !isRegisteredFontFamily(name)), face => registerLoadedLocalFontFace(face))) {');
+        return out.replace(from, 'face => registerLoadedLocalFontFace(face), clientFontRecords)) {');
       },
     };
     if (p.id === 'noto-sans-kr-for-unavailable-font') return {
@@ -182,8 +182,12 @@ export function adaptRhwp090Patches(patches) {
     if ((globalThis as { __rhwpCoworkDeclaredFonts?: boolean }).__rhwpCoworkDeclaredFonts !== true) return false;
     const doc = this.doc;`),
     '0.9 선언 글꼴 환경(로컬 바이트 별칭·엔진 환경 교체)을 쓰지 않음(fork 방식)');
-  extra('rhwp090-progressive-hold-recovery-cipher', 'src/core/wasm-bridge.ts',
-    '    notify(() => previousCipher?.dispose());', a => a.replace('notify(', 'if (!holdPrevious) notify('),
-    'rollback 완료까지 이전 문서의 복구 암호 핸들 보존');
+  // [hwpx-cowork] 독립 편집기는 글꼴 패치만 사용한다. hold 옵션을 추가한
+  // 빌드에서만 참조해야 일반 문서 열기에 미정의 변수 오류가 나지 않는다.
+  if (patches.some(p => p.id === 'progressive-open-atomic-hold-option')) {
+    extra('rhwp090-progressive-hold-recovery-cipher', 'src/core/wasm-bridge.ts',
+      '    notify(() => previousCipher?.dispose());', a => a.replace('notify(', 'if (!holdPrevious) notify('),
+      'rollback 완료까지 이전 문서의 복구 암호 핸들 보존');
+  }
   return result;
 }

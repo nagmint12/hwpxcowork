@@ -9,11 +9,11 @@ function loadAdvancedKey() {
   advancedKeyLoading = fetch('/tutorial-assets/ai-advanced-key.json').then((r) => (r.ok ? r.json() : null)).then((k) => { advancedKey = k; return k; }).catch(() => null);
   return advancedKeyLoading;
 }
-import { stepHelpers, el, length, image, practice, external, commandExample } from './common.js';
+import { stepHelpers, el, sendTutorialExample } from './common.js';
 
 export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
   const { d, s, ctx, config, focusIn, rectOf, pad, q, fdoc, inFrame, frameRect, selectFor, locate, phraseRect, cw } = env;
-  const { finish, intro, paragraph, focus, frameButton, frameDialog, closeFrameDialog, openShape, reveal, top, memo, memoCard, fill } = stepHelpers(env);
+  const { finish, intro } = stepHelpers(env);
     // 튜토리얼 6(AI 활용 심화, 2026-11-04 간소화): 꼭 필요한 5가지 작업을 준비된 예시 답변(preset)으로 진행한다 — 개인 AI 연결은 쓰지 않는다.
     // 작업마다 두 단계: ① 요청 창이 예시 문구로 열리면 [보내기] ② 결과가 오면 [모두 반영] → 바뀐 본문으로 저절로 이동해 보여 준다(확인 단추 없음 — tutorial.js showApplied).
     if (!env.describe) loadAdvancedKey();
@@ -26,20 +26,25 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
       || (ctx[`before${task.id}`] && [...(s.requests || [])].reverse().find((r) => r.tutorialStep === task.id && !ctx[`before${task.id}`].includes(r.rid)));
     const finished = (task) => ['done', 'failed', 'cancelled'].includes(reqOf(ridOf(task))?.status);
     const propsOf = (task) => (s.proposals || []).filter((p) => p.rid === ridOf(task));
-    const pendingOf = (task) => propsOf(task).filter((p) => p.status === 'pending' && !d.proposalDone?.(p));
+    const pendingOf = (task) => propsOf(task).filter(p => p.status === 'pending' && !d.proposalDone?.(p));
+    const completed = task => reqOf(ridOf(task))?.status === 'done' && propsOf(task).length > 0 && propsOf(task).every(p => p.status === 'applied' || (p.status === 'pending' && d.proposalDone?.(p)));
     const showRequest = (rid) => { const r = reqOf(rid); if (!r) return; s.tab = 'ai'; s.activeRid = r.rid; s.active = { kind: 'request', id: String(r.rid) }; s.panelPing = (Number(s.panelPing) || 0) + 1; };
     const sendButton = () => q('.composer-win .cmp-send');
     // AI 작업 카드의 attach: 연습 문서에 미리 올려 둔 첨부(엑셀·.skill)를 요청 창에 붙인다 — 이름에 그 글이 든 첨부
     const attachmentsOf = (task) => (task.attach || []).flatMap((part) => (s.attachments || []).filter((a) => String(a.name || '').toLowerCase().includes(String(part).toLowerCase())).map((a) => a.aid)).filter((aid, k, all) => all.indexOf(aid) === k);
     const attachNames = (task) => (task.attach || []).flatMap((part) => (s.attachments || []).filter((a) => String(a.name || '').toLowerCase().includes(String(part).toLowerCase())).map((a) => a.name));
     const chips = () => q('.composer-win .cmp-chips');
+    async function targetOf(task) {
+      if (task.target.doc) return { scope: 'document', display: '문서 전체', refs: [] };
+      const target = await selectFor(titleOf(task));
+      if (!target) throw new Error(`‘${titleOf(task)}’을(를) 문서에서 찾지 못했습니다`);
+      return target;
+    }
     async function openTask(task, stepTitle) {
       const ticket = env.stepIdentity?.();
-      if (s.composer || newRequest(task)) return;
-      let t;
-      if (task.target.doc) t = { scope: 'document', display: '문서 전체', refs: [] };
-      else { t = await selectFor(titleOf(task)); if (!t) throw new Error(`‘${titleOf(task)}’을(를) 문서에서 찾지 못했습니다`); }
-      if ((env.stepIdentity && env.stepIdentity() !== ticket) || env.isCurrentStep?.(stepTitle) === false || s.composer) return;
+      if (s.composer?.tutorialStep === task.id || newRequest(task)) return;
+      const t = await targetOf(task);
+      if ((env.stepIdentity && env.stepIdentity() !== ticket) || env.isCurrentStep?.(stepTitle) === false || s.composer?.tutorialStep === task.id) return;
       d.openComposer(t, 'instruct', { instruction: '', tutorialStep: task.id, attachments: attachmentsOf(task) });
       await typePrompt(task, stepTitle);
     }
@@ -68,6 +73,7 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
     const steps = [];
     tasks.forEach((task, n) => {
       const name = `${n + 1}. ${task.title}`; const askTitle = `${name} — AI에게 요청`;
+      const askIndex = steps.length + 1;
       // why(효능 한 줄)·attach(첨부 강조)는 AI 작업 카드(AI_WORK_TASKS)에만 있다 — 예전 다섯 작업은 그대로 보인다
       const lead = () => { const names = attachNames(task); return [task.why, names.length ? `첨부: ${names.map((x) => `「${x}」`).join(' ')}` : ''].filter(Boolean).join(' '); };
       const askText = (line) => (lead() ? `${lead()}\n${line}` : line);
@@ -76,11 +82,21 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
         enter: () => {
           ctx[`before${task.id}`] ||= (s.requests || []).map((r) => r.rid);
           if (!task.target.doc) { const at = locate(titleOf(task)); if (at) focusIn(d, at, { quiet: true }); }
-          openTask(task, askTitle).catch(() => { /* [요청 창 열기]로 다시 */ });
+          return openTask(task, askTitle).catch(() => { /* [요청 창 열기]로 다시 */ });
         },
         ring: () => (typing ? (task.attach ? pad(rectOf(chips()), 4) : null) : pad(rectOf(sendButton()), 4)), open: () => rectOf(q('.composer-win')) || frameRect(),
         motion: () => s.composer?.phase === 'edit' ? { rect: rectOf(typing ? q('.composer-win .cmp-instr') : sendButton()), mode: typing ? 'typing' : 'click' } : null,
-        action: { label: '요청 창 열기', show: () => !s.composer, run: () => openTask(task, askTitle) },
+        action: { label: '요청 창 열기', show: () => s.composer?.tutorialStep !== task.id, run: () => openTask(task, askTitle) },
+        quickWhen: () => s.info?.tutorialOwnAi === true,
+        quick: async () => {
+          const ticket = env.stepIdentity?.();
+          const target = s.composer?.tutorialStep === task.id ? s.composer.target : await targetOf(task);
+          if (env.stepIdentity && env.stepIdentity() !== ticket) return;
+          const attachments = attachmentsOf(task);
+          if (task.attach?.some(part => !(s.attachments || []).some(a => String(a.name || '').toLowerCase().includes(part.toLowerCase())))) throw new Error('요청에 필요한 연습 첨부를 찾지 못했습니다.');
+          const request = await sendTutorialExample(d, target, task.prompt, { tutorialStep: task.id, attachments });
+          ctx[`rid${task.id}`] = request.rid;
+        },
         // WS로 먼저 완료가 와도 전송 함수가 마무리되기 전에 요청 창을 닫지 않는다.
         until: () => { const r = newRequest(task); if (r) ctx[`rid${task.id}`] = r.rid; return !!r && !s.sending; } });
       steps.push({ title: `${name} — 결과 반영`, press: '모두 반영', wait: true, idle: () => finished(task),
@@ -95,26 +111,31 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
         text: () => {
           const r = reqOf(ridOf(task));
           if (!r || !finished(task)) return 'AI에게 보내고 답변을 기다리는 중입니다…';
-          if (r.status !== 'done') return `답변을 넣지 못했습니다${r.error ? `: ${r.error}` : ''}. 아래 [반영하지 않고 다음]으로 넘어가세요.`;
+          if (r.status !== 'done') return `답변을 넣지 못했습니다${r.error ? `: ${r.error}` : ''}. [다시 요청]을 누르거나 준비 단계부터 다시해 주세요.`;
           const what = [propsOf(task).length ? `제안 ${propsOf(task).length}건` : '', (r.comments || []).length ? `메모 ${r.comments.length}건` : ''].filter(Boolean).join(' · ') || '결과';
-          if (pendingOf(task).length && propsOf(task).some((p) => p.status === 'applied')) return `남은 제안 ${pendingOf(task).length}건은 반영하지 못했거나 아직 정하지 않았습니다. AI 작업 창에서 [반영]·[거절]하거나 아래 [반영하지 않고 다음]으로 넘어가세요.`;
+          if (pendingOf(task).length && propsOf(task).some((p) => p.status === 'applied')) return `남은 제안 ${pendingOf(task).length}건을 반영해 주세요. 반영할 수 없으면 [이 단계 다시하기]로 결과를 복구하세요.`;
           return pendingOf(task).length
             ? `AI가 ${what}을 남겼습니다. ${task.look} 초록 테두리의 [모두 반영]을 누르면 바뀐 본문으로 이동해 보여 줍니다.`
             : `AI가 ${what}을 남겼습니다. ${task.look}`;
         },
         enter: () => { try { d.closeWindow('composer'); } catch { /* 이미 닫힘 */ } showRequest(ridOf(task)); },
         ring: () => pad(rectOf(requestControl(document, ridOf(task))), 4) || pad(rectOf(q(`.result[data-rid="${ridOf(task)}"]`)), 2),
+        click: () => requestControl(document, ridOf(task)),
         open: () => rectOf(q('.panel')),
         reveal: () => requestControl(document, ridOf(task)),
         motion: () => ({ rect: rectOf(requestControl(document, ridOf(task))), mode: 'click' }),
         ...(['S3', 'S4'].includes(task.id) ? { example: keyBox(task) } : {}),
-        until: () => reqOf(ridOf(task))?.status === 'done' && propsOf(task).length > 0 && !pendingOf(task).length,
-        next: n === tasks.length - 1 ? '완료 단계로' : '반영하지 않고 다음', nextPlain: n < tasks.length - 1 });
+        until: () => completed(task), quickWhen: () => reqOf(ridOf(task))?.status === 'done' && pendingOf(task).length > 0,
+        quick: async () => { await d.resolveRequest(reqOf(ridOf(task)), 'adopt'); },
+        lost: () => {
+          const r = reqOf(ridOf(task));
+          if (!r || (r.status === 'done' && !propsOf(task).length)) return askIndex;
+          if (propsOf(task).some(p => ['rejected', 'undone'].includes(p.status))) return askIndex + 1;
+          return null;
+        },
+        action: { label: '다시 요청', show: () => ['failed', 'cancelled'].includes(reqOf(ridOf(task))?.status), run: () => d.retryRequest(reqOf(ridOf(task))) } });
     });
     steps.unshift(intro(`AI 활용 심화 — 선택한 AI 작업 ${tasks.length}가지`, `가상의 분석 보고서에서 ${tasks.map((t) => t.title).join(' → ')} 순서로 AI에게 맡깁니다. 화면 속 가상 커서와 타이핑 예시를 보고 [보내기]와 [모두 반영]을 직접 누르세요. 가상 커서는 클릭 위치만 보여 주며, 반영하면 바뀐 본문으로 이동합니다. 답변은 미리 준비한 예시라 AI 연결이나 사용료가 필요 없습니다. 수치는 모두 연습용 가상 자료입니다.`));
-    steps.push({ ...finish, text: () => {
-      const pending = (s.proposals || []).filter(p => p.status === 'pending' && !d.proposalDone?.(p)).length;
-      return `선택한 AI 작업을 맡기고 반영해 보았습니다.${pending ? ` 반영하지 않은 제안 ${pending}건은 AI 작업 창에 남아 있습니다.` : ''} 완료하면 연습 문서와 요청·제안·메모 기록을 내 문서함에 보관합니다.`;
-    } });
+    steps.push({ ...finish, text: '선택한 AI 작업을 맡기고 반영해 보았습니다. 완료하면 연습 문서와 요청·제안·메모 기록을 내 문서함에 보관합니다.' });
     return steps;
 }

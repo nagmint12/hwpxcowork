@@ -9,12 +9,15 @@ test('두 운영 방식과 세 구독의 여섯 조합은 실제 설치 CLI 계�
   for (const deployment of DEPLOYMENTS) for (const subscription of SUBSCRIPTIONS) {
     const plan = setupPlan(deployment.id, subscription.id);
     const installCli = subscription.id === 'none' ? '' : ' --install-cli';
-    assert.equal(plan.command, `.\\scripts\\setup-user.bat --mode ${deployment.id} --ai ${CLI_AI[subscription.id]}${installCli} --start`);
+    assert.equal(plan.command, `.\\scripts\\setup-user.bat --mode ${deployment.id} --ai ${CLI_AI[subscription.id]} --start`);
     assert.equal(plan.commandNode, `node scripts/setup-personal.mjs --mode ${deployment.id} --ai ${CLI_AI[subscription.id]}${installCli} --start`);
-    assert.ok(plan.prompt.includes(plan.command));
-    assert.ok(plan.prompt.includes('app 폴더'));
-    assert.match(plan.prompt, /기존 운영 설정과 문서는 건드리지/);
+    // 2026-11-16: 운영 방식마다 Windows 설치 묶음 하나, AI 는 설치 뒤 AI 연결.bat 에서 고른다(VS Code 붙여넣기 없음)
+    assert.equal(plan.target, `windows-${deployment.id}`);
+    assert.equal(plan.prompt, undefined);
     assert.equal(plan.steps.length, 3);
+    assert.match(plan.steps[1], /시작\.bat/);
+    if (subscription.id === 'none') assert.equal(plan.aiChoice, '');
+    else { assert.match(plan.aiChoice, /^AI 연결\.bat/); assert.match(plan.steps[2], /AI 연결\.bat/); }
     assert.ok(!/setx|api.key|publicUrl|https:\/\/localhost/i.test(plan.command));
     assert.equal(plan.needsLogin, subscription.id !== 'none');
     const args = plan.commandNode.split(' ').slice(2);

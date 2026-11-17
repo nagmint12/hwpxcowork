@@ -1,0 +1,212 @@
+// 새 MCP 연결(server/mcp2.js — docs/MCP_REDESIGN_2026-11-16.md)의 읽기 보기: 글과 주소만 짧게 준다(서식은 물을 때 따로 — view=format).
+//   · 본문 보기(text): 본문 문단 한 줄, 표는 줄마다 한 줄(칸 주소는 표 열쇠·줄·칸), 글상자가 많은 문단은 한 줄 요약(layout 보기로 안내)
+//   · 배치 보기(layout): 떠 있는 글상자·괘선을 좌표로 줄·표로 묶은 것(engine/layout.js) — 요약(문단마다 한 줄)과 자세히
+//   · 얼개(map)·제목(outline)
+// 모두 문서(engine HwpxDoc)만 읽는 순수 함수다. 길이는 줄 단위로 자르고 이어 읽을 자리(줄 번호)를 돌려준다.
+import { analyzeLayout, layoutHosts } from '../../engine/layout.js';
+
+const n = (v) => Number(v).toLocaleString('ko-KR');
+const oneLine = (s) => String(s ?? '').replace(/\s*\n\s*/g, ' ⏎ ');
+const clip = (s, max) => { const t = [...String(s ?? '')]; return t.length > max ? `${t.slice(0, max).join('')}…` : t.join(''); };
+
+/** 범위 글('s0/p3' · 's0/p3..s0/p20' · 's0/p3..p20' · 's2' · 's1..s3' · 생략) → 본문 문단을 고르는 함수 | null(전체). 잘못된 글이면 던진다 */
+export function rangePicker(at) {
+  if (at == null || at === '' || at === '*') return null;
+  const one = (s, side) => {
+    let m = /^s(\d+)$/.exec(s); if (m) return [Number(m[1]), side === 'from' ? 0 : Infinity];
+    m = /^s(\d+)\/p(\d+)(?:[/#].*)?$/.exec(s); if (m) return [Number(m[1]), Number(m[2])];
+    return null;
+  };
+  const parts = String(at).split('..');
+  if (parts.length > 2) throw Object.assign(new Error(`범위가 올바르지 않습니다: ${at}`), { code: 'BAD_RANGE' });
+  const a = one(parts[0].trim(), 'from');
+  let b;
+  if (parts.length === 2) {
+    const t = parts[1].trim();
+    b = /^p\d+$/.test(t) && a ? [a[0], Number(t.slice(1))] : one(t, 'to');
+  } else b = one(parts[0].trim(), 'to');
+  if (!a || !b) throw Object.assign(new Error(`범위가 올바르지 않습니다: ${at} — 's0/p3' · 's0/p3..s0/p20' · 's2' 꼴`), { code: 'BAD_RANGE' });
+  const cmp = (x, y) => x[0] - y[0] || x[1] - y[1];
+  return (sec, body) => cmp([sec, body], a) >= 0 && cmp([sec, body], b) <= 0;
+}
+
+/** 문단 스타일 번호 → 이름 */
+function styleNames(doc) { return new Map(doc.formattingCatalog().styles.map((s) => [String(s.id), s.name])); }
+function styleIdOf(doc, ref) {
+  try { const { sec, p } = doc.resolve(ref); return (/\sstyleIDRef="(\d+)"/.exec(sec.xml.slice(p.start, p.start + 400)) || [])[1] ?? null; } catch { return null; }
+}
+
+/** 문단이 가진 개체를 이름별로 센 글('글상자 207 · 사각형 52') */
+function objectTally(doc, ref) {
+  const tally = new Map();
+  for (const o of doc.ownObjects(ref)) tally.set(o.name, (tally.get(o.name) || 0) + 1);
+  return [...tally].map(([name, c]) => `${name} ${n(c)}`).join(' · ');
+}
+
+/** 표를 줄마다 한 줄로: '| a | b |' — 합친 칸은 왼쪽 위에 글, 가려진 자리는 ↑(위 칸에 이어짐)·←(왼쪽 칸에 이어짐) */
+export function tableLines(t, { from = 0, to = Infinity } = {}) {
+  const grid = Array.from({ length: t.rows }, () => Array.from({ length: t.cols }, () => ''));
+  for (const c of t.cells) {
+    for (let r = c.row; r < Math.min(t.rows, c.row + (c.rowSpan || 1)); r++) for (let k = c.col; k < Math.min(t.cols, c.col + (c.colSpan || 1)); k++) {
+      grid[r][k] = r === c.row && k === c.col ? oneLine(c.text).replace(/\|/g, '¦') : (r > c.row ? '↑' : '←');
+    }
+  }
+  const out = [];
+  for (let r = Math.max(0, from); r < Math.min(t.rows, to); r++) out.push(` r${r} | ${grid[r].join(' | ')} |`);
+  return out;
+}
+
+/**
+ * 문서 얼개(한두 줄): 구역·본문 문단·글자 수·표·그림·떠 있는 개체. 글 대부분이 글상자 안에 있으면 배치 보기를 권한다.
+ * → { text, stats: { sections, body, chars, boxChars, tables, figures, shapes, floatingHosts } }
+ */
+export function docMap(doc, { title = '' } = {}) {
+  const paras = doc.paragraphs({ view: 'final', nested: true });
+  let body = 0; let chars = 0; let boxChars = 0;
+  for (const p of paras) {
+    if (!p.parent) body++;
+    const len = [...p.text.replace(/\s+/g, '')].length; chars += len;
+    if (p.where === '글상자' || p.where === '개체') boxChars += len;
+  }
+  const tables = doc.tables().length; const figures = typeof doc.figures === 'function' ? doc.figures().length : 0;
+  const tally = new Map(); let shapes = 0;
+  for (const sec of doc.sections) for (const p of sec.bodyParas) for (const o of doc.ownObjects(p.ref)) { if (o.kind !== 'shape') continue; shapes++; tally.set(o.name, (tally.get(o.name) || 0) + 1); }
+  const hosts = layoutHosts(doc).length;
+  const lines = [`문서${title ? ` 「${clip(title, 40)}」` : ''}: 구역 ${doc.sections.length} · 본문 문단 ${n(body)} · 글 ${n(chars)}자 · 표 ${n(tables)} · 그림 ${n(figures)}${shapes ? ` · 도형 ${n(shapes)}(${[...tally].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} ${n(v)}`).join(' · ')})` : ''}`];
+  const floating = chars > 0 && boxChars / chars >= 0.5 && shapes >= 10;
+  if (floating) lines.push(`⚠ 글의 ${Math.round((boxChars / chars) * 100)}%가 떠 있는 글상자 안에 있다(쪽 좌표에 놓인 조각 — PDF 를 옮긴 문서에 흔하다). 본문 보기(text)로는 조각만 보인다. 배치 보기(read view='layout')가 좌표로 줄·표 구조를 묶어 보여 주고, edit 의 objects_to_body 가 진짜 문단·표로 옮긴다(글을 다시 치지 않는다).`);
+  return { text: lines.join('\n'), stats: { sections: doc.sections.length, body, chars, boxChars, tables, figures, shapes, floatingHosts: hosts, floating } };
+}
+
+/**
+ * 본문 보기의 줄 목록. 줄마다 { text, body(문서 전체 본문 차례) }.
+ * opts: pick(구역, 구역 안 문단 번호, 문서 전체 본문 차례 → 포함?), styles(스타일 이름을 바뀔 때마다 〔 〕 로 — 기본 true), boxLimit(글상자 안 문단을 줄마다 보일 한도 — 넘으면 한 줄 요약, 기본 12)
+ */
+export function textLines(doc, { pick = null, styles = true, boxLimit = 12 } = {}) {
+  const paras = doc.paragraphs({ view: 'final', nested: true });
+  const tables = doc.tables(); const tablesAt = new Map();
+  for (const t of tables) { if (!tablesAt.has(t.ref)) tablesAt.set(t.ref, []); tablesAt.get(t.ref).push(t); }
+  const figures = typeof doc.figures === 'function' ? doc.figures() : []; const figuresAt = new Map();
+  for (const f of figures) { if (!figuresAt.has(f.ref)) figuresAt.set(f.ref, []); figuresAt.get(f.ref).push(f); }
+  const names = styles ? styleNames(doc) : null;
+  const out = []; let lastStyle = null; let body = -1; let empties = null;
+  const flushEmpties = () => {
+    if (!empties) return;
+    out.push({ text: empties.count === 1 ? `[${empties.first}]` : `[${empties.first}..p${empties.lastBody}] (빈 문단 ${empties.count}개)`, body: empties.body });
+    empties = null;
+  };
+  const pushTable = (t, indent, b) => {
+    out.push({ text: `${indent}▦ ${t.key} 표 ${t.rows}×${t.cols}${t.caption?.text ? ` 「${clip(oneLine(t.caption.text), 80)}」` : ''}`, body: b, table: t.key });
+    for (const line of tableLines(t)) out.push({ text: `${indent}${line}`, body: b, table: t.key });
+  };
+  for (let i = 0; i < paras.length; i++) {
+    const p = paras[i];
+    if (p.parent) continue;
+    body++;
+    // 이 본문 문단에 딸린 중첩 문단(다음 본문 문단 전까지)
+    let j = i + 1; const nested = [];
+    while (j < paras.length && paras[j].parent) nested.push(paras[j++]);
+    if (pick && !pick(p.section, p.body, body)) continue;
+    const ownTables = tablesAt.get(p.ref) || []; const ownFigures = figuresAt.get(p.ref) || [];
+    const boxes = nested.filter((q) => !q.cell && (q.where === '글상자' || q.where === '개체'));
+    const others = nested.filter((q) => !q.cell && q.where !== '글상자' && q.where !== '개체' && q.where !== '표' && q.text.trim());
+    const nestedTables = nested.flatMap((q) => tablesAt.get(q.ref) || []);
+    const hasObjects = ownTables.length || ownFigures.length || boxes.length || others.length || nestedTables.length;
+    if (!p.text.trim() && !hasObjects) {
+      // 빈 문단은 이어서 한 줄로(주소 범위만)
+      if (empties && empties.section === p.section && empties.lastBody === p.body - 1) { empties.count++; empties.lastBody = p.body; }
+      else { flushEmpties(); empties = { first: p.ref, section: p.section, lastBody: p.body, count: 1, body }; }
+      continue;
+    }
+    flushEmpties();
+    let mark = '';
+    if (names) { const sid = styleIdOf(doc, p.ref); const name = sid != null ? names.get(sid) || sid : null; if (name && name !== lastStyle) { mark = ` 〔${name}〕`; lastStyle = name; } }
+    out.push({ text: `[${p.ref}]${mark} ${oneLine(p.text)}`.trimEnd(), body, ref: p.ref });
+    for (const t of ownTables) pushTable(t, ' ', body);
+    for (const f of ownFigures) out.push({ text: ` ▣ 그림${f.n > 1 ? `#${f.n}` : ''}${f.caption?.text ? ` 「${clip(oneLine(f.caption.text), 80)}」` : ''} ${Math.round(f.width / 283.46)}×${Math.round(f.height / 283.46)}mm`, body });
+    if (boxes.length > boxLimit) {
+      const chars = boxes.reduce((s, q) => s + [...q.text].length, 0);
+      out.push({ text: ` ◰ 떠 있는 개체: ${objectTally(doc, p.ref)} — 글 조각 ${n(boxes.length)}개(${n(chars)}자)는 read view='layout' at='${p.ref}' 로 줄·표로 묶어 본다`, body });
+    } else for (const q of boxes) if (q.text.trim()) out.push({ text: ` [${q.ref}] (${q.where}) ${oneLine(q.text)}`, body, ref: q.ref });
+    for (const q of others) out.push({ text: ` [${q.ref}] (${q.where}) ${oneLine(q.text)}`, body, ref: q.ref });
+    for (const t of nestedTables) pushTable(t, '  ', body);
+  }
+  flushEmpties();
+  return { lines: out, bodyTotal: body + 1 };
+}
+
+/** 줄 목록을 글자 한도까지 잘라 준다 → { text, from, to(다음 줄 번호), total, done } */
+export function pageLines(lines, { from = 0, maxChars = 20000 } = {}) {
+  const out = []; let chars = 0; let i = Math.max(0, from);
+  for (; i < lines.length; i++) {
+    const len = lines[i].text.length + 1;
+    if (out.length && chars + len > maxChars) break;
+    out.push(lines[i].text); chars += len;
+  }
+  return { text: out.join('\n'), from, to: i, total: lines.length, done: i >= lines.length };
+}
+
+/**
+ * 배치 보기(떠 있는 글상자·괘선을 좌표로 묶음).
+ * detail=false: 문단마다 한 줄 요약 + 이어 붙인 결과(표·문단·버릴 줄). detail=true: 줄(L 번호)과 표 줄을 모두.
+ * → { lines: [{ text }], plan(analyzeLayout 결과) }
+ */
+export function layoutLines(doc, { refs = null, detail = false, options = {} } = {}) {
+  const plan = analyzeLayout(doc, { ...options, refs });
+  const out = [];
+  if (!plan.hosts.length) return { lines: [{ text: '떠 있는 글상자·도형을 가진 문단이 없습니다(본문 흐름 문서 — read view=\'text\').' }], plan };
+  for (const h of plan.hosts) {
+    const c = h.counts;
+    const tally = [c.text ? `글상자 ${n(c.text)}` : '', c.rule ? `선 ${n(c.rule)}` : '', c.fill ? `면 ${n(c.fill)}` : '', c.figure ? `그림 ${n(c.figure)}` : '', c.table ? `표 ${n(c.table)}` : '', c.complex ? `복합 글상자 ${n(c.complex)}` : '', c.other + c.inline ? `그 밖 ${n(c.other + c.inline)}` : ''].filter(Boolean).join(' · ');
+    if (!detail) {
+      const parts = h.blocks.map((b) => {
+        if (b.type === 'grid') {
+          const head = Array.from({ length: b.cols }, (_, k) => clip(b.cells.find((q) => q.r === 0 && q.c === k)?.text ?? '', 16)).join(' | ');
+          return `표 ${b.rows}×${b.cols}(${b.headerRows ? `머리 ${b.headerRows}줄` : '머리행 없음'} — 첫 줄: ${head})`;
+        }
+        return b.lines.map((l) => `${l.id} "${clip(l.text, 40)}"${l.role === 'page_number' ? '(쪽 번호)' : ''}`).join(' · ');
+      });
+      out.push({ text: `[${h.ref}] ${tally} → ${parts.join(' · ') || '(글 없음)'}` });
+      continue;
+    }
+    out.push({ text: `[${h.ref}] ${tally}` });
+    for (const b of h.blocks) {
+      if (b.type === 'lines') { for (const l of b.lines) out.push({ text: ` ${l.id} ${l.text}${l.role === 'page_number' ? '  ← 쪽 번호로 보임(옮길 때 버림)' : ''}` }); continue; }
+      out.push({ text: ` 표 ${b.rows}×${b.cols}${b.headerRows ? ` (머리 ${b.headerRows}줄)` : ''}` });
+      const t = { rows: b.rows, cols: b.cols, cells: b.cells.map((q) => ({ row: q.r, col: q.c, rowSpan: q.rs, colSpan: q.cs, text: q.text })) };
+      for (const line of tableLines(t)) out.push({ text: ` ${line}` });
+    }
+  }
+  // 옮기면 어떻게 되는가(쪽을 넘는 표 잇기까지)
+  const tables = plan.tables.map((t, i) => `${'①②③④⑤⑥⑦⑧⑨⑩'[i] || `(${i + 1})`} ${t.hosts.length > 1 ? `${t.hosts[0]}~${t.hosts[t.hosts.length - 1]}` : t.host} ${t.rows}줄×${t.cols}칸${t.merges.length ? `(합친 칸 ${t.merges.length})` : ''}`);
+  const paras = plan.flow.reduce((s, f) => s + f.items.filter((x) => x.type === 'para').length, 0);
+  const why = [...new Set(plan.dropped.map((d) => d.why))].join('·');
+  // 옮긴 글상자·선은 objects_to_body 가 지운다 — 그 수와, 옮기지 못해 남는 개체 수를 미리 알려 모델이 개체 지우기를 따로 내지 않게 한다
+  const moving = plan.hosts.filter((h) => h.used.size);
+  const gone = moving.reduce((s, h) => s + h.used.size, 0); const stay = moving.reduce((s, h) => s + h.kept, 0);
+  out.push({ text: `objects_to_body 로 옮기면: 표 ${plan.tables.length}개${tables.length ? ` — ${tables.slice(0, 10).join(' / ')}${tables.length > 10 ? ' …' : ''}` : ''} · 문단 ${paras}개${plan.dropped.length ? ` · 버릴 줄 ${plan.dropped.length}개(${why})` : ''}`
+    + ` · 옮긴 글상자·선 ${n(gone)}개는 함께 지워짐 · ${stay ? `남는 개체 ${n(stay)}개(그림·표·회전한 도형 등 — 지우려면 remove_rest)` : '남는 개체 없음'}` });
+  return { lines: out, plan };
+}
+
+const HEADING = /^(?:제\s*\d+\s*[장절편조]|[IVXⅠ-Ⅹ]+[.)]\s|\d+(?:\.\d+)*[.)]?\s|[가-하][.)]\s|\(\d+\)\s|[■□◆◇○●▶]\s)/;
+
+/** 제목 스타일 이름인가(제목·개요·차례·'본문 1.' 같은 번호 단계 — 표·그림·주석·머리말 스타일은 아님) */
+const headingStyle = (name) => /제목|개요|heading|title|차례|목차|본문\s*\d|[장절]$/i.test(name) && !/표|그림|캡션|주석|단위|머리말|꼬리말|쪽/.test(name);
+
+/** 제목 얼개: 제목 스타일의 문단, 또는 번호(제1장·1.·가.·(1) …)로 시작하는 짧은 문단 → 줄 목록 */
+export function outlineLines(doc, { pick = null, max = 400 } = {}) {
+  const names = styleNames(doc);
+  const out = [];
+  for (const p of doc.paragraphs({ view: 'final', nested: false })) {
+    if (pick && !pick(p.section, p.body)) continue;
+    const text = p.text.trim(); if (!text) continue;
+    const sid = styleIdOf(doc, p.ref); const name = names.get(String(sid)) || '';
+    const len = [...text].length;
+    if (!((headingStyle(name) && len <= 120) || (HEADING.test(text) && len <= 60))) continue;
+    out.push({ text: `[${p.ref}] 〔${name || sid}〕 ${clip(oneLine(text), 100)}` });
+    if (out.length >= max) { out.push({ text: `… (제목 후보가 ${max}개를 넘어 줄임 — at 으로 범위를 좁히세요)` }); break; }
+  }
+  if (!out.length) out.push({ text: '(제목으로 보이는 문단이 없습니다 — read view=\'text\' 로 본문을 읽으세요)' });
+  return out;
+}

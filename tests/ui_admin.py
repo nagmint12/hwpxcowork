@@ -67,7 +67,8 @@ def main():
                 other = editor.new_page(); other.on('pageerror', lambda e: errors.append(str(e)))
 
                 def login(target, token):
-                    target.goto(base); target.locator('input[aria-label="접속 토큰"]').fill(token)
+                    # 첫 방문(토큰·소개 기록 없음)은 소개 영상(/teaser/)으로 간다(web/intro.js) — 로그인 칸을 보려고 ?teaser=0(2026-11-17)
+                    target.goto(base + '/?teaser=0'); target.locator('input[aria-label="접속 토큰"]').fill(token)
                     target.get_by_role('button', name='들어가기', exact=True).click()
                     target.locator('[data-testid="help-list"]').wait_for()
 

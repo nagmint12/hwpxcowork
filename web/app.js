@@ -91,13 +91,16 @@ async function enterApp(me, requested = state.route) {
 const Login = {
   template: `<div class="login"><h1>HWPX 공동 검토</h1>
     <p class="muted">관리자에게 받은 접속 토큰을 넣으세요.</p>
-    <p class="muted">체험용 접속 토큰: <strong>test1 ~ test100</strong> 중 하나를 입력하세요.</p>
+    <p class="muted" v-if="tryHint" data-testid="login-tutorial-hint">체험용 접속 토큰: <strong>{{ tryHint }}</strong>{{ tryHint.includes('~') ? ' 중 하나를' : '을' }} 입력하세요.</p>
     <input v-model="token" placeholder="토큰" @keyup.enter="go" aria-label="접속 토큰"/>
     <p class="err" v-if="err">{{ err }}</p>
-    <div class="login-actions"><button class="primary" :disabled="busy" @click="go">{{ busy ? '여는 중…' : '들어가기' }}</button><a class="login-guide" href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용설명서</a><a class="login-video" href="/teaser/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상 다시 보기</a><a class="login-guide" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-replay">나에게 맞게 시작하기</a></div>
+    <div class="login-actions"><button class="primary" :disabled="busy" @click="go">{{ busy ? '여는 중…' : '들어가기' }}</button><a class="login-guide" href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a><a class="login-video" href="/teaser/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상 다시 보기</a><a class="login-guide" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-replay">나에게 맞게 시작하기</a></div>
     <p class="muted" style="margin-top:16px">본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다. 편집기는 rhwp(MIT)입니다.</p></div>`,
   setup() {
     const token = ref(state.token); const err = ref(''); const busy = ref(false);
+    // 체험 토큰 안내: 서버가 알려 준 글(/api/config tutorialLogin — 체험 계정이 없으면 null, 2026-11-17).
+    // 그 칸을 모르는 옛 서버(다시 띄우기 전)는 예전 글 그대로
+    const tryHint = computed(() => (state.config && Object.hasOwn(state.config, 'tutorialLogin') ? state.config.tutorialLogin || '' : 'test1 ~ test100'));
     async function go() {
       if (busy.value) return;
       busy.value = true; err.value = ''; state.token = token.value.trim();
@@ -105,7 +108,7 @@ const Login = {
       catch (e) { err.value = e.status === 401 ? '토큰이 올바르지 않습니다' : `화면을 열지 못했습니다: ${e.message}`; }
       finally { busy.value = false; }
     }
-    return { token, err, busy, go };
+    return { token, err, busy, go, tryHint };
   },
 };
 
@@ -148,8 +151,8 @@ const DocList = {
         </div>
         <div class="row lib-tools">
           <button class="small" data-testid="lib-newfolder" :disabled="!can('write')" :title="can('write') ? '이 자리에 폴더를 만듭니다' : '이 자리에 폴더를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'new' }"><span class="ic" v-html="ICON.folder"></span>새 폴더</button>
-          <label class="btnlike small primary" :class="{ disabled: !can('write') }" :title="can('write') ? '이 자리에 HWPX 를 올립니다' : '이 자리에 올릴 권한이 없습니다'" data-testid="lib-upload">
-            <input type="file" accept=".hwpx" multiple style="display:none" :disabled="!can('write')" @change="upload"/>＋ HWPX 올리기</label>
+          <label class="btnlike small primary" :class="{ disabled: !can('write'), busy: !!uploading }" :aria-busy="uploading ? 'true' : 'false'" :title="uploading ? uploading.name + ' 올리는 중' : can('write') ? '이 자리에 HWPX 를 올립니다' : '이 자리에 올릴 권한이 없습니다'" data-testid="lib-upload">
+            <input type="file" accept=".hwpx" multiple style="display:none" :disabled="!can('write') || !!uploading" @change="upload"/><template v-if="uploading"><span class="spin"></span>올리는 중 {{ uploading.n }}/{{ uploading.total }}</template><template v-else>＋ HWPX 올리기</template></label>
           <button class="small" data-testid="lib-newdoc" :disabled="!can('write')" :title="can('write') ? '이 자리에 빈 한글 문서를 만들어 엽니다' : '이 자리에 문서를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'newdoc' }"><span class="ic" v-html="ICON.edit"></span>새 문서로 시작</button>
           <button class="small" v-if="curAccess" data-testid="lib-access" :title="curAccess.tip" @click="dlg = { type: 'access', target: curAccess.target }"><span class="ic" v-html="ICON.people"></span>권한</button>
           <template v-if="lib && lib.local && lib.local.canLink">
@@ -167,15 +170,16 @@ const DocList = {
               <button class="icon" v-if="f.perms.includes('manage')" title="이름 바꾸기" aria-label="이름 바꾸기" @click="dlg = { type: 'name', mode: 'rename', folder: f }" v-html="ICON.edit"></button>
               <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="옮기기" aria-label="옮기기" @click="dlg = { type: 'move', item: { kind: 'folder', id: f.id, name: f.name, loc: parentOf(f), folder: f, localOnly: !!f.local } }" v-html="ICON.move"></button>
               <button class="icon" v-if="f.perms.includes('manage')" title="권한" aria-label="권한" @click="dlg = { type: 'access', target: folderTarget(f) }" v-html="ICON.people"></button>
-              <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="폴더 지우기(비어 있어야)" aria-label="폴더 지우기" @click="removeFolder(f)" v-html="ICON.trash"></button>
+              <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="폴더 삭제(비어 있어야)" aria-label="폴더 삭제" @click="removeFolder(f)" v-html="ICON.trash"></button>
               <button class="icon" v-if="f.local && f.local.root && lib.local && lib.local.canLink" title="연결 끊기 — PC 의 파일은 그대로 남습니다" aria-label="연결 끊기" data-testid="local-unlink" @click="unlinkFolder(f)" v-html="ICON.x"></button></td></tr>
           <tr class="doc" v-for="d in shownDocs" :key="d.id" :data-doc="d.id" :class="{selected:selectedDoc===d.id}" :aria-selected="selectedDoc===d.id" tabindex="0" @click="selectedDoc=d.id" @dblclick="open(d)" @keydown.enter.self.prevent="open(d)" title="제목을 누르거나 두 번 클릭·Enter로 문서 열기">
             <td><a class="doc-link" :href="'#/doc/' + d.id" data-testid="doc-open-title" title="문서 열기" @click.stop><b>{{ d.title }}</b></a><span class="lib-badge" v-if="badge(d)" :title="badge(d).title"><span class="ic" v-html="ICON[badge(d).icon]"></span>{{ badge(d).text }}</span><span class="lib-badge pc" v-if="d.local" :class="'st-' + d.local.state" :title="localTip(d.local)" data-testid="doc-pc"><span class="ic" v-html="ICON.pc"></span>{{ localLabel(d.local) }}</span><span class="lib-badge rv" v-if="d.review" :title="reviewTip(d)" data-testid="doc-review"><span class="ic" v-html="ICON.send"></span>{{ d.review.server }}</span>
               <div class="muted">{{ d.fileName }} · {{ d.createdBy }}<template v-if="sortField === 'created' && d.createdAt"> · {{ fmt(d.createdAt) }} 올림</template><template v-if="query.trim()"> · {{ placeOf(d) }}</template></div></td>
             <td class="doc-ver" :title="verTip(d)">{{ verText(d) }}</td><td>{{ d.proposals.pending }} / {{ d.proposals.applied }}</td><td>{{ d.requests }}</td><td>{{ fmt(d.updatedAt) }}</td>
             <td class="lib-acts" @click.stop>
-              <button class="icon" title="문서 열기" aria-label="문서 열기" @click="open(d)" v-html="ICON.edit"></button>
-              <button class="icon" v-if="canRename(d)" title="이름 바꾸기" aria-label="문서 이름 바꾸기" data-testid="doc-rename" @click="dlg = { type: 'name', mode: 'docrename', doc: d }">✎</button>
+              <!-- 열기는 문서 그림, 이름 바꾸기는 연필(폴더 줄과 같은 그림) — 2026-11-17: 둘 다 연필이라 구분되지 않았다 -->
+              <button class="icon" title="문서 열기" aria-label="문서 열기" @click="open(d)" v-html="ICON.file"></button>
+              <button class="icon" v-if="canRename(d)" title="이름 바꾸기" aria-label="문서 이름 바꾸기" data-testid="doc-rename" @click="dlg = { type: 'name', mode: 'docrename', doc: d }" v-html="ICON.edit"></button>
               <button class="icon" v-if="lib.local && lib.local.canLink && has(d, 'manage')" title="함께 검토 — 검토 서버에 보내고 검토본을 가져옵니다" aria-label="함께 검토" data-testid="doc-review-open" @click="dlg = { type: 'review', doc: d }" v-html="ICON.send"></button>
               <button class="icon" v-if="has(d, 'manage')" title="옮기기" aria-label="옮기기" @click="dlg = { type: 'move', item: { kind: 'doc', id: d.id, name: d.title, loc: locOfDoc(d), localOnly: !!d.local } }" v-html="ICON.move"></button>
               <button class="icon" v-if="has(d, 'manage')" title="권한" aria-label="권한" @click="dlg = { type: 'access', target: docTarget(d) }" v-html="ICON.people"></button>
@@ -275,15 +279,20 @@ const DocList = {
       if (c.owner === me.name) return { text: '나만 봅니다', tip: '공유하려면 폴더나 문서의 권한에서 사람을 더하세요. 관리자는 언제나 볼 수 있습니다.' };
       return { text: `${c.owner} 님이 공유한 것`, tip: '이 사람의 개인 문서함 중 내게 공유된 폴더·문서만 보입니다' };
     });
+    // 올리는 동안 단추에 '올리는 중 n/m'(2026-11-17: 여러 파일을 올리는 동안 표시가 없고 단추가 다시 눌려 같은 파일을 또 올릴 수 있었다)
+    const uploading = ref(null);   // { n, total, name } | null
     async function upload(e) {
       const files = [...(e.target.files || [])]; e.target.value = '';
-      if (!files.length) return;
+      if (!files.length || uploading.value) return;
       const c = cur.value;
       const where = c.folderId ? { 'x-folder-id': c.folderId } : { 'x-space': c.space, ...(c.space === 'private' ? { 'x-space-owner': encodeURIComponent(c.owner || '') } : {}) };
       let done = 0;
-      for (const f of files) {
-        try { await api('/api/docs', { method: 'POST', body: await f.arrayBuffer(), raw: true, headers: { 'x-file-name': encodeURIComponent(f.name), ...where } }); done++; } catch (err) { toastError(err, `${f.name}: `); }
-      }
+      try {
+        for (const [i, f] of files.entries()) {
+          uploading.value = { n: i + 1, total: files.length, name: f.name };
+          try { await api('/api/docs', { method: 'POST', body: await f.arrayBuffer(), raw: true, headers: { 'x-file-name': encodeURIComponent(f.name), ...where } }); done++; } catch (err) { toastError(err, `${f.name}: `); }
+        }
+      } finally { uploading.value = null; }
       if (done) toast(done > 1 ? `${done}개 올렸습니다` : '올렸습니다');
       await load();
     }
@@ -329,7 +338,7 @@ const DocList = {
     const linkTip = (f) => { const l = linkOfFolder(f); return l ? `연결한 PC 폴더: ${l.path}${l.ok ? '' : '\n폴더가 보이지 않습니다'}` : '연결한 PC 폴더'; };
     const reviewTip = (d) => `함께 검토: ${d.review.server} 에 보냄 ${fmt(d.review.sentAt)}${d.review.fetchedAt ? ` · 검토본 가져옴 ${fmt(d.review.fetchedAt)}` : ''}`;
     async function unlinkFolder(f) {
-      if (!confirm(`${josaQuoted(f.name)} 연결을 끊을까요?\nPC 의 파일은 그대로 남습니다.`)) return;
+      if (!confirm(`'${f.name}' 연결을 끊을까요?\nPC 의 파일은 그대로 남습니다.`)) return;   // josaQuoted 는 을/를을 붙여 "'보고서'를 연결을 끊을까요?"가 됐다(local.js 와 같은 글로)
       try { const out = await api(`/api/local/links/${encodeURIComponent(f.local.link)}`, { method: 'DELETE' }); toast('연결을 끊었습니다'); await localChanged(out.local, null); } catch (err) { toastError(err); }
     }
     async function remove(d) {
@@ -384,7 +393,7 @@ const DocList = {
     return {
       lib, loaded, cur, query, dlg, showDrive, selectedDoc, me, config: state.config, urls, personalLine, keyLine, WAY_TIPS, connSummary, connTip, onConnToggle, crumbList, subfolders, shownDocs, curAccess, placeNote,
       sort, sortField, sortArrow, sortBy, ariaSort, SORTS,
-      go, goLibrary, can, has, badge, placeOf, locOfDoc, parentOf, folderLoc, folderTarget, docTarget, upload, saveName, nameDlg, canRename, removeFolder, remove, open, logout, load, driveImported,
+      go, goLibrary, can, has, badge, placeOf, locOfDoc, parentOf, folderLoc, folderTarget, docTarget, upload, uploading, saveName, nameDlg, canRename, removeFolder, remove, open, logout, load, driveImported,
       localChanged, linkTip, reviewTip, unlinkFolder, localTip, localLabel,
       fmt, roleLabel, verText, verTip, ICON,
     };
@@ -515,7 +524,7 @@ const DocView = {
               <button role="menuitemcheckbox" :aria-checked="documentView.paragraph" :disabled="!ed?.ready" data-testid="show-paragraph-marks" @click="toggleDocumentView('view:para-mark')"><span>{{ documentView.paragraph ? '✓' : '' }}</span>문단 부호 보기<kbd>Ctrl+G,T</kbd></button>
               <button role="menuitemcheckbox" :aria-checked="documentView.controls" :disabled="!ed?.ready" data-testid="show-control-codes" @click="toggleDocumentView('view:ctrl-mark')"><span>{{ documentView.controls ? '✓' : '' }}</span>조판 부호 보기<kbd>Ctrl+G,C</kbd></button>
               <div class="dvm-sep" role="separator"></div>
-              <button role="menuitemcheckbox" :aria-checked="memosOn" data-testid="show-memos" title="메모·AI 작업·제안을 문서 옆 여백에 띄웁니다(끄면 오른쪽 창의 검토 탭에서 봄)" @click="toggleMemos"><span>{{ memosOn ? '✓' : '' }}</span>문서 옆 메모 보기</button>
+              <button role="menuitemcheckbox" :aria-checked="memosOn" data-testid="show-memos" title="메모·AI 작업·제안을 문서 옆 여백에 띄웁니다(끄면 AI 작업 창의 메모 탭에서 봄)" @click="toggleMemos"><span>{{ memosOn ? '✓' : '' }}</span>문서 옆 메모 보기</button>
               <button role="menuitem" data-testid="memo-pos-reset" :disabled="!movedMemos" title="끌어 옮긴 메모를 모두 쪽 옆 제자리로" @click="resetMemoPos"><span></span>메모 제자리로</button>
             </div>
           </details>
@@ -551,7 +560,7 @@ const DocView = {
             @click="togglePin" @pointerenter="onTabEnter" @pointerleave="onTabLeave" @dragenter="openPeek('held')"><span class="et-ic" aria-hidden="true">{{ folded ? '‹' : '›' }}</span><span class="et-label">AI 작업</span><span v-for="g in aiGlance" :key="g.ph" class="et-n" :class="'ph-' + g.ph" :data-ph="g.ph" :title="g.tip">{{ g.n }}</span></button>
           <button class="edgetab et-memo" data-testid="edge-memo" :class="{ on: memosOn }" :aria-pressed="memosOn" :title="memosOn ? '문서 옆 메모 숨기기' : '문서 옆 메모 보기'" @click="toggleMemos"><span class="et-label">메모</span></button>
         </div>
-        <div class="splitter" role="separator" tabindex="0" data-testid="panel-splitter" :aria-orientation="stacked ? 'horizontal' : 'vertical'" aria-label="AI 창 크기 조절"
+        <div class="splitter" role="separator" tabindex="0" data-testid="panel-splitter" :aria-orientation="stacked ? 'horizontal' : 'vertical'" aria-label="AI 작업 창 크기 조절"
           :aria-valuenow="stacked ? Math.round((panel.min ? 0 : panel.h) * 100) : panel.w" :title="splitTip"
           @pointerdown="startResize" @dblclick="resetPanel" @keydown="keyResize"><span class="grip" aria-hidden="true"></span></div>
         <div class="tabs" role="tablist"><button v-for="t in tabs" :key="t.id" role="tab" :data-tab="t.id" :aria-selected="curTab===t.id" :class="{active: curTab===t.id}" @click="pickTab(t.id)">{{ t.label }}<template v-if="t.glance?.length"><span v-for="g in t.glance" :key="g.ph" class="cnt" :class="'ph-' + g.ph" :data-ph="g.ph" :title="g.tip">{{ g.n }}</span></template><span v-else-if="t.count" class="cnt">{{ t.count }}</span></button></div>
@@ -863,6 +872,9 @@ const DocView = {
       switch (p.action) {
         // 요청 종류는 고르지 않는다(2026-11-03): 'AI에게 맡기기…'는 요청 창을, 'AI에게 빠르게 맡기기 ▸'는 예시 지시를 넣은 요청 창을 연다
         // (문서 설정 aiQuick 이 'send'(기본)면 연 채 곧바로 보낸다 — store openComposer quick). 무엇을 할지는 지시·문맥을 보고 AI 가 고른다
+        // 'review' = 편집기 도구 메뉴의 'AI에게 맡기기…'(studio/plugin controller.ts ext:cowork.ai-review — 2026-11-17 전 이름 'AI에게 검토 맡기기') — 같은 요청 창(비워 두면 검토).
+        // 2026-11-03 메뉴를 합칠 때 이 갈래가 빠져 눌러도 아무 일이 없었다(2026-11-16)
+        case 'review':
         case 'instruct': return d.openComposer(t, 'instruct', { anchor });
         case 'quick': {
           const instruction = quickPrompt(p.quick, presets());
@@ -958,7 +970,7 @@ const DocView = {
     const foldHint = ref(false);   // 끄는 중 — 놓으면 접힘
     const sbW = ref(15);   // 편집기 세로 스크롤바 폭 — 꼭지를 그 앞에 둔다
     const panelVars = computed(() => ({ '--panel-w': `${panel.value.w}px`, '--panel-h': `${(panel.value.h * 100).toFixed(1)}%`, '--sb-w': `${sbW.value}px` }));
-    const splitTip = computed(() => (stacked.value ? '끌어서 AI 창 높이 조절 · 누르면 접기/펴기' : '끌어서 AI 창 폭 조절 · 끝까지 밀면 접기 · 두 번 누르면 기본 폭'));
+    const splitTip = computed(() => (stacked.value ? '끌어서 AI 작업 창 높이 조절 · 누르면 접기/펴기' : '끌어서 AI 작업 창 폭 조절 · 끝까지 밀면 접기 · 두 번 누르면 기본 폭'));
     const savePanel = () => writePanel(panel.value);
     function setFold(min) { if (panel.value.min !== min) { panel.value = { ...panel.value, min }; savePanel(); } }
     function pickTab(id) { s.tab = id; if (stacked.value) setFold(false); }

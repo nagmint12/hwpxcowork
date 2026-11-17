@@ -1,6 +1,7 @@
 // Administrator-only live adapter for the independently tested MCP laboratory.
 // Uses the live Service, so web requests and MCP results refer to the same docs.
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createLabGateway } from '../experiments/mcp-lab/gateway.mjs';
@@ -8,6 +9,7 @@ import { isModernRequest, handleModernMcp } from './mcp-modern.js';
 import { tokenFromRequest, userByToken } from './config.js';
 import { agentFromRequest } from './mcp.js';
 import { openAiClaimSession } from './mcp-session.js';
+import { connectDebugTransport } from './ai-debug.js';
 
 export const ADMIN_MCP_PATH = '/mcp/admin-test';
 export const ADMIN_MCP_INSTRUCTIONS = `관리자 전용 HWPX 입출력 실험 경로입니다. 기존 웹 문서와 요청을 처리합니다.
@@ -111,7 +113,8 @@ export function createAdminMcp({ service, config, oauth, events, version, trackO
         onsessioninitialized: () => sessions.set(sessionId, entry),
         onsessionclosed: () => { void closeEntry(sessions, sessionId).catch(() => {}); } });
       entry.transport = transport;
-      await gateway.server.connect(transport);
+      await connectDebugTransport(gateway.server, transport, { directory: path.join(config.dataDir, 'runtime', 'ai-debug'),
+        context: { route: 'admin-mcp', session: claimSession, profile }, service });
       await transport.handleRequest(req, res, req.body);
     } finally {
       reservations--;

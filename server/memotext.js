@@ -137,6 +137,7 @@ export function formatSummary(format) {
   }
   for (const [key, label] of [['spaceBeforePt', '문단 앞'], ['spaceAfterPt', '문단 뒤'], ['indentPt', '들여쓰기'], ['leftMarginPt', '왼쪽 여백'], ['rightMarginPt', '오른쪽 여백']]) if (paragraph[key] != null) parts.push(`${label} ${paragraph[key]}pt`);
   if (typeof paragraph.oneLine === 'boolean') parts.push(`한 줄로 입력 ${paragraph.oneLine ? '켬' : '끔'}`);
+  if (typeof paragraph.pageBreakBefore === 'boolean') parts.push(`쪽 나눔 ${paragraph.pageBreakBefore ? '켬' : '끔'}`);
   return xmlSafe(parts.join(' · '));
 }
 
@@ -165,30 +166,70 @@ export function adoptedCid(p) {
 }
 
 /**
- * 요청의 제안을 항목으로 나눈다(§9.2): 여러 안 묶음(같은 gid)은 묶음 하나가 항목 하나, 그 밖 제안은 하나씩(처음 나온 차례).
- * 항목 = { gid, list, state: 'accepted'|'declined'|'open', via?: 'applied'|'adopted', pick?: 반영된 안 }
+ * 요청의 제안을 항목으로 나눈다(§9.2): 여러 안 묶음(같은 gid)과 묶음 제안(같은 bundle, 구성원 2개 이상 — docs/UI_TERMS.md §9)은 묶음 하나가 항목 하나,
+ * 그 밖 제안은 하나씩(처음 나온 차례). 거둔 제안(withdrawn)은 뺀다.
+ * 항목 = { gid, bundle?, list, state: 'accepted'|'declined'|'open', via?: 'applied'|'adopted', pick?: 반영된 안(묶음 제안이면 첫 반영 구성원),
+ *          open: 남은 대기 제안 pid(pid 순), accepted?: 묶음 제안의 반영 구성원들 }
  *  - accepted: 기준에 적용됨(applied) 또는 대기 + 누군가 수정본에 반영해 둠(묶음은 한 안이 그러면)
  *  - open: 그 밖에 대기 중인 안이 있음(아무도 반영해 두지 않음)
  *  - declined: 나머지(거절·복구, 묶음은 모든 안이 거절·복구·대체)
  */
 export function requestItems(proposals = []) {
+  // 거둔 제안(withdrawn — 에이전트가 자기 대기 제안을 거둠)은 항목·셈에서 아예 뺀다. 거르는 자리는 여기 한 곳(web/util.js requestProgress 와 같다)
+  const all = (proposals || []).filter((p) => p && p.status !== 'withdrawn');
+  // 묶음 제안(p.bundle — 2026-11-17 docs/MCP_REDESIGN_2026-11-16.md §10.4 나-11, docs/UI_TERMS.md §9): 구성원 2개 이상이면 항목 하나. 1개만 남으면 보통 항목
+  const bsize = new Map();
+  for (const p of all) if (p.gid == null && p.bundle != null) bsize.set(String(p.bundle), (bsize.get(String(p.bundle)) || 0) + 1);
   const items = []; const groups = new Map();
-  for (const p of proposals || []) {
-    if (!p) continue;
-    if (p.gid != null) {
-      const k = String(p.gid);
-      let g = groups.get(k);
-      if (!g) { g = { gid: p.gid, list: [] }; groups.set(k, g); items.push(g); }
+  for (const p of all) {
+    const key = p.gid != null ? `g${p.gid}` : p.bundle != null && bsize.get(String(p.bundle)) > 1 ? `b${p.bundle}` : null;
+    if (key) {
+      let g = groups.get(key);
+      if (!g) { g = p.gid != null ? { gid: p.gid, list: [] } : { gid: null, bundle: String(p.bundle), list: [] }; groups.set(key, g); items.push(g); }
       g.list.push(p);
     } else items.push({ gid: null, list: [p] });
   }
   for (const it of items) {
+    if (it.bundle != null) {
+      // 묶음: 남은(대기 + 아무도 반영해 두지 않은) 구성원이 있으면 남음(일부 반영돼도), 없고 반영이 하나라도 있으면 반영, 그 밖은 거절
+      const acc = it.list.filter((p) => p.status === 'applied' || (p.status === 'pending' && isAdopted(p)));
+      it.open = it.list.filter((p) => p.status === 'pending' && !isAdopted(p)).map((p) => p.pid).sort((a, b) => a - b);
+      if (it.open.length) it.state = 'open';
+      else if (acc.length) { const ap = acc.find((p) => p.status === 'applied'); Object.assign(it, { state: 'accepted', via: ap ? 'applied' : 'adopted', pick: ap || acc[0], accepted: acc }); }
+      else it.state = 'declined';
+      continue;
+    }
     const applied = it.list.find((p) => p.status === 'applied');
     const adopted = applied ? null : it.list.find((p) => p.status === 'pending' && isAdopted(p));
     if (applied || adopted) Object.assign(it, { state: 'accepted', via: applied ? 'applied' : 'adopted', pick: applied || adopted });
     else it.state = it.list.some((p) => p.status === 'pending') ? 'open' : 'declined';
+    it.open = it.state === 'open' ? it.list.filter((p) => p.status === 'pending').map((p) => p.pid).sort((a, b) => a - b) : [];
   }
   return items;
+}
+
+/**
+ * 묶음 제안의 머리 이름(web/util.js bundleLabel 과 같은 규칙): 넣기는 '새 문단 50 · 표 2 · 그림 1 넣기', 그 밖은 '바꿈 61곳' · '서식 12곳' ·
+ * '개체 지우기 5문단' · '문단 지우기 8곳' · '제안 n건'(나머지 종류) — 여럿이면 ' · ' 로 잇는다
+ */
+export function bundleLabel(list = []) {
+  const n = {};
+  const add = (k) => { n[k] = (n[k] || 0) + 1; };
+  for (const p of list || []) {
+    if (!p) continue;
+    const t = p.type || 'replace';
+    if (t === 'insert') add('para');
+    else if (t === 'table') add('table');
+    else if (t === 'figure') add(p.figure?.nativeChart ? 'chart' : p.figure?.replace ? 'figswap' : 'figure');
+    else if (t === 'replace') add('replace');
+    else if (t === 'format') add('format');
+    else if (t === 'delete') add('delete');
+    else if (t === 'para_delete') add('paradel');   // 2026-11-17 같은 종류 묶음(server/mcp2/ops.js markBundles (d))
+    else add('other');
+  }
+  const ins = [n.para ? `새 문단 ${n.para}` : '', n.table ? `표 ${n.table}` : '', n.figure ? `그림 ${n.figure}` : '', n.chart ? `차트 ${n.chart}` : ''].filter(Boolean);
+  return [ins.length ? `${ins.join(' · ')} 넣기` : '', n.replace ? `바꿈 ${n.replace}곳` : '', n.format ? `서식 ${n.format}곳` : '', n.figswap ? `그림 교체 ${n.figswap}` : '',
+    n.delete ? `개체 지우기 ${n.delete}문단` : '', n.paradel ? `문단 지우기 ${n.paradel}곳` : '', n.other ? `제안 ${n.other}건` : ''].filter(Boolean).join(' · ');
 }
 
 /**
@@ -205,7 +246,7 @@ export function requestOutcome(req, proposals = []) {
     applied: acc.filter((x) => x.via === 'applied').length, adopted: acc.filter((x) => x.via === 'adopted').length,
     declined: items.filter((x) => x.state === 'declined').length, open: open.length, comments: (req?.comments || []).length,
     resolved: (req?.status === 'done' || req?.status === 'cancelled') && open.length === 0,
-    openPids: open.flatMap((x) => x.list.filter((p) => p.status === 'pending').map((p) => p.pid)).sort((a, b) => a - b),
+    openPids: open.flatMap((x) => x.open).sort((a, b) => a - b),
   };
 }
 
@@ -260,14 +301,34 @@ export function deleteSummary(p) {
   return `개체 ${Number(p?.delete?.count) || 0}개`;
 }
 
+/**
+ * 문단 지우기·옮기기 제안(para_delete·para_move — 2026-11-17, server/paragraph-ops.js): '문단 6개 「2) 분석 질문」 부터 지우기',
+ * '문단 6개 「4) 학기 유형별 재수강」 부터 옮기기 → 「…」 뒤'(제안할 때 적어 둔 글 — 반영 뒤에도 같다)
+ */
+export function paragraphsSummary(p) {
+  const first = p?.paras?.first?.[0];
+  const n = Number(p?.paras?.count) || 0;
+  const what = `문단 ${n}개${first ? ` 「${clip(first, 30)}」${n > 1 ? ' 부터' : ''}` : ''}`;
+  if (p?.type !== 'para_move') return `${what} 지우기`;
+  const d = p.paras?.dest;
+  return `${what} 옮기기 → ${d?.before ? `「${clip(d.beforeText || '', 24)}」 앞` : `「${clip(d?.text || '', 24)}」 뒤`}`;
+}
+
 /** 작업 기록 메모 반영 목록 줄 수(넘으면 이 줄 수만큼 적고 ' · … 외 n건' 한 줄을 더한다) */
 export const ACCEPTED_LIST_MAX = 20;
 
 /** 반영 항목 한 줄: 바꿈 ` · 「a」→「b」`, 여러 안 ` · 안 2: 「a」→「b」`, 문단 추가 ` · 문단 추가 「앞 30자」`, 표 ` · 표 r×c 「캡션」`, 그림 ` · 그림 「캡션」` + 수정본에만 반영이면 꼬리 */
 function acceptedLine(it, crOf) {
   const p = it.pick;
+  // 묶음 제안(docs/UI_TERMS.md §9)은 한 줄: ' · 새 문단 50 · 표 2 넣기: 문단 추가 「…」 외 52건'(일부만 반영했으면 '(53건 중 40건)')
+  if (it.bundle != null) {
+    const got = it.accepted?.length || 1; const all = it.list.length;
+    const first = acceptedLine({ gid: null, list: [p], pick: p, via: it.via }, crOf).replace(/^ · /, '');
+    return ` · ${bundleLabel(it.list)}${got < all ? `(${all}건 중 ${got}건)` : ''}: ${first}${got > 1 ? ` 외 ${got - 1}건` : ''}`;
+  }
   let s;
   if (p.type === 'insert') s = p.blank ? ' · 빈 줄 추가' : ` · 문단 추가 「${clip(p.text, 30)}」`;
+  else if (p.type === 'edit_batch') s = ` · 내용·형식 묶음(내용 ${p.batch?.contentOperations || 0}건 · 형식 ${p.batch?.formatOperations || 0}건)`;
   else if (p.type === 'format') s = ` · 「${clip(p.find || '빈 문단', 30)}」 서식 변경: ${formatSummary(p.format)}`;
   else if (p.type === 'table') {
     const rows = p.table?.rows || []; const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
@@ -276,6 +337,8 @@ function acceptedLine(it, crOf) {
     s = ` · 차례 새로 고침${tocExtras(p)}`;
   } else if (p.type === 'delete') {
     s = ` · 개체 지우기: ${deleteSummary(p)}`;
+  } else if (p.type === 'para_delete' || p.type === 'para_move') {
+    s = ` · ${paragraphsSummary(p)}`;
   } else if (p.type === 'table_edit') {
     s = ` · 표 고치기${p.tableEdit?.caption ? ` 「${clip(p.tableEdit.caption)}」` : ''}: ${clip((p.tableEdit?.labels || []).join(', '), 80)}`;
   } else if (p.type === 'page_layout') {
@@ -437,9 +500,12 @@ export function renderProposalMemo(p, request = null, { thread = null } = {}) {
   const tags = [];
   if (p.type === 'insert') tags.push('문단 추가');
   if (p.type === 'format') tags.push('서식 변경');
+  if (p.type === 'edit_batch') tags.push('내용·형식 묶음');
   if (p.type === 'table') tags.push('표 삽입');
   if (p.type === 'table_edit') tags.push('표 고치기');
   if (p.type === 'delete') tags.push('개체 지우기');
+  if (p.type === 'para_delete') tags.push('문단 지우기');
+  if (p.type === 'para_move') tags.push('문단 옮기기');
   if (p.type === 'toc') tags.push('차례 새로 고침');
   if (p.type === 'page_layout') tags.push('쪽 구성');
   if (p.type === 'figure') tags.push(p.figure?.replace ? '그림 교체' : '그림 삽입');
@@ -461,6 +527,8 @@ export function renderProposalMemo(p, request = null, { thread = null } = {}) {
     lines.push(`이 차례를 새로 고침${tocExtras(p)}`);
   } else if (p.type === 'delete') {
     lines.push(`이 문단의 개체 지우기: ${deleteSummary(p)}(글은 그대로)`);
+  } else if (p.type === 'para_delete' || p.type === 'para_move') {
+    lines.push(`이 문단부터 ${paragraphsSummary(p)}`);
   } else if (p.type === 'table_edit') {
     lines.push(`이 표${p.tableEdit?.caption ? ` 「${p.tableEdit.caption}」` : ''} 고치기: ${(p.tableEdit?.labels || []).join(', ')}`);
   } else if (p.type === 'page_layout') {

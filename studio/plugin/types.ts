@@ -2,7 +2,12 @@
 // 이름·모양을 바꾸면 V3_SPEC·V4_SPEC 도 같이 고친다. 계약에 없는 필드(아래 '덧붙임')는 더해도 되는 것만 둔다.
 
 /** 플러그인 판(window.rhwpCowork.version). scripts/build-studio.mjs 가 이 줄을 읽어 cowork-build.json 에 적는다. */
-export const PLUGIN_VERSION = '0.4.0';
+export const PLUGIN_VERSION = '0.4.1';
+/**
+ * 판과 함께 알리는 기능 이름(window.rhwpCowork.features) — 호스트(web/editor.js)가 새 인자를 써도 되는지 이것으로 정한다.
+ * 'insertSkip'(0.4.1, 2026-11-17 docs/MCP_REDESIGN_2026-11-16.md §10.4 나-3): insertParagraphAfter·applyBatch insert 의 skip 인자
+ */
+export const PLUGIN_FEATURES = ['insertSkip'] as const;
 
 /** 기준 문서 문단(GET /api/docs/:id/paragraphs?view=final 그대로) */
 export interface EngineParagraph {
@@ -109,8 +114,12 @@ export interface CoworkOptions {
 
 /** applyText 인자(기준 ref·기준 offset — §1.3) */
 export interface TextArgs { ref: string; find?: string; replace: string; occurrence?: number; start?: number; end?: number; label?: string }
-/** insertParagraphAfter 인자 */
-export interface InsertArgs { afterRef: string; text: string }
+/**
+ * insertParagraphAfter 인자. 덧붙임(0.4.1 'insertSkip', 2026-11-17 §10.4 나-3): skip = 기준 문단 뒤에 이미 넣어 둔 내 초안 문단 글(앞에서부터,
+ * 글 하나에 줄바꿈이 있으면 줄마다 문단 하나) — 기준 문단 바로 뒤의 '내 수정본에만 있는' 문단들 가운데 이 글과 차례대로 맞는 마지막 문단 뒤에
+ * 넣는다(맞는 것이 없으면 예전처럼 기준 문단 바로 뒤). 같은 요청의 넣기 제안을 하나씩 반영해도 pid 차례가 거꾸로 되지 않게
+ */
+export interface InsertArgs { afterRef: string; text: string; skip?: string[] }
 
 export type ApplyResult = { ok: boolean; reason?: 'NOT_FOUND' | 'NO_PARAGRAPH' | 'READONLY' | 'ERROR'; message?: string };
 

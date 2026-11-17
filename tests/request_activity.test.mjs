@@ -28,6 +28,15 @@ test('activityItem: 도구 호출 → 줄 글(개수·범위만), 실패는 오�
   for (const keep of ['start_request', 'claim_next_request', 'read_document', 'propose_changes', 'add_memo', 'complete_request', 'propose_toc_update', 'preview_figure']) assert.equal(isActivityTool(keep), true);
 });
 
+test('activityItem(edit): 영수증 pages.all_applied 가 now 와 다를 때만 \' · 모두 반영하면 N쪽\'(숫자만)', () => {
+  const ops = { ops: [{ op: 'replace' }, { op: 'replace' }] };
+  assert.equal(activityItem('edit', ops, { value: { saved: [{ op: 0, pids: '1-2', count: 2 }], pages: { now: 5, all_applied: 4, last_page_fill: 0.6 } } }).label, '수정 제안 2 · 모두 반영하면 4쪽');
+  assert.equal(activityItem('edit', { ...ops, dry_run: true }, { value: { dry_run: true, made: 2, pages: { now: 5, all_applied: 4 } } }).label, '미리 해 보기 · 수정 제안 2 · 모두 반영하면 4쪽');
+  assert.equal(activityItem('edit', { ...ops, dry_run: true }, { value: { dry_run: true, failed: [{ op: 1 }], pages: { now: 5, all_applied: 6 } } }).label, '미리 해 보기 · 수정 제안 2(1건은 다시 내야 함) · 모두 반영하면 6쪽');
+  for (const pages of [{ now: 5, all_applied: 5 }, { now: 5 }, { skipped: '쪽 수 어림이 꺼져 있다' }, undefined]) assert.equal(activityItem('edit', ops, { value: { saved: [], pages } }).label, '수정 제안 2');
+  assert.equal(activityItem('edit', ops, { value: { saved: [], failed: [{ op: 0 }] } }).label, '수정 제안 2(1건 때문에 저장 안 됨 — 다시 내야 함)');
+});
+
 test('RequestActivity: 요청별로 쌓고 넘치면 오래된 것부터 버린다', () => {
   const log = new RequestActivity({ perRequest: 3, maxRequests: 2 });
   for (let i = 1; i <= 5; i++) log.add('d1', 1, { tool: 'read_document', label: `줄 ${i}`, ok: true }, `2026-11-10T00:00:0${i}Z`);
@@ -72,7 +81,14 @@ test('임시 서버: 도구 호출이 그 요청의 진행 기록에 남고 편�
       return (tool, args = {}) => client.callTool({ name: tool, arguments: args });
     };
     const make = async () => (await api(`${route}/requests`, { method: 'POST', body: { kind: 'instruct', instruction: '비밀 지시 글', route: 'queue', target: { ref: para.ref } } })).request;
-    const activity = async (rid, who = api) => who(`${route}/requests/${rid}/activity`);
+    // 편집 뒤 조판 검사(V3 — server/layout-check.js, 2026-11-12)는 커밋마다 작업자 스레드에서 나중에 '조판 확인 · n쪽' 줄을 더한다 — 완료 뒤에 올 수도 있다.
+    // 이 시험은 AI 가 부른 도구의 줄을 보므로 그 줄은 빼고 견주고(그 줄 자체는 tests/edit_verify_layout.test.mjs), 뺀 줄이 조판 확인 꼴인지만 본다(2026-11-17)
+    const activity = async (rid, who = api) => {
+      const a = await who(`${route}/requests/${rid}/activity`);
+      const layout = (a.items || []).filter((x) => x.tool === 'layout_check');
+      assert.ok(layout.every((x) => /^조판 확인 · /.test(x.label)), `조판 확인 줄 꼴: ${layout.map((x) => x.label).join(' / ')}`);
+      return { ...a, items: (a.items || []).filter((x) => x.tool !== 'layout_check') };
+    };
     ws = watchWs(srv.base, srv.tokens.b, doc.id); await ws.ready;   // 같은 문서를 보는 다른 사람의 편집기
 
     // ── lean 연결: 맡기 → 읽기 → 검색 → 쓰기(complete) ──
@@ -101,7 +117,7 @@ test('임시 서버: 도구 호출이 그 요청의 진행 기록에 남고 편�
     assert.ok(a1.items.every((x) => Number.isInteger(x.n) && Number.isFinite(Date.parse(x.at)) && Number.isInteger(x.ms) && x.ms >= 0));
     assert.ok(!JSON.stringify(a1).includes('비밀 지시') && !JSON.stringify(a1).includes(find) && !JSON.stringify(a1).includes('없는 문단에'), '기록에 지시·검색어·문서 글·의견 글이 없다');
     // 같은 줄이 WebSocket 으로 왔다(문서를 보는 다른 사람에게도 — 글에 민감한 것이 없다)
-    const live = ws.msgs.filter((m) => m.type === 'activity' && m.rid === r1.rid).map((m) => m.item.n);
+    const live = ws.msgs.filter((m) => m.type === 'activity' && m.rid === r1.rid && m.item.tool !== 'layout_check').map((m) => m.item.n);
     assert.deepEqual(live, a1.items.map((x) => x.n));
     assert.equal((await activity(r1.rid, srv.api('b'))).items.length, 6, '문서를 볼 수 있는 사람은 볼 수 있다');
     assert.equal((await srv.api(null).res(`${route}/requests/${r1.rid}/activity`)).status, 401);

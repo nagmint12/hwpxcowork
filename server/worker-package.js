@@ -7,9 +7,9 @@ export const WORKER_PACKAGE_PREFIX = 'hwpx-ai-worker/';
 export const WORKER_PACKAGE_FILES = Object.freeze([
   'server/worker.js', 'server/ai.js', 'server/codex-ai.js', 'server/codex-mcp.js', 'server/claude-cli-ai.js', 'server/google-cli-ai.js', 'server/aimock.js', 'server/bridge.js', 'server/format-schema.js', 'server/table-schema.js', 'scripts/ai-worker.mjs',
   'server/api-mcp-tools.js', 'server/api-responses-agent.js', 'server/api-messages-agent.js', 'server/api-gemini-agent.js', 'server/api-tool-loop.js', 'server/tool-profiles.js', 'server/image-integrity.js', 'engine/picture.js', 'engine/xmlscan.js', 'engine/table-edit.js', 'engine/errors.js',
-  'server/editor-instructions.js', 'server/lean.js', 'server/edit-usage.js', 'server/codex-model-selection.js',
+  'server/editor-instructions.js', 'server/lean.js', 'server/edit-usage.js', 'server/codex-model-selection.js', 'server/ai-debug.js',
   'server/orchestration-worker.js', 'scripts/orchestration-worker.mjs', 'docs/MULTI_AGENT_ORCHESTRATION.md',
-  'scripts/codex-agent.mjs',
+  'scripts/codex-agent.mjs', 'scripts/ai-debug.mjs', 'agent/.claude/ai-debug-hook.mjs', 'server/edit-workflow-runner.js',
 ]);
 const DEPENDENCIES = ['@modelcontextprotocol/sdk', 'zod'];   // Claude API 는 SDK 없이 fetch(api-messages-agent)
 const ZIP_DATE = new Date('2000-01-01T00:00:00Z');
@@ -49,7 +49,7 @@ const README = [
   '사용자 토큰은 중앙 문서 서버의 로그인 수단이고, API 키는 AI 제공자의 별도 인증 수단입니다. 각자 본인 값을 사용하고 ZIP·설정 파일·공유 URL에 넣지 마세요. 개인 API 사용료가 발생하며 ChatGPT·Claude·Gemini 웹 구독과 별도입니다. 문서·첨부 자료는 선택한 AI API로 전달됩니다.', '',
   '연결이 안 되면 중앙 서버 주소·본인 토큰·모델 ID·API 키와 서버가 최신 버전인지 확인합니다. 이 실행기에는 중앙 서버 설정이나 실제 문서가 들어 있지 않습니다.', '',
   '## 멀티에이전트 문서 개선', '',
-  '웹 문서함의 **멀티에이전트 협업**에서 내 지휘자와 작업자를 설정하고 문서 개선 작업을 시작합니다. 각 실행기의 agent-id를 프로필 ID에 맞추어 별도 터미널에서 실행합니다. 지휘자는 계획·통합을 수행하고 작업자는 초안·검토를 맡습니다.', '',
+  '웹 문서함의 **AI 협업**에서 내 지휘자와 작업자를 설정하고 문서 개선 작업을 시작합니다. 각 실행기의 agent-id를 프로필 ID에 맞추어 별도 터미널에서 실행합니다. 지휘자는 계획·통합을 수행하고 작업자는 초안·검토를 맡습니다.', '',
   '```powershell',
   'npm run orchestrator -- --agent-id codex --provider codex',
   'npm run orchestrator -- --agent-id api-worker --provider openai --gateway baze --model "사용-가능한-모델-ID"',

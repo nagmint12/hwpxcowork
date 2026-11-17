@@ -1,6 +1,13 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "enabledMcpjsonServers": ["hwpx"],
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.claude/ai-debug-hook.mjs"] }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.claude/ai-debug-hook.mjs"] }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.claude/ai-debug-hook.mjs"] }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.claude/ai-debug-hook.mjs"] }] }],
+    "PostToolUseFailure": [{ "matcher": "mcp__hwpx__.*", "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.claude/ai-debug-hook.mjs"] }] }]
+  },
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
@@ -20,6 +27,12 @@
       "mcp__hwpx__read_skill_resource",
       "mcp__hwpx__export_skill_resource",
       "mcp__hwpx__list_figures",
+      "mcp__hwpx__list_tables",
+      "mcp__hwpx__get_edit_capabilities",
+      "mcp__hwpx__get_edit_workspace",
+      "mcp__hwpx__edit_workspace",
+      "mcp__hwpx__publish_edit_workspace",
+      "mcp__hwpx__record_edit_stage",
       "mcp__hwpx__preview_figure",
       "mcp__hwpx__export_figure",
       "mcp__hwpx__list_fields",
@@ -60,6 +73,10 @@
       "mcp__hwpx__get_change_request",
       "mcp__hwpx__comment_change_request",
       "mcp__hwpx__review_change_request",
+      "mcp__hwpx__task",
+      "mcp__hwpx__read",
+      "mcp__hwpx__edit",
+      "mcp__hwpx__finish",
       "Read(/work/**)",
       "Read(/guides/**)",
       "Edit(/work/**)",

@@ -30,20 +30,24 @@ export function setupPlan(deployment, subscription) {
   if (!DEPLOYMENTS.some(x => x.id === deployment) || !SUBSCRIPTIONS.some(x => x.id === subscription)) throw new Error('시작 방법을 먼저 선택해 주세요.');
   const personal = deployment === 'personal';
   const ai = subscription === 'chatgpt' ? 'Codex' : subscription === 'claude' ? 'Claude Code' : '';
-  const installCli = subscription === 'none' ? '' : ' --install-cli';
-  const command = `.\\scripts\\setup-user.bat --mode ${deployment} --ai ${CLI_AI[subscription]}${installCli} --start`;
+  const installCli = subscription === 'none' ? '' : ' --install-cli'; // 저장소의 Mac·Linux 고급 설치에만 사용
+  const command = `.\\scripts\\setup-user.bat --mode ${deployment} --ai ${CLI_AI[subscription]} --start`;
   return {
     title: `${personal ? '개인 서버' : '공동 서버'}${ai ? ` + ${ai}로` : '에서 AI 없이'} 시작해요`,
     command,
     commandNode: `node scripts/setup-personal.mjs --mode ${deployment} --ai ${CLI_AI[subscription]}${installCli} --start`,
-    prompt: `이 프로그램을 ${personal ? '개인' : '공동'} 서버로 설치해 줘. ${ai ? `내 ${subscription === 'chatgpt' ? 'ChatGPT' : 'Claude'} 구독으로 ${ai}를 연결해 줘.` : 'AI는 연결하지 않고 시작할게.'} scripts 폴더가 있는 프로그램 위치(설치형 ZIP은 app 폴더)를 찾아 Windows에서는 ${command} 명령을 실행해 줘. 다른 운영체제라면 같은 옵션으로 node scripts/setup-personal.mjs를 실행해 줘. 기존 운영 설정과 문서는 건드리지 말고, 새 설치의 설정·토큰·빈 포트는 도우미가 준비하게 해 줘. 구독 로그인이 필요하면 도우미가 출력하는 로그인 명령을 안내하고 내 로그인을 기다려 줘. API 키나 별도 유료 API로 대체하지 말고, 끝나면 서버 주소와 실제 연결 상태를 알려 줘.`,
+    installerUrl: `/download/windows-setup.zip?mode=${deployment}&ai=${CLI_AI[subscription]}`,
+    installerName: `hwpx-setup-${deployment}-${CLI_AI[subscription]}.zip`,
+    // Windows 설치 묶음(2026-11-16): 운영 방식마다 ZIP 하나. AI 는 설치 뒤 'AI 연결.bat' 에서 고르고 본인 계정으로 로그인한다
+    target: `windows-${deployment}`,
+    aiChoice: ai ? `AI 연결.bat → ${subscription === 'chatgpt' ? '1) ChatGPT 구독(Codex)' : '2) Claude 구독(Claude Code)'}` : '',
     needsLogin: subscription !== 'none',
     steps: [
-      personal ? '받은 프로그램 ZIP을 내 PC에 풀거나, 접근 권한이 있는 저장소의 프로그램 폴더를 엽니다.' : '받은 ZIP이나 접근 권한이 있는 저장소로, 서버로 쓸 PC·클라우드에 프로그램 폴더를 준비합니다.',
-      'scripts 폴더가 있는 위치를 VS Code에서 엽니다. 설치형 ZIP에서는 app 폴더입니다. 아래 요청을 AI 대화창에 붙여넣거나 터미널 명령을 직접 실행합니다.',
-      personal ? '자동으로 열린 문서함에서 시작합니다. 다시 접속할 서버 주소는 터미널에 표시됩니다.' : '자동으로 열린 문서함에서 시작합니다. 관리자 화면에서 동료별 토큰을 만들어 서버 주소와 함께 나눕니다.',
+      `${personal ? '개인용' : '공동 작업용'} ZIP을 받아 압축을 풉니다.`,
+      '시작.bat을 실행합니다. 처음 한 번 Node.js와 라이브러리를 인터넷으로 받습니다(관리자 권한 필요 없음).',
+      ai ? `AI 연결.bat을 실행해 ${ai}를 고르고 본인 ${subscription === 'chatgpt' ? 'ChatGPT' : 'Claude'} 계정으로 로그인합니다.` : (personal ? '문서함 [PC 폴더 연결]로 문서 폴더를 연결합니다.' : '[관리자] → [사용자]에서 참여자를 추가하고 외부 접속 열기.bat의 주소를 전달합니다.'),
     ],
-    aiNote: ai ? `${ai}로 내 요청을 내 구독 안에서 처리합니다. 처음에는 공식 CLI에서 계정 로그인·동의를 직접 한 번 진행합니다. 터미널에 표시된 로그인 명령을 실행한 뒤 시작 명령을 다시 실행하세요. API 키나 별도 유료 API로 자동 전환하지 않습니다.` : 'AI 없이 바로 편집·메모·변경 검토를 사용할 수 있습니다. AI 연결은 나중에 선택할 수 있습니다.',
+    aiNote: ai ? `${ai} 로그인과 AI 요청에는 인터넷이 필요합니다. 최초 로그인·동의는 직접 진행하며 API 키·유료 API로 바꾸지 않습니다.` : 'AI 연결은 나중에 AI 연결.bat으로 할 수 있습니다.',
     help: personal ? '/help.html#local' : '/manual.md',
   };
 }

@@ -48,7 +48,7 @@
 //  문서 설정이 바뀌면(WS doc settings → s.settings·s.canEdit) 저장 안 된 것을 지금 방식으로 먼저 보내고(못 보내면 새 방식으로 옮겨 넣고) 새 방식으로 다시 연다.
 import { reactive, watch, toRaw } from '/vendor/vue.esm-browser.prod.js';
 import { createStudio } from '/vendor/rhwp-editor/index.js';
-import { state, api, toast, cpLen, cpSlice, josa, docWorkEnv, sendToLabel } from './util.js';
+import { state, api, toast, cpLen, cpSlice, josa, docWorkEnv, autoSendLabel } from './util.js';
 import { buildAnnotations } from './annotations.js';
 import { alignOffsets, lcsPairs } from './refmap.js';
 import { emptyDraft, adoptionInEffect } from './store.js';
@@ -407,6 +407,8 @@ export function mountEditor(el, d) {
     applyText: (p) => { const q = applyToEd(p); return q ? call('applyText', q, { ok: false, reason: 'READONLY' }) : Promise.resolve({ ok: false, reason: 'NO_PARAGRAPH' }); },
     insertParagraphAfter: (p) => { const q = afterToEd(p); return q ? call('insertParagraphAfter', q, { ok: false, reason: 'READONLY' }) : Promise.resolve({ ok: false, reason: 'NO_PARAGRAPH' }); },
     applyBatch: (items) => applyBatch(items),
+    /** 넣기 인자 skip(같은 기준 문단 뒤 내 초안 건너뛰기)을 쓸 수 있는가 — 옛 편집기 빌드면 false(store 가 예전 길로) */
+    canInsertSkip: () => insertSkipOk(),
     applyFormatProposal,
     syncToBase: () => syncToBase(),
     flash: (ranges, opts) => flash(ranges, opts),
@@ -527,8 +529,15 @@ export function mountEditor(el, d) {
     }
     return q;
   }
+  /** 편집기 플러그인이 넣기의 skip 인자를 아는가(window.rhwpCowork.features 에 'insertSkip' — PLUGIN_VERSION 0.4.1 부터, 2026-11-17) */
+  function insertSkipOk() {
+    try { return !!cw && !destroyed && Array.isArray(cw.features) && cw.features.includes('insertSkip'); } catch { return false; }
+  }
   /** insertParagraphAfter 인자 → 편집기 기준(그 문단이 편집기 기준에 없으면 null) */
-  function afterToEd(p) {
+  function afterToEd(p0) {
+    // skip(앞 차례 형제의 내 초안 글 — 2026-11-17 §10.4 나-3)은 그 인자를 아는 플러그인(0.4.1 'insertSkip')에만 — 옛 편집기 빌드에는 예전 인자 그대로
+    let p = p0;
+    if (p && typeof p === 'object' && 'skip' in p && !insertSkipOk()) { p = { ...p }; delete p.skip; }
     const M = edMap();
     if (!M || !p || typeof p !== 'object') return p;
     const af = M.ref('e', p.afterRef);
@@ -798,7 +807,7 @@ export function mountEditor(el, d) {
     const f = await fetchBytes(`${d.base}/file?kind=working`);
     await studio.loadFile(f.bytes, fileName(), { skipUnsavedGuard: true, suppressDialogs: true });
     h.baseVersion = Number(f.headers.get('X-Doc-Version')) || 0; h.source = 'working';
-    h.notice = '원격 편집기라 검토 기능이 꺼져 있습니다 — 여기서 고친 글은 저장되지 않습니다(메모·AI 작업·변경 요청은 오른쪽 창에서). 관리자: config studio.mode=local 뒤 npm run build:studio';
+    h.notice = '원격 편집기라 검토 기능이 꺼져 있습니다 — 여기서 고친 글은 저장되지 않습니다(메모·AI 작업·변경 요청은 AI 작업 창에서). 관리자: config studio.mode=local 뒤 npm run build:studio';
     h.loading = false;
   }
 
@@ -1763,7 +1772,8 @@ export function mountEditor(el, d) {
     // (canResolve = 요청자·관리자 + 수정 권한 + '간단히'에서 숨는 남의 요청이 아님 — store)
     const can = typeof d.canResolve === 'function' ? !!d.canResolve(r) : false;
     // 실시간 문서는 표 제안도 공유 문서에 바로 반영한다(서버 resolve { apply }) — 승인 방식은 표 제안을 수정본에 넣지 못한다
-    const n = d.realtime?.() ? g.openPids.length : g.openPids.length - g.tables;
+    // 수는 남은 항목(묶음 제안은 하나 — docs/UI_TERMS.md §9, util.requestProgress adoptOpen). adoptOpen 이 없는 옛 꼴이면 제안 수
+    const n = d.realtime?.() ? g.open - g.openAlt : g.adoptOpen ?? g.openPids.length - g.tables;
     // 진행 단계(ui.js requestPhase — docs/UI_TERMS.md §6): 편집기 강조도 응답 대기(붉은 톤)·처리 중(보라, 움직임)·내 차례(테두리)를 칩과 같이.
     // 오래 응답 없음(late)은 편집기에서는 대기와 같게(시각에 따라 강조를 다시 보내지 않게)
     const ph = requestPhase(d, r);
@@ -1807,7 +1817,7 @@ export function mountEditor(el, d) {
   function quickSendLabel() {
     if (!quickAutoSend(s.settings, 'instruct')) return '';
     const env = docWorkEnv(s);
-    return sendToLabel(env.auto, env.autoRoute);
+    return autoSendLabel(env);
   }
 
   /** 기준 버전이 바뀌었나 보고 맞춘다(머리 주석 4 — v0.4 실시간·읽기 전용은 맞추기로) */

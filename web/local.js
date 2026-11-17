@@ -125,7 +125,7 @@ export const ReviewServersDialog = {
           <span class="lt-ic" v-html="ICON.people"></span>
           <span class="lc-main"><b>{{ r.name }}</b><span class="muted lc-path" :title="r.url">{{ r.url }}</span><span class="muted" v-if="r.user"> · {{ r.user }}</span></span>
           <button class="small" :disabled="busy" title="그 서버를 내 토큰으로 새 창에 엽니다" @click="open(r)">열기</button>
-          <button class="icon" :disabled="busy" title="등록 지우기" aria-label="등록 지우기" @click="remove(r)" v-html="ICON.trash"></button></li>
+          <button class="icon" :disabled="busy" title="등록 삭제" aria-label="등록 삭제" @click="remove(r)" v-html="ICON.trash"></button></li>
       </ul>
       <div class="muted" v-else>등록한 서버 없음</div>
       <div class="row"><b class="lc-head">서버 추가</b><Hint text="여럿이 모여 검토할 때 쓰는 서버(중앙 서버)의 주소와 그 서버에서 받은 내 토큰을 등록합니다. 문서 줄의 [함께 검토]로 그 서버에 보냅니다." :href="HELP"/></div>

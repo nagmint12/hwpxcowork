@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { before, after } from 'node:test';
-import { coworkBuildPlugins } from '../studio/build/patches.mjs';
+import { coworkBuildPlugins, patchesForStudio } from '../studio/build/patches.mjs';
+import { STANDALONE_EDITOR_PATCHES } from '../studio/build/standalone-editor-patches.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const studio = path.join(root, 'vendor/rhwp/rhwp-studio');
+const patches = patchesForStudio(studio, process.env.STUDIO_TEST_PROFILE === 'standalone' ? STANDALONE_EDITOR_PATCHES : undefined);
 let directory;
 let sequence = 0;
 const bundles = {};
@@ -17,7 +19,7 @@ before(async () => {
   const { build } = await import(pathToFileURL(path.join(studio, 'node_modules/vite/dist/node/index.js')).href);
   for (const patched of [false, true]) {
     const entry = '\0cowork-font-performance.ts';
-    const [patcher] = coworkBuildPlugins({ studioSrc: studio });
+    const [patcher] = coworkBuildPlugins({ studioSrc: studio, patches });
     const source = ['src/core/font-rule-runtime.ts', 'src/core/font-loader.ts']
       .map(file => `export * from ${JSON.stringify(path.join(studio, file).replaceAll('\\', '/'))};`).join('\n');
     const result = await build({

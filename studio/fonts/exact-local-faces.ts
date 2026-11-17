@@ -5,6 +5,34 @@ import installed from './installed-local-faces.json';
 const normalize = (name: string): string => name.normalize('NFC').replace(/\s/g, '').toLowerCase();
 const sources = new Map<string, readonly string[]>();
 type LocalVariant = { weight: string; style: string; names: readonly string[] };
+type ClientFace = {
+  family: string; fullName: string; postscriptName: string; style: string;
+  aliases: readonly string[]; weightClass?: number; italic?: boolean; detectionSource?: string;
+};
+const genericFamilies = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'emoji', 'math', 'fangsong', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded']);
+
+// [hwpx-cowork] Client fonts are not limited to this Windows build machine's
+// generated catalog. Extend it only with client-reported full/PostScript names;
+// an HFT-only name with no client SFNT record does not become a guessed TTF alias.
+function clientVariants(name: string, records: readonly ClientFace[]): readonly LocalVariant[] | undefined {
+  const key = normalize(name);
+  const matches = records.filter(record => record.detectionSource === 'local-font-access'
+    && [record.family, record.fullName, record.postscriptName, ...record.aliases].some(alias => normalize(alias) === key));
+  const exact = matches.filter(record => [record.fullName, record.postscriptName].some(alias => normalize(alias) === key));
+  if (exact.length === 1 && normalize(exact[0].family) !== key) {
+    return [{ weight: '400', style: 'normal', names: [exact[0].postscriptName, exact[0].fullName].filter(Boolean) }];
+  }
+  if (!matches.length || new Set(matches.map(record => normalize(record.family))).size !== 1) return undefined;
+  const entries = matches.flatMap(record => {
+    const regular = /^(regular|normal|book|roman|보통|일반)$/i.test(record.style.trim());
+    const weight = record.weightClass ?? (regular ? 400 : /bold/i.test(record.style) ? 700 : /italic|oblique/i.test(record.style) ? 400 : undefined);
+    if (!weight || !record.postscriptName) return [];
+    return [{ weight: String(weight), style: record.italic === true || /italic|oblique/i.test(record.style) ? 'italic' : 'normal', names: [record.postscriptName, record.fullName].filter(Boolean) }];
+  });
+  const regular = entries.findIndex(entry => entry.weight === '400' && entry.style === 'normal');
+  if (regular < 0) return undefined;
+  return [entries[regular], ...entries.filter((_, index) => index !== regular)];
+}
 const variants = new Map<string, readonly LocalVariant[]>();
 for (const prefix of ['KoPubWorld', 'KoPub']) {
   for (const [korean, english] of [['바탕체', 'Batang'], ['돋움체', 'Dotum']]) {
@@ -88,10 +116,11 @@ const faceRegistered = (face: FontFace): boolean =>
   typeof document.fonts.has !== 'function' || document.fonts.has(face);
 
 /** Returns only names backed by a successfully loaded exact local FontFace. */
-export async function loadExactLocalFaces(requested: readonly string[], registerFace?: RegisterLoadedFace): Promise<string[]> {
+export async function loadExactLocalFaces(requested: readonly string[], registerFace?: RegisterLoadedFace, clientFaces: readonly ClientFace[] = []): Promise<string[]> {
   if (typeof FontFace === 'undefined' || typeof document === 'undefined') return [];
   const add: RegisterLoadedFace = registerFace ?? (face => { document.fonts.add(face); });
-  const names = [...new Set(requested)].filter(name => sources.has(normalize(name)));
+  const names = [...new Set(requested)].filter(name => name.trim() && !genericFamilies.has(name.trim().toLowerCase())
+    && (sources.has(normalize(name)) || clientVariants(name, clientFaces) !== undefined));
   const result: string[] = [];
   // At most four local font reads at a time, matching the existing webfont loader.
   for (let offset = 0; offset < names.length; offset += 4) {
@@ -106,7 +135,8 @@ export async function loadExactLocalFaces(requested: readonly string[], register
         attempt = (async () => {
           try {
             const key = normalize(name);
-            const entries = variants.get(key) ?? [{ weight: '400', style: 'normal', names: sources.get(key)! }];
+            const entries = clientVariants(name, clientFaces) ?? variants.get(key)
+              ?? [{ weight: '400', style: 'normal', names: sources.get(key) ?? [name] }];
             const faces: FontFace[] = [];
             for (let index = 0; index < entries.length; index++) {
               const entry = entries[index];

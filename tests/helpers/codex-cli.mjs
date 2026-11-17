@@ -18,7 +18,7 @@ const [mode, receipt, auth, ...args] = process.argv.slice(2);
 if(args[0]==='debug' && args[1]==='models') { console.log(${JSON.stringify(JSON.stringify({ models: catalog }))}); process.exit(0); }
 if(args.includes('--version')) { console.log('codex-cli 0.164.0-test'); process.exit(0); }
 if(args.includes('--help')) { console.log(mode==='old' ? '--sandbox' : '--no-daemon --strict-config --ignore-user-config --sandbox --skip-git-repo-check --json --output-schema --ephemeral'); process.exit(0); }
-if(args[0]==='features') { console.log('apps plugins remote_plugin'.split(' ').map(n=>n+' stable true').join('\\n')); process.exit(0); }
+if(args[0]==='features') { console.log('apps plugins remote_plugin goals image_generation'.split(' ').map(n=>n+' stable true').join('\\n')); process.exit(0); }
 if(args[0]==='login') { const ready=mode!=='logout' && (auth==='-' || fs.readFileSync(auth,'utf8')==='ready'); console.log(mode==='api'?'Logged in using an API key':ready?'Logged in using ChatGPT':'Not logged in'); process.exit(ready?0:1); }
 const promptChunks=[];for await(const chunk of process.stdin) promptChunks.push(chunk);const prompt=Buffer.concat(promptChunks).toString('utf8');
 const config=Object.fromEntries(args.filter((s,i)=>args[i-1]==='-c').map(s=>[s.slice(0,s.indexOf('=')),s.slice(s.indexOf('=')+1)]));
@@ -39,6 +39,39 @@ fs.writeFileSync(receipt,JSON.stringify(state));
 if(mode==='slow') await new Promise(r=>setTimeout(r,20000));
 if(mode==='fail') {console.error('private provider secret-token');process.exit(2);}
 if(mode==='overflow') { process.stdout.write('X'.repeat(17*1024*1024));await new Promise(r=>setTimeout(r,1000)); }
+if(mode==='workspace') {
+ const c=new Client({name:'codex-workspace-test',version:'1'});
+ const transport=new StdioClientTransport({command:JSON.parse(config['mcp_servers.hwpx.command']),args:JSON.parse(config['mcp_servers.hwpx.args']),env:process.env,stderr:'pipe'});transport.stderr?.on('data',()=>{});
+ try {
+  await c.connect(transport);const names=(await c.listTools()).tools.map(t=>t.name);assert.ok(names.includes('edit_workspace'));assert.ok(!names.includes('propose_changes'));
+  const w=state.requestContext.editWorkflow,stage=w.stage;
+  const operations=stage==='content'?[{op:'replace',args:{ref:'s0/p1',find:'둘째',replace:'두 번째'}}]:[{op:'format',args:{refs:['s0/p1'],format:{char:{bold:true}}}}];
+  const r=await c.callTool({name:'edit_workspace',arguments:{stage,revision:w.revision,operations,complete_stage:true,summary:stage+' completed'}});assert.ok(!r.isError,JSON.stringify(r));
+  fs.appendFileSync(receipt+'.workspace.jsonl',JSON.stringify({pid:process.pid,cwd:process.cwd(),stage,prompt})+'\\n');
+ } finally {await c.close();await transport.close()}
+ console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:200,output_tokens:20,cached_input_tokens:40}}));process.exit(0);
+}
+if(mode==='v2') {
+ // 새 MCP 연결(server/mcp2.js — 작업 도구 넷): 첫 입력의 요청 내용(brief)만으로 일하고 edit 한 번(done)으로 끝낸다
+ const c=new Client({name:'codex-cli-test',version:'test'});
+ const transport=new StdioClientTransport({command:JSON.parse(config['mcp_servers.hwpx.command']),args:JSON.parse(config['mcp_servers.hwpx.args']),env:process.env,stderr:'pipe'});
+ transport.stderr?.on('data',()=>{});
+ try {
+  await c.connect(transport);
+  let toolCount=0;const nativeCall=c.callTool.bind(c);c.callTool=async(...args)=>{try{return await nativeCall(...args);}finally{console.log(JSON.stringify({type:'item.completed',item:{id:'tool-'+(++toolCount),type:'mcp_tool_call'}}));}};
+  state.tools=(await c.listTools()).tools.map(t=>t.name).sort();
+  state.instructions=fs.readFileSync(JSON.parse(config.model_instructions_file),'utf8');
+  const brief=state.requestContext;
+  assert.ok((await c.callTool({name:'read_document',arguments:{}})).isError,'예전 도구는 새 연결에 없다');
+  assert.ok((await c.callTool({name:'edit',arguments:{doc_id:'another-document',ops:[{op:'memo',at:'s0/p0',text:'x'}]}})).isError,'다른 문서는 거절');
+  assert.ok((await c.callTool({name:'finish',arguments:{expected_attempt:999,summary:'wrong attempt'}})).isError,'다른 시도는 거절');
+  const reading=await c.callTool({name:'read',arguments:{view:'map'}});assert.ok(!reading.isError,JSON.stringify(reading));state.map=reading.content[0].text;
+  const ops=brief.map.includes('⚠')?[{op:'objects_to_body'}]:[{op:'replace',at:brief.target.ref,whole:true,with:'자동 검토한 문장'}];
+  const r=await c.callTool({name:'edit',arguments:{ops,done:'새 연결로 처리했습니다.'}});assert.ok(!r.isError,JSON.stringify(r));state.receipt=JSON.parse(r.content[0].text);
+  state.toolCount=toolCount;fs.writeFileSync(receipt,JSON.stringify(state));
+ } finally {await c.close();}
+ console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:300,output_tokens:30,cached_input_tokens:100}}));process.exit(0);
+}
 if(mode==='mcp' || mode==='features' || mode==='mcp-fail-after') {
  const c=new Client({name:'codex-cli-test',version:'test'});
  const transport=new StdioClientTransport({command:JSON.parse(config['mcp_servers.hwpx.command']),args:JSON.parse(config['mcp_servers.hwpx.args']),env:process.env,stderr:'pipe'});

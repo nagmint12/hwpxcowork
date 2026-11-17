@@ -11,6 +11,8 @@ import { runMessagesAgent } from './api-messages-agent.js';
 import { runGeminiAgent } from './api-gemini-agent.js';
 import { normalizeTableOps } from './table-schema.js';
 import { EDITOR_INSTRUCTIONS, automaticNumberReadNote } from './editor-instructions.js';
+import { withAiDebug, debugRecord, debugError, debugHttpResponse } from './ai-debug.js';
+import { editStageInstructions } from './edit-workflow-runner.js';
 
 const TABLE_OP_HINT = 'delete_rows{rows} · delete_cols{cols,keep_width?} · insert_rows{row,count?,position:below|above} · insert_cols{col,count?,position:right|left,keep_width?} · merge{range} · unmerge{row,col} · '
   + 'border{range?,sides:[top|bottom|left|right|inner_h|inner_v|outer|inner|all],line:{type?:SOLID|DOUBLE_SLIM|DASH|DOT|NONE…,width_mm?,color?}} · fill{range?,color:#RRGGBB|none} · col_widths{widths:[비율…],total_mm?} · '
@@ -275,6 +277,11 @@ export class AiProposer {
    *  → { proposals, alternatives, comments, inserts, tables, summary, instructionSummary, usage:{input,output}, model }
    */
   async run(input, { signal, toolContext } = {}) {
+    return withAiDebug({ context: { route: 'api', provider: this.provider, model: this.cfg.model } }, () => this._runRecorded(input, { signal, toolContext }));
+  }
+
+  async _runRecorded(input, { signal, toolContext } = {}) {
+    debugRecord('ai.input', input, { provider: this.provider, model: this.cfg.model, effort: this.cfg.effort });
     if (!this.enabled) throw new Error(`서버 AI 호출이 꺼져 있습니다 (${this.reason})`);
     signal?.throwIfAborted();
     if (this.mock) return mockRun(input);
@@ -380,6 +387,7 @@ export class AiProposer {
   }
 
   async _jsonRequest(url, body, headers, signal) {
+    debugRecord('http.request.body', body, { provider: this.provider, endpoint: new URL(url).origin + new URL(url).pathname });
     // 전체 생성은 사용자의 취소로 제어한다. 응답 시간 제한은 사용자가 명시한 경우에만 둔다.
     const timeoutMs = Number(this.cfg.timeoutMs);
     const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(Math.ceil(timeoutMs)) : null;
@@ -387,10 +395,12 @@ export class AiProposer {
     let res;
     try { res = await (this._fetch || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: combined }); }
     catch (e) {
+      debugRecord('http.error', debugError(e), { stage: 'fetch', provider: this.provider });
       if (combined?.aborted) throw new Error(signal?.aborted ? 'AI 요청이 취소되었습니다' : 'AI 응답 시간이 초과되었습니다');
       throw new Error(`${this.agentName}에 연결하지 못했습니다`);
     }
-    // 원격 오류 본문에는 키·요청 원문이 포함될 수 있어 공유 기록에 넣지 않는다.
+    await debugHttpResponse(res, { provider: this.provider, stage: 'before-json' });
+    // 원문은 비공개 진단 파일에만 남긴다. 공유 오류 문구에는 원격 본문을 넣지 않는다.
     if (!res.ok) throw new Error(`${this.agentName} 오류 HTTP ${res.status}(키·모델·사용 한도를 확인하세요)`);
     try { return await res.json(); } catch { throw new Error(`${this.agentName} 응답이 JSON이 아닙니다`); }
   }
@@ -482,9 +492,14 @@ function inflateJsonText(value) {
 
 /** jsonText: format·runs 가 JSON 문자열로 온 결과(Claude) */
 export function parseResult(text, { jsonText = false } = {}) {
+  let stage = 'JSON.parse';
   try {
     const raw = JSON.parse(text);
-    const result = RunSchema.parse(jsonText ? inflateJsonText(raw) : raw);
+    stage = 'inflateJsonText';
+    const inflated = jsonText ? inflateJsonText(raw) : raw;
+    stage = 'RunSchema';
+    const result = RunSchema.parse(inflated);
+    stage = 'normalizeFormat/normalizeRuns';
     for (const key of ['proposals', 'alternatives', 'inserts']) for (const item of result[key]) {
       const format = normalizeFormat(item.format); const runs = normalizeRuns(item.runs);
       delete item.format; delete item.runs;
@@ -500,11 +515,14 @@ export function parseResult(text, { jsonText = false } = {}) {
     const edits = [];
     for (const item of result.tableEdits || []) {
       try { edits.push({ ...item, ops: normalizeTableOps(typeof item.ops === 'string' ? JSON.parse(item.ops) : item.ops) }); }
-      catch { result.badTableEdits = (result.badTableEdits || 0) + 1; }
+      catch (cause) { debugRecord('result.tableEdit.rejected', item, { validator: 'normalizeTableOps', error: debugError(cause) }); result.badTableEdits = (result.badTableEdits || 0) + 1; }
     }
     result.tableEdits = edits;
     return result;
-  } catch { throw Object.assign(new Error('AI 응답이 검토 결과 형식과 맞지 않습니다(완료하지 않고 재시도가 필요합니다)'), { code: 'API_RESULT_FORMAT' }); }
+  } catch (cause) {
+    debugRecord('result.validation.error', text, { validator: stage, jsonText, error: debugError(cause) });
+    throw Object.assign(new Error('AI 응답이 검토 결과 형식과 맞지 않습니다(완료하지 않고 재시도가 필요합니다)', { cause }), { code: 'API_RESULT_FORMAT' });
+  }
 }
 
 /**
@@ -528,6 +546,7 @@ export function leanFormattingInput(input) {
 
 /** guide: false = 표준서식 작성 지침을 요청 글에 싣지 않는다(시스템 지시에 실었을 때 — systemText) */
 export function taskText(input, { guide: withGuide = true } = {}) {
+  if (input.options?.workflow === 'content_format' && input.editWorkflow) return `${editStageInstructions(input.editWorkflow.stage)}\n사용자 지시: ${input.instruction || ''}\n대상: ${JSON.stringify(input.target)}\n문서 자료:\n<document_context>\n${JSON.stringify(input.editWorkflow).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')}\n</document_context>`;
   // get_request 가 이미 서식을 뺀 요청(formattingHeader.lean — MCP 대기열·개인 실행기)도 같은 꼴로
   if (!input.formattingLean && (input.formattingHeader || input.formattingCatalog)?.lean) input = { ...input, formattingLean: true, formattingHeader: null, formattingCatalog: null };
   const { kind, preset, label, instruction, target = {}, context = [], tables = [], options = {}, docTitle } = input;

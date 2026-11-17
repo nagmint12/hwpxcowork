@@ -6,6 +6,8 @@ import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import test, { before, after } from 'node:test';
 import { coworkBuildPlugins, patchedStudioSource } from '../studio/build/patches.mjs';
+import { patchesForStudio } from '../studio/build/patches.mjs';
+import { STANDALONE_FONT_PATCHES } from '../studio/build/standalone-font-patches.mjs';
 
 const NodeBlob = globalThis.Blob;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,7 +33,8 @@ before(async () => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'hwpx-font-test-'));
   const { build } = await import(pathToFileURL(viteEntry).href);
   // [hwpx-cowork] 2026-11-10 fontfix: 실제 번들과 같은 글(wasm-bridge 패치 적용본)에서 병합 함수를 잘라 쓴다.
-  const bridge = patchedStudioSource(studio, 'src/core/wasm-bridge.ts');
+  const patches = process.env.HWPX_FONT_PROFILE === 'standalone' ? patchesForStudio(studio, STANDALONE_FONT_PATCHES) : undefined;
+  const bridge = patchedStudioSource(studio, 'src/core/wasm-bridge.ts', patches);
   const start = bridge.indexOf('function substituteCssFontFamily(cssFont: string): string {');
   const end = bridge.indexOf('\nlet canvasFontSubstitutionInstalled', start);
   assert.ok(start >= 0 && end > start, 'actual Canvas2D font merger must remain discoverable');
@@ -52,7 +55,7 @@ before(async () => {
     export { loadStoredLocalFonts, detectLocalFonts, getLocalFontRecords, resolveLocalFont } from ${JSON.stringify(local)};
     export ${bridge.slice(start, end)}
   `;
-  const [patcher] = coworkBuildPlugins({ studioSrc: studio });
+  const [patcher] = coworkBuildPlugins({ studioSrc: studio, patches });
   const result = await build({
     configFile: false, root: studio, publicDir: false, logLevel: 'silent',
     plugins: [{
@@ -167,6 +170,46 @@ studioTest('registered but failed webfont falls back; a later successful retry p
   await api.loadWebFonts(['나눔명조'], undefined, { disableExternalWebFonts: true });
   assert.equal(api.getWebFontSupplySnapshot('나눔명조').status, 'loaded');
   assert.equal(api.fontFamilyCandidatesForDisplay('나눔명조')[0], '나눔명조');
+});
+
+function clientSnapshot(family) {
+  return { version: 3, detectedAt: '2026-11-14T00:00:00.000Z', families: [family], source: 'local-font-access',
+    fontRecords: [{ family, fullName: family, postscriptName: family.replaceAll(' ', ''), style: 'Regular', weightClass: 400,
+      italic: false, displayName: family, aliases: [family], detectionSource: 'local-font-access' }] };
+}
+
+studioTest('client-only installed face is usable without being in the build machine font catalog', async t => {
+  const family = 'Client Only Local Face';
+  const { api, requests } = await fixture(t, { localFaces: [family], snapshot: clientSnapshot(family) });
+  await api.loadWebFonts([family], undefined, { disableExternalWebFonts: true });
+  assert.ok(requests.some(item => item.family === family && item.source.includes(`local("${family}")`)));
+  assert.equal(api.hasLoadedLocalFontFamily(family), true);
+  assert.equal(api.fontFamilyCandidatesForDisplay(family)[0], family);
+});
+
+studioTest('a font first selected after document load is prepared and keeps its original name', async t => {
+  const family = 'Client Later Selected Face';
+  const { api } = await fixture(t, { localFaces: [family], snapshot: clientSnapshot(family) });
+  await api.loadWebFonts([], undefined, { disableExternalWebFonts: true });
+  assert.equal(api.hasLoadedLocalFontFamily(family), false);
+  await api.loadWebFonts([family], undefined, { disableExternalWebFonts: true });
+  assert.equal(api.hasLoadedLocalFontFamily(family), true);
+  assert.equal(api.fontFamilyCandidatesForDisplay(family)[0], family);
+});
+
+studioTest('ordinary sentence periods choose a loaded body face before legacy Wingdings fallback; explicit symbols remain available', async t => {
+  const { api } = await fixture(t, { installed: ['Wingdings'], localFaces: ['Wingdings'], failed: ['맑은 고딕'] });
+  await api.loadWebFonts(['함초롬바탕', '맑은 고딕', 'Missing Sans'], undefined, { disableExternalWebFonts: true });
+  for (const family of ['함초롬바탕', '맑은 고딕', 'Missing Sans']) {
+    // 한컴 기본 기호 사다리의 Wingdings는 Symbol cmap에서 '.'을 우체통으로 그린다.
+    // 없는 Windows 본문 글꼴 대신 실제로 로드한 일반 Unicode 본문 face가 앞서야 한다.
+    const descriptor = api.substituteCssFontFamily(`12px "${family}", "Haansoft Batang", "Wingdings", "Arial", sans-serif`);
+    const names = api.parseCssFontFamilyList(descriptor.slice(descriptor.indexOf('px ') + 3));
+    assert.ok(['Noto Sans KR', 'Noto Serif KR'].includes(names[0]), `${family}: ${descriptor}`);
+    assert.equal(api.getWebFontSupplySnapshot(names[0]).status, 'loaded');
+  }
+  await api.loadWebFonts(['Wingdings'], undefined, { disableExternalWebFonts: true });
+  assert.equal(api.fontFamilyCandidatesForDisplay('Wingdings')[0], 'Wingdings', '명시적으로 요청한 기호 face는 보존한다');
 });
 
 studioTest('exact installed and loaded fonts survive while missing originals override document substitutes', async t => {

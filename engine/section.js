@@ -1,6 +1,7 @@
 // 구역(section) XML 의 문단 모델 — 원문 위치 보존.
 // 각 hp:p 를 문단 레코드로 만들고, 문단이 직접 가진 글자(코드포인트) 하나하나의 원문 위치와
 // 변경 추적(삽입/삭제) 상태, 0폭 표식(메모 필드·컨트롤·마크)을 기록한다.
+import { appendFileSync } from 'node:fs';
 import { scan, attr, attrs, decodeWithMap } from './xmlscan.js';
 
 const INLINE_CHAR = { 'hp:lineBreak': '\n', 'hp:tab': '\t' };
@@ -36,6 +37,29 @@ export function isObjectAnchor(a) { return !!a && a.kind === 'ctrl' && (a.name =
 
 let loadStamp = 0;
 
+// [hwpx-cowork] 부분 다시 읽기(2026-11-16): 구역 XML 이 바뀌면 예전에는 구역 전체를 처음부터 다시 읽었다(scan + _build). 문단 3,700개(2.2M 글자) 구역에서
+// 한 번에 50~120ms, 제안 31건 [모두 반영]이 다시 읽기 314번으로 서버를 13초 멈췄다. 이제 load 는 옛 XML 과 새 XML 의 같은 앞·뒤를 찾아 바뀐 자리를 덮는
+// 본문 기록(묶인 member 포함)만 다시 읽고, 그 뒤 기록·토큰은 자리(글자 자리 d·토큰 번호 td·문단 번호)만 옮긴다. 결과는 전체 다시 읽기와 같아야 한다 —
+// 경계가 조금이라도 애매하면(구역 머리·끝 태그, 짝이 안 맞는 태그, 본문 문단 조상이 다른 구역, 끝 기록의 지운 나눔이 다음 문단을 이음 등) 전체를 다시 읽는다.
+//   - 앞 기록은 같은 객체를 그대로 쓰고, 뒤 기록은 그 자리에서 옮긴다(복사하면 전체 다시 읽기만큼 든다 — 3,700문단 39ms). 다시 읽기 전에 얻은 뒤쪽 기록·토큰을
+//     다시 읽은 뒤에도 쓰는 부르는 쪽이 있으면 예전에는 옛 자리, 이제는 옮긴 자리를 본다 — HWPX_SECTION_VERIFY=1 이 그런 읽기를 staleReads 에 모은다.
+//   - HWPX_SECTION_PARTIAL=0 이면 늘 전체 다시 읽기(되돌림 스위치). HWPX_SECTION_VERIFY=1 이면 부분 다시 읽기마다 전체 다시 읽기와 견줘 다르면 던진다(시험용).
+const PARTIAL = process.env.HWPX_SECTION_PARTIAL !== '0';
+const VERIFY = process.env.HWPX_SECTION_VERIFY === '1';
+/** 다시 읽기 횟수(시험·측정): full = 전체, partial = 부분, why = 부분으로 못 한 까닭별 수 */
+export const sectionLoadStats = { full: 0, partial: 0, why: {} };
+/** (HWPX_SECTION_VERIFY=1) 다시 읽기 전에 얻은 뒤쪽 기록·토큰의 자리를 다시 읽은 뒤에 읽은 곳 → 횟수 */
+export const staleReads = new Map();
+// 검증 모드 기록 파일(HWPX_SECTION_VERIFY_LOG): 프로세스가 끝날 때 다시 읽기 횟수·옛 기록 읽기를 한 줄(JSON)로 덧붙인다 — 시험 묶음 전체를 돌려 모을 때
+if (VERIFY && process.env.HWPX_SECTION_VERIFY_LOG) {
+  process.on('exit', () => {
+    if (!sectionLoadStats.partial && !staleReads.size) return;
+    try {
+      appendFileSync(process.env.HWPX_SECTION_VERIFY_LOG, `${JSON.stringify({ pid: process.pid, argv: process.argv.slice(1, 3), stats: sectionLoadStats, stale: [...staleReads] })}\n`);
+    } catch { /* 기록 실패는 시험 결과와 무관 */ }
+  });
+}
+
 export class Section {
   constructor(xml, index) {
     this.index = index;
@@ -43,29 +67,140 @@ export class Section {
   }
 
   load(xml) {
+    // [hwpx-cowork] 새 상태를 다 만든 뒤에 바꿔 끼운다 — 읽다가 던지면 구역은 그대로(engine/formatting.js commit 이 이것에 기댄다)
+    const next = (PARTIAL && this.tokens && this._partial(xml)) || this._full(xml);
     this.xml = xml;
     this.loadSeq = (this.loadSeq || 0) + 1; // 다시 읽은 차례(문서 단위 캐시 열쇠 — 하이퍼링크 대상 id 등)
     this.stamp = ++loadStamp;                // [hwpx-cowork] 모든 구역에 걸쳐 겹치지 않는 읽은 차례(구역을 통째로 바꿔 끼워도 다른 값 — HwpxDoc._objectInfo 캐시 열쇠)
-    this.tokens = scan(xml);
-    this.paras = [];
-    this.bodyParas = [];
-    this._build();
+    this.tokens = next.tokens;
+    this.paras = next.paras;
+    this.bodyParas = next.bodyParas;
+    this._shape = next.shape;
   }
 
-  _build() {
+  /** 전체 읽기 → { tokens, paras, bodyParas, shape } (this 는 건드리지 않는다) */
+  _full(xml) {
+    const b = builder(xml, this.index, scan(xml), 0, 0);
+    b._run(0, b.tokens.length, [], null);
+    sectionLoadStats.full++;
+    return { tokens: b.tokens, paras: b.paras, bodyParas: b.bodyParas, shape: b._shapeOut };
+  }
+
+  /** 예전 이름(전체 읽기를 this 에) */
+  _build() { this.paras = []; this.bodyParas = []; this._run(0, this.tokens.length, [], null); this._shape = this._shapeOut; }
+
+  /**
+   * [hwpx-cowork] 부분 다시 읽기 → 새 상태 | null(전체로). 바뀐 범위 [lo, hi)(옛 XML)를 덮는 본문 기록 i0..i1 을 다시 읽는다.
+   * 끝 기록이 지운 나눔으로 다음 문단을 이으면(cont) 범위를 한 기록씩 늘려 다시 해 본다
+   */
+  _partial(xml) {
+    const why = (w) => { sectionLoadStats.why[w] = (sectionLoadStats.why[w] || 0) + 1; return null; };
+    const shape = this._shape; const old = this.xml;
+    if (typeof xml !== 'string' || typeof old !== 'string') return why('type');
+    if (!shape || !shape.uniform || shape.bodyFrames == null || !shape.root || shape.root.close == null || shape.index !== this.index) return why('shape');
+    // 같은 XML(서식 되돌리기 등): 값이 같은 상태를 새 배열로(전체 다시 읽기도 값이 같은 새 객체를 만든다)
+    if (xml === old) { sectionLoadStats.partial++; return { tokens: this.tokens.slice(), paras: this.paras.slice(), bodyParas: this.bodyParas.slice(), shape }; }
+    const n0 = old.length, n1 = xml.length;
+    // 같은 앞부분은 그 자리를 품은 옛 토큰의 시작까지 줄인다(뒤 태그와 첫 글자가 같으면 — 예: '</hs:sec>' 앞에 '<hp:p' 넣기 — 다름이 태그 안에서 시작해 뿌리 태그를 품게 된다)
+    let P = commonPrefix(old, xml);
+    if (P < n0) P = this.tokens[tokenAt(this.tokens, P)].start;
+    const S = commonSuffix(old, xml, Math.min(n0, n1) - P);
+    const lo = P, hi = n0 - S, d = n1 - n0;
+    const body = this.bodyParas;
+    let i0 = firstEndAfter(body, lo), i1 = lastStartBefore(body, hi);
+    // 마지막 기록이 지운 나눔으로 끝나 다음 본문 문단을 이을 참이면(contTail) 그 뒤에 넣는 문단은 그 기록의 member — 마지막 기록부터 다시 읽는다
+    if (shape.contTail && body.length && i0 >= body.length) { i0 = body.length - 1; i1 = Math.max(i1, i0); }
+    for (let k = 0; k < 8; k++) {
+      const r = this._partialTry(xml, i0, i1, lo, hi, d);
+      if (r === 'cont' && i1 + 1 < body.length) { i1++; if (i0 > i1) i0 = i1; continue; }
+      if (typeof r === 'string') return why(r);
+      sectionLoadStats.partial++;
+      return r;
+    }
+    return why('cont-chain');
+  }
+
+  /** 부분 다시 읽기 한 번(i0 > i1 = 기록 사이에만 넣거나 지움) → 새 상태 | 실패 까닭(글 — 'cont' 는 범위를 늘려 다시) */
+  _partialTry(xml, i0, i1, lo, hi, d) {
+    const ot = this.tokens; const body = this.bodyParas; const shape = this._shape;
+    let a = lo, b = hi;
+    if (i0 <= i1) { a = Math.min(a, body[i0].start); b = Math.max(b, body[i1].end); }
+    // 옛 토큰 [ia, ib): 바뀐 자리를 덮는 토큰. 바로 앞은 태그(끝이 '>'), 바로 뒤는 태그('<')가 되게 이웃 글 토큰까지 넣는다 — 그래야 새 XML 을 처음부터
+    // 읽을 때와 토큰 경계가 같다(앞 태그는 바뀌지 않은 앞부분에서 같은 자리에 끝나고, 뒤 '<' 는 바뀌지 않은 뒷부분에 그대로 있다)
+    let ia = tokenAt(ot, a);
+    let ib = b > ot[ia].start ? tokenAt(ot, b - 1) + 1 : ia;
+    while (ia > 0 && ot[ia - 1].type === 'text') ia--;
+    while (ib < ot.length && ot[ib].type === 'text') ib++;
+    // 구역 뿌리(<hs:sec>) 여는·닫는 태그와 그 바깥(XML 선언 등)은 다시 읽지 않는다
+    if (ia <= shape.root.open || ib > shape.root.close) return 'root';
+    a = ot[ia].start; b = ib > ia ? ot[ib - 1].end : a;
+    const nb = b + d;
+    if (nb < a) return 'range';
+    const local = scan(xml.slice(a, nb));
+    for (const t of local) { t.start += a; t.end += a; if (t.attrStart != null) { t.attrStart += a; t.attrEnd += a; } }
+    if (local.length && !tokenComplete(xml, local[local.length - 1])) return 'open-tag';
+    const paraStart = i0 < body.length ? body[i0].idx : this.paras.length;
+    const paraEnd = i0 <= i1 ? (i1 + 1 < body.length ? body[i1 + 1].idx : this.paras.length) : paraStart;
+    // 옛 범위도 짝이 맞아야 하고(닫히지 않은 문단이 뒤 문단들을 품은 깨진 XML 등), 범위의 옛 기록(중첩 포함)이 범위 안에 있고 뒤 기록은 본문 기록으로 범위 뒤에서 시작해야
+    // 범위 밖은 새 XML 을 처음부터 읽어도 같다
+    if (!balanced(ot, ia, ib)) return 'old-unbalanced';
+    for (let k = paraStart; k < paraEnd; k++) { const q = this.paras[k]; if (q.start < a || q.end > b) return 'old-span'; }
+    if (paraEnd < this.paras.length && (this.paras[paraEnd].parent || this.paras[paraEnd].start < b)) return 'old-span';
+    if (paraStart > 0 && this.paras[paraStart - 1].end > a) return 'old-span';
+    const tokens = ot.slice(0, ia).concat(local);
+    const bld = builder(xml, this.index, tokens, paraStart, i0);
+    const r = bld._run(ia, tokens.length, shape.bodyFrames.map((f) => ({ ...f })), shape);
+    if (r !== true) return r;
+    if (bld._contEnd && i1 + 1 < body.length) return 'cont';
+    const td = local.length - (ib - ia);
+    const idd = bld.paras.length - (paraEnd - paraStart);
+    const bd = bld.bodyParas.length - (i0 <= i1 ? i1 - i0 + 1 : 0);
+    let tailTok = ot.slice(ib); let tailParas = this.paras.slice(paraEnd);
+    let tailBody = body.slice(i0 <= i1 ? i1 + 1 : i0);
+    if (VERIFY) ({ tailTok, tailParas, tailBody } = verifyTail(tailTok, tailParas, tailBody));
+    shiftTokens(tailTok, d);
+    shiftParas(tailParas, d, td, idd, bd, this.index);
+    const next = {
+      tokens: tokens.concat(tailTok),
+      paras: this.paras.slice(0, paraStart).concat(bld.paras, tailParas),
+      bodyParas: body.slice(0, i0).concat(bld.bodyParas, tailBody),
+      shape: { ...shape, root: { open: shape.root.open, close: shape.root.close + td }, contTail: (i0 <= i1 ? i1 + 1 : i0) >= body.length ? !!bld._contEnd : shape.contTail },
+    };
+    if (VERIFY) verifyPartial(this, xml, next);
+    return next;
+  }
+
+  /**
+   * 토큰 [from, to) 를 읽어 this.paras·bodyParas 에 기록을 더한다(번호는 this._idxBase·_bodyBase 부터). stack = 시작 자리에 열린 요소들.
+   * part(부분 다시 읽기 — 전체 읽기의 shape): 본문 문단 조상이 shape.bodyFrames 와 같아야 하고, 처음 깊이 밑으로 닫거나 열린 채 끝나면 안 된다
+   * → true | 실패 까닭(글). 전체 읽기(part 없음)는 this._shapeOut 에 구역 모양(뿌리 태그 자리·본문 조상·끝 기록의 이음)을 남긴다
+   */
+  _run(from, to, stack, part) {
     const { xml, tokens } = this;
-    const stack = []; // {name, tok, para}
     let cur = null;   // 현재 글자를 받는 문단
     const paraById = this.paras;
+    const idxBase = this._idxBase || 0; const bodyBase = this._bodyBase || 0;
     const nestedCounter = new Map(); // parent idx -> count
     const hiddenCounter = new Map(); // parent idx -> 지운 개체 안 문단 수('/d' 번호)
+    const depth0 = stack.length;
+    const bodyKey = part ? part.bodyFrames.map((f) => f.name).join('>') : null;
+    const shape = part ? null : { index: this.index, bodyFrames: null, uniform: true, root: null, contTail: false };
+    let firstKey = null;
     this._cont = null; // [hwpx-cowork] 나눔을 지운 본문 문단 — 다음 본문 <hp:p> 가 이 기록을 잇는다(문단 나눔 변경 추적)
-    for (let ti = 0; ti < tokens.length; ti++) {
+    for (let ti = from; ti < to; ti++) {
       const t = tokens[ti];
       if (t.type === 'open' || t.type === 'selfclose') {
+        if (shape && !shape.root && t.type === 'open' && !stack.length) shape.root = { open: ti, close: null };
         if (t.name === 'hp:p') {
           // [hwpx-cowork] 앞 본문 문단이 짝 맞는 지운 나눔(deleteEnd paraend="1", 뒤에 글자 없음)으로 끝났으면 이 물리 문단은 같은 기록의 다음 member
           // — 최종본에서 한 문단(ref·글·중첩 번호가 평탄화 사본과 같다). 상태(변경 범위·줄 정보)는 물리 문단마다
+          if (!cur) {
+            // [hwpx-cowork] 본문 문단의 조상(보통 hs:sec 하나)이 구역 안에서 모두 같아야 부분 다시 읽기를 한다(부분 읽기는 그 조상에서 시작한다)
+            const key = stack.map((f) => f.name).join('>');
+            if (part) { if (key !== bodyKey) return 'body-depth'; }
+            else if (firstKey === null) { firstKey = key; shape.bodyFrames = stack.map((f) => ({ name: f.name, tok: f.tok, para: f.para })); }
+            else if (key !== firstKey) shape.uniform = false;
+          }
           if (!cur && this._cont && t.type === 'open') {
             const rec = this._cont; this._cont = null;
             (rec.members ??= [memberOf(rec)]).push({ start: t.start, end: t.end, openTok: ti, closeTok: ti, lineseg: null,
@@ -76,34 +211,56 @@ export class Section {
           }
           if (!cur) this._cont = null;
           const rec = {
-            idx: paraById.length, body: null, parent: cur, container: containerOf(stack, cur),
+            idx: idxBase + paraById.length, body: null, parent: cur, container: containerOf(stack, cur),
             children: [], start: t.start, end: t.end, openTok: ti, closeTok: ti,
             chars: [], anchors: [], runs: [], ts: [], _ctrlStack: [], _inT: null, _run: null,
             _ins: null, _del: null, lineseg: null,
           };
-          if (!cur) { rec.body = this.bodyParas.length; this.bodyParas.push(rec); rec.ref = `s${this.index}/p${rec.body}`; }
+          if (!cur) { rec.body = bodyBase + this.bodyParas.length; this.bodyParas.push(rec); rec.ref = `s${this.index}/p${rec.body}`; }
           else {
             // [hwpx-cowork] 변경 추적으로 지운 개체(그 문단이나 조상 문단의 run 에 직접 든 표·그림·도형 — del) 안 문단은 최종본에 없다:
             // ref 를 '/d{k}'(따로 셈)로 매겨 보이는 중첩 문단의 n 번호가 평탄화 사본(작업본)과 같게 한다. 넣은 개체(ins) 안 문단은 added(원본 보기에서 숨음)
-            const hidden = !!cur.hidden || cur._ctrlStack.some((a) => a.del && isObjectAnchor(a));
+            // [hwpx-cowork] 2026-11-17 hp:switch 의 대체 갈래(뒤 hp:case·hp:default — 위 갈래 표시) 안 문단은 보이는 갈래 문단의 사본이다:
+            // 어느 보기에도 없고(alt) 지운 개체 안 문단처럼 '/d' 로 따로 센다 — 같은 캡션이 n 번호 둘로 보이지 않게(한/글은 첫 갈래만 보이고 쓴다)
+            const alt = !!cur.alt || stack.some((f) => f.alt);
+            const hidden = alt || !!cur.hidden || cur._ctrlStack.some((a) => a.del && isObjectAnchor(a));
             const added = !!cur.added || cur._ctrlStack.some((a) => a.ins && isObjectAnchor(a));
             const counter = hidden ? hiddenCounter : nestedCounter;
             const k = (counter.get(cur.idx) || 0); counter.set(cur.idx, k + 1);
             cur.children.push(rec); rec.nested = k; rec.ref = `${cur.ref}/${hidden ? 'd' : 'n'}${k}`;
             if (hidden) { rec.hidden = true; cur.hiddenKids = (cur.hiddenKids || 0) + 1; }
+            if (alt) rec.alt = true;
             if (added) rec.added = true;
           }
           paraById.push(rec);
           if (t.type === 'open') { stack.push({ name: t.name, tok: ti, para: rec }); cur = rec; }
           continue;
         }
-        if (t.type === 'open') stack.push({ name: t.name, tok: ti, para: cur });
+        // [hwpx-cowork] 2026-11-17 hp:switch 의 갈래: 첫 갈래(보통 hp:case)만 보이는 쪽이고 그 뒤 갈래(뒤 hp:case·hp:default)는 대체 사본(alt).
+        // 한/글 2022 COM 실측: 차트 <hp:switch><hp:case ooxmlchart><hp:chart>…<hp:caption>…</hp:case><hp:default><hp:ole>…<hp:caption>…
+        // 에서 case 캡션 글만 바꾼 파일을 열면 글(GetTextFile)·PDF 모두 case 글이고, 다시 저장하면 default 캡션을 case 글로 새로 쓴다
+        // (default 의 다른 글은 사라짐). hp:case 없이 hp:default 만 있으면 그것이 첫 갈래라 보인다. 빈 갈래(<hp:case …/> — 개요 8~10 수준 문단)도 첫 갈래다
+        const sw = stack.length ? stack[stack.length - 1] : null;
+        const altBranch = !!sw && sw.name === 'hp:switch' && (t.name === 'hp:case' || t.name === 'hp:default') && sw.branches++ > 0;
+        if (t.type === 'open') {
+          const fr = { name: t.name, tok: ti, para: cur };
+          if (altBranch) fr.alt = true;
+          if (t.name === 'hp:switch') fr.branches = 0;
+          stack.push(fr);
+        }
         if (cur) this._onElementStart(cur, t, ti, stack);
         continue;
       }
       if (t.type === 'close') {
-        let fr = stack.pop();
-        while (fr && fr.name !== t.name) fr = stack.pop();
+        // 이름이 맞는 요소까지 닫는다(짝이 안 맞는 XML 도 예전처럼). 부분 다시 읽기는 시작할 때 열려 있던 요소를 닫으면 안 된다
+        let fr;
+        do {
+          if (part && stack.length <= depth0) return 'unbalanced';
+          fr = stack.pop();
+          if (shape && fr && shape.root && shape.root.close == null && fr.tok === shape.root.open) {
+            if (fr.name === t.name) shape.root.close = ti; else shape.uniform = false;
+          }
+        } while (fr && fr.name !== t.name);
         if (t.name === 'hp:p') {
           if (fr && fr.para) {
             const rec = fr.para;
@@ -123,11 +280,15 @@ export class Section {
         }
       }
     }
+    const contEnd = !!this._cont; // 끝 기록이 지운 나눔으로 다음 본문 문단을 이을 참인가
     this._cont = null;
+    if (part && (cur || stack.length !== depth0)) return 'unbalanced';
     for (const p of this.paras) { delete p._ctrlStack; delete p._inT; delete p._run; delete p._ins; delete p._del; delete p._brk; }
     for (const p of this.paras) if (p.anchors.length > 1) attachObjectMarks(p);
     for (const p of this.paras) if (p._pe) { delete p._pe; markBreaks(p); }
     for (const p of this.bodyParas) if (p.members) setLeader(p);
+    if (shape) { shape.contTail = contEnd; this._shapeOut = shape; } else this._contEnd = contEnd;
+    return true;
   }
 
   _onElementStart(p, t, ti, stack) {
@@ -237,6 +398,7 @@ export class Section {
 
   /** [hwpx-cowork] 문단이 보기(view)에서 보이는가 — final: 지운 개체 안 문단은 안 보임, original: 넣은 개체 안 문단은 안 보임 */
   static visibleParagraph(q, view = 'final') {
+    if (q.alt) return false; // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본 — 어느 보기에도 없다
     if (view === 'final') return !q.hidden;
     if (view === 'original') return !q.added;
     return true;
@@ -435,6 +597,204 @@ function setLeader(p) {
   for (let k = 0; k < p.members.length - 1; k++) if (Section.memberHasContent(p, k)) { L = k; break; }
   p.leader = L;
   p.openTok = p.members[L].openTok;
+}
+
+// ───────── [hwpx-cowork] 부분 다시 읽기 도우미(2026-11-16) ─────────
+
+/** 새 상태를 만들 읽기 일꾼(this 를 건드리지 않게 — Section 메서드를 그대로 쓴다). 번호는 idxBase(전체 문단 차례)·bodyBase(본문 문단 번호)부터 */
+function builder(xml, index, tokens, idxBase, bodyBase) {
+  const b = Object.create(Section.prototype);
+  b.xml = xml; b.index = index; b.tokens = tokens; b.paras = []; b.bodyParas = []; b._idxBase = idxBase; b._bodyBase = bodyBase;
+  return b;
+}
+
+const CHUNK = 4096;
+/** 두 글의 같은 앞부분 길이(4K 덩어리로 견준 뒤 한 글자씩) */
+function commonPrefix(a, b) {
+  const n = Math.min(a.length, b.length); let i = 0;
+  while (i + CHUNK <= n && a.substring(i, i + CHUNK) === b.substring(i, i + CHUNK)) i += CHUNK;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+}
+/** 두 글의 같은 뒷부분 길이(max 이하 — 앞부분과 겹치지 않게) */
+function commonSuffix(a, b, max) {
+  const na = a.length, nb = b.length; let k = 0;
+  while (k + CHUNK <= max && a.substring(na - k - CHUNK, na - k) === b.substring(nb - k - CHUNK, nb - k)) k += CHUNK;
+  while (k < max && a.charCodeAt(na - 1 - k) === b.charCodeAt(nb - 1 - k)) k++;
+  return k;
+}
+/** 본문 기록(자리 차례) 가운데 end > pos 인 첫 번호(없으면 길이) */
+function firstEndAfter(body, pos) {
+  let lo = 0, hi = body.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (body[m].end > pos) hi = m; else lo = m + 1; }
+  return lo;
+}
+/** 본문 기록 가운데 start < pos 인 마지막 번호(없으면 -1) */
+function lastStartBefore(body, pos) {
+  let lo = 0, hi = body.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (body[m].start < pos) lo = m + 1; else hi = m; }
+  return lo - 1;
+}
+/** 자리 pos 를 품은(start <= pos 인 마지막) 토큰 번호 — 토큰은 XML 전체를 빈틈없이 덮는다 */
+function tokenAt(tokens, pos) {
+  let lo = 0, hi = tokens.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (tokens[m].start <= pos) lo = m + 1; else hi = m; }
+  return Math.max(0, lo - 1);
+}
+/** 잘라 읽은 마지막 토큰이 그 안에서 제대로 끝났나(잘린 자리 밖으로 이어지는 태그·주석·CDATA 면 전체 읽기와 경계가 다르다) */
+function tokenComplete(xml, t) {
+  const s = xml.slice(t.start, t.end);
+  if (t.type === 'text') return !t.cdata || s.endsWith(']]>');
+  if (t.type === 'other') return s.startsWith('<!--') ? s.length >= 7 && s.endsWith('-->') : s.endsWith('>');
+  if (!s.endsWith('>')) return false;
+  let quote = null;
+  for (let i = 1; i < s.length - 1; i++) { const c = s[i]; if (quote) { if (c === quote) quote = null; } else if (c === '"' || c === "'") quote = c; else if (c === '>') return false; }
+  return quote === null;
+}
+
+/** 토큰 [from, to) 가 짝이 맞나(_run 과 같은 닫기 규칙 — 이름이 맞는 요소까지 닫고, 시작 전에 열린 요소를 닫지 않으며, 끝에 열린 것이 없다) */
+function balanced(tokens, from, to) {
+  const stack = [];
+  for (let i = from; i < to; i++) {
+    const t = tokens[i];
+    if (t.type === 'open') stack.push(t.name);
+    else if (t.type === 'close') {
+      let name;
+      do { if (!stack.length) return false; name = stack.pop(); } while (name !== t.name);
+    }
+  }
+  return stack.length === 0;
+}
+
+/** 뒤쪽 토큰 자리 옮기기(그 자리에서) */
+function shiftTokens(list, d) {
+  if (!d) return;
+  for (const t of list) { t.start += d; t.end += d; if (t.attrStart != null) { t.attrStart += d; t.attrEnd += d; } }
+}
+
+/**
+ * 뒤쪽 기록(전위 차례 — 부모가 자식보다 앞) 옮기기(그 자리에서): XML 자리 d, 토큰 번호 td, 전체 문단 번호 idd, 본문 번호 bd(바뀌면 ref 도 다시).
+ * 기록 안의 자리 칸: 기록·member·줄 정보·run·hp:t·글자 raw·부호(시작·끝·안쪽 요소·닫는 토큰)
+ */
+function shiftParas(list, d, td, idd, bd, index) {
+  for (const p of list) {
+    p.start += d; p.end += d; p.openTok += td; p.closeTok += td; p.idx += idd;
+    if (bd) p.ref = p.parent ? `${p.parent.ref}/${p.hidden ? 'd' : 'n'}${p.nested}` : `s${index}/p${(p.body += bd)}`;
+    if (!d && !td) continue;
+    const seen = p.members ? new Set() : null;
+    const ls = (x) => { if (!x || (seen && seen.has(x))) return; seen?.add(x); x.start += d; x.end += d; x.tok += td; };
+    ls(p.lineseg);
+    if (p.members) for (const m of p.members) { m.start += d; m.end += d; m.openTok += td; m.closeTok += td; ls(m.lineseg); }
+    for (const r of p.runs) { r.start += d; r.end += d; r.openTok += td; r.closeTok += td; }
+    for (const t of p.ts) { t.openStart += d; t.openEnd += d; t.closeStart += d; t.closeEnd += d; t.tok += td; }
+    for (const c of p.chars) { c.raw[0] += d; c.raw[1] += d; c.tok += td; }
+    for (const a of p.anchors) {
+      a.start += d; a.end += d; a.tok += td;
+      if (a.innerTok != null) a.innerTok += td;
+      if (a.innerStart != null) { a.innerStart += d; a.innerEnd += d; }
+      if (a.closeTok != null) a.closeTok += td;
+    }
+  }
+}
+
+// ── 검증 모드(HWPX_SECTION_VERIFY=1): 뒤쪽은 사본을 옮기고(옛 객체는 예전처럼 옛 자리로 남긴 채) 옛 객체의 자리 읽기를 staleReads 에 모은다 ──
+
+const POS_KEYS = {
+  para: ['start', 'end', 'openTok', 'closeTok', 'idx', 'body', 'ref'], member: ['start', 'end', 'openTok', 'closeTok'], lineseg: ['start', 'end', 'tok'],
+  run: ['start', 'end', 'openTok', 'closeTok'], t: ['openStart', 'openEnd', 'closeStart', 'closeEnd', 'tok'], char: ['tok'],
+  anchor: ['start', 'end', 'tok', 'innerTok', 'innerStart', 'innerEnd', 'closeTok'], token: ['start', 'end', 'attrStart', 'attrEnd'],
+};
+function poison(obj, keys) {
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+    let v = obj[k];
+    Object.defineProperty(obj, k, { configurable: true, enumerable: true,
+      get() { const site = new Error().stack.split('\n').slice(2, 5).map((l) => l.trim()).join(' < '); staleReads.set(site, (staleReads.get(site) || 0) + 1); return v; },
+      set(x) { v = x; } });
+  }
+}
+function verifyTail(tailTok, tailParas, tailBody) {
+  const tok = tailTok.map((t) => ({ ...t }));
+  const map = new Map();
+  const paras = tailParas.map((p) => {
+    const rm = new Map(p.runs.map((r) => [r, { ...r }])); const tm = new Map(p.ts.map((t) => [t, { ...t, run: rm.get(t.run) ?? t.run }]));
+    const lm = new Map(); const ls = (x) => { if (!x) return x; if (!lm.has(x)) lm.set(x, { ...x }); return lm.get(x); };
+    const am = new Map(p.anchors.map((a) => [a, { ...a, t: tm.get(a.t) ?? a.t, run: rm.get(a.run) ?? a.run }]));
+    // 시작·끝 표식은 같은 objects/attach 배열을 함께 쓴다(engine/doc.js changes() 가 end.objects === m.objects 로 짝을 본다) — 사본도 같이 쓰게
+    const arr = new Map(); const arrOf = (x) => { if (!arr.has(x)) arr.set(x, x.map((o) => am.get(o) ?? o)); return arr.get(x); };
+    for (const a of am.values()) {
+      if (a.objects) a.objects = arrOf(a.objects);
+      if (a.attach) a.attach = arrOf(a.attach);
+      if (a.marks) a.marks = { begin: am.get(a.marks.begin) ?? a.marks.begin, end: am.get(a.marks.end) ?? a.marks.end };
+    }
+    const q = { ...p, runs: [...rm.values()], ts: [...tm.values()], anchors: [...am.values()], lineseg: ls(p.lineseg),
+      chars: p.chars.map((c) => ({ ...c, raw: [...c.raw], t: tm.get(c.t) ?? c.t, run: rm.get(c.run) ?? c.run })) };
+    if (p.members) q.members = p.members.map((m) => ({ ...m, lineseg: ls(m.lineseg) }));
+    map.set(p, q); return q;
+  });
+  for (const q of paras) { q.parent = q.parent ? (map.get(q.parent) ?? q.parent) : null; q.children = q.children.map((c) => map.get(c) ?? c); }
+  // 옛 객체: 값은 그대로(예전처럼 옛 자리), 다시 읽은 뒤의 읽기는 staleReads 에
+  for (const t of tailTok) poison(t, POS_KEYS.token);
+  for (const p of tailParas) {
+    poison(p, POS_KEYS.para);
+    for (const m of p.members || []) poison(m, POS_KEYS.member);
+    for (const x of new Set([p.lineseg, ...(p.members || []).map((m) => m.lineseg)].filter(Boolean))) poison(x, POS_KEYS.lineseg);
+    for (const r of p.runs) poison(r, POS_KEYS.run);
+    for (const t of p.ts) poison(t, POS_KEYS.t);
+    for (const c of p.chars) { poison(c, POS_KEYS.char); poison(c.raw, ['0', '1']); }
+    for (const a of p.anchors) poison(a, POS_KEYS.anchor);
+  }
+  return { tailTok: tok, tailParas: paras, tailBody: tailBody.map((p) => map.get(p)) };
+}
+
+/** 상태를 견줄 수 있는 글로(객체 참조는 번호로, 키는 차례대로) */
+function canonState(st) {
+  const pidx = new Map(st.paras.map((p, i) => [p, i]));
+  const plain = (x) => {
+    if (x instanceof Map) return [...x];
+    if (Array.isArray(x)) return x.map(plain);
+    if (x && typeof x === 'object') { const o = {}; for (const k of Object.keys(x).sort()) o[k] = plain(x[k]); return o; }
+    return x;
+  };
+  const out = st.paras.map((p, i) => {
+    if (p.idx !== i) return `idx ${p.idx} at ${i}`;
+    const rm = new Map(p.runs.map((r, k) => [r, k])); const tm = new Map(p.ts.map((t, k) => [t, k])); const am = new Map(p.anchors.map((a, k) => [a, k]));
+    const lsl = []; const lid = (x) => { if (!x) return null; let k = lsl.indexOf(x); if (k < 0) { lsl.push(x); k = lsl.length - 1; } return [k, plain(x)]; };
+    const ref = (m, x) => (x == null ? null : (m.has(x) ? m.get(x) : 'FOREIGN'));
+    const o = {};
+    for (const k of Object.keys(p).sort()) {
+      const v = p[k];
+      if (k === 'parent') o[k] = v ? (pidx.has(v) ? pidx.get(v) : 'FOREIGN') : null;
+      else if (k === 'children') o[k] = v.map((c) => (pidx.has(c) ? pidx.get(c) : 'FOREIGN'));
+      else if (k === 'lineseg') o[k] = lid(v);
+      else if (k === 'members') o[k] = v.map((m) => ({ ...plain({ ...m, lineseg: null }), lineseg: lid(m.lineseg) }));
+      else if (k === 'ts') o[k] = v.map((t) => ({ ...plain({ ...t, run: null }), run: ref(rm, t.run) }));
+      else if (k === 'chars') o[k] = v.map((c) => ({ ...plain({ ...c, t: null, run: null }), t: ref(tm, c.t), run: ref(rm, c.run) }));
+      else if (k === 'anchors') {
+        // 함께 쓰는 배열(objects·attach)은 처음 나온 차례 번호로 — 같은 배열을 쓰는가까지 견준다
+        const arrs = []; const aid = (x) => { if (!x) return null; let n = arrs.indexOf(x); if (n < 0) { arrs.push(x); n = arrs.length - 1; } return n; };
+        o[k] = v.map((a) => ({ ...plain({ ...a, t: null, run: null, objects: null, attach: null, marks: null }), t: ref(tm, a.t), run: ref(rm, a.run),
+          objects: a.objects ? [aid(a.objects), a.objects.map((x) => ref(am, x))] : null, attach: a.attach ? [aid(a.attach), a.attach.map((x) => ref(am, x))] : null,
+          marks: a.marks ? [ref(am, a.marks.begin), ref(am, a.marks.end)] : null }));
+      } else o[k] = plain(v);
+    }
+    return JSON.stringify(o);
+  });
+  return { paras: out, body: st.bodyParas.map((p) => (pidx.has(p) ? pidx.get(p) : 'FOREIGN')), tokens: st.tokens.map((t) => JSON.stringify(plain(t))) };
+}
+function verifyPartial(sec, xml, next) {
+  const full = sec._full(xml); sectionLoadStats.full--;
+  const A = canonState(next), B = canonState(full);
+  const diff = (x, y, what) => {
+    if (x.length !== y.length) return `${what} 수 ${x.length} ≠ ${y.length}`;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return `${what}[${i}] 다름\n부분: ${String(x[i]).slice(0, 600)}\n전체: ${String(y[i]).slice(0, 600)}`;
+    return null;
+  };
+  const shapeA = JSON.stringify({ ...next.shape, bodyFrames: next.shape.bodyFrames.map((f) => [f.name, f.tok]) });
+  const shapeB = JSON.stringify({ ...full.shape, bodyFrames: full.shape.bodyFrames?.map((f) => [f.name, f.tok]) });
+  const bad = diff(A.tokens, B.tokens, '토큰') || diff(A.paras, B.paras, '문단') || diff(A.body, B.body, '본문 문단')
+    || (shapeA !== shapeB ? `구역 모양 다름 ${shapeA} ≠ ${shapeB}` : null);
+  if (bad) throw new Error(`SECTION_PARTIAL_MISMATCH s${sec.index}: ${bad}`);
 }
 
 function containerOf(stack, cur) {

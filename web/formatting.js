@@ -60,6 +60,7 @@ export function formatSummary(format, catalog) {
   if (p.lineSpacing) rows.push(`줄 간격 ${p.lineSpacing.value}${LINE[p.lineSpacing.type] || ''}`);
   for (const [key, label] of [['spaceBeforePt', '문단 앞'], ['spaceAfterPt', '문단 뒤'], ['indentPt', '들여쓰기'], ['leftMarginPt', '왼쪽 여백'], ['rightMarginPt', '오른쪽 여백']]) if (p[key] != null) rows.push(`${label} ${p[key]}pt`);
   if (typeof p.oneLine === 'boolean') rows.push(`한 줄로 입력 ${p.oneLine ? '켬' : '끔'}`);
+  if (typeof p.pageBreakBefore === 'boolean') rows.push(`쪽 나눔 ${p.pageBreakBefore ? '켬' : '끔'}`);
   return rows;
 }
 export function runPreviewStyle(run) {

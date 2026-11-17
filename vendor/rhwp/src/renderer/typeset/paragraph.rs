@@ -428,6 +428,21 @@ pub(super) fn place_split_paragraph_with_storage<S: crate::storage::Storage>(
             end_line,
             cumulative,
         } = boundary;
+        // [hwpx-cowork] 줄 단위 분할의 예산과 끝 줄을 쪽 나눔 결정 기록에 남긴다(2026-11-16 — 문단 끝 줄이
+        // 본문 밖에 놓인 까닭을 기록만으로 가릴 수 없었다).
+        if crate::renderer::layout_trace_log::enabled() {
+            crate::renderer::layout_trace_log::record(
+                st.pages.len(),
+                "splitScan",
+                st.current_height,
+                st.current_height + cumulative,
+                format!(
+                    "cursor={cursor_line} end={end_line} lines={line_count} avail={avail_for_lines:.2} page_avail={page_avail:.2} reserve={reserve:.2} sb={sp_b:.2} saved_tail={used_saved_tail_vpos_fit} entry={on_entry_page} base_available={base_available:.2} footnote={:.2} zone={:.2}",
+                    st.current_footnote_height, st.current_zone_y_offset
+                ),
+                std::panic::Location::caller(),
+            );
+        }
 
         let Some(fragment) = placement::plan_fragment(
             fmt,

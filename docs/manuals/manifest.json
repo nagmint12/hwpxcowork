@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "builtAt": "2026-11-13T06:03:33.726Z",
+  "builtAt": "2026-11-16T12:06:31.793Z",
   "folder": "따라하기 설명서",
   "format": "대학혁신센터 표준서식",
   "documents": [
@@ -8,7 +8,7 @@
       "order": 0,
       "file": "00 처음 읽기 — hwpx-cowork 둘러보기.hwpx",
       "scenario": null,
-      "bytes": 23058,
+      "bytes": 23010,
       "pages": 7
     },
     {
@@ -22,21 +22,21 @@
       "order": 2,
       "file": "02 따라하기 — AI 작업 맡기기.hwpx",
       "scenario": "ai-requests",
-      "bytes": 25365,
+      "bytes": 25647,
       "pages": 9
     },
     {
       "order": 3,
       "file": "03 AI 연결 — MCP 자동 설정.hwpx",
       "scenario": null,
-      "bytes": 23079,
+      "bytes": 23179,
       "pages": 7
     },
     {
       "order": 4,
       "file": "04 관리자 안내 — 관리자 앱·계정·문서함.hwpx",
       "scenario": null,
-      "bytes": 21418,
+      "bytes": 21517,
       "pages": 7
     }
   ]

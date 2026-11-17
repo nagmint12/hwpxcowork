@@ -10,6 +10,10 @@
 
 운영 방식은 `personal`(개인 서버) / `shared`(공동 서버), AI는 `codex`(ChatGPT 구독) / `claude-code`(Claude 구독) / `none`입니다. Node 22 이상이 있는 macOS·Linux에서는 `node scripts/setup-personal.mjs` 뒤에 같은 옵션을 붙입니다. 설치 도우미는 `userdata-personal` 또는 `userdata-shared`에 설정·기록과 무작위 관리자 토큰을 만들고, 8790부터 빈 포트에서 이 PC 전용 서버를 엽니다. 기존 `config.json`·`data`·전역 환경 변수·홈 MCP 등록은 바꾸지 않습니다.
 
+개인 AI 실행기 설치형 ZIP은 별도 서버 설치 없이 `hwpx-ai-worker` 폴더에서 `sh install.sh`로 준비합니다. macOS 14를 포함한 13.5 이상은 Node 24.22.2, macOS 11~13.4는 Node 22.23.5를 자동 선택합니다(Intel·Apple Silicon 구분, 공식 SHA-256 확인). 이미 실행 가능한 Node 22 이상이 있으면 재사용합니다. Node 22 공식 바이너리의 최소 실행 대상은 macOS 11이며 10.15 이하는 지원하지 않습니다. 이 최소값은 선택한 AI CLI의 요구조건이나 macOS의 보안 지원 기간을 보장하지 않습니다. `worker-settings.txt` 설정과 토큰 export 후 `sh start-worker.sh --check`로 연결을 점검하고, `sh start-worker.sh`로 요청 처리를 시작합니다. 구독 CLI 설치·로그인은 별도입니다.
+
+호환성 근거: [Node 22 빌드 대상](https://github.com/nodejs/node/blob/v22.23.5/BUILDING.md#platform-list), [Node 24 빌드 대상](https://github.com/nodejs/node/blob/v24.22.2/BUILDING.md#platform-list). 기존 Safari 15의 `Object.hasOwn` 보완(`scripts/build-studio.mjs`)은 웹 편집기 경로이며 이 실행기 설치 경로와 별개입니다.
+
 CLI의 본인 구독 로그인·OAuth 동의는 사용자가 직접 합니다. 도우미가 출력한 로그인 명령을 실행하고 같은 설치 명령을 다시 실행하면 서버를 재사용하며 실행기를 연결합니다. VS Code 확장 로그인만으로 CLI 로그인을 대신할 수 있는 것은 아닙니다. 설치·상태 확인은 모델을 호출하거나 요청을 선점하지 않습니다. 실행기를 켠 뒤 웹에서 맡긴 실제 요청은 본인의 구독 사용량을 씁니다. API 키로 자동 전환하지 않습니다.
 
 `--status`로 상태, `--stop`으로 이 설치의 서버·실행기를 정상 종료합니다. `--no-window`는 브라우저를 열지 않습니다. 공동 서버는 처음에는 이 PC에서만 열고 사용자 추가·HTTPS 공유를 후속 설정합니다. 관리자의 구독 AI는 본인 요청만 처리하며 참여자는 본인 토큰·구독으로 연결합니다. 아래 수동 절차는 기존 공유 서버에 참여하거나 대화창 MCP·채널을 별도 등록할 때 사용합니다.
@@ -263,14 +267,14 @@ bearer_token_env_var = "HWPX_COWORK_TOKEN"
 
 **② ChatGPT 웹(고급).** 접근 가능한 HTTPS 서버와 계정·조직이 지원하는 연결 구성이 필요합니다. 현재 서버는 사용자별 토큰과 OAuth 2.1(DCR·PKCE)을 지원합니다(운영 매뉴얼 §9). OAuth 연결만으로 자동 작업은 생성되지 않습니다. 연결한 채팅에서 “대기열을 처리해 줘”라고 하거나, 새 요청을 바로 처리하려면 ①의 Codex 실행기를 씁니다. 로컬 SDK 시험 통과는 실제 계정의 연결·자동 실행 완료를 의미하지 않습니다.
 
-서버 재시작이나 연결 단절로 남은 처리 작업은 선점이 만료되면 `claim_next_request`가 회수합니다(기본 15분, `config.agents.leaseMinutes`). `existingResults`에는 이미 저장한 제안·의견 ID가 있으므로 `list_proposals`·`list_memos`로 확인하고 이어서 처리합니다. 완료 호출 재전송은 중복 저장하지 않지만, 응답 유실 뒤 같은 제안·의견을 다시 보내는 경우까지 정확히 한 번 저장하는 보장은 없습니다.
+서버 재시작이나 연결 단절로 남은 처리 작업은 선점이 만료되면 `claim_next_request`가 회수합니다(기본 15분, `config.agents.leaseMinutes`). 2026-11-16 이후 판의 서버는 같은 작업을 이렇게 이어받는 것을 기본 3번까지만 허용하고(`config.agents.maxTakeovers`), 그다음에는 그 작업을 실패로 닫습니다 — 처리 도중 계속 멈추는 작업이 끝없이 되풀이되지 않게 하는 장치이며, 편집기에서 '다시 요청'하면 처음부터 다시 셉니다(그 전 판의 서버에는 횟수 제한이 없습니다). `existingResults`에는 이미 저장한 제안·의견 ID가 있으므로 `list_proposals`·`list_memos`로 확인하고 이어서 처리합니다. 완료 호출 재전송은 중복 저장하지 않지만, 응답 유실 뒤 같은 제안·의견을 다시 보내는 경우까지 정확히 한 번 저장하는 보장은 없습니다.
 
 격리 검증: `npm run test:mcp`, `npm run test:memo`, `npm test`. 이 시험은 임시 문서·토큰·포트만 사용합니다.
 
 ## 부록: 브리지 명령줄
 
 ```
-node server/mcp-stdio.js [--channel] [--lean] [--url <MCP 주소>] [--token <토큰>] [--agent <이름>] [--no-tools]
+node server/mcp-stdio.js [--channel] [--v2 [--tools core|all]] [--lean] [--url <MCP 주소>] [--token <토큰>] [--agent <이름>] [--no-tools]
 ```
 | 인자 | 뜻 |
 |---|---|
@@ -279,6 +283,9 @@ node server/mcp-stdio.js [--channel] [--lean] [--url <MCP 주소>] [--token <토
 | `--agent` | 에이전트 이름(기본: MCP 클라이언트 이름, `claude-code` → `Claude Code`) — 메모 작성자 `홍길동(Claude Code)` 에 쓰임 |
 | `--channel` | 채널 알림 켜기(없으면 v0.2 처럼 도구만 중계) |
 | `--lean` | 얇은 흐름 — 요청 내용·도구 응답을 모델용으로 짧게 받는다(`start_request` 가 내용을 함께 줌, 쓰기의 `complete` 로 완료). `--no-lean` 으로 끈다. 주소에 `?lean=1` 을 붙여도 같다 |
+| `--v2` | 새 연결(2026-11-16 — [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md)): 작업 도구 넷 `task`(맡기 + 요청 내용)·`read`(글과 주소만)·`edit`(ops 를 한 번에, `done` 으로 완료)·`finish`. 주소에 `?v=2` 를 붙여도 같다. `--tools core` 는 작업 도구와 그림·스킬 파일 도구만, `all`(기본)은 사람이 정할 일·변경 요청·멀티에이전트 도구까지. 서버가 새 연결을 알아야 한다(옛 서버는 예전 도구로 답한다) |
 | `--no-tools` | 도구는 중계하지 않고 알림만(`--channel` 과 함께, 도구는 다른 hwpx MCP 연결을 쓸 때) |
 
-로그는 모두 stderr 로 나갑니다(stdout 은 MCP 통로).
+작업 공간을 새 연결로 바꾸려면 `node scripts/setup-agent.mjs --v2` — `.mcp.json` 의 브리지 인자를 `--v2` 로, `CLAUDE.md` 를 새 연결용(`agent/v2/CLAUDE.md`)으로 바꾸고(예전 지침은 `CLAUDE.v1.md` 로 남김) 허용 목록에 작업 도구 넷을 더한다. 되돌리기는 `--v1`. 바꾼 뒤 에이전트 세션을 다시 띄워야 적용된다. 프로그램 소스 폴더(시험·묶음 스크립트가 함께 있는 개발용 폴더)에서는 그 안의 `agent/` 가 배포 묶음의 본보기이므로 그 자리에서 바꾸지 않고 다른 폴더에 만든다(`node scripts/setup-agent.mjs --dir agent-v2 --v2` — 그 폴더에서 Claude Code 를 띄운다). **서버가 새 연결을 알 때만 쓴다** — `setup-agent` 의 서버 확인에 "이 서버는 새 연결(--v2)을 모릅니다"가 나오면 그 서버는 예전 도구로 답해 새 지침과 맞지 않으므로 `--v1` 로 되돌린다.
+
+일반 안내 로그는 stderr로 나갑니다(stdout은 MCP 통로). AI 수신 원문은 실행 폴더의 `logs/ai-debug/`에 별도 보존하며 `HWPX_COWORK_DEBUG_DIR`로 위치를 고정할 수 있습니다. 서버 MCP 기록은 서버의 `<dataDir>/runtime/ai-debug/`에 남습니다. Claude 채널은 `.claude/ai-debug-hook.mjs`와 `.claude/settings.json`의 hook으로 마지막 답변과 transcript도 저장합니다. `setup-agent`는 hook 파일을 준비하고 기존 권한·다른 hook을 보존하면서 누락된 진단 hook만 병합합니다. 기존 세션에는 다시 실행한 뒤 적용됩니다. 경로·검사 단계·원문 확인 명령은 [AI 수신 원문과 오류 판정 기록](DEPLOYMENT_AND_AI_GUIDE.md#ai-수신-원문과-오류-판정-기록2026-11-14)을 보세요.

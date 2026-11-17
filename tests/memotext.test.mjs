@@ -190,6 +190,29 @@ test('requestOutcome: 항목(묶음 = 하나)·반영(적용/수정본)·거절�
   assert.equal(MT.isAdopted(P({ adopted: { by: '홍길동' } })), true);
 });
 
+test('묶음 제안(bundle — docs/UI_TERMS.md §9): 항목 하나 — 일부 반영이어도 남음, 다 정하면 반영 · 결과 줄은 항목 수 · 반영 목록은 묶음 한 줄', () => {
+  const ins = (t, over = {}) => P({ type: 'insert', text: t, bundle: 'bA', ref: undefined, afterRef: 's0/p0', find: undefined, replace: undefined, ...over });
+  const props = [ins('첫 문단', { status: 'applied' }), ins('둘째', { status: 'applied' }), ins('셋째'), P({ type: 'table', bundle: 'bA', table: { rows: [['a', 'b']] } }), P({ status: 'pending' })];
+  const o = MT.requestOutcome(R(), props);
+  assert.deepEqual([o.items, o.open, o.accepted], [2, 2, 0], '묶음은 남은 구성원이 있으면 남음');
+  assert.deepEqual(o.openPids, [props[2].pid, props[3].pid, props[4].pid]);
+  assert.equal(MT.requestSummaryResultLine(R({ status: 'done' }), props), '결과: 남은 제안 2건');
+  // 남은 것을 정함(셋째 반영 · 표 거절) → 묶음 = 반영, 목록은 한 줄(일부만이면 '(n건 중 k건)')
+  props[2].status = 'applied'; props[3].status = 'rejected';
+  const o2 = MT.requestOutcome(R(), props);
+  assert.deepEqual([o2.items, o2.accepted, o2.applied, o2.open], [2, 1, 1, 1]);
+  const memo = MT.renderRequestMemo(R({ status: 'done' }), props);
+  assert.match(memo, /결과: 반영 1건 · 남은 제안 1건/);
+  assert.match(memo, / · 새 문단 3 · 표 1 넣기\(4건 중 3건\): 문단 추가 「첫 문단」 외 2건/);
+  assert.equal(MT.bundleLabel(props.slice(0, 4)), '새 문단 3 · 표 1 넣기');
+  // 구성원이 하나뿐인 bundle 은 보통 항목, 거둔 제안(withdrawn)은 빠진다
+  const lone = MT.requestItems([P({ bundle: 'bZ' }), P({ bundle: 'bY' }), P({ bundle: 'bY', status: 'withdrawn' })]);
+  assert.deepEqual(lone.map((x) => x.bundle ?? null), [null, null]);
+  // 여러 안(gid)은 bundle 이 있어도 여러 안 묶음(섞지 않는다)
+  const alt = MT.requestItems([P({ gid: 'g', option: 1, bundle: 'bQ' }), P({ gid: 'g', option: 2, bundle: 'bQ' })]);
+  assert.deepEqual(alt.map((x) => [x.gid, x.bundle ?? null, x.list.length]), [['g', null, 2]]);
+});
+
 test('복구 메모 두 꼴: 이정표(사람용 버전)면 v, 아니면 기록 시각(시각도 모르면 옛 기록)', () => {
   assert.equal(MT.renderRestoreMemo({ v: 3, at: T2, by: '관리자', count: 2 }), `[복구] v3(${MT.fmtTime(T2)}) 내용으로 되돌림 — 관리자\n바뀐 문단 2개`);
   assert.equal(MT.renderRestoreMemo({ at: T2, by: '관리자', count: 1 }), `[복구] ${MT.fmtTime(T2)} 기록 내용으로 되돌림 — 관리자\n바뀐 문단 1개`);

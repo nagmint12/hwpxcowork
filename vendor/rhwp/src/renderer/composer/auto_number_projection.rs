@@ -6,7 +6,9 @@ use crate::model::{
     paragraph::Paragraph,
 };
 
-fn label(number: &AutoNumber) -> String {
+/// 표시 문자열(앞·뒤 장식 문자 + 번호). 줄 나눔(`line_breaking::apply_auto_number_tokens_with_storage`)도
+/// 같은 문자열의 폭으로 자리표 한 칸을 잰다.
+pub(super) fn label(number: &AutoNumber) -> String {
     let mut text = String::new();
     if number.prefix_char != '\0' {
         text.push(number.prefix_char);

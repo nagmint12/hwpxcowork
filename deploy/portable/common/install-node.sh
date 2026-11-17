@@ -12,7 +12,26 @@ case "$(uname -m)" in
 esac
 case "$(uname -s)" in
   Linux) OS=linux ;;
-  Darwin) OS=darwin ;;
+  Darwin)
+    OS=darwin
+    MACOS=$(sw_vers -productVersion)
+    MACOS_MAJOR=${MACOS%%.*}
+    MACOS_MINOR=${MACOS#*.}; MACOS_MINOR=${MACOS_MINOR%%.*}
+    if [ "$MACOS_MAJOR" -lt 11 ]; then
+      echo "[오류] macOS $MACOS: 개인 실행기는 macOS 11 이상과 Node.js 22 이상이 필요합니다." >&2
+      exit 1
+    fi
+    # Node 24 공식 바이너리는 macOS 13.5+, Node 22는 11.0+를 대상으로 빌드된다.
+    # https://github.com/nodejs/node/blob/v24.x/BUILDING.md / v22.x/BUILDING.md
+    if [ "$MACOS_MAJOR" -lt 13 ] || { [ "$MACOS_MAJOR" -eq 13 ] && [ "$MACOS_MINOR" -lt 5 ]; }; then
+      VERSION=${HWPX_COWORK_NODE_VERSION:-__MACOS_COMPAT_NODE_VERSION__}
+      if [ "${VERSION%%.*}" != 22 ]; then
+        echo "[오류] macOS $MACOS에서는 Node.js 22를 사용하세요. HWPX_COWORK_NODE_VERSION을 해제한 뒤 다시 실행하세요." >&2
+        exit 1
+      fi
+      echo "  macOS $MACOS 호환 런타임: Node.js $VERSION"
+    fi
+    ;;
   *) echo "[오류] 지원하지 않는 운영체제: $(uname -s)" >&2; exit 1 ;;
 esac
 NAME="node-v$VERSION-$OS-$ARCH.tar.gz"
@@ -32,6 +51,11 @@ if command -v sha256sum >/dev/null 2>&1; then ACTUAL=$(sha256sum "$WORK/$NAME" |
 [ "$ACTUAL" = "$EXPECTED" ] || { echo "[오류] SHA-256 이 공식 값과 다릅니다 — 받은 파일을 쓰지 않습니다" >&2; exit 1; }
 echo "  SHA-256 확인 완료"
 tar -xzf "$WORK/$NAME" -C "$WORK"
+# 실행 불가능한 바이너리로 기존 runtime을 덮어쓰지 않는다(잘못된 CPU·최소 OS 등).
+if ! "$WORK/node-v$VERSION-$OS-$ARCH/bin/node" -v; then
+  echo "[오류] 받은 Node.js를 이 PC에서 실행할 수 없습니다. 기존 runtime은 보존했습니다." >&2
+  exit 1
+fi
 mkdir -p "$HERE/runtime/bin"
 mkdir -p "$HERE/runtime/lib/node_modules"
 cp "$WORK/node-v$VERSION-$OS-$ARCH/bin/node" "$HERE/runtime/bin/node"

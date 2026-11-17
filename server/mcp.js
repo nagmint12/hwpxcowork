@@ -19,6 +19,12 @@ import { imageForModel } from './image-convert.js';
 import { registerOrchestrationTools } from './orchestration-tools.js';
 import { EDIT_USAGE_FIELDS } from './edit-usage.js';
 import { ServiceError, DELETE_KINDS } from './service.js';
+import path from 'node:path';
+import { connectDebugTransport, debugRecord, debugError } from './ai-debug.js';
+import { proposalToolResult } from './editor-instructions.js';
+import { editCapabilities, OperationEnvelopeSchema } from './document-edit.js';
+import { registerV2Tools, v2Keeps, v2Instructions } from './mcp2.js';
+import { newBundleId } from './mcp2/ops.js';
 
 const EditUsageSchema = z.object({ ...Object.fromEntries(EDIT_USAGE_FIELDS.map(k => [k, z.number().int().min(0).max(1e12).optional()])), modelCallsUnknown: z.boolean().optional() }).strict();
 
@@ -77,9 +83,18 @@ ${work}
  *   start_request·claim_next_request·get_request 는 모델용 요약을, 쓰기·완료 도구는 영수증을 돌려주고, 쓰기 도구의 complete 로 완료까지 한다.
  *   도구는 그대로 다 준다. 기본(lean 아님)은 실행기·옛 클라이언트가 쓰는 응답 꼴 그대로다.
  */
-export function createMcpServer({ service, user, version = '0.2.0', agentName = null, agentSession = null, session = null, trackOperation = (fn) => fn(), lean = false }) {
-  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: serverInstructions(user.name, service, { lean }) });
-  const fault = (e) => ({ content: [{ type: 'text', text: `오류(${e.code || 'ERR'}): ${e.message}` }], isError: true });
+export function createMcpServer({ service, user, version = '0.2.0', agentName = null, agentSession = null, session = null, trackOperation = (fn) => fn(), lean: leanOpt = false, surface = null, toolset = 'all' }) {
+  // surface 'v2'(머리글 X-Hwpx-Mcp: 2 또는 ?v=2 — server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md): 내 PC 에이전트용 작업 도구 넷(task·read·edit·finish).
+  //   읽기·제안·요청 흐름의 예전 도구는 등록하지 않고(v2Keeps), 응답은 들여쓰기 없이, 도구 스키마는 lean 처럼 줄여 싣는다. 기본·lean 연결은 그대로다.
+  const v2 = surface === 'v2';
+  const lean = v2 || leanOpt;
+  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: v2 ? v2Instructions(cleanName(user.name, 20, { keepParens: true })) : serverInstructions(user.name, service, { lean }) });
+  const connect = server.connect.bind(server);
+  server.connect = transport => connectDebugTransport({ connect }, transport, {
+    directory: service.cfg?.dataDir ? path.join(service.cfg.dataDir, 'runtime', 'ai-debug') : undefined,
+    context: { route: 'mcp', agent: agentName, session: agentSession || session, lean }, service,
+  });
+  const fault = (e) => { debugRecord('mcp.handler.error', debugError(e)); return { content: [{ type: 'text', text: `오류(${e.code || 'ERR'}): ${e.message}` }], isError: true }; };
   const completable = new Set(COMPLETABLE_TOOLS);
   // 완료는 자동 반영 문서의 제안을 바로 반영한다(pending → applied) — 영수증에 저장 직후가 아니라 완료 뒤의 상태를 싣는다
   const currentStatus = async (docId, slim) => {
@@ -93,6 +108,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
   // 힌트는 안내이며 실제 인증·권한 검사는 서비스가 계속 수행한다.
   const registerBase = server.registerTool.bind(server);
   const register = (name, config, handler) => {
+    if (v2 && !v2Keeps(name, toolset)) return undefined;   // 새 연결: 읽기·제안·요청 흐름의 예전 도구는 싣지 않는다(task·read·edit·finish 가 대신한다)
     const readOnly = /^(list_|read_|search_|get_)/.test(name);
     const destructive = /^(delete_|update_|apply_|accept_|reject_|undo_)/.test(name);
     const receipt = lean && hasLeanReceipt(name);
@@ -109,7 +125,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
       const started = Date.now();
       const result = await run(args, extra);
       note(name, args, result, Date.now() - started);
-      return result;
+      return proposalToolResult(name, result);
     }));
     async function run(args, extra) {
       if (!receipt) return handler(args, extra);
@@ -140,8 +156,8 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
       if (!isActivityTool(name) || typeof service.noteActivity !== 'function') return;
       const value = values.get(result) ?? null;
       const first = String(result?.content?.find?.((c) => c.type === 'text')?.text || '').split('\n', 1)[0].slice(0, 200);
-      service.noteActivity(args?.doc_id ?? value?.docId ?? null, {
-        rid: args?.request_id ?? (name === 'claim_next_request' ? value?.rid ?? null : null), session: sessionId(), user,
+      service.noteActivity(args?.doc_id ?? value?.docId ?? value?.doc_id ?? null, {
+        rid: args?.request_id ?? (name === 'claim_next_request' ? value?.rid ?? null : name === 'task' ? value?.request_id ?? null : null), session: sessionId(), user,
         tool: name, args, value, text: first, isError: !!result?.isError, ms,
       });
     } catch { /* 기록은 부가 기능 */ }
@@ -191,20 +207,59 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
 
   register('read_document', {
     title: '문서 읽기',
-    description: '문서 본문·표 셀을 문단 주소와 함께 읽는다. view=final(최종본, 기본)/markup(변경 추적을 {+삽입+} [-삭제-] 로 표시)/original(원본). 응답은 한도(관리자 설정, 기본 4만 자) 안에서 — 첫 줄의 범위(본문 문단 a..b)를 보고 나머지는 from/to(본문 문단 번호)로 이어 읽는다. 필요한 범위만 읽는다(읽을 때마다 대화가 길어진다).',
-    inputSchema: { doc_id: z.string(), view: z.enum(['final', 'markup', 'original']).optional(), nested: z.boolean().optional().describe('표 셀 등 중첩 문단 포함(기본 true)'), from: z.number().int().min(0).optional(), to: z.number().int().min(0).optional(), max_chars: z.number().int().positive().optional() },
-  }, wrap(async ({ doc_id, view, nested, from, to, max_chars }) => {
-    // 응답 글자 수는 관리자 설정 한도(limits.mcpResponseChars) 안으로 — 넘치면 from/to 로 이어 읽는다
+    description: '문서 본문·표 셀을 ref와 함께 읽는다. from/to는 구역을 합친 전체 본문 차례(0부터, to 제외). view=final/markup/original. 한도로 끊기면 마지막 이어 읽기.cursor를 그대로 보내 같은 view/nested로 계속 읽는다(같은 본문의 표 셀·긴 문단도 포함). cursor 없이는 from/to 범위의 처음부터 읽는다. 필요한 범위만 읽는다.',
+    inputSchema: { doc_id: z.string(), view: z.enum(['final', 'markup', 'original']).optional(), nested: z.boolean().optional().describe('표 셀 등 중첩 문단 포함(기본 true)'), from: z.number().int().min(0).optional(), to: z.number().int().min(0).optional(), max_chars: z.number().int().positive().optional(), cursor: z.string().max(2048).optional() },
+  }, wrap(async ({ doc_id, view, nested, from, to, max_chars, cursor }) => {
+    // 문서 정보와 이어 읽기 metadata를 위한 여유. 본문 원문을 잘라 버리지 않고 cursor로 보존한다.
     const limit = service.mcpLimit();
-    const r = await service.readText(doc_id, { view: view || 'final', nested: nested !== false, from: from || 0, to, maxChars: Math.min(max_chars || limit, limit) });
+    const r = await service.readText(doc_id, { view: view || 'final', nested: nested !== false, from, to, cursor, maxChars: Math.min(max_chars || limit, Math.max(1, limit - 1000)) });
     // 문서 정보(V4 §1): 문서 설정과 이 사용자의 수정 권한 — 둘째 줄 '문서 정보: {"settings":…,"canEdit":…}'
     let info = null;
     try { info = service.docAccess(doc_id, user); } catch { info = null; }
-    return text(`본문 문단 ${r.bodyParagraphs}개 중 ${r.from}..${r.to}${info ? `\n문서 정보: ${JSON.stringify(info)}` : ''}\n${r.text}`);
+    return text(`본문 문단 ${r.bodyParagraphs}개 중 ${r.from}..${r.to}${info ? `\n문서 정보: ${JSON.stringify(info)}` : ''}\n${r.text}${r.truncated ? `\n이어 읽기: ${JSON.stringify({ truncated: true, cursor: r.nextCursor, nextRef: r.nextRef, nextOffset: r.nextOffset, requestedTo: r.requestedTo })}` : '\n읽기 완료(요청 범위 끝)'}`);
+  }));
+
+  register('list_tables', {
+    title: '표 목록', description: '문서 전체 표의 key·ref·행/열 수·캡션을 읽는다(칸 글·XML 제외). 전체 표 수정은 total과 끝 페이지까지 확인한다. from은 표 차례(0부터), nextFrom이 있으면 이어 읽는다. 칸 글은 read_document(nested=true, cursor)로 읽는다.',
+    inputSchema: { doc_id: z.string(), from: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() },
+  }, wrap(async ({ doc_id, from = 0, limit = 100 }) => {
+    const all = await service.tables(doc_id);
+    const page = { total: all.length, from, to: from, tables: [] };
+    for (let i = from; i < Math.min(all.length, from + limit); i++) {
+      const t = all[i]; const caption = t.caption?.text || '';
+      const item = { key: t.key, ref: t.ref, rows: t.rows, cols: t.cols,
+        ...(t.caption ? { caption: { ref: t.caption.ref, text: caption.slice(0, 160) }, ...(caption.length > 160 ? { captionTruncated: true } : {}) } : {}) };
+      page.tables.push(item); page.to = i + 1;
+      if (page.tables.length > 1 && JSON.stringify(page).length > service.mcpLimit() - 200) { page.tables.pop(); page.to = i; break; }
+    }
+    if (page.to < all.length) page.nextFrom = page.to;
+    return text(page);
   }));
 
   register('search_document', { title: '문서 검색', description: '글을 포함한 문단을 찾는다', inputSchema: { doc_id: z.string(), query: z.string() } },
     wrap(async ({ doc_id, query }) => text(await service.search(doc_id, query))));
+
+  register('get_edit_capabilities', { title: '실험 편집 기능', description: '내용·형식 분리 실험의 지원 동작 목록. operations를 주면 그 동작의 정확한 args 스키마만 반환한다. 임의 메서드/XML 실행은 지원하지 않는다.',
+    inputSchema: { doc_id: z.string().optional(), operations: z.array(z.string()).max(20).optional() } },
+  wrap(async ({ operations }) => text(editCapabilities(operations))));
+  register('get_edit_workspace', { title: '내용·형식 작업 사본 읽기', description: '실험 사본의 내용(Markdown), 형식(스타일·표), 주소(mapping)를 따로 읽는다. nextFrom이 있으면 from으로 이어 읽는다. 원문을 변경하지 않는다.',
+    inputSchema: { doc_id: z.string(), request_id: z.number().int().positive(), expected_attempt: expectedAttempt,
+      part: z.enum(['content', 'format', 'mapping', 'receipts']).optional(), from: z.number().int().min(0).optional(), max_chars: z.number().int().positive().optional() } },
+  wrap(async ({ doc_id, request_id, expected_attempt, part, from, max_chars }) => text(await service.readEditWorkspace(doc_id, request_id, { part, from, maxChars: max_chars }, actor(expected_attempt)))));
+  register('edit_workspace', { title: '내용·형식 작업 사본 고치기', description: '현재 stage/revision 사본에 검증된 동작들을 원자적으로 적용한다. args는 get_edit_capabilities에서 필요한 것만 조회한다. 내용 단계 완료 후 형식 단계, 형식 완료 후 ready가 된다. complete_stage=true로 끝낸 뒤 이번 모델 응답을 종료한다. 원문은 바꾸지 않는다.',
+    inputSchema: { doc_id: z.string(), request_id: z.number().int().positive(), expected_attempt: expectedAttempt,
+      stage: z.enum(['content', 'format']), revision: z.number().int().min(0), operations: z.array(OperationEnvelopeSchema).max(2000).optional(),
+      complete_stage: z.boolean().optional(), summary: z.string().max(2000).optional(), no_changes_reason: z.string().max(2000).optional() } },
+  wrap(async ({ doc_id, request_id, expected_attempt, stage, revision, operations, complete_stage, summary, no_changes_reason }) => text(await service.editWorkspace(doc_id, request_id,
+    { stage, revision, operations, completeStage: complete_stage, summary, noChangesReason: no_changes_reason }, actor(expected_attempt), agent()))));
+  register('publish_edit_workspace', { title: '내용·형식 묶음 제안 저장', description: '내용과 형식 두 단계가 모두 ready이면 한 묶음 제안으로 저장한다. 원문 변경은 기존 반영 정책을 따른다. 저장 뒤 complete_request로 요청을 마친다.',
+    inputSchema: { doc_id: z.string(), request_id: z.number().int().positive(), expected_attempt: expectedAttempt,
+      stage_usage: z.array(z.object({ stage: z.enum(['content', 'format']), usage: EditUsageSchema.nullable(), model: z.string().nullable(), freshConversation: z.boolean() }).strict()).max(2).optional() } },
+  wrap(async ({ doc_id, request_id, expected_attempt, stage_usage }) => text(await service.publishEditWorkspace(doc_id, request_id, actor(expected_attempt), agent(), { stage_usage }))));
+  register('record_edit_stage', { title: '실험 단계 사용량 기록', description: '실행기가 완료된 단계의 모델 사용량과 새 대화 실행 여부를 기록한다. 단계 작업을 완료하거나 원문을 변경하지 않는다.',
+    inputSchema: { doc_id: z.string(), request_id: z.number().int().positive(), expected_attempt: expectedAttempt,
+      stage: z.enum(['content', 'format']), usage: EditUsageSchema.nullable(), model: z.string().nullable(), fresh_conversation: z.boolean() } },
+  wrap(async ({ doc_id, request_id, expected_attempt, ...data }) => text(await service.recordEditStage(doc_id, request_id, data, actor(expected_attempt)))));
 
   register('list_memos', { title: '메모 목록', description: '문서의 메모(의견·제안·AI 작업 기록) 목록. link 는 연결(요청·제안·의견), body 는 사람이 고칠 수 있는 부분, thread 는 답글·해결(답글은 add_memo 의 reply_to)', inputSchema: { doc_id: z.string() } },
     wrap(async ({ doc_id }) => text(await service.memos(doc_id, user))));
@@ -261,8 +316,12 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
       paragraphs: z.array(z.object({ text: z.string().optional(), blank: z.boolean().optional(), reason: z.string().optional(), ...richShape })).min(1).optional().describe('여러 문단을 한 번에(이 차례대로). 주면 text·blank·format·runs 는 쓰지 않는다'),
       request_id: rid, expected_attempt: expectedAttempt },
   }, wrap(async ({ doc_id, after_ref, text: t, blank, reason, format, runs, paragraphs, request_id, expected_attempt }) => {
-    // 여러 문단: 한 번의 저장으로(같은 자리 뒤 문단들은 pid 차례로 들어간다 — '모두 반영'이 그 차례를 지킨다)
-    if (paragraphs?.length) return text(await service.proposeMany(doc_id, paragraphs.map((p) => ({ type: 'insert', afterRef: after_ref, text: p.text ?? '', blank: p.blank === true, reason: p.reason ?? reason, format: p.format, runs: p.runs })), actor(expected_attempt), agent(), { rid: request_id }));
+    // 여러 문단: 한 번의 저장으로(같은 자리 뒤 문단들은 pid 차례로 들어간다 — '모두 반영'이 그 차례를 지킨다).
+    // 둘 이상이면 한 묶음(bundle — 화면에서 항목 하나, 2026-11-17 docs/MCP_REDESIGN_2026-11-16.md §10.4 나-11). 응답 꼴은 그대로
+    if (paragraphs?.length) {
+      const bundle = paragraphs.length > 1 ? newBundleId() : undefined;
+      return text(await service.proposeMany(doc_id, paragraphs.map((p) => ({ type: 'insert', afterRef: after_ref, text: p.text ?? '', blank: p.blank === true, reason: p.reason ?? reason, format: p.format, runs: p.runs, bundle })), actor(expected_attempt), agent(), { rid: request_id }));
+    }
     return text(await service.propose(doc_id, { type: 'insert', afterRef: after_ref, text: t ?? '', blank: blank === true, reason, format, runs, rid: request_id }, actor(expected_attempt), agent()));
   }));
 
@@ -274,7 +333,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
 
   register('get_writing_guide', {
     title: '표준서식 작성 지침',
-    description: '대학혁신센터 표준서식(hwpx-standard-report 스킬) 문서를 고칠 때 따를 지침 — 문단 역할별 스타일(장 &본문 1.·절 &본문1)·본문 ■·◦·-·단위 줄·주석), 빈 줄 규칙(장·절 제목 앞), 문체·숫자 표기, 표·그림 캡션·주석, 차례. doc_id 를 주면 그 문서가 표준서식인지(standard)도. part=spec 은 글꼴·간격·테두리 수치(서식명세). get_request 에 writingGuide 가 있으면 먼저 읽는다',
+    description: '표준서식(hwpx-standard-report 스킬) 문서를 고칠 때 따를 지침 — 문단 역할별 스타일(장 &본문 1.·절 &본문1)·본문 ■·◦·-·단위 줄·주석), 빈 줄 규칙(장·절 제목 앞), 문체·숫자 표기, 표·그림 캡션·주석, 차례. doc_id 를 주면 그 문서가 표준서식인지(standard)도. part=spec 은 글꼴·간격·테두리 수치(서식명세). get_request 에 writingGuide 가 있으면 먼저 읽는다',
     inputSchema: { doc_id: z.string().optional(), part: z.enum(['guide', 'spec']).optional() },
   }, wrap(async ({ doc_id, part }) => text(await service.writingGuide(doc_id || null, { part: part || 'guide' }))));
 
@@ -451,9 +510,9 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
     description: lean
       ? `요청을 맡아 처리 중(working)으로 표시하고 요청 내용을 함께 돌려준다 — 알림을 받으면 이 도구 하나로 시작한다(get_request 를 따로 부르지 않는다). 다른 세션이 맡아 처리 중이면 오류 CLAIMED, 남의 요청이면 NOT_OWNER — 그 요청은 그만둔다. 다시 부르거나 request_id 를 단 도구를 쓰면 맡은 시간(lease)이 늘어난다. ${LEAN_BRIEF}`
       : '요청을 맡아 처리 중(working)으로 표시한다(요청자·관리자만). 다른 세션이 맡아 처리 중이면 오류 CLAIMED, 남의 요청이면 NOT_OWNER — 그 요청은 그만둔다. 같은 세션이 다시 부르거나 request_id 를 단 도구를 쓰면 맡은 시간(lease)이 늘어난다',
-    inputSchema: { doc_id: z.string(), request_id: z.number().int(), expected_attempt: expectedAttempt },
-  }, wrap(async ({ doc_id, request_id, expected_attempt }) => {
-    const view = await service.startRequest(doc_id, request_id, actor(expected_attempt), agent(), { session: sessionId() });
+    inputSchema: { doc_id: z.string(), request_id: z.number().int(), expected_attempt: expectedAttempt, workflow: z.literal('content_format').optional() },
+  }, wrap(async ({ doc_id, request_id, expected_attempt, workflow }) => {
+    const view = await service.startRequest(doc_id, request_id, actor(expected_attempt), agent(), { session: sessionId(), workflow });
     if (!lean) return text(view);
     return text(leanRequest({ ...(await service.mcpGetRequest(doc_id, request_id, user, { session: sessionId() })), started: true }));
   }));
@@ -463,9 +522,9 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
     description: lean
       ? `가장 오래된 내 대기 요청 또는 선점 시간이 만료된 작업 하나를 맡고 요청 내용을 돌려준다(claimed: true). 없으면 { none: true }. doc_id 를 주면 그 문서에서만. 채널 없는 ChatGPT·Codex 에서는 이 도구로 대기 작업을 가져온다(연결만으로 자동 수신되지 않음). ${LEAN_BRIEF}`
       : '가장 오래된 내 대기 요청 또는 선점 시간이 만료된 작업 하나를 맡고 get_request 와 같은 내용을 돌려준다(claimed: true). 없으면 { none: true }. doc_id 를 주면 그 문서에서만. 채널 없는 ChatGPT·Codex 에서는 이 도구로 대기 작업을 가져온다(연결만으로 자동 수신되지 않음)',
-    inputSchema: { doc_id: z.string().optional(), tutorial_only: z.boolean().optional().describe('true이면 진행 중인 튜토리얼 요청만 맡는다. 관리자 공유 ChatGPT는 true로 지정한다.') },
-  }, wrap(async ({ doc_id, tutorial_only }) => {
-    const out = await service.claimNextRequest(user, agent(), sessionId(), doc_id || undefined, { tutorialOnly: tutorial_only === true });
+    inputSchema: { doc_id: z.string().optional(), tutorial_only: z.boolean().optional().describe('true이면 진행 중인 튜토리얼 요청만 맡는다. 관리자 공유 ChatGPT는 true로 지정한다.'), workflows: z.array(z.literal('content_format')).optional().describe('내용·형식 두 단계 도구를 지원하는 실행기/클라이언트만 content_format을 선언한다. 생략한 옛 실행기는 일반 요청만 맡는다.') },
+  }, wrap(async ({ doc_id, tutorial_only, workflows }) => {
+    const out = await service.claimNextRequest(user, agent(), sessionId(), doc_id || undefined, { tutorialOnly: tutorial_only === true, workflows });
     return text(lean ? leanRequest(out) : out);
   }));
 
@@ -628,6 +687,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
       return text(await service.drive.prepareDocument(user, doc_id, attachment_id));
     }));
   }
+  if (v2) registerV2Tools({ register, service, user, wrap, text, actor, agent, sessionId });
   // lean: 도구 목록의 입력 스키마에서 'null 허용' 가지·값 범위를 빼 싣는다(서식 속성마다 두 번 적히던 것 — 받는 쪽 zod 검사는 그대로).
   // propose_change 는 propose_changes 한 건과 같아 목록에서만 뺀다(부르면 그대로 된다 — API 프로필과 같은 까닭).
   // SDK 가 만든 목록 처리기를 감싼다(없으면 손대지 않는다 — 목록은 SDK 기본 꼴로 나간다)

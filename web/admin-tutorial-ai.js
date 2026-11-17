@@ -7,7 +7,7 @@ export const AdminTutorialAiPanel = {
     <h2 id="admin-tutorial-ai-title" class="admin-subtitle">튜토리얼 AI</h2>
     <p class="muted">{{ data && data.examples === true ? '튜토리얼 연습 문서의 AI 요청은 늘 미리 준비한 예시 답변으로 처리합니다(AI 호출 없음). 여기서 고른 연결은 체험 계정이 자기 문서에서 보낸 요청에만 씁니다.' : '튜토리얼과 체험 계정의 AI 요청을 처리할 연결입니다.' }} 저장하면 바로 적용됩니다.</p>
     <p v-if="loading" class="admin-message" role="status">설정을 읽는 중입니다…</p>
-    <p v-else-if="!data" class="admin-message err" role="alert">{{ error }}</p>
+    <div v-else-if="!data" class="admin-message" data-testid="admin-load-failed"><p class="err" role="alert">{{ error }}</p><button type="button" :disabled="busy" @click="load()">다시 읽기</button></div>
     <form v-else class="tutorial-ai-form" @submit.prevent="save">
       <fieldset :disabled="busy"><legend class="sr-only">튜토리얼 AI 연결</legend>
         <label v-for="o in data.options" :key="o.id" class="tutorial-ai-option" :class="{ chosen: choice === o.id }" :data-testid="'tutorial-ai-' + o.id" :title="o.detail">

@@ -533,6 +533,7 @@ tr.doc:hover { background: #f5f8fc; cursor: pointer; }
 .admin-user-add b { flex-basis: 100%; }
 .admin-user-add input { flex: 1; min-width: 180px; height: 34px; }
 .admin-user-add .admin-token-input { font-family: Consolas, "D2Coding", monospace; }
+.admin-user-actions .admin-confirm-text { display: inline-block; max-width: 260px; margin-right: 4px; white-space: normal; text-align: left; vertical-align: middle; font-size: 12px; }
 .admin-user-actions .admin-token-input { width: 180px; height: 28px; margin-right: 4px; font-family: Consolas, "D2Coding", monospace; font-size: 12px; }
 .admin-secret { margin: 0 0 16px; }
 /* 튜토리얼 AI 탭(web/admin-tutorial-ai.js) */
@@ -543,6 +544,26 @@ tr.doc:hover { background: #f5f8fc; cursor: pointer; }
 .tutorial-ai-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .tutorial-ai-label .muted { font-size: 12px; overflow-wrap: anywhere; }
 .tutorial-ai-option .admin-status { margin: 0; flex: none; }
+/* AI 사용량 탭(web/admin-usage.js) */
+.usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 18px; }
+.usage-card { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.usage-cost { font-size: 24px; font-weight: 700; }
+.usage-h { font-size: 14px; margin: 18px 0 8px; }
+.usage-h .muted { font-weight: 400; font-size: 12px; }
+.usage-chart { display: flex; align-items: flex-end; gap: 4px; height: 150px; padding: 0 0 2px; border-bottom: 1px solid var(--line); }
+.usage-col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
+.usage-col i { display: block; width: 70%; max-width: 34px; background: var(--accent); border-radius: 3px 3px 0 0; }
+.usage-val { font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-day { font-size: 10px; color: var(--muted); }
+.usage-scroll { overflow-x: auto; }
+.usage-table td, .usage-table th { font-variant-numeric: tabular-nums; }
+.usage-table th { white-space: nowrap; }
+.usage-table .r { text-align: right; }
+.usage-table .nowrap { white-space: nowrap; }
+.usage-table .usage-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-prices { margin-top: 16px; font-size: 13px; }
+.usage-prices summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.usage-at { font-size: 11px; margin-top: 10px; }
 /* AI 크레딧 탭(web/admin-credits.js) */
 .admin-status.empty { color: var(--danger); background: var(--danger-soft); }
 .credit-account { padding: 16px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; }

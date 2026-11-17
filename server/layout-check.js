@@ -6,6 +6,7 @@
 //   · 결과(문서 글 없이 쪽 번호·개수·ref 만): 요청 작업 기록 한 줄(편집기 AI 작업 카드) + 새 칸 넘침이 있으면 같은 요청의 다음 lean 쓰기 영수증 경고 한 줄
 //     (takeLayoutNote — 요청이 이미 끝났으면 작업 기록에만)
 // 끄기: 환경 HWPX_COWORK_LAYOUT_CHECK=0 또는 config.verify.layout === false
+// 같은 작업자로 쪽 수 어림(estimate — 2026-11-17, server/page-estimate.js)도 한다: 에이전트 응답이 기다리므로 기다리는 검사보다 앞에 서고, 도는 검사는 끊지 않는다
 import { Worker } from 'node:worker_threads';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { physicalParas } from '../engine/toc.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULTS = { timeoutMs: 30000, maxBytes: 16 * 1024 * 1024, maxOldGenerationSizeMb: 512 };
+// estimateTimeoutMs·estimateWaitMs: 쪽 수 어림(estimate — 2026-11-17) 한 작업의 시간 한도와 줄 서서 기다릴 한도(에이전트 응답이 기다린다)
+const DEFAULTS = { timeoutMs: 30000, maxBytes: 16 * 1024 * 1024, maxOldGenerationSizeMb: 512, estimateTimeoutMs: 20000, estimateWaitMs: 20000 };
 
 export class LayoutChecker {
   constructor({ pkgDir = path.resolve(root, process.env.HWPX_COWORK_ENGINE_PKG || path.join('vendor', 'rhwp', 'pkg')), workerFile = path.join(root, 'server', 'layout-worker.js'), ...opts } = {}) {
@@ -24,6 +26,47 @@ export class LayoutChecker {
     this.running = null; this.worker = null; this.seq = 0;
     this.stats = { done: 0, failed: 0, skipped: 0, timeouts: 0, restarts: 0, lastMs: null, lastRss: null };
     this.idle = [];             // 큐가 빌 때 부를 함수(시험)
+    this.urgent = [];           // 쪽 수 어림 작업(estimate) — 편집 뒤 검사보다 먼저 돈다
+    this.estStats = { done: 0, failed: 0, busy: 0, timeouts: 0, lastMs: null };
+  }
+
+  /**
+   * 쪽 수 어림(2026-11-17 — docs/MCP_REDESIGN_2026-11-16.md §10.4 나-7, server/page-estimate.js): 문서 바이트(또는 기록 파일)들의 쪽 수·구역별 쪽 수·마지막 쪽 찬 비율.
+   * 같은 작업자(같은 WASM, CPU 한 코어)를 쓰되 기다리는 편집 뒤 검사(V3)보다 앞에 선다 — 에이전트 응답이 이것을 기다리기 때문이다.
+   * 이미 돌고 있는 검사는 끊지 않고 끝나기를 기다린다(검사 한도 timeoutMs). 줄에서 estimateWaitMs 를 넘게 기다리면 빼고 { ok:false, reason:'busy' }.
+   * 도는 중에 estimateTimeoutMs 를 넘으면 검사와 같이 작업자를 끝낸다(다음 작업 때 다시 띄움) → { ok:false, reason:'timeout' }.
+   * docs: [{ bytes: Uint8Array } | { file }] → Promise<{ ok, results?: [{ pages, sections, lastFill, fills }], reason?, ms? }> (던지지 않는다)
+   * sparseBelow: 거의 빈 쪽 문턱(2026-11-17 작업 Q — server/page-estimate.js SPARSE_FILL). 주면 마지막 쪽이 아닌 글 적은 쪽의 찬 비율(fills)도 잰다
+   */
+  estimate(docs, { waitMs = this.opts.estimateWaitMs, timeoutMs = this.opts.estimateTimeoutMs, sparseBelow = null } = {}) {
+    return new Promise((resolve) => {
+      const job = { estimate: true, docs, timeoutMs, sparseBelow, resolve: null };
+      const wait = setTimeout(() => {
+        const i = this.urgent.indexOf(job); if (i < 0) return;
+        this.urgent.splice(i, 1); this.estStats.busy++; job.resolve({ ok: false, reason: 'busy' });
+      }, waitMs);
+      wait.unref?.();
+      // 기다리는 동안은 프로세스를 붙잡는다(작업자·시간 타이머는 unref — 서버 밖 스크립트가 결과 전에 끝나지 않게, drain 과 같다)
+      const hold = setInterval(() => {}, 1000);
+      job.resolve = (r) => { clearTimeout(wait); clearInterval(hold); resolve(r); };
+      this.urgent.push(job);
+      setImmediate(() => this._pump());
+    });
+  }
+
+  _pumpEstimate() {
+    const job = this.urgent.shift();
+    const w = this.worker || this._spawn();
+    const n = ++this.seq;
+    this.running = { n, job, w, timer: setTimeout(() => this._timeout(n), job.timeoutMs) };
+    this.running.timer.unref?.();
+    // 바이트는 복사해 보낸다(넘기면 — transfer — 호출자의 버퍼가 비게 된다)
+    w.postMessage({ job: n, kind: 'pages', sparseBelow: job.sparseBelow ?? null, docs: job.docs.map((d) => (d.file ? { file: d.file } : { bytes: d.bytes })) });
+  }
+
+  _finishEstimate(job, m) {
+    if (m.ok) { this.estStats.done++; this.estStats.lastMs = Math.round(m.ms); } else if (m.reason === 'timeout') this.estStats.timeouts++; else this.estStats.failed++;
+    try { job.resolve(m); } catch (e) { console.error('[쪽 수 어림] 전달:', e.message); }
   }
 
   /** 작업 넣기(바로 돌아온다). job = { key, id, file, beforeFile, version, beforeVersion, positions, deliver(result) } */
@@ -46,6 +89,7 @@ export class LayoutChecker {
   }
 
   _pump() {
+    if (!this.running && this.urgent.length) return this._pumpEstimate();
     if (this.running || !this.order.length) { if (!this.running && !this.order.length) this._idle(); return; }
     const key = this.order.shift(); const job = this.pending.get(key); this.pending.delete(key);
     if (this.lastOf.get(job.key) === key) this.lastOf.delete(job.key);
@@ -61,6 +105,7 @@ export class LayoutChecker {
   _onMessage(w, m) {
     if (m?.ready || !this.running || this.running.w !== w || m.job !== this.running.n) return;
     const { job, timer } = this.running; clearTimeout(timer); this.running = null;
+    if (job.estimate) { this._finishEstimate(job, m); return setImmediate(() => this._pump()); }
     if (m.ok) { this.stats.done++; this.stats.lastMs = Math.round(m.ms); this.stats.lastRss = m.rss; } else this.stats.failed++;
     this._deliver(job, m);
     setImmediate(() => this._pump());
@@ -68,17 +113,19 @@ export class LayoutChecker {
 
   _timeout(n) {
     if (!this.running || this.running.n !== n) return;
-    const { job, w } = this.running; this.running = null; this.stats.timeouts++;
+    const { job, w } = this.running; this.running = null;
     this.worker = null; w.terminate().catch(() => {});
-    this._deliver(job, { ok: false, timeout: true, reason: 'timeout' });
+    if (job.estimate) this._finishEstimate(job, { ok: false, timeout: true, reason: 'timeout' });
+    else { this.stats.timeouts++; this._deliver(job, { ok: false, timeout: true, reason: 'timeout' }); }
     setImmediate(() => this._pump());
   }
 
   _onDead(w, e) {
     if (this.worker === w) { this.worker = null; this.stats.restarts++; }
     if (this.running?.w === w) {
-      const { job, timer } = this.running; clearTimeout(timer); this.running = null; this.stats.failed++;
-      this._deliver(job, { ok: false, reason: 'worker', error: String(e?.message || e).slice(0, 200) });
+      const { job, timer } = this.running; clearTimeout(timer); this.running = null;
+      const r = { ok: false, reason: 'worker', error: String(e?.message || e).slice(0, 200) };
+      if (job.estimate) this._finishEstimate(job, r); else { this.stats.failed++; this._deliver(job, r); }
       setImmediate(() => this._pump());
     }
   }
@@ -87,7 +134,7 @@ export class LayoutChecker {
   _idle() { const list = this.idle.splice(0); for (const f of list) f(); }
   /** 큐가 비고 도는 작업이 없을 때까지 기다린다(시험·측정) */
   // 기다리는 동안은 프로세스를 붙잡는다(작업자·시간 제한 타이머는 unref — 서버 밖 스크립트가 기다리다 끝나지 않게)
-  drain() { return new Promise((r) => { if (!this.running && !this.order.length) return r(); const hold = setInterval(() => {}, 1000); this.idle.push(() => { clearInterval(hold); r(); }); }); }
+  drain() { return new Promise((r) => { if (!this.running && !this.order.length && !this.urgent.length) return r(); const hold = setInterval(() => {}, 1000); this.idle.push(() => { clearInterval(hold); r(); }); }); }
   async stop() { const w = this.worker; this.worker = null; if (w) await w.terminate().catch(() => {}); }
 }
 
@@ -95,6 +142,8 @@ let shared = null;
 /** 프로세스에 하나(작업자 1개) */
 export function layoutChecker() { return (shared ||= new LayoutChecker()); }
 export function layoutCheckEnabled(cfg) { return process.env.HWPX_COWORK_LAYOUT_CHECK !== '0' && cfg?.verify?.layout !== false; }
+/** 쪽 수 어림(server/page-estimate.js) 켜짐 — 끄기: 환경 HWPX_COWORK_PAGE_ESTIMATE=0 또는 config.verify.pages === false. 편집 뒤 검사 끄기와는 따로다 */
+export function pageEstimateEnabled(cfg) { return process.env.HWPX_COWORK_PAGE_ESTIMATE !== '0' && cfg?.verify?.pages !== false; }
 
 // 같은 요청의 다음 lean 쓰기 영수증에 실을 경고(저장소·문서·요청별 한 줄, 한 번 실으면 지운다)
 const notes = new WeakMap();
@@ -157,6 +206,10 @@ export function enqueueLayoutCheck(service, ctx) {
       let meta2 = null; try { meta2 = store.readMeta(id); } catch { meta2 = null; }
       for (const rid of rids) {
         const r = meta2?.requests?.find((x) => x.rid === rid); if (!r) continue;
+        // 같은 요청의 바로 앞 조판 확인 줄과 글이 같고 경고·실패가 없으면 남기지 않는다(2026-11-17: 커밋마다 한 줄이라 한 요청에
+        // '조판 확인 · 1쪽'이 다섯 번 남기도 했다 — 쪽 수·바뀐 쪽·주소가 달라지거나 경고가 있으면 그대로 남긴다)
+        const prev = service.activity?.list?.(id, rid)?.filter((x) => x.tool === 'layout_check').at(-1);
+        if (prev && prev.label === label && prev.ok && result?.ok && !warning) continue;
         const row = service.activity?.add(id, rid, { tool: 'layout_check', label, ok: !!result?.ok && !warning });
         if (row) hub?.broadcast(id, { type: 'activity', rid, item: row });
         if (warning && r.status !== 'done' && r.status !== 'cancelled') noteMap(store).set(`${id}\u0000${rid}`, warning);

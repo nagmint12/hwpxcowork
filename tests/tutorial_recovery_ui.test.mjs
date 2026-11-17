@@ -92,3 +92,14 @@ test('다시 열 창에는 전체store/토큰을 저장하지 않고 자동전�
   state.composer.attachments = [{ unexpected: 'x'.repeat(15000) }];
   assert.equal(tutorialStoredView(state), null, '진행 저장 32KB를 넘길 창 정보는 저장하지 않는다');
 });
+
+test('전송 중 재접속한 요청 창은 새 실행의 입력 상태로 돌아온다', () => {
+  const state = { composer: { key: 1, phase: 'sending', instruction: '확인 요청' } };
+  const saved = tutorialStoredView(state);
+  assert.equal(saved.windows.composer.phase, 'edit');
+  assert.equal(state.composer.phase, 'sending');
+  const restored = {};
+  restoreTutorialView(tutorialViewSnapshot(state), restored, () => {});
+  assert.equal(restored.composer.phase, 'edit');
+  assert.equal(restored.composer.instruction, '확인 요청');
+});

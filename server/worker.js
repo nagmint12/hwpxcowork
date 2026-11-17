@@ -6,6 +6,8 @@ import { apiBaseFrom, createSseParser, eventsUrlFrom } from './bridge.js';
 import { requestedFormat, requestedRuns } from './format-schema.js';
 import { createApiToolContext } from './api-mcp-tools.js';
 import { validateImage } from './image-integrity.js';
+import { withAiDebug, debugRecord, debugError } from './ai-debug.js';
+import { runEditWorkflow } from './edit-workflow-runner.js';
 
 const DEFAULT_TIMING = { pollMs: 30000, backoffMs: 1000, maxBackoffMs: 30000, connectTimeoutMs: 15000, callTimeoutMs: 120000, deadMs: 50000 };
 const DEFAULT_LOG = (line) => process.stderr.write(`[hwpx 개인 AI] ${line}\n`);
@@ -51,7 +53,7 @@ export function workerInput(request, attachments = [], previousResults = { propo
   return { kind: request.kind, preset: request.preset, label: request.label, instruction: request.instruction || '', target,
     context: request.contextItems, tables: request.tables || [], attachments, options: request.options || {},
     formattingHeader: request.formattingHeader, formattingCatalog: request.formattingCatalog,
-    docTitle: request.title || '', previousResults, followUp: request.followUp, existingResults: request.existingResults };
+    docTitle: request.title || '', previousResults, followUp: request.followUp, existingResults: request.existingResults, editWorkflow: request.editWorkflow };
 }
 
 /**
@@ -163,15 +165,18 @@ class ApiWorker {
 
   /** keepErrors: 도구 오류 결과(isError)를 던지지 않고 그대로 돌려준다 — API 모델이 오류 글을 보고 고치게(멈출 오류는 api-mcp-tools 가 가린다) */
   async call(name, args, signal, { keepErrors = false } = {}) {
+    debugRecord('worker.mcp.call', { name, arguments: args });
     signal = signal ? AbortSignal.any([signal, this.shutdown.signal]) : this.shutdown.signal;
     checkSignal(signal);
     const client = await this.connected(); checkSignal(signal);
     let result;
     try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: this.timing.callTimeoutMs, signal }); }
     catch (e) {
+      debugRecord('worker.mcp.error', debugError(e), { tool: name });
       if (this.client === client) { this.client = null; await client.close().catch(() => {}); }
       throw e;
     }
+    debugRecord('worker.mcp.result', result, { tool: name });
     if (result.isError && !keepErrors) {
       const code = /오류\(([A-Z_]+)\)/.exec(textContent(result))?.[1] || 'TOOL_FAILED';
       throw Object.assign(new Error('중앙 서버가 작업을 받지 못했습니다'), { code });
@@ -194,7 +199,7 @@ class ApiWorker {
     do {
       this.wakeRequested = false;
       while (!this.stopped) {
-        const req = await this.callJson('claim_next_request', this.tutorialOnly ? { tutorial_only: true } : {});
+        const req = await this.callJson('claim_next_request', { ...(this.tutorialOnly ? { tutorial_only: true } : {}), workflows: ['content_format'] });
         if (req.none) break;
         await this.process(req);
       }
@@ -280,6 +285,16 @@ class ApiWorker {
       comments: memos.filter((m) => m.link?.type === 'comment' && m.link.rid === request.rid).map((m) => ({ ref: m.ref, text: m.body })) };
   }
 
+  /** 새 MCP 연결의 요청 내용(GET /api/docs/:id/requests/:rid/brief — server/mcp2/service.js agentBrief). 옛 서버면 SERVER_UPDATE_REQUIRED */
+  async brief(request, signal) {
+    const res = await this.fetch(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/brief`, { headers: this.headers(), signal, redirect: 'error' });
+    if (res.status === 404) throw Object.assign(new Error('중앙 서버가 새 MCP 연결을 지원하지 않습니다'), { code: 'SERVER_UPDATE_REQUIRED' });
+    if (!res.ok) throw Object.assign(new Error('요청 내용을 읽지 못했습니다'), { code: 'TOOL_FAILED' });
+    const brief = await res.json();
+    if (brief.doc_id !== request.docId || brief.request_id !== request.rid || Number(brief.attempt ?? 1) !== Number(request.attempt ?? 1)) throw Object.assign(stopError(), { code: 'ATTEMPT_CHANGED' });
+    return brief;
+  }
+
   assertAttempt(request, current) {
     if (Number(current.attempt ?? 1) !== Number(request.attempt ?? 1)) throw Object.assign(stopError(), { code: 'ATTEMPT_CHANGED' });
   }
@@ -305,6 +320,11 @@ class ApiWorker {
   }
 
   async process(request) {
+    return withAiDebug({ context: { route: 'worker', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1, agent: this.agent, session: this.session } }, () => this.processRecorded(request));
+  }
+
+  async processRecorded(request) {
+    debugRecord('worker.request', request);
     const controller = new AbortController(); const signal = controller.signal;
     const active = { request, controller }; this.active = active;
     const args = { doc_id: request.docId, request_id: request.rid, expected_attempt: request.attempt ?? 1 };
@@ -321,10 +341,33 @@ class ApiWorker {
     try {
       const current = await this.current(request, signal);
       await this.applyRunSettings(signal);
+      if (current.options?.workflow === 'content_format') {
+        nativeResult = await runEditWorkflow({ ai: this.ai, docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
+          url: this.url.href, token: this.token, session: this.session, signal,
+          getRequest: () => this.current(request, signal), call: (name, extra) => this.callJson(name, { ...args, ...extra }, signal),
+          openTools: () => createApiToolContext({ profile: 'workspace', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
+            listTools: () => this.connected().then(client => client.listTools()), assertCurrent: () => this.current(request, signal),
+            callTool: (name, bound, toolSignal) => this.call(name, bound, toolSignal, { keepErrors: true }),
+            uploadFile: async ({ bytes, name }, toolSignal) => {
+              if (/\.(png|jpe?g|gif|bmp)$/i.test(name)) validateImage(bytes);
+              const url = new URL(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/files`);
+              url.searchParams.set('attempt', String(request.attempt ?? 1)); url.searchParams.set('agent', this.agent);
+              const response = await this.fetch(url, { method: 'POST', body: bytes, headers: { ...this.headers(), 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) }, redirect: 'error', signal: toolSignal });
+              if (!response.ok) throw Object.assign(new Error('실험 결과 파일 저장 실패'), { code: 'API_FILE_SAVE' });
+              return response.json();
+            } }) });
+        this.reportUsage(nativeResult.usage); this.statsValue.completed++;
+        this.say('내용·형식 두 단계를 각각 새 대화에서 처리하고 묶음 제안으로 저장했습니다.');
+        return;
+      }
       if (typeof this.ai.runMcp === 'function') {
-        this.say(`${this.who()}가 MCP로 요청 전문·전체 문서와 서식을 읽고 결과를 직접 등록합니다.`);
-        const completed = nativeResult = await this.ai.runMcp({ type: 'request', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1 },
-          { url: this.url.href, token: this.token, session: this.session, signal, requestContext: current });
+        // 새 MCP 연결(--mcp 2 — server/mcp2.js): 짧은 요청 내용(brief)을 받아 모델의 첫 입력에 싣고, 모델은 작업 도구 넷(task·read·edit·finish)으로 처리한다
+        const v2 = this.ai.mcpSurface === 'v2';
+        this.say(v2 ? `${this.who()}가 작업 도구(task·read·edit·finish)로 필요한 범위만 읽고 결과를 직접 등록합니다.`
+          : `${this.who()}가 MCP로 요청 전문·전체 문서와 서식을 읽고 결과를 직접 등록합니다.`);
+        const brief = v2 ? await this.brief(request, signal) : null;
+        const completed = nativeResult = await this.ai.runMcp({ type: 'request', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1, ...(v2 ? { surface: 'v2' } : {}) },
+          { url: this.url.href, token: this.token, session: this.session, signal, requestContext: current, ...(v2 ? { brief } : {}) });
         this.reportModelSelection(completed);
         this.reportUsage(completed?.usage, completed?.execution);
         const finished = await this.callJson('get_request', { doc_id: request.docId, request_id: request.rid }, signal);
@@ -366,6 +409,7 @@ class ApiWorker {
       // 시각화 요청인데 그림 제안이 없었음 — 이유는 의견 메모(add_memo)로 문서에 남았다
       if (result.figureMissing) this.say(`그림 제안 없이 완료했습니다. 이유: ${String(result.figureMissing).slice(0, 200)}`);
     } catch (e) {
+      debugRecord('worker.error', debugError(e), { stage: 'execute-save-complete' });
       this.reportModelSelection(e);
       // 완료 응답 직후 프로세스가 끊겼더라도 서버에 등록된 성공을 실패로 바꾸지 않는다.
       if (typeof this.ai.runMcp === 'function' && !this.stopped) {

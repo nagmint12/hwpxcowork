@@ -3448,12 +3448,19 @@ fn floating_anchor_font_size_px(
 /// 한/글 저장 줄은 이 상자 높이를 줄 높이로 쓴다(samples HWPX 의 바깥 여백 있는 글자처럼
 /// 사각형 78줄 전부 `vertsize = 높이 + 위 + 아래 여백`). 배치도 같은 상자로 줄 안 폭과
 /// 기준선 자리를 센다(`tac_object_outer_margins_px`).
+///
+/// [hwpx-cowork] 2026-11-17 위/아래 캡션도 그 줄의 점유 높이다 — 그림(`picture_flow_extra_height_hu`)과 같은 규칙
+/// (`tac_caption_extra_height_hu`). 한/글 2022 재저장 X08(글자처럼 차트 38268×17008, 아래 캡션 간격 850·10pt 한 줄)의
+/// 그 줄 vertsize 18958 = 17008 + 850 + 1100(캡션 줄 높이, 마지막 줄 줄간격 제외), baseline 16114 = 0.85 × 18958.
+/// 배치(`inline_shape_box_height`·`tac_object_box_height_px`)는 이미 같은 상자를 쓰고 있었다 — 줄 높이만 캡션을 빠뜨려
+/// 뒤 문단이 캡션 몫(1950HU)만큼 올라오고 캡션이 다음 줄과 겹쳐 그려졌다. 왼/오른쪽 캡션은 높이를 늘리지 않는다.
 fn tac_shape_box_hu(shape: &crate::model::shape::ShapeObject) -> (i32, i32) {
     let common = shape.common();
     let margin = &common.margin;
     (
         shape.flow_width_hu() + i32::from(margin.left) + i32::from(margin.right),
-        shape.flow_height_hu() + i32::from(margin.top) + i32::from(margin.bottom),
+        (shape.flow_height_hu() + i32::from(margin.top) + i32::from(margin.bottom))
+            .saturating_add(tac_caption_extra_height_hu(shape.caption())),
     )
 }
 
@@ -3678,9 +3685,16 @@ fn inline_control_spacing_height_hwp(control: &Control) -> Option<i32> {
 /// 그림 바로 아래 간격 850 뒤, 여백은 캡션 아래). 빠뜨리면 저장 줄 없는 그림 문단(편집기·AI 가 넣은 그림)이 1.9px 남짓
 /// 작게 재어져, 한/글은 다음 쪽으로 넘기는 그림을 쪽 끝에 눌러 담는다. 왼/오른쪽 캡션은 높이를 늘리지 않는다.
 pub(crate) fn picture_flow_extra_height_hu(pic: &crate::model::image::Picture) -> i32 {
-    use crate::model::shape::CaptionDirection;
     let margin = i32::from(pic.common.margin.top) + i32::from(pic.common.margin.bottom);
-    let caption = pic.caption.as_ref().map_or(0, |cap| {
+    margin.saturating_add(tac_caption_extra_height_hu(pic.caption.as_ref()))
+}
+
+/// [hwpx-cowork] 2026-11-17 글자처럼 취급한 개체(그림·도형·차트·OLE)의 위/아래 캡션이 줄에서 차지하는 높이 — 캡션 간격 +
+/// 캡션 줄 높이 합(줄마다 줄 높이 + 줄간격, 마지막 줄의 줄간격은 뺀다). 왼/오른쪽 캡션·줄 없는 캡션은 0. 그림 규칙
+/// (`picture_flow_extra_height_hu`, 한/글 실측 21260 + 850 + 1000 + 283)을 도형 계열과 함께 쓰려고 떼어 냈다.
+pub(crate) fn tac_caption_extra_height_hu(caption: Option<&crate::model::shape::Caption>) -> i32 {
+    use crate::model::shape::CaptionDirection;
+    caption.map_or(0, |cap| {
         if !matches!(cap.direction, CaptionDirection::Top | CaptionDirection::Bottom) {
             return 0;
         }
@@ -3692,8 +3706,7 @@ pub(crate) fn picture_flow_extra_height_hu(pic: &crate::model::image::Picture) -
         } else {
             0
         }
-    });
-    margin.saturating_add(caption)
+    })
 }
 
 /// [#7160] 프레임 채움 전용 — **글자처럼 취급 표**도 인라인 토큰으로 싣는다.
@@ -4612,6 +4625,91 @@ fn apply_resolved_field_tokens_with_storage<S: crate::storage::Storage>(
     Ok(())
 }
 
+/// [hwpx-cowork] 자동 번호(표·그림·수식 번호 등)는 원문 자리표 한 칸(HWPX 파서는 `' '`)으로 토큰화되지만
+/// 그려지는 것은 번호 글자다(`auto_number_projection` 이 같은 자리에 표시 문자열을 투영한다). 한/글은 줄 끝을 그 번호
+/// 글자 폭으로 잰다 — 2026-11-16 한/글 2022 COM 캡션 시험(`artifacts/pagefix-20261116/capnum-probe.mjs`: 표 캡션
+/// "[표 <번호>] 글…" 의 상자를 번호를 글자로 쓴 자연 폭보다 d HU 좁힘, 한 자리·두 자리 × d −800~+400): 한/글은 정확히
+/// 그 자연 폭이 상자를 넘을 때(d > 0, 두 자리는 d = 0 부터) 두 줄로 나눴다. 종전 엔진은 자리표를 공백 폭으로 재어
+/// 한 자리는 +400, 두 자리는 끝내 나누지 않았다(표준서식 생성 보고서 [그림 16] 캡션이 한 줄 → 그림 줄이 1,980HU 낮아
+/// 뒤 쪽이 모두 하나씩 당겨짐). 공백 토큰을 표시 문자열 폭의 나눌 수 없는 글자 토큰으로 바꾼다. 쪽 번호·총 쪽수는 쪽
+/// 계획 뒤에 정해지므로(`resolved_fields`) 대상이 아니고, 위 첨자 번호(각주 표지)도 종전대로 둔다.
+fn apply_auto_number_tokens_with_storage<S: crate::storage::Storage>(
+    para: &Paragraph,
+    styles: &ResolvedStyleSet,
+    inline: &[FlowInlineControl],
+    tokens: &mut [BreakToken],
+    storage: &S,
+) -> Result<(), S::Error> {
+    if !para
+        .controls
+        .iter()
+        .any(|control| matches!(control, Control::AutoNumber(_)))
+    {
+        return Ok(());
+    }
+    let sources = para.control_source_positions();
+    let mut widths = Vec::new();
+    for (index, control) in para.controls.iter().enumerate() {
+        let Control::AutoNumber(number) = control else {
+            continue;
+        };
+        if number.superscript
+            || matches!(
+                number.number_type,
+                crate::model::control::AutoNumberType::Page
+                    | crate::model::control::AutoNumberType::TotalPage
+            )
+        {
+            continue;
+        }
+        let Some(source) = sources.get(index).filter(|source| source.owns_char) else {
+            continue;
+        };
+        let style_id = find_active_char_shape(&para.char_shapes, source.utf16);
+        let label = super::auto_number_projection::label(number);
+        let mut width = 0.0;
+        for ch in label.chars() {
+            let style = crate::renderer::layout::resolved_to_text_style(
+                styles,
+                style_id,
+                crate::renderer::style_resolver::detect_lang_category(ch),
+            );
+            let mut bytes = [0u8; 4];
+            width += estimate_text_width_unrounded(ch.encode_utf8(&mut bytes), &style);
+        }
+        storage.push(
+            &mut widths,
+            (
+                source.char_index,
+                width + inline_width_px_at(inline, source.char_index, styles),
+                token_line_font_size(styles, style_id),
+            ),
+        )?;
+    }
+    for token in tokens.iter_mut() {
+        let position = match token {
+            BreakToken::Space { idx, .. } => *idx,
+            BreakToken::Text {
+                start_idx, end_idx, ..
+            } if *end_idx == *start_idx + 1 => *start_idx,
+            _ => continue,
+        };
+        let Some(&(_, width, size)) = widths.iter().find(|(at, _, _)| *at == position) else {
+            continue;
+        };
+        *token = BreakToken::Text {
+            start_idx: position,
+            end_idx: position + 1,
+            base_width: width,
+            width,
+            max_font_size: size,
+            base_char_widths: storage.collect([width])?,
+            char_widths: storage.collect([width])?,
+        };
+    }
+    Ok(())
+}
+
 /// Lay out the small scalar/Picture-band paragraph subset through a
 /// caller-owned physical frame.
 ///
@@ -4844,6 +4942,7 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
         storage,
     )?;
     apply_resolved_field_tokens_with_storage(para, styles, &inline_controls, &mut tokens, storage)?;
+    apply_auto_number_tokens_with_storage(para, styles, &inline_controls, &mut tokens, storage)?;
     apply_auto_left_tab_targets(&mut tokens, para_style);
     let prepared_kerning = allow_kerning
         .then(|| {
@@ -4896,6 +4995,7 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
             &mut tokens,
             storage,
         )?;
+        apply_auto_number_tokens_with_storage(para, styles, &inline_controls, &mut tokens, storage)?;
         apply_auto_left_tab_targets(&mut tokens, para_style);
         Ok(tokens)
     })
@@ -6561,6 +6661,7 @@ fn try_reflow_line_segs_body<S: Storage>(
         storage,
     )?;
     apply_resolved_field_tokens_with_storage(para, styles, &inline_controls, &mut tokens, storage)?;
+    apply_auto_number_tokens_with_storage(para, styles, &inline_controls, &mut tokens, storage)?;
     apply_auto_left_tab_targets(&mut tokens, para_style);
     let prepared_kerning = prepare_paragraph_kerning(
         para,

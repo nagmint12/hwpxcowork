@@ -67,7 +67,7 @@ echo  Codex MCP 직접 자동 처리 - 본인 ChatGPT 로그인 사용
 echo   - Codex가 MCP로 메모·표·서식·그림 도구를 직접 사용합니다.
 echo   - 최초 로그인: codex login
 echo   - 이 창을 켜 두면 본인의 기존 대기 요청과 새 요청을 자동 처리합니다.
-echo   - 멀티에이전트 협업의 Codex 지휘자·작업자도 이 창에서 함께 처리합니다.
+echo   - AI 협업의 Codex 지휘자·작업자도 이 창에서 함께 처리합니다.                
 echo   - 점검만 실행: start-codex-agent.bat --check
 echo   - 종료: Ctrl+C
 echo.

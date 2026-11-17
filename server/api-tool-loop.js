@@ -2,6 +2,7 @@
 // 제공자별 메시지 꼴은 어댑터가 맡는다 — OpenAI Responses(api-responses-agent)·Claude Messages(api-messages-agent)·Gemini generateContent(api-gemini-agent).
 // docs/MCP_TOOLSET_PLAN_2026-11-03.md §10
 import { withoutToolDuplicates } from './api-mcp-tools.js';
+import { debugRecord, debugError } from './ai-debug.js';
 
 export const fail = (code, message) => Object.assign(new Error(message), { code });
 // 응답을 받은 뒤 파싱/파일 회수에 실패해도 숫자 사용량만 오류에 보존한다.
@@ -11,7 +12,7 @@ export function responseFailure(error, usage = {}, model) {
   return error;
 }
 // 이 오류는 모델에 되돌리지 않고 실행을 멈춘다(취소·다시 요청·범위 밖)
-const STOP = ['ABORTED', 'ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER', 'API_TOOL_SCOPE'];
+const STOP = ['ABORTED', 'ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER', 'API_TOOL_SCOPE', 'EDIT_STAGE_ADVANCED', 'EDIT_SOURCE_CHANGED'];
 const callId = value => value == null || (typeof value === 'string' && value.length <= 200 && !/[\x00-\x1f]/.test(value));
 
 // 그림 도구를 받았을 때만 붙이는 규칙
@@ -66,6 +67,7 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
       try { turn = await adapter.send(combined); }
       catch (e) { if (e.usage) { addUsage(e.usage); modelCalls += Number(e.usage.modelCalls) || 0; } if (e.model) model = e.model; throw e; }
       modelCalls++; addUsage(turn.usage); model = turn.model || model;
+      debugRecord('model.turn', turn, { modelCalls, toolCalls, model, repaired });
       stopped();
       if (turn.calls.length || turn.more) {
         // 계획/편집의 구조화 JSON 한 차례에는 도구가 없다. 오류를 모델에 되돌려 반복하지 않는다.
@@ -78,8 +80,15 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
           try {
             if (!toolContext) throw fail('API_TOOL_UNSUPPORTED', 'API 도구 실행 연결이 없습니다.');
             const executed = await toolContext.call(call.name, JSON.parse(raw), combined);
+            if (toolContext.stageAdvanced) {
+              debugRecord('edit.stage.boundary', toolContext.stageAdvanced, { modelCalls, toolCalls, model });
+              return { proposals: [], alternatives: [], comments: [], inserts: [], formats: [], tables: [], figures: [], tableEdits: [], tocUpdates: [],
+                summary: '실험 단계 사본을 저장했습니다.', stageAdvanced: true, model, usage: usage(), execution: 'tool-agent' };
+            }
+            debugRecord('tool.result', executed, { tool: call.name, callId: call.id });
             results.push({ call, output: await adapter.output(executed, combined), isError: !!executed.isError });
           } catch (e) {
+            debugRecord('tool.error', raw, { tool: call.name, callId: call.id, error: debugError(e) });
             if (combined.aborted || STOP.includes(e.code)) throw e;
             results.push({ call, isError: true, output: adapter.failure(JSON.stringify({ error: e.code || 'TOOL_FAILED', message: '도구 실행에 실패했습니다. 입력·지원 범위를 확인하고 같은 실패를 반복하지 마세요.' })) });
           }
@@ -90,7 +99,8 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
       if (turn.refusal) throw fail('API_REFUSAL', '모델이 요청을 처리하지 못했습니다.');
       // 도구로 이미 남긴 결과(같은 실행) — 그리고 이어받은 시도의 그림 — 는 최종 JSON 에서 빼 두 번 넣지 않는다
       let parsed;
-      try { parsed = parse(turn.text); }
+      debugRecord('result.parse.input', turn.text, { modelCalls, toolCalls, model, repaired, singleTurn, requireResult });
+      try { parsed = parse(turn.text); debugRecord('result.parse.ok', parsed); }
       catch (e) {
         // 구조화 출력을 무시하는 호환 서버도 있다. 저장된 결과는 유지하고 형식만 한 번 다시 받는다.
         // 설명문을 성공으로 간주하지 않으며, 재응답도 동일한 파서·실제 결과 검사로 확인한다.
@@ -103,11 +113,13 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
       if (toolContext?.figures && value.figures?.length) value.figures = [];
       const hasOutput = ['proposals', 'alternatives', 'comments', 'inserts', 'formats', 'tables', 'figures', 'tableEdits', 'tocUpdates'].some(key => value[key]?.length)
         || toolContext?.written?.length || toolContext?.savedFiles?.length;
+      debugRecord('result.completion.check', { hasOutput: !!hasOutput, requireResult, noChangesReason: value.noChangesReason,
+        written: toolContext?.written, savedFiles: toolContext?.savedFiles, value }, { validator: 'actual-output-or-noChangesReason' });
       if (!requireResult) return { ...value, model, usage: usage(), execution: 'tool-agent' };
       if (!hasOutput && !String(value.noChangesReason || '').trim()) throw fail('API_RESULT_INCOMPLETE', '실제 저장 결과나 변경이 불필요한 사유가 없어 작업을 완료하지 않았습니다.');
       if (!hasOutput) value.summary = '문서를 검토했으며 변경하지 않았습니다.';
       return { ...value, model, usage: usage(), execution: 'tool-agent' };
     }
-  } catch (e) { failure = e; e.usage = usage(); if (model) e.model = model; throw e; }
+  } catch (e) { failure = e; e.usage = usage(); if (model) e.model = model; debugRecord('loop.error', debugError(e), { modelCalls, toolCalls, model, repaired }); throw e; }
   finally { try { await adapter.close?.(); } catch (e) { if (!failure) { e.usage = usage(); if (model) e.model = model; throw e; } } }
 }

@@ -85,6 +85,12 @@ export function loadConfig(root) {
   cfg.agents = { leaseMinutes: 15, othersCanTake: false, ...obj(cfg.agents) };
   cfg.agents.leaseMinutes = Number(cfg.agents.leaseMinutes) > 0 ? Number(cfg.agents.leaseMinutes) : 15;
   cfg.agents.othersCanTake = cfg.agents.othersCanTake === true;
+  // 실험 기능(기본 끔). contentFormat = 내용·형식 나눠 처리(요청 options.workflow='content_format' — 사본에서 내용 단계·형식 단계를 따로 돌린다).
+  // 2026-11-16 사용자 결정으로 쓰지 않는다: 형식 단계가 큰 문서에서 서버를 멈추게 했고 그 요청이 밤새 되풀이됐다(docs/MCP_REDESIGN_2026-11-16.md §2).
+  // 끄면 편집기의 선택 칸이 사라지고, 그 방식의 새 요청·맡기는 받지 않으며, 남아 있던 그 방식의 요청은 실패로 닫는다(다시 요청하면 보통 방식).
+  // 다시 켜려면 config.experiments.contentFormat = true(시험은 HWPX_COWORK_CONTENT_FORMAT=1 로도)
+  cfg.experiments = { contentFormat: false, ...obj(cfg.experiments) };
+  cfg.experiments.contentFormat = cfg.experiments.contentFormat === true || process.env.HWPX_COWORK_CONTENT_FORMAT === '1';
   // PC 폴더 연결(server/local-folders.js — 개인용 앱): 서버 PC 의 폴더를 관리자의 개인 문서함에 비춘다. 기본 끔(중앙 서버에서는 켜지 않는다).
   // HWPX_COWORK_LOCAL=1 로도 켠다. writeDelayMs = 고친 뒤 PC 파일에 쓰기까지 모으는 시간, trash = 'recycle'(Windows 휴지통, 기본)|'folder'(<dataDir>/local-trash)
   cfg.local = { enabled: false, ...obj(cfg.local) };

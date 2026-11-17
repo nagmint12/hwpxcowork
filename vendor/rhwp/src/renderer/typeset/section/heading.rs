@@ -185,8 +185,17 @@ impl TypesetEngine {
         let fresh = st.base_available_height();
         let own = self.format_paragraph(para, composed.get(para_idx), styles, Some(col_w));
         let keep_lines = style(para).is_some_and(|s| s.keep_lines) && own.line_count() > 1;
+        // [hwpx-cowork] 글자처럼 취급한 개체(표·그림·도형)만 든 문단도 문단 보호를 지킨다 — 개체는 제 줄을 차지하는
+        // 글자다. 표준서식 생성 보고서의 「표 + 줄 바꿈 + 주: …」 문단(문단 보호)은 한/글 2022 에서 표와 주석 일부가
+        // 쪽에 들어가도 문단 통째로 다음 쪽에 놓였다(2026-11-16 COM, 본문 306·384번 문단). 종전에는 글 문단만 보았다.
+        let only_inline_objects = para.controls.iter().all(|control| match control {
+            crate::model::control::Control::Table(table) => table.common.treat_as_char,
+            crate::model::control::Control::Picture(picture) => picture.common.treat_as_char,
+            crate::model::control::Control::Shape(shape) => shape.common().treat_as_char,
+            other => crate::renderer::composer::control_is_width_neutral_marker(other),
+        });
         if keep_lines
-            && para.controls.is_empty()
+            && only_inline_objects
             && st.current_height + own.height_for_fit > avail
             && own.height_for_fit <= fresh
         {

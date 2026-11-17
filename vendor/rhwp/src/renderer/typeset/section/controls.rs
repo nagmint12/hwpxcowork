@@ -631,7 +631,7 @@ impl TypesetEngine {
                                     |end| (end - st.current_height).max(0.0),
                                 );
                                 // [hwpx-cowork] 2026-11-04 X2: 합성 줄 빈 앵커 문단은 그리기와 같은 규칙(앵커 줄 뒤 띠가 더 미는 양).
-                                let extra = crate::renderer::generated_empty_anchor_band_extra_hu(para, &pic.common, styles, self.dpi)
+                                let extra = crate::renderer::generated_empty_anchor_band_extra_hu(para, &pic.common, pic.caption.as_ref(), styles, self.dpi)
                                     .map(|hu| hwpunit_to_px(hu, self.dpi))
                                     .unwrap_or(advance);
                                 Some((h, extra, hl, hr))
@@ -662,7 +662,7 @@ impl TypesetEngine {
                                         self.dpi,
                                     );
                                 // [hwpx-cowork] 2026-11-04 X2: 합성 줄 빈 앵커 문단은 그리기와 같은 규칙.
-                                let extra = crate::renderer::generated_empty_anchor_band_extra_hu(para, cm, styles, self.dpi)
+                                let extra = crate::renderer::generated_empty_anchor_band_extra_hu(para, cm, s.caption(), styles, self.dpi)
                                     .map(|hu| hwpunit_to_px(hu, self.dpi))
                                     .unwrap_or((h + mb - absorbed_host_line).max(0.0));
                                 Some((h, extra, hl, hr))

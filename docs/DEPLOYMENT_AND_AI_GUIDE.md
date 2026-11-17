@@ -363,6 +363,35 @@ HWPX에 본인 토큰으로 로그인하고 **사용 설명서 → ② ChatGPT �
 
 `HWPX_COWORK_AI=off`는 공용 서버 AI를 끈다. `HWPX_COWORK_AI_MOCK=1`은 실제 API를 쓰지 않는 시험·체험용이다. 관리자 공용 키를 UI나 참여자에게 전달하지 않는다.
 
+### AI 수신 원문과 오류 판정 기록(2026-11-14)
+
+AI 작업은 성공·실패 여부와 관계없이 수신 원문을 파일로 남긴다. JSON 해석이나 도구 입력 검사 **이전**에 저장하며, 기록 실패 시 `AI_DEBUG_WRITE_FAILED`로 처리를 중단한다. 기존 작업 메모의 짧은 오류 문구와 별도로, 아래 비공개 폴더에서 원문과 상세 판정을 확인한다. 파일을 자동으로 자르거나 회전·삭제하지 않는다.
+
+| 경로 | 저장 위치와 내용 |
+| --- | --- |
+| 공용·개인 서버 API(OpenAI·Claude·Gemini·로컬 호환 API) | `<dataDir>/runtime/ai-debug/` — HTTP 응답 바이트(오류 본문·수신 중단 부분 포함), 제공자 요청 본문(인증 헤더 제외), 실제 파서 입력, 검증 결과 |
+| 개인 API·Codex·Claude Code·Gemini CLI·Antigravity 실행기 및 협업 실행기 | 실행 폴더의 `logs/ai-debug/` — stdout/stderr 바이트, 처리 결과, MCP 호출/응답. CLI의 임시 작업 폴더와 분리하고 자식 MCP 브리지에도 영속 기록 폴더를 전달 |
+| 서버 MCP(ChatGPT·Codex·Claude 채널·Desktop 등) | `<dataDir>/runtime/ai-debug/` — 수신 HTTP 본문, SDK 검사 전 도구 인자, 거절/반환 응답, 문서 엔진 상태 |
+| 로컬 stdio·채널 브리지 | 실행 폴더의 `logs/ai-debug/` — 원시 stdin 바이트(잘못된 JSON 포함), 호출/응답, 채널 알림 |
+| Claude 채널의 마지막 답변 | `agent/.claude/ai-debug-hook.mjs`가 Stop·StopFailure·SubagentStop·SessionEnd·MCP 도구 실패 시 hook 입력과 세션 transcript 사본을 저장. 마지막 답변은 `last_assistant_message`에서도 별도로 보존. 기본 `<프로그램>/logs/ai-debug/` |
+
+개인 실행기/브리지/hook은 `HWPX_COWORK_DEBUG_DIR`로 기록 위치를 고정할 수 있다. 서버 기록은 해당 서버의 `dataDir`를 따른다. 기본 하위 구조는 `<문서ID>/r<요청번호>-a<시도>/<UTC시각>-<PID>-<실행UUID>/`이며, 요청 번호를 아직 모르는 연결·채널 transcript는 `unassigned`에 세션 ID로 남는다. `events.jsonl`이 원문 파일 경로·바이트 수·SHA-256·처리 단계·요청/시도/세션/모델을 연결한다. 스트림은 `stream.start`가 가리키는 `.bin`에 즉시 쓰고 `stream.end`에 최종 길이·해시·취소/실패 상태를 남긴다. 프로세스가 강제 종료돼 `stream.end`가 없으면 완전한 응답으로 간주하지 않고 남은 수신 바이트를 확인한다.
+
+`result.validation.error`에는 `JSON.parse`/Claude 중첩 JSON 펼치기/`RunSchema`/서식 정규화 중 어느 단계에서 실패했는지와 원래 예외·스택·Zod 필드 경로가 들어간다. `state`는 **저장된 문서 버전·요청 상태와 현재 문서 캐시**의 출처를 명시하며 대상 문단 원문·시도·제안/메모 ID·트랜잭션 진행 여부를 담는다. 서비스의 최종 판정은 `service.request.failed`·`service.result.applied`에서 함께 확인한다. `run.start`에는 Node 판과 처리 코드 해시도 저장한다. MCP 프로토콜의 파싱된 JSON 객체 기록은 원시 HTTP/stdin 바이트 기록과 구분한다.
+
+```powershell
+node scripts/ai-debug.mjs --dir data/runtime/ai-debug --doc <문서ID> --request <요청번호>
+node scripts/ai-debug.mjs --dir logs/ai-debug --session <세션ID>
+```
+
+명령은 파일 경로·해시 일치 여부·검사 단계·오류 상세를 출력하며 모델을 호출하거나 문서를 변경하지 않는다. 원문 파일은 `.txt`·`.json`·`.bin`으로 저장한다. `.bin`은 바이트 보존용 확장자이며 HTTP/CLI JSON·글은 UTF-8로 읽을 수 있다. 기록에는 문서와 응답 원문이 있으므로 공유용 메모·공개 웹 경로·배포 ZIP에는 넣지 않는다. 인증 헤더/실행 환경 전체는 기록하지 않는다.
+
+외부 앱의 대화창에만 표시되고 hwpx-cowork에 전달되지 않는 글은 서버 MCP 수신 원문에 포함되지 않는다. Claude 채널은 위 hook으로 마지막 답변까지 보완하고, 관리하는 Codex·Claude CLI 실행기는 stdout 전체를 보존한다. 연결된 앱이 제공하지 않는 내부 추론을 수신한 것으로 기록하지 않는다.
+
+서버 코드는 정상 재시작 뒤, CLI/브리지는 다시 실행한 뒤 적용된다. Claude 채널 hook 설정도 세션에서 다시 읽어야 하므로 기존 세션에 자동 적용됐다고 간주하지 않는다. 재시도는 새 시도/실행 폴더를 만들고 이전 실패 증거를 유지한다. 시험은 `node --test tests/ai_debug.test.mjs`(가짜 API·CLI, 임시 문서/서버)이며 실제 유료 호출은 하지 않는다.
+
+Claude hook 필드는 [Claude Code 공식 hook 문서](https://code.claude.com/docs/en/hooks)를 따른다. Stop 시점 transcript에 최종 답변이 아직 없을 수 있으므로 `last_assistant_message`를 별도로 저장한다.
+
 ## 11. 검증 결과
 
 | 상태 | 내용 |

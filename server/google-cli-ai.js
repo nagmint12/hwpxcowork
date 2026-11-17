@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { SYSTEM, taskText, attachmentText, outputJsonSchema, parseResult } from './ai.js';
 import { codexEnvironment, runProcess } from './codex-ai.js';
+import { withAiDebug, debugRecord, debugError } from './ai-debug.js';
 
 const fault = (code, message) => Object.assign(new Error(message), { code });
 const TYPES = {
@@ -68,7 +69,7 @@ export function parseGoogleCliResult(text, provider) {
       input += Number(model.tokens?.input) || 0; output += Number(model.tokens?.candidates) || 0;
     }
     return { ...parsed, usage: { input, output } };
-  } catch { throw fault('GOOGLE_CLI_OUTPUT_INVALID', 'Google CLI 응답이 문서 검토 결과 형식에 맞지 않습니다. 요청을 완료하지 않았습니다.'); }
+  } catch (cause) { debugRecord('google-cli.validation.error', text, { provider, error: debugError(cause) }); throw Object.assign(fault('GOOGLE_CLI_OUTPUT_INVALID', 'Google CLI 응답이 문서 검토 결과 형식에 맞지 않습니다. 요청을 완료하지 않았습니다.'), { cause }); }
 }
 
 export class GoogleCliProposer {
@@ -118,6 +119,10 @@ export class GoogleCliProposer {
   }
 
   async run(input, { signal } = {}) {
+    return withAiDebug({ context: { route: this.provider, model: this.model } }, () => this._runRecorded(input, { signal }));
+  }
+
+  async _runRecorded(input, { signal } = {}) {
     if (signal?.aborted) throw fault('ABORTED', '요청이 취소되었습니다.');
     if (!input || !Array.isArray(input.context) || input.context.some(p => typeof p?.ref !== 'string' || typeof p?.text !== 'string') || !input.target?.ref || !Array.isArray(input.attachments || [])) throw fault('GOOGLE_CLI_INPUT_INVALID', '검토 요청의 문단·첨부 정보를 확인하세요.');
     const attachments = [];

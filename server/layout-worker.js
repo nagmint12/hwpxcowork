@@ -2,6 +2,7 @@
 // 서버 차례 엔진(server/toc-engine.js)과 같은 우리 fork WASM(vendor/rhwp/pkg — HWPX_COWORK_ENGINE_PKG)을 이 스레드에서 따로 읽어
 // 저장된 기록 파일을 열고 조판 결과만 읽는다(읽기 전용 — 문서를 고치거나 저장하지 않는다). 엔진 호출은 동기라 서버 스레드를 막지 않게 여기서 한다.
 // 받는 일: { job, id, file(편집 뒤 기록 파일), beforeFile(편집 전 — 이 작업자가 그 문서의 앞 결과를 기억하지 않을 때만 연다), version, beforeVersion, positions:[{ref, sec, para}] }
+//   또는 쪽 수 어림(2026-11-17): { job, kind: 'pages', docs: [{ bytes } | { file }] } → { job, ok, results: [{ pages, sections, lastFill, fills }] } (아래 estimatePages)
 // 돌려줌: { job, ok, before:{pages}, after:{pages}, changedPages:[쪽(0부터)], refPages:[{ref, page}], overflow:[{kind, page, cell}], ms, rss }
 import { parentPort, workerData } from 'node:worker_threads';
 import fs from 'node:fs';
@@ -97,8 +98,66 @@ function pairTables(B, A) {
 const open = (file) => new mod.HwpDocument(new Uint8Array(fs.readFileSync(file)));
 const cache = new Map();   // 문서 id → { version, sum } (이 작업자가 마지막으로 본 기록)
 
+/**
+ * 쪽 수 어림(2026-11-17 — docs/MCP_REDESIGN_2026-11-16.md §10.4 나-7, server/page-estimate.js): 쪽 수, 구역별 쪽 수, 마지막 쪽이 찬 비율.
+ * 찬 비율 = 쪽 본문 영역(머리말 아래 ~ 꼬리말 위) 높이 가운데 본문 글 줄·개체(글 뒤·앞 개체 제외)의 가장 아래까지 — 엔진 배치 결과의 어림이다
+ */
+function pageFill(d, p, info, stopAt = null) {
+  const top = info.headerArea ? info.headerArea.y + info.headerArea.height : (info.marginTop || 0) + (info.marginHeader || 0);
+  const bottom = info.footerArea ? info.footerArea.y : info.height - (info.marginBottom || 0) - (info.marginFooter || 0);
+  let low = top;
+  let runs = []; try { runs = JSON.parse(d.getPageTextLayout(p)).runs || []; } catch { runs = []; }
+  // paraIdx 0xFFFFFFFF = 머리말·꼬리말·쪽 번호(본문 문단이 아님)
+  for (const r of runs) if (r.paraIdx != null && r.paraIdx < 0x7fffffff && r.y >= top - 1 && r.y < bottom) low = Math.max(low, Math.min(bottom, r.y + r.h));
+  const ratio = () => (bottom > top ? Math.round(((low - top) / (bottom - top)) * 100) / 100 : null);
+  // stopAt: 글 줄만으로 이 비율을 넘었으면 개체 배치는 읽지 않는다(개체는 찬 비율을 늘리기만 한다 — 이때 값은 아래 한계)
+  if (stopAt != null && ratio() != null && ratio() >= stopAt) return ratio();
+  let controls = []; try { controls = JSON.parse(d.getPageControlLayout(p)).controls || []; } catch { controls = []; }
+  for (const c of controls) if (!['behindText', 'inFrontOfText'].includes(c.wrap) && c.y >= top - 1 && c.y < bottom) low = Math.max(low, Math.min(bottom, c.y + c.h));
+  return ratio();
+}
+// 거의 빈 쪽 후보(2026-11-17 작업 Q — artifacts/mcp-round3-20261117/codex/REPORT-G3.md 문제 2: Z01 은 9쪽에서 멈췄는데 5쪽에 2장 끝 144자만 있었다).
+// 쪽마다 배치를 읽으면 작업자 시간이 두 배쯤 든다(9쪽 보고서: 조판 55ms + 모든 쪽 찬 비율 77ms — 쪽 글 읽기는 1ms 미만). 그래서 쪽 글(getPageText)이
+// SPARSE_TEXT 자(빈칸 뺀 글자) 이하인 쪽만 찬 비율을 잰다 — 본문 15%(page-estimate.js SPARSE_FILL)는 A4·10pt 로 대여섯 줄(300자 안팎)이라 그보다 글이 많은 쪽은 거의 빈 쪽이 아니다
+// (글이 적고 큰 그림·표가 찬 쪽은 후보로 들어와 찬 비율로 걸러진다). 글자가 아주 작거나 다단이면 놓칠 수 있다 — 알림은 덤이다
+const SPARSE_TEXT = 400;
+function pageStats(d, sparseBelow = null) {
+  const pages = d.pageCount(); const sections = [];
+  const infos = [];
+  for (let p = 0; p < pages; p++) {
+    let info = null; try { info = JSON.parse(d.getPageInfo(p)); } catch { info = null; }
+    infos.push(info);
+    const s = Number(info?.sectionIndex ?? 0); sections[s] = (sections[s] || 0) + 1;
+  }
+  const last = pages ? infos[pages - 1] : null;
+  const lastFill = last ? pageFill(d, pages - 1, last) : null;
+  // fills: 마지막 쪽이 아닌 쪽 가운데 글이 적은 쪽의 [쪽(0부터), 찬 비율] — 문서 글은 싣지 않는다. sparseBelow 를 받았을 때만(page-estimate.js SPARSE_FILL)
+  // — 그 문턱을 글 줄만으로 넘은 쪽의 값은 아래 한계다(거의 빈 쪽인지 가리는 데는 넉넉하다)
+  const fills = [];
+  for (let p = 0; sparseBelow != null && p < pages - 1; p++) {
+    if (!infos[p]) continue;
+    let n = 0; try { n = d.getPageText(p).replace(/\s+/g, '').length; } catch { continue; }
+    if (n <= SPARSE_TEXT) { const f = pageFill(d, p, infos[p], sparseBelow); if (f != null) fills.push([p, f]); }
+  }
+  return { pages, sections: sections.map((n) => n || 0), lastFill, fills };
+}
+
+/** 쪽 수 어림 일: { job, kind: 'pages', docs: [{ bytes } | { file }] } → { job, ok, results: [{ pages, sections, lastFill, fills }], ms } */
+function estimatePages(m, t0) {
+  const results = [];
+  for (const x of m.docs || []) {
+    const d = x.file ? open(x.file) : new mod.HwpDocument(new Uint8Array(x.bytes));
+    try { results.push(pageStats(d, Number.isFinite(m.sparseBelow) ? m.sparseBelow : null)); } finally { d.free?.(); }
+  }
+  return { job: m.job, ok: true, results, ms: performance.now() - t0, rss: process.memoryUsage().rss };
+}
+
 parentPort.on('message', (m) => {
   const t0 = performance.now();
+  if (m?.kind === 'pages') {
+    try { parentPort.postMessage(estimatePages(m, t0)); } catch (e) { parentPort.postMessage({ job: m.job, ok: false, error: String(e?.message || e).slice(0, 200), ms: performance.now() - t0 }); }
+    return;
+  }
   try {
     let before = cache.get(m.id);
     if (!before || before.version !== m.beforeVersion) {

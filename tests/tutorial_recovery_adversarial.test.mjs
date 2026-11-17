@@ -22,12 +22,26 @@ test('다른 메모의 후속 요청·다른 문단의 차례 요청은 채택�
 test('실패·취소된 차례 요청은 완료가 아니다',()=>{
   const e=environment();e.ctx.rid3=2;e.d.request=()=>e.s.requests[0];const wait=buildReportFlow(e)[14];
   for(const status of ['failed','cancelled','pending','working']){e.s.requests=[{rid:2,status}];assert.equal(wait.until(),false,status);}
-  e.s.requests[0].status='done';assert.equal(wait.until(),true);
+  e.s.requests[0].status='done';assert.equal(wait.until(),false,'완료 응답만으로 차례 갱신을 인정하지 않음');
+  e.s.proposals=[{rid:1,type:'toc',status:'applied'},{rid:2,type:'toc',status:'pending'}];assert.equal(wait.until(),false);
+  e.s.proposals[1].status='applied';assert.equal(wait.until(),true);
 });
 test('없는 제안과 거절한 제안은 반영 되돌리기 성공이 아니다',async()=>{
   const e=environment();const undo=step(buildAiReview(e),'반영한 제안 되돌리기');await assert.rejects(undo.action.run());assert.equal(undo.until(),false);
-  e.s.requests=[{rid:1,example:true,status:'done'}];e.s.proposals=[{rid:1,pid:1,status:'rejected'}];assert.equal(undo.until(),false);await assert.rejects(undo.action.run());
+  e.s.requests=[{rid:1,example:true,status:'done'}];e.s.proposals=[{rid:1,pid:1,status:'rejected'},{rid:1,pid:2,status:'rejected'}];assert.equal(undo.until(),false);await assert.rejects(undo.action.run());
   e.s.proposals[0].status='applied';e.d.undoProposal=async p=>{p.status='undone';};await undo.action.run();assert.equal(undo.until(),true);
+});
+
+test('모두 반영된 상태에서는 중간 단계를 통과하지 않고 첫 반영 전 복구를 안내한다', () => {
+  const e = environment();
+  e.s.requests = [{ rid: 1, example: true, status: 'done' }];
+  e.s.proposals = [{ rid: 1, pid: 2, status: 'applied' }, { rid: 1, pid: 1, status: 'applied' }];
+  const steps = buildAiReview(e);
+  for (const title of ['제안 하나 반영하기', '마음에 들지 않는 제안 거절', '반영한 제안 되돌리기']) {
+    const current = step(steps, title);
+    assert.equal(current.until(), false, title);
+    assert.equal(steps[current.lost()].title, '제안 하나 반영하기');
+  }
 });
 test('같은 단계에 다시 진입해도 이전 선택의 비동기 완료가 창을 열지 않는다',async()=>{
   for(const kind of ['report','memo','review']){

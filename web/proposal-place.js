@@ -22,15 +22,45 @@ export function proposalPlace(p) {
   const type = p.type || 'replace';
   const applied = p.status === 'applied';
   const parts = applied ? (p.split?.refs || []).filter(Boolean) : [];
+  // 반영 때 덧붙여 넣은 본문 문단(extraRefs — 표·차트의 단위 줄·주석, 문단 옮기기, 2026-11-17)도 '넣은 문단 n개' 범위에 든다. 없으면 예전과 같다
+  const extra = applied && Array.isArray(p.extraRefs) ? p.extraRefs.filter(Boolean) : [];
+  // 문단 지우기·옮기기(para_delete·para_move — 2026-11-17, server/paragraph-ops.js): 대기 중에는 고른 범위(ref 부터 paras.count 개),
+  // 옮기기 반영 뒤에는 옮겨 간 문단(insertedRef + extraRefs), 지우기 반영 뒤에는 지운 자리 바로 앞 문단(ref — '이 문단 뒤에 있던')
+  if (type === 'para_delete' || type === 'para_move') {
+    const n = Math.max(1, Number(p.paras?.count) || 1);
+    if (applied && type === 'para_move') {
+      const all = [...new Set([p.insertedRef, ...extra].filter(Boolean))].sort(byDoc);
+      return { ref: all[0] || null, endRef: all.length > 1 ? all[all.length - 1] : null, after: false, gone: !all.length || !!p.insertedGone, count: Math.max(1, all.length) };
+    }
+    if (applied) return { ref: p.ref || null, endRef: null, after: true, gone: !p.ref || !!p.refGone, count: n };
+    const m = /^s(\d+)\/p(\d+)$/.exec(String(p.ref || ''));
+    return { ref: p.ref || null, endRef: m && n > 1 ? `s${m[1]}/p${Number(m[2]) + n - 1}` : null, after: false, gone: !p.ref || !!p.lost || !!p.refGone, count: n };
+  }
   if (ADDS.includes(type) && !p.figure?.replace) {
     if (!applied) return { ref: p.afterRef || p.ref || null, endRef: null, after: true, gone: !!p.lost, count: 1 };
+    if (extra.length) {
+      const all = [...new Set([p.insertedRef, ...parts, ...extra].filter(Boolean))].sort(byDoc);
+      const ref = all[0] || null;
+      return { ref, endRef: all.length > 1 ? all[all.length - 1] : null, after: false, gone: !ref || !!p.insertedGone, count: Math.max(1, all.length) };
+    }
     const ref = p.insertedRef || parts[0] || null;
     const endRef = parts.length > 1 && parts[parts.length - 1] !== ref ? parts[parts.length - 1] : null;
     return { ref, endRef, after: false, gone: !ref || !!p.insertedGone, count: Math.max(1, parts.length) };
   }
   const ref = p.ref || p.afterRef || null;
+  if (extra.length) {
+    const more = [...new Set([...(type === 'replace' ? parts : []), ...extra])].filter((r) => r !== ref).sort(byDoc);
+    return { ref, endRef: more.length ? more[more.length - 1] : null, after: false, gone: !ref || !!p.refGone || !!p.lost, count: 1 + more.length };
+  }
   const endRef = type === 'replace' && parts.length ? parts[parts.length - 1] : null;
   return { ref, endRef, after: false, gone: !ref || !!p.refGone || !!p.lost, count: 1 + (endRef ? parts.length : 0) };
+}
+
+/** 본문 문단 주소의 문서 차례('s0/p9' < 's0/p10' < 's1/p0') — 주소 꼴이 아니면 맨 뒤 */
+function byDoc(a, b) {
+  const key = (r) => { const m = /^s(\d+)\/p(\d+)/.exec(String(r || '')); return m ? [Number(m[1]), Number(m[2])] : [Infinity, Infinity]; };
+  const x = key(a); const y = key(b);
+  return (x[0] - y[0]) || (x[1] - y[1]) || 0;
 }
 
 /**

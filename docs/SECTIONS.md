@@ -6,6 +6,8 @@
 
 ## 1. 정의
 
+`read_document(from/to)`의 범위는 구역을 합친 문서 전체 본문 차례(0부터, to 제외)다. ref의 p번호는 각 구역 안 차례이므로 범위 필터에 그대로 쓰지 않는다. 한도에 걸린 표 셀·긴 문단은 반환된 `이어 읽기.cursor`로 같은 view/nested를 지정해 이어 읽는다. 문서가 바뀌면 READ_CHANGED로 새 조회를 요구한다(회귀 `tests/document_read_paging.test.mjs`).
+
 - **구역** = HWPX `Contents/sectionN.xml` 하나 = rhwp `document.sections[N]` = 주소 `sN/pM` 의 N. 구역마다 구역 정의(용지·여백·방향·바탕쪽·쪽 테두리·
   각주 모양·시작 번호)가 하나다.
 - **구역 나누기** = 구역 첫 문단 머리의 구역·단 정의(rhwp `SectionDef`+`ColumnDef` 컨트롤, HWPX 첫 run 머리의 `hp:secPr`+`hp:ctrl>hp:colPr`).

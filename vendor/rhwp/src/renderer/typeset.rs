@@ -6033,6 +6033,13 @@ impl TypesetEngine {
                 if extra > 0.5 {
                     st.advance_flow_by(extra);
                 }
+            } else if let Some(spacing) =
+                self.composed_tac_line_spacing_before_post_text(para, table, fmt, post_table_start)
+            {
+                // [hwpx-cowork] 저장 줄 없는 문단의 표 줄 0 뒤에 글줄이 이어지면 흐름은 표 줄의 줄간격도 지난다 —
+                // 그리기는 이미 표 줄 끝 + 줄간격에 첫 글줄을 놓는다(한/글 2022 재저장 줄도 같다: 표 줄 vpos + lh + ls = 다음 줄
+                // vpos, 2026-11-16 시험지 tachost). 빼면 표 + 주석 문단마다 조판 흐름이 그리기보다 그 간격만큼 위에 남는다.
+                st.advance_flow_by(spacing);
             }
             // [#2808] 소비 조건을 layout 의 same_owner_table_precedes 와 동일하게
             // 다중 co-anchored float host 로 한정 — 단일 표 host post-text 는 기존
@@ -6096,10 +6103,28 @@ impl TypesetEngine {
             // 다음 흐름에는 보존하지만, 그 간격만 용지 밖에 남는다는 이유로
             // 본문에 들어가는 줄을 다음 쪽으로 옮기지 않는다.
             let post_content_height = fmt.line_content_height(post_table_start..total_lines, 0.0);
+            // [hwpx-cowork] 저장 줄 없는 문단(rhwp 가 줄을 구성)의 글자처럼 취급한 표(줄 0) 뒤 글줄은 한/글처럼 줄마다
+            // 쪽 끝을 본다 — 들어가는 줄까지 이 쪽, 나머지는 다음 쪽(2026-11-16 한/글 2022 COM 시험지
+            // `tachost_pageend*.hwpx`: 표가 들어가고 주석 n줄 중 k줄 자리가 남으면 표 + k줄이 이 쪽, 강제 줄 바꿈이든
+            // 저절로 접힌 줄이든 같다). 종전(0.9.0)에는 글줄 전체가 안 들어가면 글줄을 모두 다음 쪽으로 넘겼다.
+            // 문단 보호(keepLines)면 문단 통째가 다음 쪽이므로(`keep_synthetic_paragraph_together`) 여기서 나누지 않는다.
+            let composed_tac_line_split = table.common.treat_as_char
+                && !session_grown_topbottom_spill
+                && crate::renderer::para_has_no_stored_line_segs(para)
+                && self.tac_table_line_index(para, table, fmt) == Some(0)
+                && !styles
+                    .para_styles
+                    .get(para.para_shape_id as usize)
+                    .is_some_and(|style| style.keep_lines);
+            let first_post_line_fits = fmt
+                .line_heights
+                .get(post_table_start)
+                .is_some_and(|height| st.current_height + height <= st.available_height() + 0.5);
             if (self.tac_table_line_index(para, table, fmt) == Some(0)
                 || session_grown_topbottom_spill)
                 && st.current_height + post_content_height > st.available_height() + 0.5
                 && !st.current_items.is_empty()
+                && !(composed_tac_line_split && first_post_line_fits)
             {
                 st.advance_column_or_new_page();
             }
@@ -6137,8 +6162,8 @@ impl TypesetEngine {
             // 없다). 종전엔 표 뒤 글 전체를 한 항목으로 붙여 넘친 줄이 본문 하단 아래에
             // 그려졌다. 줄 fit 은 그 줄의 말미 줄간격을 빼고 잰다(#6184 — 쪽 마지막 줄 뒤의
             // 간격은 쪽을 채우지 않는다). 첫 줄부터 안 들어가는 경우는 종전 경로에 둔다.
-            let post_split_line = (is_visible_para_float
-                && !table.common.treat_as_char
+            let post_split_line = (((is_visible_para_float && !table.common.treat_as_char)
+                || composed_tac_line_split)
                 && !session_grown_topbottom_spill
                 && st.current_height + post_height > st.available_height() + 0.5)
                 .then(|| {
@@ -6504,6 +6529,27 @@ impl TypesetEngine {
             .checked_add(table_line.line_spacing)?;
         (post_line.vertical_pos == step)
             .then(|| hwpunit_to_px(table_line.line_height + table_line.line_spacing, self.dpi))
+    }
+
+    /// [hwpx-cowork] 저장 줄이 하나도 없는 문단(rhwp 가 줄을 구성)에서 글자처럼 취급한 표가 줄 0 을
+    /// 차지하고 줄 1 부터 글줄이 이어질 때, 표 줄과 첫 글줄 사이의 줄간격(현재 줄 구성 값).
+    /// 저장 줄 문단은 위 `stored_tac_line_step_to_post_text` 가 저장 사다리로 정한다.
+    fn composed_tac_line_spacing_before_post_text(
+        &self,
+        para: &Paragraph,
+        table: &crate::model::table::Table,
+        fmt: &FormattedParagraph,
+        post_table_start: usize,
+    ) -> Option<f64> {
+        if post_table_start != 1
+            || self.profile.get().session_edited()
+            || !crate::renderer::para_has_no_stored_line_segs(para)
+            || fmt.line_heights.len() <= 1
+            || self.tac_table_line_index(para, table, fmt) != Some(0)
+        {
+            return None;
+        }
+        fmt.line_spacings.first().copied().filter(|spacing| *spacing > 0.0)
     }
 
     fn tac_flow_query(&self) -> controls::tac_flow::TacFlowQuery<'_> {

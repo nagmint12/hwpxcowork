@@ -6,6 +6,7 @@
 // 서버 문서(HwpxDoc)로 차트를 옮기거나 지울 때 Chart 부분도 따라 옮기고 거둔다(engine/doc.js _importShapeParts·_releaseShapeParts 갈고리).
 // 대체 OLE 는 BinData 라 그림 파일 경로(_importBinary·removeUnusedBinary)가 맡는다.
 import { createHash } from 'node:crypto';
+import { Section } from './section.js';
 
 const PART = /^Chart\/chart(\d+)\.xml$/;
 
@@ -133,4 +134,40 @@ export function chartPartReport(doc) {
   const parts = doc.container.order.filter((n) => PART.test(n));
   const refs = doc.sections.flatMap((s) => chartRefs(s.xml));
   return { parts, refs, orphans: parts.filter((p) => !refs.includes(p)), dangling: [...new Set(refs.filter((r) => !doc.container.has(r)))] };
+}
+
+/**
+ * [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본 맞추기(저장 전): 한/글 차트는 같은 캡션을 첫 갈래(hp:case 의 hp:chart)와 대체 갈래(hp:default 의
+ * hp:ole)에 두 벌 쓴다. 엔진은 첫 갈래 캡션만 보이고 고치므로(engine/section.js alt) 캡션 글을 고치면 대체 사본이 옛 글로 남는다. 한/글 2022 COM 실측:
+ * 대체 사본만 다른 글인 파일을 열면 글·PDF 모두 첫 갈래 글이고 다시 저장하면 대체 사본을 첫 갈래에서 새로 쓴다. 대체 사본에 첫 갈래와 같은 문단
+ * (같은 변경 표식 번호 포함)을 넣은 파일도 한/글은 변경 하나·글 한 번으로 연다. 그래서 두 갈래 캡션의 최종본 글이 다를 때만 대체 사본 캡션의 문단들을
+ * 첫 갈래 캡션 문단 XML 로 바꾼다(캡션·subList 속성은 그대로) — 글이 같으면(한/글 저장본 그대로) 한 바이트도 바꾸지 않는다.
+ * 대체 사본에 캡션이 없으면(첫 갈래에만 캡션을 단 경우) 넣지 않는다 — 한/글이 다시 저장할 때 새로 쓴다 → 바꾼 대체 사본 수
+ */
+export function syncSwitchCopies(doc) {
+  let n = 0;
+  for (const sec of doc.sections) {
+    if (!sec.xml.includes('<hp:switch') || !sec.paras.some((p) => p.alt)) continue;
+    const xml = sec.xml; const edits = [];
+    // 문단들이 한 hp:caption > hp:subList 의 문단 전부로 잇닿아 있는가
+    const capRun = (ps) => ps.length > 0 && ps.every((q, i) => i === 0 || ps[i - 1].end === q.start)
+      && /<hp:caption\b[^>]*><hp:subList\b[^>]*>$/.test(xml.slice(Math.max(0, ps[0].start - 1500), ps[0].start))
+      && xml.startsWith('</hp:subList></hp:caption>', ps[ps.length - 1].end);
+    const text = (ps) => ps.map((q) => Section.text(q, 'final')).join('\n');
+    for (const p of sec.paras) {
+      if (p.alt || !p.children.some((c) => c.alt)) continue;
+      for (const a of p.anchors) {
+        if (a.kind !== 'ctrl' || a.name !== 'hp:switch' || a.end == null) continue;
+        const kids = p.children.filter((c) => a.start <= c.start && c.end <= a.end);
+        const main = kids.filter((c) => !c.alt); const alt = kids.filter((c) => c.alt);
+        if (!capRun(main) || !capRun(alt) || text(main) === text(alt)) continue;
+        edits.push({ start: alt[0].start, end: alt[alt.length - 1].end, insert: xml.slice(main[0].start, main[main.length - 1].end) });
+      }
+    }
+    if (!edits.length) continue;
+    let out = xml;
+    for (const e of edits.sort((x, y) => y.start - x.start)) out = out.slice(0, e.start) + e.insert + out.slice(e.end);
+    sec.load(out); n += edits.length;
+  }
+  return n;
 }

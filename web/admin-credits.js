@@ -13,7 +13,7 @@ export const AdminCreditsPanel = {
     <h2 v-if="!mine" id="admin-credits-title" class="admin-subtitle">AI 크레딧</h2>
     <p v-if="!mine" class="muted">체험에 공유하는 키와 내 키의 API 잔액입니다. 조회에는 크레딧이 들지 않습니다.</p>
     <p v-if="loading" class="admin-message" role="status">잔액을 읽는 중입니다…</p>
-    <p v-else-if="error" class="admin-message err" role="alert">{{ error }}</p>
+    <div v-else-if="error" class="admin-message" data-testid="admin-load-failed"><p class="err" role="alert">{{ error }}</p><button type="button" :disabled="busy" @click="load()">다시 읽기</button></div>
     <template v-else-if="data">
       <div v-for="(a, i) in data.accounts" :key="i" class="credit-account" data-testid="credit-account">
         <div class="credit-head"><span title="월 할당은 계정 단위입니다. 같은 계정의 키·API 화면이 함께 씁니다">남은 크레딧</span>

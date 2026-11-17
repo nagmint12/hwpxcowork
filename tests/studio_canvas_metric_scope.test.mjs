@@ -5,15 +5,17 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
-import { coworkBuildPlugins } from '../studio/build/patches.mjs';
+import { coworkBuildPlugins, patchesForStudio } from '../studio/build/patches.mjs';
+import { STANDALONE_EDITOR_PATCHES } from '../studio/build/standalone-editor-patches.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const studio = path.join(root, 'vendor/rhwp/rhwp-studio');
+const patches = patchesForStudio(studio, process.env.STUDIO_TEST_PROFILE === 'standalone' ? STANDALONE_EDITOR_PATCHES : undefined);
 
 function sourceApi(file, names, extra = {}) {
   const filename = path.join(studio, file);
   const source = fs.readFileSync(filename, 'utf8');
-  const patched = coworkBuildPlugins({ studioSrc: studio })[0].transform(source, filename)?.code ?? source;
+  const patched = coworkBuildPlugins({ studioSrc: studio, patches })[0].transform(source, filename)?.code ?? source;
   const compiled = stripTypeScriptTypes(patched, { mode: 'transform' })
     .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '')
     .replace(/^export /gm, '')

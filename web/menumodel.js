@@ -295,7 +295,7 @@ export function reviewMenuModel(ctx = {}) {
     if (pending) {
       const live = typeof p.adoptLabel === 'string' && p.adoptLabel;
       // 승인 방식: [반영] = 내 수정본에 넣기(검토 요청 뒤 문서에). 표·그림은 내 수정본에 넣지 못한다(문서에 바로 적용만 — 관리자)
-      sub.push(item('check', live ? p.adoptLabel : '반영', { type: 'proposal-adopt', pid: p.pid }, ['table','table_edit','toc','figure','page_layout','delete'].includes(p.type) && !live ? { disabled: true, hint: p.type === 'page_layout' ? '쪽 구성은 바로 적용만' : p.type === 'delete' ? '개체 지우기는 바로 적용만' : p.type === 'figure' ? '그림은 바로 적용만' : p.type === 'toc' ? '차례는 바로 적용만' : '표는 바로 적용만' } : undefined));
+      sub.push(item('check', live ? p.adoptLabel : '반영', { type: 'proposal-adopt', pid: p.pid }, ['table','table_edit','toc','figure','page_layout','delete','edit_batch','para_delete','para_move'].includes(p.type) && !live ? { disabled: true, hint: p.type === 'edit_batch' ? '내용·서식 묶음은 바로 적용만' : p.type === 'page_layout' ? '쪽 구성은 바로 적용만' : p.type === 'delete' ? '개체 지우기는 바로 적용만' : p.type === 'para_delete' || p.type === 'para_move' ? '문단 지우기·옮기기는 바로 적용만' : p.type === 'figure' ? '그림은 바로 적용만' : p.type === 'toc' ? '차례는 바로 적용만' : '표는 바로 적용만' } : undefined));
       sub.push(item('x', '거절', { type: 'proposal-reject', pid: p.pid }));
     }
     sub.push(item('rail', '보기', { type: 'proposal-show', pid: p.pid }));

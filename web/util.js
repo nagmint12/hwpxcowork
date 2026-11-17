@@ -51,7 +51,7 @@ export const presets = () => (state.config?.presets?.length ? state.config.prese
 export const kindLabel = (id) => kinds().find((k) => k.id === id)?.label || id || '요청';
 export const presetLabel = (id) => presets().find((k) => k.id === id)?.label || id || '';
 // 요청 상태 칩은 ui.js requestBadge(대기열·전달됨·처리 중·확인 필요·완료·실패·취소됨 — docs/UI_TERMS.md §1-3). 이 표는 제안 상태와 그 밖의 대비용
-export const STATUS_LABEL = { pending: '대기', working: '처리 중', done: '완료', failed: '실패', cancelled: '취소됨', applied: '적용', rejected: '거절', undone: '복구됨', superseded: '다른 안 적용' };
+export const STATUS_LABEL = { pending: '대기', working: '처리 중', done: '완료', failed: '실패', cancelled: '취소됨', applied: '적용됨', rejected: '거절됨', undone: '복구됨', superseded: '다른 안 적용', withdrawn: '거둠' };   // withdrawn: 에이전트가 거둔 제안(2026-11-17 MCP_REDESIGN §10.4 나-4 — 서버 목록에는 기본으로 오지 않는다)
 
 // ───────── 연결된 작업 환경 이름(보낼 곳·보내기 단추·경로 칩·연결 알약·자동 처리 상태 줄) ─────────
 // 참여자에게는 '내 에이전트'·'서버 AI' 대신 실제로 일을 맡는 환경 이름(API·Codex·ChatGPT·Claude Code …)을 보인다.
@@ -138,6 +138,13 @@ export function docWorkEnv(s, { agentName = '' } = {}) {
 export function sendToLabel(name, route) {
   return route === 'queue' || !name || name === '대기열' ? '대기열에 넣기' : `${josa(name, '으로/로')} 보내기`;
 }
+/**
+ * 자동 경로의 보낼 곳 이름표(workEnv 결과로). 체험 문서에서 관리자 AI 가 아직 연결되지 않았을 때의 auto 는 환경 이름이 아니라
+ * 상태 글('Codex 연결 대기'·'API 연결 필요')이라 그대로 붙이면 'Codex 연결 대기로 보내기'가 된다 — 그때 요청은 대기열에서 기다리므로 '대기열에 넣기'(2026-11-16)
+ */
+export function autoSendLabel(env) {
+  return sendToLabel(env?.apiOnly && !env.serverOn ? '' : env?.auto, env?.autoRoute);
+}
 /** 보낼 곳 선택 칸의 항목(연결된 것만): 자동 · 채널 환경 · 내 키 환경 · 대기열. 공용 서버 AI 는 따로 고르지 않는다(자동에 들어 있음).
  *  내 AI 키는 늘 '(내 키)'를 붙인다 — 사용료가 따로 드는 길임을 이름표에서 알 수 있게(2026-11-13) */
 export function routeOptions(env) {
@@ -187,7 +194,7 @@ export const cpSlice = (s, a, b) => cps(s).slice(a, b).join('');
 export const cpLen = (s) => cps(s).length;
 
 // ── 역할 이름(서버 role → 화면 글) ──
-const ROLE_KO = { admin: '관리자', editor: '편집자' };
+const ROLE_KO = { admin: '관리자', editor: '편집자', viewer: '보기만' };   // viewer 가 빠져 문서함 머리에 영문 'viewer' 가 그대로 보였다(관리자 표 ROLE_LABELS 와 같은 글, 2026-11-16)
 /** 'admin' → '관리자', 'editor' → '편집자'(모르는 역할은 그대로) */
 export const roleLabel = (role) => ROLE_KO[role] || String(role ?? '');
 
@@ -277,41 +284,89 @@ export function proposalAccepted(p, o = {}) {
  * 묶음 하나가 항목 하나, 그 밖 제안은 하나씩. 반영 = 적용됨 또는 대기 + 반영해 둠(proposalAccepted — 내가 반영해 둔 것은 지금 편집기 글에
  * 들어 있을 때만: Ctrl+Z 로 되돌렸으면 다시 남음), 거절 = 반영 없이 대기 안도 없음(거절·복구·대체), 남음 = 그 밖(대기).
  * @param r 요청 { status } @param proposals 그 요청의 제안들 @param o { adoptedByMe(p), inEffect(p), me? }
- * @returns { items, accepted, declined, open, openPids, openAlt, tables, resolved, applied, adopted, entries }
- *   openPids = 남은 항목 중 여러 안 묶음이 아닌 대기 제안 pid(pid 순, 표 포함), openAlt = 고를 묶음 수, tables = openPids 중 표·그림 제안 수(기준에만 적용),
+ * 묶음 제안(같은 bundle, 구성원 2개 이상 — docs/UI_TERMS.md §9)도 항목 하나: 남은 구성원이 있으면 남음(일부 반영돼도), 없고 반영이 있으면 반영, 그 밖은 거절.
+ * @returns { items, accepted, declined, open, openPids, openAlt, tables, adoptOpen, resolved, applied, adopted, entries }
+ *   openPids = 남은 항목 중 여러 안 묶음이 아닌 대기 제안 pid(pid 순, 표 포함 — 묶음 제안은 남은 구성원 모두), openAlt = 고를 묶음 수,
+ *   tables = openPids 중 표·그림 제안 수(기준에만 적용 — 제안 수), adoptOpen = 내 수정본에 넣을 바꿈·문단 추가가 있는 남은 항목 수(단추 [모두 반영 (n)]),
  *   resolved = 요청이 끝났고(완료·취소) 남음 0, applied·adopted = 반영의 나눔(기준 적용 / 수정본에만),
- *   entries = 항목 [{ gid, list(제안들, 안 차례), state: 'open'|'accepted'|'declined', via?: 'applied'|'adopted' }](처음 나온 차례)
+ *   entries = 항목 [{ gid, bundle?, list(제안들, 안 차례·묶음은 pid 차례), state: 'open'|'accepted'|'declined', via?: 'applied'|'adopted', open(남은 대기 pid) }](처음 나온 차례)
  */
 export function requestProgress(r, proposals = [], o = {}) {
+  // 거둔 제안(withdrawn — 에이전트가 자기 대기 제안을 거둠)은 항목·셈에서 아예 뺀다. 거르는 자리는 여기 한 곳(server/memotext.js requestItems 와 같다)
+  const all = (Array.isArray(proposals) ? proposals : []).filter((p) => p && p.status !== 'withdrawn');
+  // 묶음 제안(p.bundle, 2026-11-17 — docs/UI_TERMS.md §9): 구성원 2개 이상이면 항목 하나. 1개만 남으면 보통 항목
+  const bsize = new Map();
+  for (const p of all) if (p.gid == null && p.bundle != null) bsize.set(String(p.bundle), (bsize.get(String(p.bundle)) || 0) + 1);
   const entries = []; const groups = new Map();
-  for (const p of Array.isArray(proposals) ? proposals : []) {
-    if (!p) continue;
-    if (p.gid != null) {
-      const k = String(p.gid);
-      let g = groups.get(k);
-      if (!g) { g = { gid: p.gid, list: [] }; groups.set(k, g); entries.push(g); }
+  for (const p of all) {
+    const key = p.gid != null ? `g${p.gid}` : p.bundle != null && bsize.get(String(p.bundle)) > 1 ? `b${p.bundle}` : null;
+    if (key) {
+      let g = groups.get(key);
+      if (!g) { g = p.gid != null ? { gid: p.gid, list: [] } : { gid: null, bundle: String(p.bundle), list: [] }; groups.set(key, g); entries.push(g); }
       g.list.push(p);
     } else entries.push({ gid: null, list: [p] });
   }
-  let accepted = 0; let declined = 0; let open = 0; let openAlt = 0; let tables = 0; let applied = 0; let adopted = 0;
+  let accepted = 0; let declined = 0; let open = 0; let openAlt = 0; let tables = 0; let applied = 0; let adopted = 0; let adoptOpen = 0;
   const openPids = [];
   for (const it of entries) {
     if (it.gid != null) it.list.sort((a, b) => (Number(a.option) || 0) - (Number(b.option) || 0) || Number(a.pid) - Number(b.pid));
+    if (it.bundle != null) {
+      // 묶음: 남은(대기 + 반영해 두지 않은) 구성원이 있으면 남음(일부 반영돼도), 없고 반영이 하나라도 있으면 반영, 그 밖은 거절
+      it.list.sort((a, b) => Number(a.pid) - Number(b.pid));
+      const acc = it.list.filter((p) => proposalAccepted(p, o));
+      const left = it.list.filter((p) => p.status === 'pending' && !proposalAccepted(p, o));
+      it.open = left.map((p) => Number(p.pid));
+      if (left.length) {
+        it.state = 'open'; open++; openPids.push(...it.open);
+        const objs = left.filter((p) => OBJECT_TYPES.includes(p.type)).length;
+        tables += objs; if (objs < left.length) adoptOpen++;
+      } else if (acc.length) {
+        const ap = acc.some((p) => p.status === 'applied');
+        it.state = 'accepted'; it.via = ap ? 'applied' : 'adopted'; accepted++;
+        if (ap) applied++; else adopted++;
+      } else { it.state = 'declined'; declined++; }
+      continue;
+    }
     const ap = it.list.find((p) => p.status === 'applied');
     const ad = ap ? null : it.list.find((p) => p.status === 'pending' && proposalAccepted(p, o));
+    it.open = [];
     if (ap || ad) {
       it.state = 'accepted'; it.via = ap ? 'applied' : 'adopted'; accepted++;
       if (ap) applied++; else adopted++;
     } else if (it.list.some((p) => p.status === 'pending')) {
       it.state = 'open'; open++;
+      it.open = it.list.filter((p) => p.status === 'pending').map((p) => Number(p.pid));
       if (it.gid != null) openAlt++;
-      else { const p = it.list[0]; openPids.push(Number(p.pid)); if (['table','table_edit','toc','figure','page_layout','delete'].includes(p.type)) tables++; }
+      else { const p = it.list[0]; openPids.push(Number(p.pid)); if (OBJECT_TYPES.includes(p.type)) tables++; else adoptOpen++; }
     } else { it.state = 'declined'; declined++; }
   }
   openPids.sort((a, b) => a - b);
   const done = r?.status === 'done' || r?.status === 'cancelled';
   const archived = entries.filter(it => it.state === 'declined' && it.list.some(p => p.supersededByRequest)).length;
-  return { items: entries.length, accepted, declined, archived, open, openPids, openAlt, tables, resolved: done && open === 0, applied, adopted, entries };
+  return { items: entries.length, accepted, declined, archived, open, openPids, openAlt, tables, adoptOpen, resolved: done && open === 0, applied, adopted, entries };
+}
+/** 수정본에 넣지 못하고 기준에만 적용하는 제안 종류(표·그림·개체·차례·쪽 구성·묶음·문단 지우기·옮기기 — [모두 반영]이 내 수정본에 넣지 않는 것).
+ *  para_delete·para_move(2026-11-17, server/paragraph-ops.js)도 문서에 바로 적용만이다(web/store.js 의 수정본 넣기가 막는다) */
+const OBJECT_TYPES = ['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete', 'edit_batch', 'para_delete', 'para_move'];
+/** 묶음 제안의 머리 이름(server/memotext.js bundleLabel 과 같은 규칙): '새 문단 50 · 표 2 · 그림 1 넣기' · '바꿈 61곳' · '서식 12곳' · '개체 지우기 5문단' · '문단 지우기 8곳' · '제안 n건' */
+export function bundleLabel(list = []) {
+  const n = {};
+  const add = (k) => { n[k] = (n[k] || 0) + 1; };
+  for (const p of Array.isArray(list) ? list : []) {
+    if (!p) continue;
+    const t = p.type || 'replace';
+    if (t === 'insert') add('para');
+    else if (t === 'table') add('table');
+    else if (t === 'figure') add(p.figure?.nativeChart ? 'chart' : p.figure?.replace ? 'figswap' : 'figure');
+    else if (t === 'replace') add('replace');
+    else if (t === 'format') add('format');
+    else if (t === 'delete') add('delete');
+    else if (t === 'para_delete') add('paradel');   // 2026-11-17 같은 종류 묶음(server/mcp2/ops.js markBundles (d))
+    else add('other');
+  }
+  const ins = [n.para ? `새 문단 ${n.para}` : '', n.table ? `표 ${n.table}` : '', n.figure ? `그림 ${n.figure}` : '', n.chart ? `차트 ${n.chart}` : ''].filter(Boolean);
+  return [ins.length ? `${ins.join(' · ')} 넣기` : '', n.replace ? `바꿈 ${n.replace}곳` : '', n.format ? `서식 ${n.format}곳` : '', n.figswap ? `그림 교체 ${n.figswap}` : '',
+    n.delete ? `개체 지우기 ${n.delete}문단` : '', n.paradel ? `문단 지우기 ${n.paradel}곳` : '', n.other ? `제안 ${n.other}건` : ''].filter(Boolean).join(' · ');
 }
 /** 개체 지우기 제안 설명: '글상자 206개 · 사각형 51개'(server/memotext.js deleteSummary 와 같음) */
 export function deleteNote(p) {

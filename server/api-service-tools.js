@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from './mcp.js';
 import { createApiToolContext } from './api-mcp-tools.js';
 
-export async function openServiceApiTools({ service, user, agent, docId, requestId, attempt, assertCurrent }) {
+export async function openServiceApiTools({ service, user, agent, docId, requestId, attempt, assertCurrent, profile }) {
   const server = createMcpServer({ service, user, agentName: agent, session: `api-${requestId}` });
   const client = new Client({ name: 'hwpx-api-agent', version: '0.4.1' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -12,6 +12,7 @@ export async function openServiceApiTools({ service, user, agent, docId, request
     await server.connect(b); await client.connect(a);
     const context = await createApiToolContext({
       docId, requestId, attempt, assertCurrent,
+      profile,
       listTools: () => client.listTools(),
       callTool: (name, args, signal) => client.callTool({ name, arguments: args }, undefined, { signal, timeout: 120000 }),
       uploadFile: (file) => service.addRequestFile(docId, { ...file, rid: requestId }, user, agent),

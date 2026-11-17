@@ -4683,9 +4683,14 @@ pub(crate) fn generated_empty_anchor_line_hu(
 /// [hwpx-cowork] 2026-11-04 X2 — 합성 줄 빈 앵커 문단에서 문단 기준 자리차지 개체가 앵커 줄 **뒤에** 더 미는 양(HU).
 /// 띠 = [max(오프셋, 0), + 위 여백 + 높이 + 아래 여백] (문단 위 기준). 띠가 앵커 줄(또는 바로 다음 글 줄)과 겹치면
 /// 띠 아래 − 앵커 줄 끝(음수면 0), 겹치지 않으면 0. 대상이 아니면 `None`.
+/// [hwpx-cowork] 2026-11-17 위/아래 캡션(`caption`)도 띠에 든다 — 간격 + 캡션 줄(마지막 줄간격 뺌), 글자처럼 개체와 같은 몫
+/// (`tac_caption_extra_height_hu`). 한/글 2022(조판 시험지 probe_objects_captions `cap-rect-float`): 빈 앵커의 자리차지
+/// 사각형 8000 + 아래 캡션(간격 850, 10pt 한 줄) → 다음 글 1980 + 9850 = 11830, 캡션 세 줄 → 13810 + 12850 = 26660.
+/// 종전에는 캡션을 빼고 재어 다음 글이 캡션과 겹쳤다(9975).
 pub(crate) fn generated_empty_anchor_band_extra_hu(
     para: &crate::model::paragraph::Paragraph,
     common: &crate::model::shape::CommonObjAttr,
+    caption: Option<&crate::model::shape::Caption>,
     styles: &style_resolver::ResolvedStyleSet,
     dpi: f64,
 ) -> Option<i32> {
@@ -4712,6 +4717,7 @@ pub(crate) fn generated_empty_anchor_band_extra_hu(
     let bottom = top
         .saturating_add(i32::from(common.margin.top).max(0))
         .saturating_add(common.height.min(i32::MAX as u32) as i32)
+        .saturating_add(crate::renderer::composer::tac_caption_extra_height_hu(caption))
         .saturating_add(i32::from(common.margin.bottom).max(0));
     Some(bottom.saturating_sub(line).max(0))
 }

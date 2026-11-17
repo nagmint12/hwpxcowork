@@ -86,5 +86,5 @@ test('복사는 한/글 붙여넣기 그림 장면과 따라하기 안내, 연�
   assert.equal(typeof clipboard.find(step => step.title === '한/글에 붙여넣기').example, 'function');
   assert.equal(clipboard.find(step => step.title === '한/글에 붙여넣는 흐름').scene, 'hangul-paste');
   assert.equal(typeof connections.find(step => step.title === 'ChatGPT 웹 — 주소와 OAuth').example, 'function');
-  assert.equal(clipboard.find(step => step.title === '선택한 내용을 실제로 복사하기').action, undefined);
+  assert.equal(clipboard.find(step => step.title === '선택한 내용을 실제로 복사하기').quick, undefined);
 });

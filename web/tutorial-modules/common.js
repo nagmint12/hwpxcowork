@@ -76,6 +76,39 @@ export function typeInTutorialComposer(env, value, title = null) {
     current: () => env.s.composer === composer && sameTutorialStep(env, step, title) });
 }
 
+export async function sendTutorialExample(d, target, instruction, options = {}) {
+  const model = d.s.composer;
+  const result = await d.createRequest({ kind: 'instruct', target, instruction, attachments: [], ...options, route: 'example' });
+  if (result?.request?.rid == null) throw new Error(result?.message || '연습 요청을 만들지 못했습니다.');
+  if (model && d.s.composer === model) {
+    model.rid = result.request.rid; model.phase = 'result'; model.error = result.failed ? result.message : '';
+  }
+  return result.request;
+}
+
+export function openTutorialMemoReply(d, memo) {
+  if (!memo) throw new Error('연습 메모를 찾지 못했습니다. 준비 단계부터 다시해 주세요.');
+  d.s.active = { kind: 'memo', id: memo.id };
+  d.openReply({ key: Date.now(), kind: 'memo', memoId: memo.id, ref: memo.ref, quote: memo.body ?? memo.text ?? '', anchor: null });
+}
+
+export async function applyTutorialProposal(d, proposal) {
+  if (proposal?.status !== 'pending') throw new Error('반영할 연습 제안이 없습니다. 준비 단계의 상태를 확인해 주세요.');
+  await d.applyProposal(proposal);
+}
+
+export function enableTutorialTools(env) {
+  const button = () => env.q('[data-testid="toggle-editor-tools"]');
+  const menu = () => env.q('[data-testid="bar-more-toggle"]');
+  return {
+    allowControl: control => control === button() || control === menu(),
+    quick: async () => {
+      if (!button()) { env.activate(menu()); await Promise.resolve(); }
+      env.activate(button());
+    },
+  };
+}
+
 export function stepHelpers(env) {
   const { d, s, ctx, config, focusIn, rectOf, pad, q, fdoc, inFrame, frameRect, selectFor, locate, phraseRect, cw } = env;
   const finish = { title: '연습을 마쳤습니다', text: '완료하면 지금의 연습 문서와 메모·검토 기록을 내 문서함에 보관합니다. 새 연습은 튜토리얼 메뉴에서 언제든 다시 시작할 수 있습니다.', center: true, next: '완료하고 문서함에 저장', last: true };
@@ -87,7 +120,8 @@ export function stepHelpers(env) {
     return b.getBoundingClientRect().width && labels.some(label => name.includes(label.replace(/\s/g, '')));
   });
   const frameDialog = kind => shapeDialog(fdoc(), kind);
-  const closeFrameDialog = kind => { const box = frameDialog(kind); const b = box?.querySelector('.dialog-close') || [...(box?.querySelectorAll('button') || [])].find(b => /^(취소|닫기|Cancel)/.test(b.textContent.replace(/\s/g, ''))); b?.click(); };
+  const activate = button => env.activate ? env.activate(button) : button.click();
+  const closeFrameDialog = kind => { const box = frameDialog(kind); const b = box?.querySelector('.dialog-close') || [...(box?.querySelectorAll('button') || [])].find(b => /^(취소|닫기|Cancel)/.test(b.textContent.replace(/\s/g, ''))); if (b) activate(b); };
   const openShape = async (kind, title) => {
     const ticket = env.stepIdentity?.();
     // 글자 모양은 실제 선택 범위가 있어야 열린다. 앞 단계를 건너뛰었어도 같은 예시를 선택한다.
@@ -97,7 +131,7 @@ export function stepHelpers(env) {
     closeFrameDialog(kind === 'char' ? 'para' : 'char');
     const b = fdoc()?.querySelector(`button[data-cmd="format:${kind === 'char' ? 'char' : 'para'}-shape"]`);
     if (!b) throw new Error('편집기 도구 막대의 모양 단추가 보이지 않습니다');
-    b.click();
+    activate(b);
   };
   const reveal = element => element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   const top = selector => () => pad(rectOf(q(selector)), 4);

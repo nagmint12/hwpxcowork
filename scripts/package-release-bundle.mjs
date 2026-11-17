@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
-import {assertFontDistributionZip} from './font-distribution-policy.mjs';
+import {assertFontDistributionZip} from './rhwp-original-font-policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
@@ -44,6 +44,10 @@ const readme = [
   `hwpx-cowork ${version} 릴리즈 (${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6)})`,
   '========================================',
   '',
+  '빠른 시작(Windows): 이 폴더의 설치 시작.bat을 더블클릭하면 개인 서버를 AI 없이 준비하고 엽니다.',
+  `개인·공동 서버와 Codex·Claude Code를 골라 설치: ${downloadBase.replace(/\/download$/, '')}/onboarding.html`,
+  '선택한 설치 ZIP 안의 설치 시작.bat을 실행하면 필요한 준비와 VS Code용 안내가 이어집니다.',
+  '',
   '이 ZIP 하나에 세 가지가 들어 있습니다. 필요한 폴더만 쓰면 됩니다.',
   '',
   '1. hwpx-cowork-server  — 공동 검토 서버(웹 화면·편집기·AI 연결). 관리자가 한 대에 설치합니다.',
@@ -62,7 +66,8 @@ const readme = [
   '',
 ].join('\r\n');
 bundle.file(`${top}/읽어보기.txt`, '﻿' + readme, { unixPermissions: 0o644 });
-let files = 1;
+bundle.file(`${top}/설치 시작.bat`, '@echo off\r\nchcp 65001 >nul\r\ncall "%~dp0hwpx-cowork-server\\app\\scripts\\setup-user.bat" --mode personal --ai none --start\r\nif errorlevel 1 pause\r\n', { unixPermissions: 0o644 });
+let files = 2;
 for (const p of parts) {
   const zip = await JSZip.loadAsync(fs.readFileSync(path.join(stage, p.file)));
   for (const entry of Object.values(zip.files)) {
@@ -91,7 +96,7 @@ const manifest = {
   downloadBase,
   notes: [
     '이 파일 하나에 서버(hwpx-cowork-server)·개인 AI 실행기(hwpx-ai-worker)·참여자용 바로 가기(hwpx-cowork-user-app)가 들어 있습니다. 필요한 폴더만 쓰면 됩니다.',
-    '설치형은 Node와 npm 라이브러리를 넣지 않았습니다. ZIP을 푼 뒤 쓰려는 폴더에서 install.bat(Windows) 또는 sh install.sh(macOS/Linux)를 실행하세요. 인터넷 연결이 필요합니다.',
+    'Windows 빠른 시작: ZIP을 풀고 맨 위의 설치 시작.bat을 더블클릭하면 개인 서버를 AI 없이 준비합니다. 다른 운영 방식·구독은 시작 안내에서 선택한 설치 ZIP을 받으세요. 인터넷 연결이 필요합니다.',
     '처음 읽을 것: 압축을 푼 폴더의 읽어보기.txt',
   ],
   packages: [{ target: 'bundle', file: bundleName, bytes: buf.length, sha256: hash, title: '서버·개인 AI 실행기·참여자 앱', files: count, topFolder: top, downloadUrl: `${downloadBase}/${bundleName}` }],

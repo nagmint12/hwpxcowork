@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { runProcess, codexMcpPrompt } from './codex-ai.js';
 import { validateCodexJob } from './codex-mcp.js';
+import { withAiDebug, debugRecord, debugError, currentAiDebug } from './ai-debug.js';
 import { EDITOR_INSTRUCTIONS } from './editor-instructions.js';
 
 const fault = (code, message, extra = {}) => Object.assign(new Error(message), { code }, extra);
@@ -140,7 +141,7 @@ export function parseClaudeStream(stdout = '') {
   let init = null; let result = null;
   const messages = new Map(); const tools = new Set();
   for (const line of String(stdout).split('\n')) {
-    let event; try { event = JSON.parse(line); } catch { continue; }
+    let event; try { event = JSON.parse(line); } catch (cause) { if (line.trim()) debugRecord('claude.stream.line.rejected', line, { validator: 'JSON.parse', error: debugError(cause) }); continue; }
     if (event?.type === 'system' && event.subtype === 'init') init = event;
     else if (event?.type === 'result') result = event;
     else if (event?.type === 'assistant' && event.message) {
@@ -184,6 +185,11 @@ export class ClaudeCodeProposer {
   }
 
   async runMcp(job, { url, token, session, signal, requestContext } = {}) {
+    return withAiDebug({ context: { route: 'claude-cli', docId: job?.docId, requestId: job?.requestId, attempt: job?.attempt } },
+      () => this._runMcpRecorded(job, { url, token, session, signal, requestContext }));
+  }
+
+  async _runMcpRecorded(job, { url, token, session, signal, requestContext } = {}) {
     validateCodexJob(job);
     if (job.type !== 'request') throw fault('CLAUDE_INPUT_INVALID', 'Claude Code 실행기는 일반 AI 요청만 처리합니다.');
     if (requestContext != null && (requestContext.docId !== job.docId || requestContext.rid !== job.requestId || (requestContext.attempt ?? 1) !== job.attempt || requestContext.instructionHidden)) throw fault('CLAUDE_INPUT_INVALID', '문서 문맥이 배정된 요청·시도와 일치하지 않습니다.');
@@ -207,9 +213,10 @@ export class ClaudeCodeProposer {
       await fs.writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { hwpx: { type: 'stdio', command: process.execPath, args: [bridge] } } }), { encoding: 'utf8', mode: 0o600 });
       const launch = await this.resolveCommand(this.command, this.env);
       const args = claudeArgs({ model: this.model, effort: this.effort, mcpConfigFile });
-      const env = { ...claudeEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_TOKEN: token,
+      const env = { ...claudeEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_DEBUG_DIR: currentAiDebug()?.directory, HWPX_COWORK_TOKEN: token,
         HWPX_CODEX_JOB: JSON.stringify({ job: { ...job, agentId: this.agentName }, url, session, filesDir: work }) };
-      const prompt = codexMcpPrompt(job, requestContext) + CLAUDE_NOTE;
+      const prompt = codexMcpPrompt(job, requestContext) + (job.workflow === 'content_format'
+        ? '\n명령·코드 실행 도구는 없습니다. 그림은 edit_workspace의 figure(svg)·chart 동작으로 만듭니다. 별도 결과 파일은 Write로 work/out/에 쓴 뒤 upload_result_file로 저장한 첨부 id를 사용합니다.' : CLAUDE_NOTE);
       const metadata = (usage) => ({ usage, model: this.model || 'claude-code-default', effort: this.effort, execution: 'tool-agent' });
       let result;
       try { result = await runProcess(launch, args, { spawn: this.spawn, env, cwd: directory, input: prompt, signal, timeoutMs: this.timeoutMs }); }
@@ -220,6 +227,7 @@ export class ClaudeCodeProposer {
         throw Object.assign(e, { message }, metadata({ modelCallsUnknown: true, unknownModelTasks: 1 }));
       }
       const parsed = parseClaudeStream(result.stdout);
+      debugRecord('claude.stream.parsed', parsed, { exitCode: result.code });
       const meta = { ...metadata(parsed.usage), ...(parsed.init?.model ? { model: String(parsed.init.model).slice(0, 200) } : {}) };
       if (signal?.aborted) throw Object.assign(ABORTED(), meta);
       const hwpx = (parsed.init?.mcp_servers || []).find(s => s?.name === 'hwpx');

@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createBridge, installShutdown } from './bridge.js';
 import { ADMIN_MCP_PATH } from './admin-mcp.js';
+import { createDebugStdioTransport } from './ai-debug.js';
 
 export function adminConnection({ configFile, adminName, filesDir, full = false } = {}) {
   const root = fileURLToPath(new URL('../', import.meta.url));
@@ -32,7 +33,7 @@ export async function main(argv = process.argv.slice(2)) {
   const bridge = await createBridge({ ...adminConnection(options), channel: false, forwardToolListChanges: true,
     log: () => {} }); // Do not echo configuration, credentials or document content.
   installShutdown(bridge);
-  await bridge.start(new StdioServerTransport());
+  await bridge.start(createDebugStdioTransport(StdioServerTransport, { context: { route: 'admin-mcp-wire', session: bridge.session } }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

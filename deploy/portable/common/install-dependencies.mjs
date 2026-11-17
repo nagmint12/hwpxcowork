@@ -23,9 +23,9 @@ const nodeDir = path.dirname(process.execPath);
 const npmCli = findNpmCli();
 if (!npmCli) { console.error('npm을 찾지 못했습니다. install-node.bat(또는 install-node.sh)로 Node와 npm을 준비한 뒤 다시 실행하세요.'); process.exit(1); }
 console.log('잠금 파일의 npm 모듈을 이 PC에 설치합니다. 인터넷 연결이 필요합니다.');
-const result = spawnSync(process.execPath, [npmCli, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+const result = spawnSync(process.execPath, [npmCli, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--loglevel=error'], {
   cwd: app, stdio: 'inherit', env: { ...process.env, PATH: `${nodeDir}${path.delimiter}${process.env.PATH || ''}` },
 });
 if (result.error || result.status !== 0) { console.error('npm 설치에 실패했습니다. 네트워크·프록시와 위 오류를 확인한 뒤 다시 실행하세요.'); process.exit(1); }
 fs.writeFileSync(marker, hash);
-console.log('설치 완료. 서버는 admin-app.bat 또는 start-server.bat, 개인 실행기는 start-worker.bat로 켜세요.');
+console.log('라이브러리 설치를 마쳤습니다.');

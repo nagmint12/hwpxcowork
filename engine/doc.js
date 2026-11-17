@@ -10,7 +10,7 @@ import { escapeText, escapeAttr, decodeEntities } from './xmlscan.js';
 import { scanTables, sectionTextWidth, sectionTextHeight, tableXml, stripCaptionNumber, isNumericCell, numericColumns } from './table.js';
 import { editTableXml, restoreTableXml } from './table-edit.js';
 import { imageInfo, scanPictures, pictureXml, PX, MM } from './picture.js';
-import { importChartParts, releaseChartParts, chartPartKey, fixSwitchIds, pruneChartParts } from './chart-parts.js';
+import { importChartParts, releaseChartParts, chartPartKey, fixSwitchIds, pruneChartParts, syncSwitchCopies } from './chart-parts.js';
 import { SHAPE_TAGS, shapeProps, shapePrintText, shapeChange, shapeKey, pairShapes, patchShape, shapeName, shapeFlowsText } from './shapes.js';
 import { planBody, planBodyAnchored, charOps, entryKind, foldOwners } from './diff.js';
 import { inspectFormatting, formattingCatalog, formatRange, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, breakChangeLabels } from './formatting.js';
@@ -46,6 +46,7 @@ export class HwpxDoc {
       if (!sec.xml.includes('<hp:insertEnd') && !sec.xml.includes('<hp:deleteEnd')) continue;
       const edits = [];
       for (const p of sec.paras) {
+        if (p.alt) continue; // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본의 표식은 변경이 아니다(_normalizeChanges)
         for (const e of p.anchors) {
           if (e.kind !== 'change' || (e.name !== 'hp:insertEnd' && e.name !== 'hp:deleteEnd')) continue;
           const kind = e.name === 'hp:insertEnd' ? 'insert' : 'delete';
@@ -72,7 +73,12 @@ export class HwpxDoc {
   _normalizeChanges() {
     const re = /<hp:(insertBegin|insertEnd|deleteBegin|deleteEnd)\b([^>]*)\/>/g;
     const marks = [];
-    for (const sec of this.sections) for (const m of sec.xml.matchAll(re)) {
+    // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본(alt) 안 표식은 세지도 고치지도 않는다 — 한/글 2022 가 그 사본에 머리 항목 없이(TcId="0") 쓰는
+    // 표식이다(차트 대체 OLE 캡션, COM 실측). 세면 머리 항목이 생겨 한/글에 없는 유령 변경이 된다
+    const altSpans = this.sections.map((sec) => sec.paras.filter((p) => p.alt && !p.parent?.alt).map((p) => [p.start, p.end]));
+    const inAlt = (si, at) => altSpans[si].some(([s, e]) => s <= at && at < e);
+    for (const [si, sec] of this.sections.entries()) for (const m of sec.xml.matchAll(re)) {
+      if (inAlt(si, m.index)) continue;
       const id = /\bId="(\d+)"/.exec(m[2])?.[1] ?? null; const tc = /\bTcId="(\d+)"/.exec(m[2])?.[1] ?? null;
       marks.push({ name: m[1], id: id ?? tc, tc: tc ?? id });
     }
@@ -88,8 +94,9 @@ export class HwpxDoc {
       return { id: i + 1, type: b.name.startsWith('insert') ? 'Insert' : 'Delete', date: src.date || new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), authorID: src.authorID ?? 1, hide: !!src.hide };
     });
     this.header.rewriteChanges(entries);
-    for (const sec of this.sections) {
-      const xml = sec.xml.replace(re, (all, name, a) => {
+    for (const [si, sec] of this.sections.entries()) {
+      const xml = sec.xml.replace(re, (all, name, a, at) => {
+        if (inAlt(si, at)) return all;
         const id = /\bId="(\d+)"/.exec(a)?.[1] ?? /\bTcId="(\d+)"/.exec(a)?.[1]; const n = map.get(id) ?? id;
         let b = a.replace(/\bId="\d+"/, `Id="${n}"`).replace(/\bTcId="\d+"/, `TcId="${n}"`);
         if (!/\bId="/.test(b)) b = ` Id="${n}"${b}`; if (!/\bTcId="/.test(b)) b = b.replace(/\bId="\d+"/, (x) => `${x} TcId="${n}"`);
@@ -103,6 +110,8 @@ export class HwpxDoc {
   async save() {
     // [hwpx-cowork] 아무도 안 쓰는 차트 부분·차트 대체 OLE 를 거둔다(engine/chart-parts.js — 한/글 저장본처럼)
     pruneChartParts(this);
+    // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 캡션 사본을 첫 갈래 글에 맞춘다(engine/chart-parts.js — 최종본 글이 다를 때만)
+    syncSwitchCopies(this);
     this.container.setText('Contents/header.xml', this.header.xml);
     this.sections.forEach((s, i) => this.container.setText(this.sectionNames[i], memoZorderFix(s.xml)));
     return this.container.save();
@@ -153,7 +162,8 @@ export class HwpxDoc {
 
   /** 구역의 표 색인(구역 XML 이 바뀔 때만 다시 만든다) */
   _tableIndex(sec) {
-    if (!sec._tables || sec._tables.xml !== sec.xml) sec._tables = { xml: sec.xml, data: scanTables(sec) };
+    // [hwpx-cowork] 다시 읽을 때마다(stamp) 새로 — 색인이 문단 기록을 품으므로 같은 XML 로 돌아와도 지금 기록이어야 한다(구역 부분 다시 읽기는 뒤 기록을 그 자리에서 옮긴다, 2026-11-16)
+    if (!sec._tables || sec._tables.stamp !== sec.stamp) sec._tables = { stamp: sec.stamp, data: scanTables(sec) };
     return sec._tables.data;
   }
 
@@ -207,8 +217,21 @@ export class HwpxDoc {
     const header = dryRun ? new Header(this.header.xml) : this.header;
     const res = editTableXml(before, ops, { header });
     const out = { key: t.key, ref: t.ref, before, after: res.xml, undo: res.undo, rows: res.rows, cols: res.cols, labels: res.labels, geometry: res.geometry };
+    // [hwpx-cowork] 한/글 2022 실측(2026-11-14): 글자처럼 표는 hp:pos.horzAlign만 바꿔도 x=113px 그대로이고,
+    // 소유 문단을 CENTER로 바꿔야 x=227px가 된다. 떠 있는 표는 표 위치 속성을 그대로 쓴다.
+    const align = ops.findLast(o => o.op === 'table' && o.align != null)?.align;
+    const pos = /<hp:pos\b[^>]*\/>/.exec(res.xml)?.[0] || '';
+    if (align && /\btreatAsChar="(?:1|true)"/.test(pos)) {
+      const previous = this.inspectFormatting(t.ref).paragraph.align;
+      if (previous !== align) {
+        out.undo.paragraphAlign = { before: previous, after: align };
+        out.geometry = true;
+        out.labels = [...out.labels, '표를 품은 문단 정렬'];
+      }
+    }
     if (dryRun) return out;
-    this._putTableXml(sec, t, res.xml, res.geometry);
+    this._putTableXml(sec, t, res.xml, out.geometry);
+    if (out.undo.paragraphAlign) this.formatRange(t.ref, { start: 0, end: this.inspectFormatting(t.ref).length, paragraph: { align } });
     return out;
   }
 
@@ -218,7 +241,14 @@ export class HwpxDoc {
    */
   restoreTable(key, before, undo) {
     const { sec, t } = this._tableTarget(key);
-    this._putTableXml(sec, t, restoreTableXml(sec.xml.slice(t.start, t.end), before, undo), true);
+    // 둘 다 먼저 검사한다. 이후 사람이 바꾼 문단 정렬은 덮지 않고 표·문단을 함께 되돌린다.
+    const xml = restoreTableXml(sec.xml.slice(t.start, t.end), before, undo);
+    const paragraph = undo?.paragraphAlign;
+    if (paragraph && this.inspectFormatting(t.ref).paragraph.align !== paragraph.after) {
+      throw new EngineError('STALE', '표를 고친 뒤 그 문단의 정렬이 바뀌어 되돌릴 수 없습니다');
+    }
+    this._putTableXml(sec, t, xml, true);
+    if (paragraph) this.formatRange(t.ref, { start: 0, end: this.inspectFormatting(t.ref).length, paragraph: { align: paragraph.before } });
     return true;
   }
 
@@ -265,6 +295,9 @@ export class HwpxDoc {
     const authors = new Map(this.header.authors().map((a) => [a.id, a.name]));
     const out = [];
     for (const sec of this.sections) for (const p of sec.paras) {
+      // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본(p.alt — 차트의 대체 OLE 캡션 등)의 표식은 변경이 아니다: 한/글 2022 는 그 사본을 첫 갈래에서
+      // 새로 써 넣으며 캡션 전체를 TcId="0"(머리 항목 없음) 넣음으로 감싸고, 모두 수락한 뒤에도 그 표식을 남긴다(COM 실측) — 목록에 넣으면 유령 변경
+      if (p.alt) continue;
       const marks = Section.changeMarks(p);
       for (const m of marks) {
         if (m.name !== 'hp:insertBegin' && m.name !== 'hp:deleteBegin') continue;
@@ -1036,6 +1069,7 @@ export class HwpxDoc {
     for (const sec of this.sections) {
       const begins = []; const ends = new Map(); // 끝 표식: beginIDRef → [{ q, a }](문단 순서, 문단 안에서는 표식 순서)
       for (const p of sec.paras) for (const a of Section.fieldCtrls(p)) {
+        if (p.alt) break; // [hwpx-cowork] 2026-11-17 hp:switch 대체 갈래 사본 안 메모는 보이는 갈래 메모의 사본
         if (a.inner === 'hp:fieldBegin' && a.innerAttrs?.get('type') === 'MEMO') begins.push({ p, a });
         if (a.inner === 'hp:fieldEnd') {
           const k = a.innerAttrs?.get('beginIDRef');
@@ -1081,6 +1115,52 @@ export class HwpxDoc {
     const { beginXml, endXml } = memoCtrlXml(this.header.memoStyle(), { number, memoId, fieldId, fid, zorder, author, text, when: date || new Date() });
     sec.load(applyEdits(sec.xml, memoEdits(sec, p, range, beginXml, endXml)));
     return memoId;
+  }
+
+  /** 검증된 엔진이 만든 필드/각주 조각만 삽입한다. 원래 run·개체·메모·문단은 다시 쓰지 않는다. */
+  insertControlFragment(ref, { start, end = start, beginXml, endXml = '' }) {
+    const { sec, p } = this.resolve(ref); const fc = Section.visibleChars(p, 'final');
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > fc.length) throw new EngineError('RANGE', '컨트롤 위치가 문단 밖입니다');
+    const point = (offset, xml) => {
+      if (!fc.length) return emptyParagraphEdit(sec, p, '', xml);
+      return offset === fc.length ? ctrlPointAfter(p, p.chars.indexOf(fc.at(-1)), xml)
+        : ctrlPointBefore(p, p.chars.indexOf(fc[offset]), xml);
+    };
+    const edits = start === end ? [point(start, beginXml + endXml)] : [point(end, endXml), point(start, beginXml)];
+    dropLineseg(p, edits);
+    sec.load(applyEdits(sec.xml, edits));
+  }
+
+  /** 각주/미주 생성 엔진이 다시 매긴 번호만 복사한다. 기존 주석 글·개체·서식은 그대로 둔다. */
+  syncNoteNumbersFrom(source) {
+    const notes = doc => doc.sections.flatMap(sec => sec.paras.filter(p => Section.visibleParagraph(p, 'final')).flatMap(p =>
+      p.anchors.filter(a => a.kind === 'ctrl' && !a.del && ['hp:footNote', 'hp:endNote'].includes(a.inner)).map(a => ({ sec, p, a }))));
+    const current = notes(this), generated = notes(source);
+    if (current.length !== generated.length || current.some((n, i) => n.a.inner !== generated[i].a.inner)) throw new EngineError('EDIT_PRESERVATION', '각주/미주 번호를 대조할 수 없습니다');
+    const edits = new Map(), changed = new Map();
+    for (let i = 0; i < current.length; i++) {
+      const { sec, p, a } = current[i], number = generated[i].a.innerAttrs?.get('number');
+      if (!/^\d+$/.test(number || '')) throw new EngineError('EDIT_PRESERVATION', '생성 엔진의 주석 번호가 올바르지 않습니다');
+      const xml = sec.xml.slice(a.start, a.end), tag = new RegExp(`<${a.inner}\\b[^>]*>`).exec(xml);
+      if (!tag || !/\bnumber="[^"]*"/.test(tag[0])) throw new EngineError('EDIT_PRESERVATION', '기존 주석의 번호 속성을 찾지 못했습니다');
+      const list = edits.get(sec) || [], paras = changed.get(sec) || new Set();
+      if (number !== a.innerAttrs?.get('number')) {
+        list.push({ pos: a.start + tag.index, end: a.start + tag.index + tag[0].length, insert: tag[0].replace(/\bnumber="[^"]*"/, `number="${number}"`) }); paras.add(p);
+      }
+      const gen = generated[i], genXml = gen.sec.xml.slice(gen.a.start, gen.a.end);
+      const auto = text => [...text.matchAll(/<hp:autoNum\b(?=[^>]*\bnumType="(?:FOOTNOTE|ENDNOTE)")[^>]*>/g)];
+      const oldNums = auto(xml), newNums = auto(genXml);
+      if (oldNums.length !== newNums.length) throw new EngineError('EDIT_PRESERVATION', '주석 본문의 자동 번호를 대조하지 못했습니다');
+      for (let j = 0; j < oldNums.length; j++) {
+        const desired = /\bnum="(\d+)"/.exec(newNums[j][0])?.[1];
+        if (!desired || /\bnum="(\d+)"/.exec(oldNums[j][0])?.[1] === desired) continue;
+        const at = a.start + oldNums[j].index;
+        list.push({ pos: at, end: at + oldNums[j][0].length, insert: oldNums[j][0].replace(/\bnum="[^"]*"/, `num="${desired}"`) });
+        for (const q of sec.paras) if (q.start <= at && q.end > at) paras.add(q);
+      }
+      if (list.length) { edits.set(sec, list); changed.set(sec, paras); }
+    }
+    for (const [sec, list] of edits) { for (const p of changed.get(sec)) dropLineseg(p, list); sec.load(applyEdits(sec.xml, list)); }
   }
 
   /**
@@ -2235,14 +2315,15 @@ export class HwpxDoc {
 
   /** 구역의 그림 색인(주인 문단 → 그 문단이 직접 가진 그림들, 문서 순서) — 구역 XML 이 바뀔 때만 다시 만든다 */
   _pictureIndex(sec) {
-    if (!sec._pics || sec._pics.xml !== sec.xml) {
+    // [hwpx-cowork] 다시 읽을 때마다(stamp) 새로 — 주인 문단 기록이 열쇠이므로 같은 XML 로 돌아와도 지금 기록이어야 한다(2026-11-16 구역 부분 다시 읽기)
+    if (!sec._pics || sec._pics.stamp !== sec.stamp) {
       const byOwner = new Map();
       for (const pic of scanPictures(sec)) {
         if (!pic.owner) continue;
         if (!byOwner.has(pic.owner)) byOwner.set(pic.owner, []);
         byOwner.get(pic.owner).push(pic);
       }
-      sec._pics = { xml: sec.xml, byOwner };
+      sec._pics = { stamp: sec.stamp, byOwner };
     }
     return sec._pics.byOwner;
   }
@@ -2980,11 +3061,12 @@ export class HwpxDoc {
    * [hwpx-cowork] 추적하지 않는 지우기 — 변경 추적으로 지운(최종본에 없는) 개체도 함께('all'), 개체에 붙은 변경 표식과 개체 안 변경의 머리 항목,
    * 차트 부분, 개체째 지운 메모의 남은 끝까지 정리한다(_objectRemoval — 다시 매김 기록은 takeRenumberLog)
    */
-  removeOwnObjects(ref, { kinds = null } = {}) {
+  removeOwnObjects(ref, { kinds = null, pick = null } = {}) {
     const { sec, p } = this.resolve(ref);
     // kinds(2026-11-10 개체 지우기 제안): 그 종류의 개체만 — 문단이 run 에 직접 가진 것 가운데서 고른다(묶음 안 그림은 묶음째). 없으면 모두(종전 그대로)
+    // pick(2026-11-16 개체 → 본문, engine/flow.js): kinds 와 함께 줄 때 그 가운데 pick(anchor) 가 참인 개체만(글을 본문으로 옮긴 글상자·괘선만 지운다)
     const own = kinds
-      ? this._ownObjectAnchors(p, 'all').filter((a) => kinds.includes(objectKind(a)))
+      ? this._ownObjectAnchors(p, 'all').filter((a) => kinds.includes(objectKind(a)) && (!pick || pick(a)))
       : [...this._ownPictures(sec, p, 'all'), ...this._tableIndex(sec).tables.filter((t) => t.owner === p), ...ownShapeAnchors(p, 'all')];
     if (!own.length) return 0;
     const anchors = outermostObjects(own.map((x) => p.anchors.find((a) => a.kind === 'ctrl' && a.start === x.start) || { kind: 'ctrl', start: x.start, end: x.end }));

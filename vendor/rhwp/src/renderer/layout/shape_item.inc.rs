@@ -788,7 +788,7 @@ impl LayoutEngine {
                                     para_index.checked_sub(1).and_then(|index| paragraphs.get(index)), para,
                                 )).flatten().map(|hu| hwpunit_to_px(hu, self.dpi)).unwrap_or(0.0);
                             if let Some((line, extra)) = crate::renderer::generated_empty_anchor_line_hu(para, styles, self.dpi)
-                                .zip(crate::renderer::generated_empty_anchor_band_extra_hu(para, common, styles, self.dpi)) {
+                                .zip(crate::renderer::generated_empty_anchor_band_extra_hu(para, common, shape.caption(), styles, self.dpi)) {
                                 top + hwpunit_to_px(line.saturating_add(extra), self.dpi)
                             } else {
                                 top - pushdown + hwpunit_to_px(signed_hwpunit(common.vertical_offset).max(0), self.dpi)

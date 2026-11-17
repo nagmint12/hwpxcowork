@@ -2,6 +2,7 @@ import { createAdminSettings } from '../admin-settings.js';
 import { createAdminAccounts } from '../admin-accounts.js';
 import { tutorialConfig } from '../tutorial.js';
 import { createAdminTutorialAi } from '../admin-tutorial-ai.js';
+import { usageReport } from '../usage-report.js';
 
 /** UI를 숨기는 것과 별개로 모든 관리 경로에 관리자 권한을 검사한다. */
 export function installAdminRoutes({ app, config, auth, wrap, restartControl, instanceId = '', adminSettings, adminAccounts, service, personalAi }) {
@@ -50,6 +51,12 @@ export function installAdminRoutes({ app, config, auth, wrap, restartControl, in
   app.delete('/api/admin/users/:name', auth, admin, wrap(async (req, res) => res.json(accounts.deleteUser(name(req), req.body?.revision ?? req.query.revision, req.user.name))));
   // AI 크레딧: 체험에 공유하는 키(tutorial.shareFrom)와 내 키의 API 잔액·이번 달 사용량(조회는 과금 없음)
   app.get('/api/admin/ai-credits', auth, admin, wrap(async (req, res) => res.json(await aiCredits(personalAi || service?.personalAi, config, req.user.name, req.query.refresh === '1'))));
+  // AI 사용량: 모든 문서의 요청 기록 토큰 → 예상 API 비용(읽기만 — 화면이 10초마다 다시 읽는다. 같은 순간의 거듭된 조회는 2초 동안 앞의 답을 쓴다)
+  let usageHit = null;
+  app.get('/api/admin/usage-report', auth, admin, wrap(async (req, res) => {
+    if (!usageHit || Date.now() - usageHit.at > 2000) usageHit = { at: Date.now(), value: usageReport(service?.store?.list() || []) };
+    res.json(usageHit.value);
+  }));
   // 튜토리얼 AI: 체험 요청을 처리할 연결(API·로컬 AI·ChatGPT·Codex·Claude Code — 재시작 없이 바로 적용)
   const tutorialAi = createAdminTutorialAi({ config, service });
   app.get('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.snapshot())));

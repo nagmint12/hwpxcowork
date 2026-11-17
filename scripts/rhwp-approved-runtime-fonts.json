@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "authorization": "User explicitly permits fonts embedded in unmodified official AI CLI and Electron components; standalone additional font assets remain prohibited.",
+  "officialExecutables": [
+    {
+      "component": "claude-code",
+      "version": "2.1.323",
+      "file": "claude.exe",
+      "bytes": 367634080,
+      "sha256": "5064e6e0572dca86257363ca04d48653eef20ef27f1bd04b504ed7199ed3fd13"
+    }
+  ],
+  "embeddedFonts": [
+    {
+      "component": "electron",
+      "version": "43.8.10",
+      "bytes": 572,
+      "sha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59"
+    },
+    {
+      "component": "electron",
+      "version": "43.8.10",
+      "bytes": 1984,
+      "sha256": "e5f0e22cc84fb26b8ca9107bdd394f9fd511e592fa3ccb65ada870345becc324"
+    }
+  ],
+  "provenance": [
+    {
+      "component": "electron",
+      "version": "43.8.10",
+      "arch": "x64",
+      "officialArchive": "electron-v43.8.10-darwin-x64.zip",
+      "archiveSha256": "5f43558b6b6afed1acd4ea107ceee4576327c90a5a63ab65da3d791c39b503c9",
+      "frameworkSha256": "2232b49de34d852e92da79d911391c50e616e4d6fe6bbde1178d4b184e78c931",
+      "fonts": [
+        {
+          "component": "electron",
+          "version": "43.8.10",
+          "bytes": 572,
+          "sha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59",
+          "offset": 171132768
+        },
+        {
+          "component": "electron",
+          "version": "43.8.10",
+          "bytes": 1984,
+          "sha256": "e5f0e22cc84fb26b8ca9107bdd394f9fd511e592fa3ccb65ada870345becc324",
+          "offset": 179634944
+        }
+      ]
+    },
+    {
+      "component": "electron",
+      "version": "43.8.10",
+      "arch": "arm64",
+      "officialArchive": "electron-v43.8.10-darwin-arm64.zip",
+      "archiveSha256": "4e63242d2e5e08b6cfc203304c6f62c561eea574cb4065a626d488b38bff78f7",
+      "frameworkSha256": "f637edf217b4d7507713253415c021e79cef4d499b5cefba1a637104babaef96",
+      "fonts": [
+        {
+          "component": "electron",
+          "version": "43.8.10",
+          "bytes": 572,
+          "sha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59",
+          "offset": 154837292
+        },
+        {
+          "component": "electron",
+          "version": "43.8.10",
+          "bytes": 1984,
+          "sha256": "e5f0e22cc84fb26b8ca9107bdd394f9fd511e592fa3ccb65ada870345becc324",
+          "offset": 163262936
+        }
+      ]
+    }
+  ]
+}

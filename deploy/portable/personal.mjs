@@ -19,6 +19,14 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// 앱이 준비되는 동안 부모가 닫히거나 stop을 보내도 놓치지 않는다.
+const desktopManaged = process.env.HWPX_COWORK_DESKTOP_MANAGED === '1';
+let desktopStopRequested = false;
+let desktopStop = () => { desktopStopRequested = true; };
+if (desktopManaged) {
+  process.on('message', message => { if (message === 'stop') desktopStop(); });
+  process.once('disconnect', () => desktopStop());
+}
 // 배포물: <묶음>/app/portable → 프로그램 = <묶음>/app. 개발 폴더: <저장소>/deploy/portable → 프로그램 = <저장소>
 const packaged = fs.existsSync(path.join(here, '..', 'server', 'launcher.js'));
 export const appDir = packaged ? path.resolve(here, '..') : path.resolve(here, '..', '..');
@@ -146,6 +154,7 @@ export function workerCommand(spec, { port, token, env = process.env }) {
 }
 
 async function main() {
+  const managedByDesktop = desktopManaged || process.connected === true;
   const o = parseArgs(process.argv.slice(2));
   if (o.help) {
     console.log('hwpx-cowork 개인용 앱 — 내 PC 폴더의 HWPX 를 열어 고칩니다(중앙 서버 없이).');
@@ -181,7 +190,9 @@ async function main() {
   }
 
   let controller = null; let worker = null; let stopping = false;
+  let startingServer = false; let stopRequested = false;
   async function shutdown(code) {
+    if (startingServer) { stopRequested = true; return; }
     if (stopping) return;
     stopping = true;
     say('앱을 끕니다(저장 중인 작업을 마친 뒤)…');
@@ -190,6 +201,15 @@ async function main() {
     process.exit(code);
   }
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(signal, () => void shutdown(0));
+  // 데스크톱 앱이 만든 자식만 IPC로 종료한다. 부모가 비정상 종료해도 개인 서버를 남기지 않는다.
+  if (managedByDesktop) {
+    if (desktopManaged) desktopStop = () => void shutdown(0);
+    else {
+      process.on('message', message => { if (message === 'stop') void shutdown(0); });
+      process.once('disconnect', () => void shutdown(0));
+    }
+    if (desktopStopRequested || !process.connected) { await shutdown(0); return; }
+  }
   // 표준 입력의 quit(시험·다른 프로그램이 정상 종료를 시킬 때)
   const rl = readline.createInterface({ input: process.stdin });
   rl.on('line', (line) => { if (line.trim() === 'quit') void shutdown(0); });
@@ -204,12 +224,15 @@ async function main() {
   };
   say(`hwpx-cowork 개인용 앱 — 설정·기록 ${userDir}`);
   const launcher = await import(pathToFileURL(path.join(appDir, 'server', 'launcher.js')).href);
+  startingServer = true;
   controller = await launcher.startManagedServer({
     root: appDir, stdio: 'pipe', handleSignals: false,
     env: { ...process.env, HWPX_COWORK_CONFIG: configFile, HWPX_COWORK_USERDATA: userDir, HWPX_COWORK_LOCAL: '1' },
     onSpawn: capture,
     onExit(code) { if (!stopping) { say(`서버가 멈췄습니다(종료 코드 ${code}).`); process.exit(code || 1); } },
   });
+  startingServer = false;
+  if (stopRequested) { await shutdown(0); return; }
   const api = client(port, admin.token);
   const linked = await linkFolders(api, o.folders);
   // 처음 실행: 연결한 폴더가 없으면 폴더 고르기 창을 띄운다(취소하면 문서함의 [PC 폴더 연결]로 나중에)

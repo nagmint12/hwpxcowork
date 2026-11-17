@@ -168,7 +168,7 @@ def main():
             # ── 연결 끊기 ──
             page.locator('.lib-crumbs a', has_text='개인 문서함').click()
             folder = page.locator('tr.folder', has_text='내 문서'); folder.wait_for()
-            ok(folder.locator('.lib-badge.pc').is_visible() and folder.locator('button[aria-label="폴더 지우기"]').count() == 0, '연결한 폴더 줄: PC 꼬리표, 지우기 대신 연결 끊기')
+            ok(folder.locator('.lib-badge.pc').is_visible() and folder.locator('button[aria-label="폴더 삭제"]').count() == 0, '연결한 폴더 줄: PC 꼬리표, 지우기 대신 연결 끊기')
             folder.locator('[data-testid="local-unlink"]').click()
             folder.wait_for(state='detached', timeout=10000)
             ok((pc / '하위' / '보고서.hwpx').exists() and page.locator('.libtree .lt-pc').count() == 0, '연결을 끊어도 PC 파일은 그대로, 문서함에서만 빠진다')

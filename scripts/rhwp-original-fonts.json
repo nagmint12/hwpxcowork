@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "originalTag": "v0.9.0",
+  "originalCommit": "c9095c5f67632e6721e800ccc7fb43ea49d26682",
+  "fonts": [
+    {
+      "path": "assets/fonts/Cafe24Ssurround-v2.0.woff2",
+      "bytes": 391868,
+      "gitBlob": "a9925d4cbe7f598637911f4804e1a233e12daa6a",
+      "sha256": "2d726dbf8863d66e6d5cf56e2532c5d14d8a4b514461b565c513c1da6ae2f41a"
+    },
+    {
+      "path": "assets/fonts/Cafe24Supermagic-Regular-v1.0.woff2",
+      "bytes": 765684,
+      "gitBlob": "f9f3236c8d95cd6ec6621802a7618dd54abb4ad9",
+      "sha256": "65434a217b9532867a1fe41417d0ad51210a60027a51dca40748aafed48ef0ba"
+    },
+    {
+      "path": "assets/fonts/D2Coding-Bold.woff2",
+      "bytes": 1579776,
+      "gitBlob": "8d6ed16c40d3c95fefe4ae3092c7b58908797808",
+      "sha256": "cf59ac9e719ce9888870ec012cdf8cbc8ffdb632f823652d5b3ba3236ce6b7c8"
+    },
+    {
+      "path": "assets/fonts/D2Coding-Regular.woff2",
+      "bytes": 1485480,
+      "gitBlob": "443935a2126c5a41bcc7700193c0366d4e126cea",
+      "sha256": "4d3fa8ed66fedcb1787f200bd75637b816b09057fc06da0aa783e3b305a726d8"
+    },
+    {
+      "path": "assets/fonts/GowunBatang-Bold.woff2",
+      "bytes": 447856,
+      "gitBlob": "974ce6f15645702ec0a639d1ffabe432052c3b93",
+      "sha256": "aef1b91ea9ea4688fb296044959b38dfeeaa3e1650af5d543a2b5c160fa30b36"
+    },
+    {
+      "path": "assets/fonts/GowunBatang-Regular.woff2",
+      "bytes": 495092,
+      "gitBlob": "b9257e842be3e2b054220898b5deeb2747db4230",
+      "sha256": "0c6a288aa0c12081dccde769c312f71f290b353243747dd24fb8c57f94f01d72"
+    },
+    {
+      "path": "assets/fonts/GowunDodum-Regular.woff2",
+      "bytes": 406476,
+      "gitBlob": "e7ebd0278b59adf049bfd27f1b6588bbaf37d6dc",
+      "sha256": "349c098a6181952dab564bf891b8efcacfbf855adc28d40b4aa2e5937c101c56"
+    },
+    {
+      "path": "assets/fonts/Happiness-Sans-Bold.woff2",
+      "bytes": 336604,
+      "gitBlob": "04a6c44377e74a6d273e0c6cc20be15ca569a2e7",
+      "sha256": "54becdfd4f7f58e872eba8fbc67778e29cff94c1cd03f9a0ebadfbe482b4aba0"
+    },
+    {
+      "path": "assets/fonts/Happiness-Sans-Regular.woff2",
+      "bytes": 291556,
+      "gitBlob": "c41916239919c8b9be45beb2506a6c0be0b6cfd8",
+      "sha256": "4fc37e7663c3d440b5a6af6938bde0c6618b666553ed521745f3362050bd4988"
+    },
+    {
+      "path": "assets/fonts/Happiness-Sans-Title.woff2",
+      "bytes": 348700,
+      "gitBlob": "d5a14433978bfb280aa71a21c28770a1bc7f55e2",
+      "sha256": "057e6821a062d9192964d99cf058fe6608230e9e4a464c9652b3756e02460e22"
+    },
+    {
+      "path": "assets/fonts/HappinessSansVF.woff2",
+      "bytes": 613412,
+      "gitBlob": "5bb2f11961df6b09cfd5024261f4646d51728a8d",
+      "sha256": "cd29de60acf8c466938400561fcbfb14812dd5981f4f78b0c8da74609682423c"
+    },
+    {
+      "path": "assets/fonts/LatinModernMath-Regular.woff2",
+      "bytes": 391676,
+      "gitBlob": "7ec4c482757612cacb0c3841320767804318bf4f",
+      "sha256": "b11060f37967c090457580275129d0d7da1d5fbfc82b04e78c91aa31977f547c"
+    },
+    {
+      "path": "assets/fonts/LatinModernMath-VariableOutline-subset.otf",
+      "bytes": 13488,
+      "gitBlob": "33ccc4f9cbaaa721ab0b8e544e1c87a0c716986d",
+      "sha256": "c3b70b3a6ad5d7b03fb9c86067b6fc212b3a084870a9acff13238190137bf260"
+    },
+    {
+      "path": "assets/fonts/NanumGothic-Bold.woff2",
+      "bytes": 440012,
+      "gitBlob": "9f38579b58e03fd252a8cbfcec6a11ae93fc16b0",
+      "sha256": "f1a3a97599e73746b1af08f88bc542c0f6b091818ffa67b31efb5b88d49ebc2e"
+    },
+    {
+      "path": "assets/fonts/NanumGothic-ExtraBold.woff2",
+      "bytes": 402288,
+      "gitBlob": "4165b1001269664d273063ab590959d2e6523a0a",
+      "sha256": "a1961b5f8820d1c03519e21858508bedd32ea9f748805db5cad11536404c1801"
+    },
+    {
+      "path": "assets/fonts/NanumGothic-Regular.woff2",
+      "bytes": 363844,
+      "gitBlob": "8f74a6c4adcdb618ccae2979156dcd9975a10245",
+      "sha256": "b2b25ce9c9179e0a4c867bd2610e1db5595965345aa1cdb857964ab802c4ee3e"
+    },
+    {
+      "path": "assets/fonts/NanumGothicCoding-Bold.woff2",
+      "bytes": 698148,
+      "gitBlob": "caaffdb551a1694a14662a92ba1331a71ec89367",
+      "sha256": "81c3ae9d714c4b31fb0fac7596e4a472e1a19776193a4a595e6f7e5b23daeeb3"
+    },
+    {
+      "path": "assets/fonts/NanumGothicCoding-Regular.woff2",
+      "bytes": 670036,
+      "gitBlob": "bf781e073cdb86d42ade89f7057ca30fb07ba8cc",
+      "sha256": "6bd0831252dc3bd96f3257ec4eaf794d88ffb185346eb5d3f889248a7a3c6239"
+    },
+    {
+      "path": "assets/fonts/NanumMyeongjo-Bold.woff2",
+      "bytes": 608768,
+      "gitBlob": "d0d0de08459c98272a50880fae259b45ef0b2913",
+      "sha256": "65c47ec072dd91cbaac538f4482be3185fb0896b5f3909aa8a9834604b1eec08"
+    },
+    {
+      "path": "assets/fonts/NanumMyeongjo-ExtraBold.woff2",
+      "bytes": 728364,
+      "gitBlob": "e3710b6fd9a3bf15f19d286411e656338d637af9",
+      "sha256": "dda2e9b5d670b63dd66a9a83468ee0ee9e64bef09d4fc24771865a7ab2529332"
+    },
+    {
+      "path": "assets/fonts/NanumMyeongjo-Regular.woff2",
+      "bytes": 536732,
+      "gitBlob": "126b30932a55adf6b29c542110756fcd8ab27d05",
+      "sha256": "52d27bf4ee205020a4aa9eb19ef4835e4aa04a94f7742b13e69e5c8b9a74072a"
+    },
+    {
+      "path": "assets/fonts/NotoSansKR-Bold.woff2",
+      "bytes": 559192,
+      "gitBlob": "e265a8a903a1899ddfba9c1007f3c0b1adeea17b",
+      "sha256": "dab3d492daa687386292cff1499225db580f931f800ee0d124eb0636378c6020"
+    },
+    {
+      "path": "assets/fonts/NotoSansKR-ExtraLight.woff2",
+      "bytes": 592496,
+      "gitBlob": "84538ea7cf7b62f907d35e08be1312ff07d9a00f",
+      "sha256": "3b5cac6af73fd94fa91ded10f6cfc54c7ce52189986fe7ca6fd457208f1d3673"
+    },
+    {
+      "path": "assets/fonts/NotoSansKR-Regular.woff2",
+      "bytes": 562220,
+      "gitBlob": "87978b76934d7a1153b7c43b21a997610af5b4a0",
+      "sha256": "d1bf8649914a4fe9477a8735bf056383e44e466141fb3d61897252e06d900c1a"
+    },
+    {
+      "path": "assets/fonts/NotoSansMath-Regular.woff2",
+      "bytes": 226456,
+      "gitBlob": "15c747bb12cd83ab340967cb4fd10cc3a2393d09",
+      "sha256": "6836027b99d29fd0e6f668cf0c2e89107de4131b91116cd96516ad4a7e19d66d"
+    },
+    {
+      "path": "assets/fonts/NotoSansSymbols2-Regular.ttf",
+      "bytes": 656852,
+      "gitBlob": "45df8301c7bdfaccff52e30a0973132e94b2e95d",
+      "sha256": "876598db5f1e3bef2bc77c4d94c5b0d5d2c1620be4878a06f18fb5434e331688"
+    },
+    {
+      "path": "assets/fonts/NotoSerifKR-Bold.woff2",
+      "bytes": 1033556,
+      "gitBlob": "527dbba3a3758d3d9ecb0c9a68928be0de201e63",
+      "sha256": "504d6af6abb882acd912d47bafa383c4512a6c8c33635e4e8fb37111d9310941"
+    },
+    {
+      "path": "assets/fonts/NotoSerifKR-Regular.woff2",
+      "bytes": 971428,
+      "gitBlob": "767dc69febe54ed555e95d1eb72a34f52016a4dd",
+      "sha256": "c9a1e3ac69994d680883b53b1fd83d520733b704792522a932bfaa276117de45"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Black.woff2",
+      "bytes": 800404,
+      "gitBlob": "eafe6835364c00298fd68ebb6224d3b71797c73a",
+      "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Bold.woff2",
+      "bytes": 791156,
+      "gitBlob": "4d40a1ab896c4e305354344326d2e18bea49c847",
+      "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362"
+    },
+    {
+      "path": "assets/fonts/Pretendard-ExtraBold.woff2",
+      "bytes": 793540,
+      "gitBlob": "dcd57e757da59f14265e132196c10a5781f81a79",
+      "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3"
+    },
+    {
+      "path": "assets/fonts/Pretendard-ExtraLight.woff2",
+      "bytes": 734392,
+      "gitBlob": "e5104022b494be49b6d7b79655c94e804639bb35",
+      "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Light.woff2",
+      "bytes": 757000,
+      "gitBlob": "7f82fe847821d8f75cff0ad3aaa7ad1f7a69834c",
+      "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Medium.woff2",
+      "bytes": 778432,
+      "gitBlob": "f8c743d603ed545917669bb0f45f417ca6d772b9",
+      "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Regular.woff2",
+      "bytes": 765892,
+      "gitBlob": "a9f62319b7d956cc2daee957ae80c45352b72320",
+      "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63"
+    },
+    {
+      "path": "assets/fonts/Pretendard-SemiBold.woff2",
+      "bytes": 785856,
+      "gitBlob": "4c6a32de1acd9d0ae77a6d0426185b0e7725b1d7",
+      "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0"
+    },
+    {
+      "path": "assets/fonts/Pretendard-Thin.woff2",
+      "bytes": 694804,
+      "gitBlob": "6c9bc96040e38b9de1673c1f8143083474b1c9cb",
+      "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b"
+    },
+    {
+      "path": "assets/fonts/RHWPOldHangul-Regular.woff2",
+      "bytes": 239732,
+      "gitBlob": "692fe503ee1caf90370386700c70f9776fa0fab2",
+      "sha256": "1a45a61e9a320c1bc62ca1401f7b23ceffffe8133dc2a9650ad4e12524f8dcab"
+    },
+    {
+      "path": "assets/fonts/RHWPPublicBatang-Regular.woff2",
+      "bytes": 2832012,
+      "gitBlob": "6030d1865ff26fdfd5527fd1a4cd0ec602a8a309",
+      "sha256": "20d454f45cdf29cc4619e769f1f59f3b8920941b6b274a530e82d3b75e24dbfb"
+    },
+    {
+      "path": "assets/fonts/SpoqaHanSans-Regular.woff2",
+      "bytes": 275144,
+      "gitBlob": "96c14069d35661c0512ec8007e3948bcf4e19946",
+      "sha256": "6568bf80b50c14f2e54f56f2c07e668416f39f880baf5ea2825d315767f98f69"
+    }
+  ]
+}

@@ -37,6 +37,9 @@ fn covers(p:&Program,c:char)->bool {
         else if cp>b {std::cmp::Ordering::Less} else {std::cmp::Ordering::Equal}).is_ok()
 }
 pub(crate) fn is_native(key:&str)->bool { key.starts_with("HFTMETRIC:") && program(key).is_some() }
+/// [hwpx-cowork] 2026-11-16 원본 HFT 프로그램이 이 글자를 가지는가. 한/글 영문 HFT(예: ENSMJ.HFT,
+/// 범위 33~126)에는 공백 글리프가 없다 — 그 자리를 표시용 TTF 의 공백으로 재면 안 된다.
+pub(crate) fn program_covers(key:&str, c:char)->bool { program(key).is_some_and(|p|covers(p,c)) }
 pub(crate) fn uses_extracted_policy(key:&str)->bool { is_native(key) }
 pub(crate) fn find_face(key:&str)->Option<&'static LocalFontFace> {
     super::local_font_width::find_local_face(&program(key)?.ttf)

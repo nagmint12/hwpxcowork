@@ -19,6 +19,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 OUT = f'{ROOT}/tests/out'
 os.makedirs(OUT, exist_ok=True)
 PORT = int(os.environ.get('STUDIO_PLUGIN_PORT', '8793'))
+# 기대하는 플러그인 판 = 소스의 PLUGIN_VERSION(scripts/build-studio.mjs 가 cowork-build.json 에 적는 것과 같은 줄)
+with open(f'{ROOT}/studio/plugin/types.ts', encoding='utf-8') as _f:
+    PLUGIN_VERSION = re.search(r"export const PLUGIN_VERSION = '([^']+)'", _f.read()).group(1)
 BASE = f'http://localhost:{PORT}'          # 브라우저 주소(CLAUDE.md)
 REST = f'http://127.0.0.1:{PORT}'          # 시험 코드의 REST(IPv6 우회 지연 없이)
 CHROME = '%USERPROFILE%/AppData/Local/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-win64/chrome-headless-shell.exe'
@@ -113,6 +116,10 @@ def start_server(tmp):
         json.dump(cfg, f, ensure_ascii=False, indent=1)
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('HWPX_COWORK_')}
     env.update(HWPX_COWORK_CONFIG=cfg_path, HWPX_COWORK_DATA_DIR=data, HWPX_COWORK_AI_MOCK='1', HWPX_COWORK_PORT=str(PORT), HWPX_COWORK_HOST='127.0.0.1')
+    # 견줄 편집기 번들(분리 빌드 — artifacts/<작업>/studio-dist)만 그대로 넘긴다(2026-11-17, ui_studio.py 와 같다)
+    if os.environ.get('HWPX_COWORK_STUDIO_DIR'):
+        env['HWPX_COWORK_STUDIO_DIR'] = os.path.abspath(os.environ['HWPX_COWORK_STUDIO_DIR'])
+        print(f'편집기 번들: {env["HWPX_COWORK_STUDIO_DIR"]}', flush=True)
     log = open(f'{OUT}/studio_server.log', 'w', encoding='utf-8', newline='')
     srv = subprocess.Popen(['node', 'server/index.js'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     conf = None
@@ -343,7 +350,10 @@ def main():
             print('[1] 준비(ready)', flush=True)
             open_doc(pg, d1)
             frame = next(f for f in pg.frames if '/studio/' in f.url)
-            ok(pg.evaluate('window.__cowork.version') == '0.4.0', '플러그인 판 0.4.0')
+            # 판은 소스(studio/plugin/types.ts PLUGIN_VERSION)와 같아야 한다 — 빌드가 지금 플러그인을 품었는가(0.4.1 부터 기능 목록 features, 2026-11-17)
+            ok(pg.evaluate('window.__cowork.version') == PLUGIN_VERSION, f'플러그인 판 {PLUGIN_VERSION}')
+            if PLUGIN_VERSION != '0.4.0':
+                ok('insertSkip' in (pg.evaluate('window.__cowork.features || []') or []), "기능 목록에 'insertSkip'(넣기 skip 인자)")
             ok(all(pg.evaluate(f'typeof window.__cowork.{n} === "function"') for n in ('syncToBase', 'flash', 'setOptions', 'applyBatch')), 'v0.4 API: syncToBase·flash')
             ok(len(events(pg, 'ready')) >= 1, 'ready 이벤트')
             stats = pg.evaluate('window.__cowork.debug.stats()')

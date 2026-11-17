@@ -156,6 +156,8 @@ pub(super) fn measure(
     let mut tac_idx = 0;
     // TAC 개체가 소유한 줄. 나머지 줄은 같은 문단의 글줄이다.
     let mut tac_owned_lines = Vec::new();
+    // 표마다 위 합에 넣은 줄 뒤 간격(제어 차례, px) — 아래 합성 줄 경로가 뒤 글줄이 있을 때 전량으로 바꾼다.
+    let mut table_trailing: Vec<(usize, f64)> = Vec::new();
     for (ci, c) in para.controls.iter().enumerate() {
         if let Control::Table(t) = c {
             if flow.is_effective_tac_table(para, t, fmt) {
@@ -197,6 +199,7 @@ pub(super) fn measure(
                         hwpunit_to_px(seg.line_spacing, dpi) / 2.0
                     };
                     tac_seg_total += effective_h + trailing;
+                    table_trailing.push((ci, trailing));
                 }
                 tac_idx += 1;
             }
@@ -286,7 +289,47 @@ pub(super) fn measure(
     }
     // 표 줄 **뒤** 같은 저장 프레임의 글줄만 센다. 표 앞 앵커 줄(한/글 2024 는 흐름에서
     // 회수한다, #5524)과 저장 되감김 뒤 줄(다음 쪽 몫, #5700)은 이 문단 상한에 넣지 않는다.
-    if tac_seg_total > 0.0
+    // [hwpx-cowork] 저장 줄이 하나도 없는 문단(rhwp 가 줄을 구성한 생성 문서)의 표 **뒤** 글줄도
+    // 이 문단이 쌓는 줄이다 — 조판은 post-text 조각으로 그 줄만큼 흐름을 이미 전진시켰고 그리기도
+    // 그 자리에 놓는다. 아래 저장 줄 경로는 합성 줄(태그 bit31)에서 바로 멈추고, 재구성 줄
+    // (`computed_host_lines`)이면 아예 돌지 않아, 상한이 그 줄들을 되감았다 — 뒤 문단부터 조판 흐름이
+    // 그리기보다 위에 있어 쪽 끝 문단이 본문 밖으로 넘치고 쪽이 줄었다(2026-11-16 표준서식 생성 보고서:
+    // 표 + 줄 바꿈 + "주:" 글 3줄 문단마다 39px, 한/글 76쪽 ↔ 엔진 73쪽). 합성 줄에는 저장 되감김(쪽 경계)이
+    // 없으므로 현재 줄 구성이 정한 표 줄(`tac_table_line_index`) 뒤의 줄을 모두 센다. 표 앞 글줄은 종전대로다.
+    // 한/글 2022(12.0.0.3146) 재저장 줄: 그 문단 다음 문단 vpos = 표 줄(lh+ls) + 글줄 3×(lh+ls)
+    // (시험지 `scripts/layout-probe-tachost.mjs`, 회귀 `tests/layout_tac_host_text.test.mjs`).
+    // 뒤 글줄이 있으면 표 줄의 줄간격도 전량 지난다(조판 `composed_tac_line_spacing_before_post_text`·그리기와 같다)
+    // — 위 합의 표 줄 뒤 간격(반간격 상한 등)을 그 값으로 바꾼다.
+    let composed_lines = crate::renderer::para_has_no_stored_line_segs(para);
+    if composed_lines && tac_seg_total > 0.0 && fmt.line_spacings.len() == fmt.line_heights.len() {
+        let last_table = para
+            .controls
+            .iter()
+            .enumerate()
+            .filter_map(|(control_index, control)| match control {
+                Control::Table(table) if flow.is_effective_tac_table(para, table, fmt) => flow
+                    .tac_table_line_index(para, table, fmt)
+                    .map(|line| (line, control_index)),
+                _ => None,
+            })
+            .max_by_key(|(line, _)| *line);
+        if let Some((table_line, control_index)) = last_table {
+            let post: f64 = (table_line + 1..fmt.line_heights.len())
+                .filter(|index| !tac_owned_lines.contains(index))
+                .map(|index| fmt.line_heights[index] + fmt.line_spacings[index])
+                .sum();
+            if post > 0.0 {
+                let counted = table_trailing
+                    .iter()
+                    .find(|(index, _)| *index == control_index)
+                    .map_or(0.0, |(_, trailing)| *trailing);
+                let full = fmt.line_spacings.get(table_line).copied().unwrap_or(0.0);
+                tac_seg_total += post + (full - counted).max(0.0);
+            }
+        }
+    }
+    if !composed_lines
+        && tac_seg_total > 0.0
         && fmt.computed_host_lines.is_none()
         && fmt.line_heights.len() == para.line_segs.len()
         && fmt.line_spacings.len() == fmt.line_heights.len()

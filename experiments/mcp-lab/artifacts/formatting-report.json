@@ -13,7 +13,7 @@
       "before": {
         "path": "artifacts/formatting-documents/heading-before.hwpx",
         "bytes": 13211,
-        "sha256": "9f8fdd7615f738144474b05c4c41f5a7b736994fd7c7f20a92f41dd2a5ece6b3",
+        "sha256": "41de46a201381cfa28b6b672099764b0ac6b18f67b54bcf45c33daae4a306c55",
         "sections": 1,
         "paragraphs": 4,
         "tables": 0,
@@ -23,7 +23,7 @@
       "after": {
         "path": "artifacts/formatting-documents/heading-after.hwpx",
         "bytes": 13627,
-        "sha256": "e75a718d21f3352175b6c4c2bc279e9d7a7ed9444352d17ffa003580ff000dba",
+        "sha256": "2374f24df4c78c0115592429a56b25f279ecf1839ae0bf4a3da6efb213ed5d8e",
         "sections": 1,
         "paragraphs": 4,
         "tables": 0,
@@ -212,7 +212,7 @@
       "before": {
         "path": "artifacts/formatting-documents/toc-before.hwpx",
         "bytes": 14812,
-        "sha256": "f55edf3ee190ceae4568c4430826c6f7f4d3e193f8fd4dec0d1a8ed2651ea336",
+        "sha256": "28e65712de6b563891ffbae24720535b1e992a8a5714e36e557eb2236068e6c0",
         "sections": 1,
         "paragraphs": 37,
         "tables": 1,
@@ -222,7 +222,7 @@
       "after": {
         "path": "artifacts/formatting-documents/toc-after.hwpx",
         "bytes": 15251,
-        "sha256": "944746ae4dd1700ef5dc4a9988b4bdaf29b8434e04d19d8929fd29f1f3e8ccda",
+        "sha256": "828b8b993bcb47719df8918e9dc2c876c232607861f4d73616c11dce99e1d6b8",
         "sections": 1,
         "paragraphs": 37,
         "tables": 1,

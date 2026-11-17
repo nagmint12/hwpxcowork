@@ -33,7 +33,7 @@ export const TableOpSchema = z.object({
   header_rows: opt(z.number().int().min(0).max(20)).describe('table: 제목 줄(머리행) 수 — 그 줄 셀을 제목 셀로'),
   repeat_header: opt(z.boolean()).describe('table: 쪽이 넘어가면 제목 줄 반복'),
   width_mm: opt(z.number().min(10).max(600)).describe('table: 표 전체 폭 mm(칸 너비는 비율대로)'),
-  align: opt(z.enum(['LEFT', 'CENTER', 'RIGHT'])).describe('table: 표 가로 위치(본문 기준)'),
+  align: opt(z.enum(['LEFT', 'CENTER', 'RIGHT'])).describe('table: 표 가로 위치(본문 기준). 글자처럼 표는 표를 품은 문단 정렬도 함께 변경'),
   treat_as_char: opt(z.boolean()).describe('table: 글자처럼 취급'),
   page_break: opt(z.enum(['CELL', 'TABLE', 'NONE'])).describe('table: 쪽 경계에서 CELL 셀 단위로 나눔 · TABLE 나눔 · NONE 나누지 않음'),
 }).strict();

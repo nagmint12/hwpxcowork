@@ -114,5 +114,42 @@ test('worker-install: npm 모듈과 런타임 없이 잠금 파일과 실제 PC 
     assert.match(await zip.file(base + 'start-worker.bat').async('string'), /install-dependencies\.mjs" --check/);
     assert.match(await zip.file(base + 'worker-settings.txt').async('string'), /^HWPX_COWORK_URL=https:\/\/cowork\.example\.com\/mcp\r$/m);
     assert.match(await zip.file(base + 'app/portable/install-dependencies.mjs').async('string'), /'ci', '--omit=dev', '--ignore-scripts'/);
+    const macInstaller = await zip.file(base + 'install-node.sh').async('string');
+    assert.ok(macInstaller.includes('22.23.5'), '구형 macOS 호환 런타임 고정');
+    assert.doesNotMatch(macInstaller, /__[A-Z_]+__|\r/, '셸 템플릿 치환·LF');
+    assert.equal(zip.file(base + 'start-worker.sh').unixPermissions & 0o777, 0o755);
+    assert.match(await zip.file(base + 'README.txt').async('string'), /macOS 14 포함 13.5 이상은 Node 24/);
+  } finally { cleanup(tmp); }
+});
+
+// 2026-11-16: Windows 개인용·공동 작업용 설치 묶음 — 프로그램만 담고(Node·npm 모듈은 받는 PC 에서 처음 실행할 때), 기관 자료는 넣지 않는다
+test('windows: 개인용·공동 작업용 두 묶음은 실행 파일·안내·잠금 파일만 담고 튜토리얼·설명서·소개 화면·개발 PC 파일을 뺀다', { timeout: 180000 }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-portable-'));
+  try {
+    const out = pack(tmp, ['--target', 'windows']);
+    const release = JSON.parse(fs.readFileSync(path.join(out, 'release.json'), 'utf8'));
+    assert.deepEqual(release.packages.map((p) => p.target), ['windows-personal', 'windows-shared']);
+    for (const p of release.packages) {
+      const zip = await JSZip.loadAsync(fs.readFileSync(path.join(out, p.file)));
+      const top = `hwpx-cowork-${p.mode}/`;
+      const names = Object.values(zip.files).filter((e) => !e.dir).map((e) => e.name);
+      assert.ok(names.every((n) => n.startsWith(top)));
+      const launchers = ['시작.bat', '종료.bat', 'AI 연결.bat', ...(p.mode === 'shared' ? ['외부 접속 열기.bat'] : [])];
+      for (const file of [...launchers, '설치 안내.txt', 'install-options.json', 'app/portable/hwpx-windows.ps1', 'app/portable/install-node.ps1', 'app/portable/install-dependencies.mjs', 'app/package-lock.json']) assert.ok(names.includes(top + file), file);
+      if (p.mode === 'personal') assert.ok(!names.includes(top + '외부 접속 열기.bat'));
+      assert.deepEqual(JSON.parse(await zip.file(top + 'install-options.json').async('string')), { schema: 1, mode: p.mode });
+      assert.ok(names.every((n) => !n.includes('/node_modules/') && !n.includes('/runtime/')), 'Node·npm 모듈은 받는 PC 에서 설치');
+      for (const re of [/\/app\/tutorial\//, /\/app\/docs\/manuals\//, /\/app\/web\/teaser3?\//, /run-watchdog-silent\.vbs$/, /install-watchdog\.js$/, /\/server\/templates\/README\.md$/]) assert.ok(!names.some((n) => re.test(n)), String(re));
+      // 한글 이름은 UTF-8 표시로 넣어 탐색기에서 깨지지 않는다
+      assert.ok(Object.values(zip.files).some((e) => e.name === top + '시작.bat'));
+      const ps1 = await zip.file(top + 'app/portable/hwpx-windows.ps1').async('nodebuffer');
+      assert.deepEqual([...ps1.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'PowerShell 5.1 이 한글을 읽도록 BOM');
+      assert.doesNotMatch(ps1.toString('utf8'), /__NODE_VERSION__/);
+      assert.match(await zip.file(top + '시작.bat').async('string'), /hwpx-windows\.ps1" -Action Start\r\n/);
+      const guide = await zip.file(top + '설치 안내.txt').async('string');
+      assert.match(guide, p.mode === 'personal' ? /PC 폴더 연결/ : /외부 접속 열기\.bat/);
+      const writingGuide = await zip.file(top + 'app/skill/hwpx-standard-report/reference/AI_작성지침.md').async('string');
+      assert.doesNotMatch(writingGuide, /대학혁신센터/);
+    }
   } finally { cleanup(tmp); }
 });

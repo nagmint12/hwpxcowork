@@ -1,11 +1,12 @@
 // Only manifest-listed release artifacts are public. Never serve artifacts/ as a static tree.
 import fs from 'node:fs';
 import path from 'node:path';
+import { renderDownloadPage } from './download-page.js';
+import { windowsSetupSettings, windowsSetupZip } from './windows-setup.js';
 
 const safeName = (name) => typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && name !== '.' && name !== '..';
-const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-// 공개 배포 파일만 허용한다: PC용 묶음과 버전이 명시된 Android APK.
-const RELEASE_FILE = /^(?:hwpx-(?:(?:cowork-server|ai-worker|cowork-user-app)-[A-Za-z0-9._-]+\.(?:zip|tar\.gz)|cowork-\d+\.\d+\.\d+-\d{8}\.zip)|(?:hwp-document-lite|rhwp-editor|hwpx-cowork)-\d+\.\d+\.\d+\.apk)$/;
+// 공개 배포 파일만 허용한다: PC용 묶음(Windows 개인용·공동 작업용·Mac 편집기 포함)과 버전이 명시된 Android APK.
+const RELEASE_FILE = /^(?:hwpx-(?:(?:cowork-server|cowork-windows|cowork-macos|ai-worker|cowork-user-app)-[A-Za-z0-9._-]+\.(?:zip|tar\.gz)|cowork-\d+\.\d+\.\d+-\d{8}\.zip)|(?:hwp-document-lite|rhwp-editor|hwpx-cowork)-\d+\.\d+\.\d+\.apk)$/;
 
 export function installReleaseDownloads(app, { root, releaseDir = process.env.HWPX_COWORK_RELEASE_DIR } = {}) {
   const current = () => {
@@ -26,19 +27,35 @@ export function installReleaseDownloads(app, { root, releaseDir = process.env.HW
   const readCurrent = (res) => {
     try { return current(); } catch { res.status(503).set('Cache-Control', 'no-store').json({ error: 'RELEASE_NOT_PUBLISHED', message: '릴리즈 파일이 아직 게시되지 않았습니다.' }); return null; }
   };
-  const mb = (bytes) => `${(bytes / 1000000).toFixed(2)} MB`;
-  // 명세에 notes(안내 문장 목록)가 있으면 그것을, 없으면 종전 설치 안내를 쓴다
-  const defaultNotes = [
-    '설치형은 Node와 npm 라이브러리를 제외합니다. ZIP 해제 후 실제 사용할 PC에서 install-dependencies.bat(Windows) 또는 sh install-dependencies.sh(macOS/Linux)를 실행하세요. 인터넷 연결이 필요합니다.',
-    '참여자용 user-app은 서버 화면을 여는 바로 가기입니다. 개인 AI 실행기(worker)는 별도 프로그램입니다.',
-  ];
+  // 명세에 notes(안내 문장 목록)가 있을 때만 보여 준다(설치 안내는 각 패키지의 guide)
+  const defaultNotes = [];
   app.get('/download', (req, res) => {
     const r = readCurrent(res); if (!r) return;
     const m = r.manifest;
     const notes = Array.isArray(m.notes) && m.notes.every((n) => typeof n === 'string') ? m.notes : defaultNotes;
-    const date = typeof m.releasedOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.releasedOn) ? ` · ${m.releasedOn}` : '';
-    const cards = r.packages.map((p) => `<section class="pkg"><a class="btn" href="/download/${encodeURIComponent(p.file)}" download>내려받기</a><div><b>${escape(p.file)}</b><br><span class="dim">${mb(p.bytes)}${p.title ? ` · ${escape(p.title)}` : ''}</span><br><span class="dim">SHA-256 <code>${p.sha256}</code></span></div></section>`).join('');
-    res.set('Cache-Control', 'no-store').set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'").type('html').send(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>hwpx-cowork 내려받기</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:860px;margin:40px auto;padding:0 16px;color:#1d2433}h1{font-size:26px;margin:0 0 4px}.dim{color:#5b6577;font-size:14px}.pkg{display:flex;gap:18px;align-items:center;border:1px solid #d6dbe4;border-radius:10px;padding:18px;margin:22px 0}.btn{flex:none;background:#2f5bd3;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px}.btn:hover{background:#2348ad}code{overflow-wrap:anywhere;font-size:12px}ul{padding-left:20px}</style><h1>hwpx-cowork ${escape(m.version)} 릴리즈</h1><div class="dim">최신판${escape(date)}</div>${cards || '<p>지금 내려받을 파일이 없습니다.</p>'}<ul>${notes.map((n) => `<li>${escape(n)}</li>`).join('')}</ul><p class="dim"><a href="/download/release.json">릴리즈 명세</a> · <a href="/download/SHA256SUMS.txt">SHA-256 목록</a> · <a href="/">hwpx-cowork 열기</a></p></html>`);
+    res.set('Cache-Control', 'no-store').set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'").type('html').send(renderDownloadPage({ manifest: m, packages: r.packages, notes }));
+  });
+  app.get('/download/windows-setup.zip', async (req, res, next) => {
+    const mode = req.query.mode ?? 'personal', ai = req.query.ai ?? 'none';
+    if (Object.keys(req.query).some(key => !['mode', 'ai'].includes(key)) || !['personal', 'shared'].includes(mode) || !['codex', 'claude-code', 'none'].includes(ai)) return res.status(400).json({ error: 'BAD_SETUP_CHOICE' });
+    const r = readCurrent(res); if (!r) return;
+    try {
+      // 시작 안내의 설치 링크는 고른 운영 방식의 Windows 설치 묶음으로 보낸다(AI 는 설치 뒤 AI 연결.bat 에서 고른다).
+      const installer = r.packages.find(p => !p.archived && p.target === `windows-${mode}`);
+      if (installer) return res.set('Cache-Control', 'no-store').redirect(302, `/download/${encodeURIComponent(installer.file)}`);
+      // 옛 간편 설치 링크도 완전 포함 파일로 연결한다. 받는 PC에서 추가 다운로드하지 않는다.
+      const offline = r.packages.find(p => !p.archived && p.target === `windows-offline-${mode}-${ai}`);
+      if (offline) return res.set('Cache-Control', 'no-store').redirect(302, `/download/${encodeURIComponent(offline.file)}`);
+      const settings = windowsSetupSettings(r.manifest, r.packages, mode, ai);
+      const name = decodeURIComponent(new URL(settings.bundle.url).pathname.split('/').pop());
+      const file = path.join(r.dir, name), stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== settings.bundle.bytes || !fs.realpathSync(file).startsWith(r.dir + path.sep)) throw new Error('NO_SETUP_BUNDLE');
+      const bytes = await windowsSetupZip(settings);
+      res.set('Cache-Control', 'no-store').set('X-Content-Type-Options', 'nosniff').attachment(`hwpx-setup-${mode}-${ai}.zip`).send(bytes);
+    } catch (error) {
+      if (/^(NO_SETUP_BUNDLE|BAD_SETUP_SOURCE)$/.test(error.message) || ['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) return res.status(503).json({ error: 'SETUP_NOT_AVAILABLE', message: '간편 설치 파일을 준비 중입니다. 다운로드 페이지에서 프로그램을 받아 주세요.' });
+      next(error);
+    }
   });
   app.get('/download/:file', (req, res) => {
     const r = readCurrent(res); if (!r) return;

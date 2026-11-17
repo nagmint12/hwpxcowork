@@ -990,7 +990,20 @@ pub(crate) fn try_resolve_single_char_style<A: storage::Storage>(
     // 슬롯은 공백도 그 프로그램의 폭을 소비한다. 표시용 대체 글꼴의 좁은 공백을
     // 섞으면 같은 원본 글꼴의 문자와 들여쓰기 전진폭이 달라진다.
     // 확인하지 못한 원본 공백·명시 TrueType·내장 글꼴은 기존 표시 체인으로 조회한다.
-    let font_space_em = cs.use_font_space.then(|| font_families_metric_face.get(1).and_then(Option::as_deref)
+    // [hwpx-cowork] 2026-11-16 한/글 2022 실측(tests/fixtures/layout/fontspace-20261116, 숨은 COM 줄 끝 시험지):
+    // 영문 슬롯이 HFT 프로그램이면 '글꼴에 어울리는 빈칸'도 반각 0.5em 이다 — 한양신명조·한양중고딕·한양견명조,
+    // 10/12/14pt, 본문·표 칸 모두 14pt 700±2HU(useFontSpace=0 과 같음). 한/글 영문 HFT 에는 공백 글리프가 없어
+    // (ENSMJ.HFT 범위 33~126) 아래 갈래가 표시용 TTF(HY신명조 ≈0.333em)의 공백을 돌려주면 줄에 글자가 더 들어간다
+    // (고등교육법 의안원문: 27개 문단이 한 줄씩 짧아 80쪽 / 한/글 81쪽). 공백을 가진 HFT 프로그램은 종전대로 그 폭.
+    // None = 반각(측정 갈래의 기본 공백).
+    let hft_latin_without_space = cs.use_font_space
+        && font_families_metric_face
+            .get(1)
+            .and_then(Option::as_deref)
+            .is_some_and(|face| {
+                super::hft_ttf::is_native(face) && !super::hft_ttf::program_covers(face, ' ')
+            });
+    let font_space_em = if hft_latin_without_space { None } else { cs.use_font_space.then(|| font_families_metric_face.get(1).and_then(Option::as_deref)
         .filter(|face| super::hft_ttf::is_native(face))
         .and_then(|face| declared_space_advance_em(face, cs.bold, cs.italic))).flatten().or_else(|| resolved_space_advance_em(
         cs.use_font_space,
@@ -1001,7 +1014,7 @@ pub(crate) fn try_resolve_single_char_style<A: storage::Storage>(
     )).or_else(|| {
         cs.use_font_space.then(|| font_families_metric_face.get(1).and_then(Option::as_deref)
             .and_then(|face| declared_space_advance_em(face, cs.bold, cs.italic))).flatten()
-    });
+    }) };
 
     let ascii_punct_latin_slot = ascii_punctuation::uses_latin_slot(
         &font_families,

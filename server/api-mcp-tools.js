@@ -9,13 +9,14 @@ const ALLOWED = new Set(TOOL_PROFILES.api);
 const BOUND = ['doc_id', 'request_id', 'expected_attempt', 'image_base64', 'complete'];
 const fault = (code, message) => Object.assign(new Error(message), { code });
 // 도구 결과가 이 오류면 모델에 되돌리지 않고 실행을 멈춘다(취소·다시 요청·선점 잃음). 그 밖의 오류 글(틀린 find 등)은 모델이 보고 고친다
-const STOP_CODES = new Set(['ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER']);
+const STOP_CODES = new Set(['ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER', 'EDIT_SOURCE_CHANGED']);
 const errorCode = result => /오류\(([A-Z_]+)\)/.exec((result.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n'))?.[1];
 const canonical = value => value && typeof value === 'object' ? Array.isArray(value) ? value.map(canonical) : Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
 
 // 실행기는 api 프로필 전체를 native 도구로 전달한다. 문서·요청·시도 바인딩과 실제 결과 기록을 담당한다.
-export async function createApiToolContext({ listTools, callTool, assertCurrent, uploadFile, docId, requestId, attempt, existingFigures = 0 }) {
-  const page = await listTools(), selected = (page.tools || page).filter(t => ALLOWED.has(t.name));
+export async function createApiToolContext({ listTools, callTool, assertCurrent, uploadFile, docId, requestId, attempt, existingFigures = 0, profile = 'api' }) {
+  const allowed = profile === 'workspace' ? new Set(TOOL_PROFILES.workspace) : ALLOWED;
+  const page = await listTools(), selected = (page.tools || page).filter(t => allowed.has(t.name));
   const tools = selected.map(t => {
     // 모델에 주는 스키마는 'null 허용' 가지·값 범위를 뺀다(server/lean.js — 받는 쪽 zod 검사는 그대로, 라운드마다 다시 보내는 글자 수를 줄인다)
     const parameters = leanToolSchema(structuredClone(t.inputSchema || {}));
@@ -25,12 +26,13 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
     parameters.additionalProperties = false;
     return { name: t.name, description: t.description || '', parameters };
   });
-  const names = new Set(tools.map(t => t.name)); const receipts = new Map(); const written = [], savedFiles = []; let figures = Math.max(0, Number(existingFigures) || 0), nativeCharts = 0;
+  const names = new Set(tools.map(t => t.name)); const receipts = new Map(); const written = [], savedFiles = []; let figures = Math.max(0, Number(existingFigures) || 0), nativeCharts = 0, stageAdvanced = null;
   return {
     tools,
     get savedFiles() { return savedFiles; },
     get figures() { return figures; },
     get nativeCharts() { return nativeCharts; },
+    get stageAdvanced() { return stageAdvanced; },
     /** 이번 실행에서 도구로 남긴 결과(최종 JSON 의 같은 결과를 빼는 데 씀 — withoutToolDuplicates) */
     get written() { return written; },
     async call(name, args, signal) {
@@ -50,6 +52,10 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
       if (tool.inputSchema?.properties?.request_id) bound.request_id = requestId;
       if (tool.inputSchema?.properties?.expected_attempt) bound.expected_attempt = attempt;
       const result = await callTool(name, bound, signal);
+      if (profile === 'workspace' && name === 'edit_workspace' && !result.isError) {
+        const value = JSON.parse(result.content.find(c => c.type === 'text').text);
+        if (value.stageCompleted) stageAdvanced = value;
+      }
       if (result.isError && STOP_CODES.has(errorCode(result))) throw fault(errorCode(result), '요청이 취소·다시 요청되었거나 선점이 바뀌었습니다.');
       // 모델에는 영수증만(방금 보낸 글·서식의 되풀이와 이력을 뺀다 — 대화에 쌓이는 글을 줄인다). 같은 쓰기를 다시 부르면 같은 영수증
       const shown = leanToolResult(name, modelToolResult(name, result));

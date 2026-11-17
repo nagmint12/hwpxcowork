@@ -639,6 +639,8 @@ fn sweep_paragraph(base: &str, a: &Paragraph, b: &Paragraph, out: &mut Divergenc
         source_line_seg_vertical_pos: _,
         // 로드 후 재구성된 본문 축의 조판 전용 출처는 원본 IR 비교 대상이 아니다.
         layout_rebased_body_axis: _,
+        // [hwpx-cowork] 원본 줄 나눔 보존 표식 — 조판 전용 출처, 비교 대상 아님.
+        layout_source_text_partition: _,
         // [#5961] 저장 lineseg 의 축 보정폭 — 출처 컨테이너가 결정하는 IR 전용 부수
         // 채널이라 비교 대상 아님. 같은 문서를 HWPX/HWP5 로 읽으면 이 값은 정당하게
         // 다르므로(8 vs 0), 비교에 넣으면 x2h ir-diff 가 없는 차이를 만든다.

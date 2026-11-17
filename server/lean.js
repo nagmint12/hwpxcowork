@@ -76,6 +76,7 @@ function leanHowTo(full, { formattingLean, figureHinted }) {
  */
 export function leanRequest(full) {
   if (!full || typeof full !== 'object' || full.none) return full;
+  if (full.options?.workflow === 'content_format') return full;
   const items = Array.isArray(full.contextItems) ? full.contextItems : null;
   const formattingLean = !!full.formattingHeader?.lean;
   const target = full.target || {};
@@ -105,6 +106,7 @@ export function leanRequest(full) {
     context: items ? `<document_context>\n${escapeContext(contextLines(items))}\n</document_context>` : full.context,
     ...(formats.length ? { formatting: { paragraphs: formats, header: { ...full.formattingHeader, ...(typeof full.formattingHeader?.note === 'string' ? { note: full.formattingHeader.note.replace('contextItems', 'formatting.paragraphs') } : {}) } } } : {}),
     ...(full.tables?.length ? { tables: full.tables } : {}),
+    ...(full.tableInventory ? { tableInventory: full.tableInventory } : {}),
     ...(full.attachments?.length ? { attachments: full.attachments } : {}),
     ...(full.resultAttachments?.length ? { resultAttachments: full.resultAttachments } : {}),
     ...(hasExisting ? { existingResults: dropEmpty(existing) } : {}),
@@ -128,7 +130,7 @@ export function leanListItem(r) {
 // 제안 영수증에서 빼는 것: 방금 보낸 값의 되풀이(글·서식·표·차트 자료)와 이력·작성자
 // (+ 되돌리기용 내부 기록 — …Snapshot·…Fingerprint·…Hash)
 const PROPOSAL_DROP = new Set(['by', 'at', 'reason', 'changeIds', 'log', 'rid', 'find', 'replace', 'occurrence', 'memo', 'text', 'blank', 'format', 'runs', 'table', 'tableEdit', 'pageLayout', 'start', 'end', 'options', 'note']);
-const INTERNAL_KEY = /(Snapshot|Fingerprint|Hash)$/;
+const INTERNAL_KEY = /(Snapshot|Fingerprint|Hash|Undo)$/;
 function slimProposal(p) {
   if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
   const out = {};
@@ -214,6 +216,8 @@ export function leanToolSchema(node) {
   const out = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === '$schema' || SCHEMA_BOUNDS.has(key)) continue;
+    // 빈 스키마({} = 무엇이든)는 true 로 적는다 — 같은 뜻이고, 빈 스키마에 type 을 지어 붙이는 클라이언트가 있다(새 연결 edit 의 ops 항목)
+    if (key === 'additionalProperties' && value && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length) { out.additionalProperties = true; continue; }
     if (key === 'properties' && value && typeof value === 'object') { out.properties = Object.fromEntries(Object.entries(value).map(([name, item]) => [name, leanToolSchema(item)])); continue; }
     out[key] = leanToolSchema(value);
   }

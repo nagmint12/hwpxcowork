@@ -477,7 +477,21 @@ pub(super) fn reconcile_tac_height(
 
     let capped_bottom =
         tac_reconcile::capped_bottom(para_idx, snapped_base, cap, st.tac_height_page());
-    st.commit_tac_capped_bottom(capped_bottom);
+    let advance_end = {
+        let page = st.tac_height_page();
+        page.inline_placements
+            .iter()
+            .filter(|((pi, _), _)| *pi == para_idx)
+            .filter_map(|(_, placement)| placement.advance_end)
+            .reduce(f64::max)
+            .map(|end| (end, page.inline_box_flow_bottom))
+    };
+    st.commit_tac_capped_bottom(capped_bottom, || {
+        format!(
+            "tac_seg_total={tac_seg_total:.1} cap={cap:.1} base={snapped_base:.1} advance_end={advance_end:?} lines={}",
+            fmt.line_heights.len()
+        )
+    });
 }
 
 /// 표 문단의 비표 개체 배치 순서만 조정한다. 뒤쪽 문단 높이 보정은 호출자에 남는다.

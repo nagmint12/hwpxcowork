@@ -100,8 +100,30 @@ export function adoptionInEffect(p, st) {
   return hit(p.ref);
 }
 
+/**
+ * 넣기 제안 p 를 내 수정본에 반영할 때 편집기에 넘길 skip(2026-11-17 docs/MCP_REDESIGN_2026-11-16.md §10.4 나-3, 플러그인 0.4.1 'insertSkip') —
+ * 같은 요청(요청이 없으면 같은 작성자의 요청 없는 제안 — 서버 _insertAfterRef 와 같은 형제 규칙, 여러 안 묶음(gid)의 다른 안은 뺀다)·같은 기준 문단의
+ * 넣기 제안 가운데 pid 가 더 작고 내 수정본에 이미 반영해 둔 것의 글(pid 차례). '반영해 둠' = 내 반영 기록(adopted(q))이 있거나 그 줄들이 지금 편집기의
+ * 그 기준 문단 뒤 넣은 문단(st.inserted — 지금 기준 ref)에 모두 있음. 플러그인은 기준 문단 뒤 내 초안 문단 가운데 이 글과 차례대로 맞는 마지막 문단 뒤에
+ * 넣는다(사람이 고쳐 맞지 않는 글은 건너뛴다 — 넘겨도 해가 없다). 더 큰 pid 형제는 넘기지 않으므로 이미 들어가 있으면 새 문단이 그 앞에 놓인다.
+ * 표·그림 같은 개체 제안은 수정본 반영 대상이 아니라 글 넣기(type insert)만 본다. exclude = 같은 applyBatch 로 함께 넣는 pid(묶음 안은 caret 으로 잇는다)
+ */
+export function insertSkipOf(p, proposals, st, adopted = () => false, exclude = null) {
+  if (!p || (p.type || 'replace') !== 'insert') return [];
+  const after = p.afterRef || p.ref; const pid = Number(p.pid);
+  const mate = (q) => (p.rid != null ? q.rid === p.rid : q.rid == null && q.by === p.by);
+  const lines = (t) => String(t ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim());
+  const pool = (Array.isArray(st?.inserted) ? st.inserted : []).filter((x) => x && x.afterRef === after).map((x) => String(x.text ?? '').trim());
+  const present = (q) => pool.length > 0 && lines(q.text).every((l) => pool.includes(l));
+  return (Array.isArray(proposals) ? proposals : [])
+    .filter((q) => q && Number(q.pid) < pid && q.type === 'insert' && q.status === 'pending' && mate(q) && (q.afterRef || q.ref) === after
+      && !(p.gid != null && q.gid === p.gid) && !exclude?.has(Number(q.pid)) && (adopted(q) || present(q)))
+    .sort((a, b) => a.pid - b.pid).map((q) => String(q.text ?? ''));
+}
+
 /** applyBatch 항목 하나(제안 → 편집기 손잡이 인자, adoptProposal 의 applyText·insertParagraphAfter 인자와 같은 꼴, key = pid) */
 export function batchItemOf(p) {
+  if (p.type === 'edit_batch') throw new Error('내용·서식 묶음은 문서에 바로 적용하세요');
   if ((p.type || 'replace') === 'insert') return { op: 'insert', afterRef: p.afterRef || p.ref, text: p.text || '', key: Number(p.pid) };
   const it = { op: 'text', ref: p.ref, find: p.find ?? '', replace: p.replace ?? '', occurrence: p.occurrence || 1, key: Number(p.pid) };
   if (Number.isInteger(p.start) && Number.isInteger(p.end)) { it.start = p.start; it.end = p.end; }
@@ -437,11 +459,11 @@ export function createDocStore(id) {
    * 'AI에게 요청하기' — 메모 답장을 그 메모 자리의 AI 작업(지시)으로 이어 맡긴다(서버가 같은 글을 답글로도 남긴다). 보낼 곳은 서버가 앞 작업 경로로 정한다
    * → 서버 응답(request·route·hint). 서버 AI 가 바로 처리하면 결과까지 기다린다
    */
-  async function askAiFromMemo(m, text) {
+  async function askAiFromMemo(m, text, { route } = {}) {
     const mid = m?.id ?? m;
     s.busy++; s.sending++;
     try {
-      const r = await api(`${base}/memos/${encodeURIComponent(mid)}/ask-ai`, { method: 'POST', body: { text } });
+      const r = await api(`${base}/memos/${encodeURIComponent(mid)}/ask-ai`, { method: 'POST', body: { text, ...(route ? { route } : {}) } });
       await refresh();
       const rid = r?.request?.rid;
       if (rid != null) s.activeRid = rid;
@@ -522,6 +544,7 @@ export function createDocStore(id) {
     for (const k of Object.keys(t)) if (t[k] === undefined) delete t[k];
     const body = { kind: c.kind, preset: c.kind === 'polish' ? c.preset || 'concise' : null, instruction: c.instruction || '', target: t, attachments: [...c.attachments], options: { count: c.kind === 'suggest' ? Number(c.count) || 1 : undefined, includeInstruction: !!c.includeInstruction }, summary: null };
     if (c.route) body.route = c.route;
+    if (c.kind === 'instruct' && c.workflow === 'content_format' && state.config?.features?.contentFormatWorkflow) body.options.workflow = 'content_format';
     if (c.tutorialStep) body.tutorialStep = c.tutorialStep;   // 튜토리얼 6 의 단계(연결이 없으면 그 단계의 예시 답변)
     if (c.format) body.options.format = c.format;
     return body;
@@ -585,12 +608,16 @@ export function createDocStore(id) {
    *  - 'reject': 남은 것 거절 { reject: 'rest' }(여러 안 묶음의 대기 안 포함)
    * → 서버 응답({ request, results, counts, version, milestone }) 또는 null(하지 않음)
    */
-  async function resolveRequest(r0, mode0) {
+  async function resolveRequest(r0, mode0, { pids = null } = {}) {
     const r = r0 && typeof r0 === 'object' ? (request(r0.rid) || r0) : request(r0);
     if (!r) { toast('AI 작업을 찾지 못했습니다'); return null; }
     const rid = Number(r.rid); const tag = `AI 작업 #${rid}`;
     if (resolving.has(rid)) return null;
-    const g = progress(r);
+    // 묶음 제안 하나만 정하기(2026-11-17, docs/UI_TERMS.md §9 — ui.js BundleItem 의 [반영 (n)]·[거절 (n)]): 요청의 [모두 반영]·[남은 n건 거절]과 같은 길을
+    // 그 묶음의 남은 pid 로만 좁힌다(서버에는 'rest' 대신 그 목록). 실시간 문서 [반영] = 서버 resolve { apply }, 비실시간 = 편집기 applyBatch(pid 차례)
+    const only = Array.isArray(pids) ? new Set(pids.map(Number)) : null;
+    const g0 = progress(r);
+    const g = g0 && only ? { ...g0, openPids: g0.openPids.filter((pid) => only.has(Number(pid))), openAlt: 0, entries: g0.entries.filter((it) => it.open?.some((pid) => only.has(Number(pid)))) } : g0;
     const post = (body) => api(`${base}/requests/${rid}/resolve`, { method: 'POST', body });
     // v0.4 실시간 문서(§4.2): [모두 반영] = 공유 문서에 바로(서버 resolve { apply }) — 편집기 applyBatch·반영 기록(adopt)을 쓰지 않는다.
     // 반영하면 WS doc changed 로 모든 편집기(요청자 것도)가 따라간다(web/editor.js 맞추기)
@@ -604,7 +631,7 @@ export function createDocStore(id) {
         if (ed.locked) { toast(`편집기가 잠시 잠겨 있습니다(${ed.locked}) — 끝난 뒤 다시 하세요`); return null; }
         const NO_BATCH = '이 편집기 빌드는 제안을 한 번에 반영할 수 없습니다 — npm run build:studio 로 다시 빌드하세요(하나씩 보기에서 하나씩은 반영할 수 있습니다)';
         if (typeof ed.applyBatch !== 'function') { toast(NO_BATCH, { kind: 'error', ms: 8000 }); return null; }
-        const list = (g?.openPids || []).map((pid) => proposal(pid)).filter((p) => p && p.status === 'pending' && p.gid == null && !['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete'].includes(p.type || 'replace')).sort((a, b) => a.pid - b.pid);
+        const list = (g?.openPids || []).map((pid) => proposal(pid)).filter((p) => p && p.status === 'pending' && p.gid == null && !['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete', 'edit_batch', 'para_delete', 'para_move'].includes(p.type || 'replace')).sort((a, b) => a.pid - b.pid);
         if (!list.length) { toast(`${tag}: 반영할 남은 제안이 없습니다${g?.openAlt ? ' — 여러 안은 하나씩 보기에서 고르세요' : ''}`); return null; }
         // 서식은 서버가 현재 수정본 위에 적용한다. 각 성공 뒤 저장·다시 열기를 마쳐 다음 제안을 처리한다.
         if (list.some(isRichProposal)) {
@@ -624,7 +651,14 @@ export function createDocStore(id) {
         try { await ed.saveNow?.(); } catch { /* 저장을 멈춘 상태 등 — 칩이 알린다. 반영은 그대로 한다 */ }
         if (!ed.ready || ed.locked) { toast('편집기가 다시 열리는 중입니다 — 잠시 뒤 다시 누르세요'); return null; }
         const take = list.slice(0, 200);   // 플러그인 한도(§9.6 — 넘으면 TOO_MANY)
-        const res = await ed.applyBatch(take.map(batchItemOf));
+        const items = take.map(batchItemOf);
+        // 앞서 하나씩 반영해 둔 같은 기준 문단의 넣기가 있으면 그 초안 뒤에서 잇는다(§10.4 나-3 — 묶음 안끼리는 플러그인이 caret 으로 잇는다)
+        if (ed.canInsertSkip?.() && take.some((p) => p.type === 'insert')) {
+          let st = null; try { st = await ed.draftState?.(); } catch { st = null; }
+          const inBatch = new Set(take.map((p) => Number(p.pid)));
+          take.forEach((p, k) => { const skip = insertSkipOf(p, s.proposals, st, adoptedByMe, inBatch); if (skip.length) items[k].skip = skip; });
+        }
+        const res = await ed.applyBatch(items);
         const results = Array.isArray(res?.results) ? res.results : [];
         const okPids = results.filter((x) => x && x.ok).map((x) => Number(x.key)).filter((x) => take.some((p) => Number(p.pid) === x));
         if (res?.reason === 'UNSUPPORTED') { toast(NO_BATCH, { kind: 'error', ms: 8000 }); return null; }   // 옛 편집기 빌드(web/editor.js applyBatch)
@@ -659,18 +693,21 @@ export function createDocStore(id) {
           const groupPid = new Set(proposalsOf(rid).filter((p) => p.gid != null).map((p) => Number(p.pid)));
           const mine = g?.openPids || [];
           if (!mine.length) { toast(liveAdopt ? `${tag}: 문서에 반영할 남은 제안이 없습니다${g?.openAlt ? ' — 여러 안은 하나씩 보기에서 고르세요' : ''}` : `${tag}: 문서에 적용할 남은 제안이 없습니다`); return null; }
-          body = { apply: serverOpen ? restOr(mine, serverOpen.filter((pid) => !groupPid.has(Number(pid)))) : 'rest' };
+          body = { apply: only ? mine : serverOpen ? restOr(mine, serverOpen.filter((pid) => !groupPid.has(Number(pid)))) : 'rest' };
           // 실시간 문서: 이 창에서 친 글을 먼저 보낸다(서버가 그 위에 반영한다)
           if (realtime()) {
             await saveDraftNow();
             if (s.editor?.dirty || s.live.error) throw new Error(s.live.error || '저장하지 못한 편집이 있습니다. 저장을 마친 뒤 반영하세요.');
           }
         } else {
-          const mine = (g?.entries || []).filter((it) => it.state === 'open').flatMap((it) => it.list.filter((p) => p.status === 'pending').map((p) => Number(p.pid)));
+          // 남은 항목의 대기 제안(묶음 제안은 반영해 두지 않은 구성원만 — util.requestProgress 의 it.open)
+          const mine = (g?.entries || []).filter((it) => it.state === 'open').flatMap((it) => (Array.isArray(it.open) ? it.open : it.list.filter((p) => p.status === 'pending').map((p) => Number(p.pid))))
+            .filter((pid) => !only || only.has(Number(pid)));
           if (!mine.length) { toast(`${tag}: 거절할 남은 제안이 없습니다`); return null; }
-          body = { reject: serverOpen ? restOr(mine, serverOpen) : 'rest' };
+          body = { reject: only ? mine : serverOpen ? restOr(mine, serverOpen) : 'rest' };
         }
-        const n0 = g?.open || 0;
+        // 단추의 수와 같게: 요청 전체면 남은 항목 수, 묶음 하나면 그 묶음의 제안 수
+        const n0 = only ? (body.reject?.length || 0) : g?.open || 0;
         const out = await post(body);
         putRequest(out?.request);
         await refresh(['requests', 'proposals', 'memos', 'info', 'changes', 'paragraphs', 'history', 'crs']);
@@ -869,7 +906,8 @@ export function createDocStore(id) {
     if (!ed?.ready) { toast('편집기가 아직 준비되지 않았습니다'); return { ok: false, reason: 'NOT_READY' }; }
     if (ed.locked) { toast(`편집기가 잠시 잠겨 있습니다(${ed.locked}) — 끝난 뒤 다시 하세요`); return { ok: false, reason: 'BUSY' }; }
     const type = prop.type || 'replace';
-    if (['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete'].includes(type)) { toast(`${type === 'page_layout' ? '쪽 구성' : type === 'figure' ? '그림' : type === 'toc' ? '차례 새로 고침' : type === 'delete' ? '개체 지우기' : '표'} 제안은 [문서에 바로 적용]을 쓰세요`); return { ok: false, reason: 'TABLE' }; }
+    // 문단 지우기·옮기기(para_delete·para_move — 2026-11-17)도 수정본(편집기 글)에 넣을 수 없다 — 문서에 바로 적용만
+    if (['table', 'table_edit', 'toc', 'figure', 'page_layout', 'delete', 'edit_batch', 'para_delete', 'para_move'].includes(type)) { toast(`${type === 'edit_batch' ? '내용·서식 묶음' : type === 'page_layout' ? '쪽 구성' : type === 'figure' ? '그림' : type === 'toc' ? '차례 새로 고침' : type === 'delete' ? '개체 지우기' : type === 'para_delete' ? '문단 지우기' : type === 'para_move' ? '문단 옮기기' : '표'} 제안은 [문서에 바로 적용]을 쓰세요`); return { ok: false, reason: 'TABLE' }; }
     if (prop.status !== 'pending') { toast(`대기 중인 제안만 반영할 수 있습니다(지금: ${prop.status})`); return { ok: false, reason: 'STATE' }; }
     if (isRichProposal(prop)) {
       if (adoptedByMe(prop) && formatAdoptionOf(prop, myName())) return { ok: false, reason: 'ADOPTED' };
@@ -889,7 +927,16 @@ export function createDocStore(id) {
       }
     }
     let r;
-    if (type === 'insert') r = await ed.insertParagraphAfter({ afterRef: prop.afterRef || prop.ref, text: prop.text || '' });
+    if (type === 'insert') {
+      const arg = { afterRef: prop.afterRef || prop.ref, text: prop.text || '' };
+      // 같은 요청·같은 기준 문단의 앞 차례 넣기를 이미 반영해 두었으면 그 초안 뒤에(§10.4 나-3 — 옛 편집기 빌드면 예전 길 그대로)
+      if (ed.canInsertSkip?.()) {
+        let st = null; try { st = await ed.draftState?.(); } catch { st = null; }
+        const skip = insertSkipOf(prop, s.proposals, st, adoptedByMe);
+        if (skip.length) arg.skip = skip;
+      }
+      r = await ed.insertParagraphAfter(arg);
+    }
     else {
       const arg = { ref: prop.ref, find: prop.find ?? '', replace: prop.replace ?? '', occurrence: prop.occurrence || 1, label: `제안 #${prop.pid}` };
       if (Number.isInteger(prop.start) && Number.isInteger(prop.end)) { arg.start = prop.start; arg.end = prop.end; }
@@ -930,6 +977,7 @@ export function createDocStore(id) {
   async function downloadHangul() {
     try { await saveDraftNow(); } catch { /* 저장 실패는 칩이 보여 준다 — 내려받기는 계속 */ }
     const r = await download(`${base}/file?kind=export`, null);
+    if (r && s.info?.tutorialSession) s.hangulDownloads = (s.hangulDownloads || 0) + 1;
     if (r && r.headers?.get?.('X-Export-Fallback')) toast('겹친 변경 추적이 있어 변경 추적 포함으로 저장했습니다(변경 추적을 정리하면 보이는 그대로 저장됩니다)', { kind: 'warn', ms: 8000 });
     return r;
   }

@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { apiBaseFrom } from './bridge.js';
+import { withAiDebug, debugRecord, debugError } from './ai-debug.js';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const abortError = () => fail('ABORTED', '오케스트레이션 실행을 중지했습니다.');
@@ -183,15 +184,18 @@ class OrchestrationWorker {
   }
 
   async call(name, args, signal = this.shutdown.signal) {
+    debugRecord('orchestration.mcp.call', { name, arguments: args });
     signal.throwIfAborted();
     if (this.customCall) return this.customCall(name, args, { signal, session: this.session });
     const client = await this.connected();
     let result;
     try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: this.timing.callTimeoutMs, signal }); }
     catch (error) {
+      debugRecord('orchestration.mcp.error', debugError(error), { tool: name });
       if (name !== 'report_orchestration_worker' && this.client === client) { this.client = null; await client.close().catch(() => {}); }
       throw error;
     }
+    debugRecord('orchestration.mcp.result', result, { tool: name });
     if (result.isError) throw fail(/오류\(([A-Z_]+)\)/.exec(textContent(result))?.[1] || (/unknown tool|tool not found/i.test(textContent(result)) ? 'UNKNOWN_TOOL' : 'TOOL_FAILED'), '중앙 서버가 작업을 받지 못했습니다.');
     const parsed = parseJson(textContent(result));
     if (!parsed) throw fail('BAD_RESPONSE', '중앙 서버의 결과 형식이 올바르지 않습니다.');
@@ -277,6 +281,11 @@ class OrchestrationWorker {
   }
 
   async process(claim) {
+    return withAiDebug({ context: { route: 'orchestration-worker', docId: claim.run.doc_id, runId: claim.run.id, taskId: claim.task.id, attempt: claim.attempt } }, () => this.processRecorded(claim));
+  }
+
+  async processRecorded(claim) {
+    debugRecord('orchestration.claim', claim);
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, this.shutdown.signal]);
     const identity = { run_id: claim.run.id, task_id: claim.task.id, lease_token: claim.lease_token, attempt: claim.attempt };

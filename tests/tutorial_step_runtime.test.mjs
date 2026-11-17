@@ -27,8 +27,9 @@ test('단계 목록은 DOM과 네트워크 없이 결과보고서 15개 행동�
   } finally { globalThis.fetch = oldFetch; }
 });
 
-test('개별 문구를 수정하고 안내를 끼워 넣어도 15개 행동과 숫자 이동은 유지된다', async () => {
-  const env = environment(); env.selectFor = async () => ({ ref: 's0/p1' }); env.d.openComposer = () => {};
+test('개별 문구를 수정하고 안내를 끼워 넣어도 빠른 선택은 그 안내를 넘기지 않는다', async () => {
+  const env = environment(); const at = { ref: 's0/p1', start: 0, end: 17 };
+  env.locate = () => at; env.selectExact = async text => { env.s.selection = { ...at, text }; };
   const refs = refsFor('report-flow');
   refs[0].title = '첫 문장 고르기'; refs[0].text = '수정한 안내'; refs[0].next = '조건 우회 금지';
   refs.splice(1, 0, { key: 'notice', kind: 'custom', actionId: 'notice', title: '선택 확인', text: '선택 상태를 확인하세요.' });
@@ -38,7 +39,8 @@ test('개별 문구를 수정하고 안내를 끼워 넣어도 15개 행동과 �
   assert.equal(steps[1].text, '수정한 안내');
   assert.equal(steps[1].originalTitle, '1. 고칠 글 고르기');
   assert.equal(steps[1].next, undefined, '버튼 문구는 자동 완료 조건을 없애지 않음');
-  assert.equal(steps[await steps[1].action.run()].originalTitle, '3. AI 에게 말하기');
+  assert.equal(await steps[1].action.run(), undefined);
+  assert.equal(steps[1].until(), true);
   assert.equal(steps[2].title, '선택 확인');
 });
 
@@ -57,12 +59,12 @@ test('등록된 custom 동작은 복잡한 기존 행동과 상태를 그대로 
   const specs = describeTutorialModule('report-flow').steps;
   const refs = refsFor('report-flow').slice(0, 5);
   refs[0] = { key: 'custom-select', kind: 'custom', actionId: 'registered-handler', title: '직접 연결한 선택 행동', text: '원래 선택 기능을 사용합니다.', params: { handlerId: specs[0].handlerId } };
-  const env = environment(); let opened = false;
-  env.selectFor = async () => ({ ref: 's0/p1' }); env.d.openComposer = () => { opened = true; };
+  const env = environment(); const at = { ref: 's0/p1', start: 0, end: 17 };
+  env.locate = () => at; env.selectExact = async text => { env.s.selection = { ...at, text }; };
   const steps = buildComposedTutorialSteps(course([entry(refs)]), env);
-  const target = await steps[1].action.run();
-  assert.equal(opened, true);
-  assert.equal(steps[target].title, 'AI 에게 말하기');
+  await steps[1].action.run();
+  assert.equal(steps[1].until(), true);
+  assert.equal(steps[2].title, 'AI에게 맡기기');
   assert.equal(steps[1].id, 'report/custom/custom-select');
   const duplicates = [...refs, { key: 'duplicate', kind: 'builtin', stepId: specs[0].stepId }];
   assert.throws(() => validateTutorialStepReferences({ courses: [course([entry(duplicates)])] }), /한 번/);

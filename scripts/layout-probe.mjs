@@ -3,6 +3,7 @@
 // 문단에는 저장 줄(linesegarray)을 넣지 않는다 — 편집기·AI 가 문단·그림을 넣은 문서처럼 엔진이 직접 조판하는 경로를 시험한다.
 //
 //   node scripts/layout-probe.mjs                 → tests/fixtures/layout/probe_objects.hwpx 생성(기본 서식: testdata/매크로테스트용_저장.hwpx)
+//   node scripts/layout-probe.mjs --set captions [--hangul] → 캡션 시험지 probe_objects_captions.hwpx(글자처럼 도형·차트 캡션, 2026-11-17)
 //   node scripts/layout-probe.mjs --hangul        → 위 + 한/글 COM 으로 열어(인쇄 없이 CreatePageImage) tests/fixtures/layout/probe_objects_hangul.json 생성
 //   node scripts/layout-trace.mjs tests/fixtures/layout/probe_objects.hwpx --hangul <한/글 결과 폴더>   → 문단별 비교
 // 시험 사례(쪽마다 하나, `CASES`)의 이름·설명이 기준 JSON 의 cases 에 들어가 tests/layout_fidelity.test.mjs 가 사례별로 보고한다.
@@ -135,6 +136,78 @@ add('empty-anchor-tables', '빈 앵커 문단의 자리차지 표 4개: 글머�
     para({ paraPr: PARA_PLAIN, runs: [`<hp:run charPrIDRef="${CHAR_BODY}">${table({ pageBreak: 'NONE' })}<hp:t/></hp:run>`] }), text('표3 뒤 글(글머리표 없음, NONE).'),
     para({ paraPr: PARA_BULLET, runs: [`<hp:run charPrIDRef="${CHAR_BODY}">${table({ pageBreak: 'NONE', cap: '[표] 캡션 있는 표' })}<hp:t/></hp:run>`] }), text('표4 뒤 글(글머리표, NONE, 위 캡션).')]);
 
+// ── 캡션 시험지(--set captions, 2026-11-17) ─────────────────────────────
+// 글자처럼 취급한 도형·차트의 위/아래/왼/오른 캡션이 그 줄 높이에 들어가는지(그림은 위 A~B 사례·vendor/README 11번),
+// 캡션 여러 줄·캡션 간격·바깥 여백, 글 사이에 놓인 경우, 자리차지(글자처럼 아님) 도형의 캡션을 한/글로 잰다.
+// 결과: tests/fixtures/layout/probe_objects_captions.hwpx · probe_objects_captions_hangul.json.
+const MAT = '<hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>';
+/** 캡션 — side TOP|BOTTOM|LEFT|RIGHT, gap(간격), width(옆 캡션 폭), lastWidth(위/아래 캡션 글 폭), num(캡션 번호 넣기). */
+function cap2({ side = 'BOTTOM', gap = 850, width = 8503, lastWidth = 30000, label = '시험 캡션', num = false }) {
+  const runs = num
+    ? `<hp:run charPrIDRef="${CHAR_CAPTION}"><hp:t>[그림 </hp:t><hp:ctrl><hp:autoNum num="1" numType="PICTURE"><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar="" supscript="0"/></hp:autoNum></hp:ctrl><hp:t>] ${esc(label)}</hp:t></hp:run>`
+    : `<hp:run charPrIDRef="${CHAR_CAPTION}"><hp:t>${esc(label)}</hp:t></hp:run>`;
+  return `<hp:caption side="${side}" fullSz="0" width="${width}" gap="${gap}" lastWidth="${lastWidth}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">`
+    + `<hp:p id="0" paraPrIDRef="${PARA_CAPTION}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${runs}</hp:p></hp:subList></hp:caption>`;
+}
+const objPos = (tac) => `<hp:pos treatAsChar="${tac ? 1 : 0}" affectLSpacing="0" flowWithText="1" allowOverlap="${tac ? 1 : 0}" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="${tac ? 'PARA' : 'COLUMN'}" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>`;
+/** 사각형(채움·테두리) — tac 아니면 위아래 자리차지. */
+function rect({ w = 30000, h = 8000, tac = true, margin = [0, 0, 0, 0], cap = null }) {
+  return `<hp:rect id="${nextId()}" zOrder="${uid % 50}" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="${nextId()}" ratio="0">`
+    + `<hp:offset x="0" y="0"/><hp:orgSz width="${w}" height="${h}"/><hp:curSz width="${w}" height="${h}"/><hp:flip horizontal="0" vertical="0"/>`
+    + `<hp:rotationInfo angle="0" centerX="${w >> 1}" centerY="${h >> 1}" rotateimage="1"/><hp:renderingInfo>${MAT}</hp:renderingInfo>`
+    + `<hp:lineShape color="#1F4E9E" width="33" style="SOLID" endCap="FLAT" headStyle="NORMAL" tailStyle="NORMAL" headfill="1" tailfill="1" headSz="MEDIUM_MEDIUM" tailSz="MEDIUM_MEDIUM" outlineStyle="NORMAL" alpha="0"/>`
+    + `<hc:fillBrush><hc:winBrush faceColor="#D6E6FF" hatchColor="#000000" alpha="0"/></hc:fillBrush><hp:shadow type="NONE" color="#B2B2B2" offsetX="0" offsetY="0" alpha="0"/>`
+    + `<hc:pt0 x="0" y="0"/><hc:pt1 x="${w}" y="0"/><hc:pt2 x="${w}" y="${h}"/><hc:pt3 x="0" y="${h}"/>`
+    + `<hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/>${objPos(tac)}`
+    + `<hp:outMargin left="${margin[0]}" right="${margin[1]}" top="${margin[2]}" bottom="${margin[3]}"/>`
+    + (cap ? cap2(cap) : '') + `</hp:rect>`;
+}
+/** 차트(Chart/chart1.xml — tests/fixtures/layout/probe_chart.xml 을 넣는다). X08 과 같은 꼴(hp:chart, 저장 줄 없음). */
+function chart({ w = 38268, h = 17008, margin = [0, 0, 0, 0], cap = null }) {
+  return `<hp:chart id="${nextId()}" zOrder="${uid % 50}" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" chartIDRef="Chart/chart1.xml">`
+    + `<hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/>${objPos(true)}`
+    + `<hp:outMargin left="${margin[0]}" right="${margin[1]}" top="${margin[2]}" bottom="${margin[3]}"/>`
+    + (cap ? cap2(cap) : '') + `</hp:chart>`;
+}
+const objPara = (xml, o = {}) => para({ paraPr: o.paraPr ?? PARA_CENTER, runs: [`<hp:run charPrIDRef="${CHAR_BODY}"><hp:t></hp:t>${xml}<hp:t/></hp:run>`] });
+const CAP3 = '캡션이 세 줄로 접히도록 길게 쓴 캡션 글입니다. 캡션 줄 높이와 줄간격이 그 줄의 높이에 어떻게 들어가는지 본다. 한 줄 더 넘어가게 조금 더 씁니다.';
+const CAPSIDE = '옆 캡션이 개체보다 높게 여러 줄로 접히는 글입니다.';
+const CAPTION_CASES = [];
+function addCap(name, desc, paras) { CAPTION_CASES.push({ name, desc, paras }); }
+addCap('cap-rect-bottom-top', '글자처럼 사각형(30000×8000) 아래 캡션 한 줄·위 캡션 한 줄(간격 850)·캡션 없음.',
+  [text('캡션 사각형 시작.', { pageBreak: true }), objPara(rect({ cap: { side: 'BOTTOM', label: '[아래] 사각형 캡션' } })), text('아래 캡션 뒤 글.'),
+    objPara(rect({ cap: { side: 'TOP', label: '[위] 사각형 캡션' } })), text('위 캡션 뒤 글.'), objPara(rect({})), text('캡션 없는 사각형 뒤 글.')]);
+addCap('cap-rect-gap', '아래 캡션 간격 0 / 2000 / 위 캡션 간격 2000.',
+  [text('캡션 간격 시작.', { pageBreak: true }), objPara(rect({ cap: { gap: 0, label: '[간격 0] 캡션' } })), text('간격 0 뒤 글.'),
+    objPara(rect({ cap: { gap: 2000, label: '[간격 2000] 캡션' } })), text('간격 2000 뒤 글.'),
+    objPara(rect({ cap: { side: 'TOP', gap: 2000, label: '[위 간격 2000] 캡션' } })), text('위 간격 2000 뒤 글.')]);
+addCap('cap-rect-multiline', '캡션 여러 줄(lastWidth 30000) — 아래·위.',
+  [text('여러 줄 캡션 시작.', { pageBreak: true }), objPara(rect({ cap: { label: CAP3 } })), text('여러 줄 아래 캡션 뒤 글.'),
+    objPara(rect({ cap: { side: 'TOP', label: CAP3 } })), text('여러 줄 위 캡션 뒤 글.')]);
+addCap('cap-rect-side', '왼/오른 캡션(폭 8503) — 개체보다 캡션이 높을 때(사각형 높이 1500)와 낮을 때.',
+  [text('옆 캡션 시작.', { pageBreak: true }), objPara(rect({ w: 20000, h: 1500, cap: { side: 'LEFT', label: CAPSIDE } })), text('왼 캡션(낮은 개체) 뒤 글.'),
+    objPara(rect({ w: 20000, h: 1500, cap: { side: 'RIGHT', label: CAPSIDE } })), text('오른 캡션(낮은 개체) 뒤 글.'),
+    objPara(rect({ w: 20000, h: 8000, cap: { side: 'LEFT', label: '[왼] 짧은 캡션' } })), text('왼 캡션(높은 개체) 뒤 글.')]);
+addCap('cap-rect-margin', '바깥 여백 283(사방) + 아래 캡션 / 위 캡션.',
+  [text('여백 캡션 시작.', { pageBreak: true }), objPara(rect({ margin: [283, 283, 283, 283], cap: { label: '[여백] 아래 캡션' } })), text('여백 아래 캡션 뒤 글.'),
+    objPara(rect({ margin: [283, 283, 283, 283], cap: { side: 'TOP', label: '[여백] 위 캡션' } })), text('여백 위 캡션 뒤 글.')]);
+addCap('cap-rect-inline', '글 사이 글자처럼 사각형(6000×3000) + 아래 캡션 — 그 줄의 높이·기준선.',
+  [text('글 사이 캡션 시작.', { pageBreak: true }), para({ runs: [textRun('앞 글 '), `<hp:run charPrIDRef="${CHAR_BODY}">${rect({ w: 6000, h: 3000, cap: { lastWidth: 6000, label: '작은 캡션' } })}<hp:t/></hp:run>`, textRun(' 뒤 글. ' + LONG(3))] }), text('다음 문단.')]);
+addCap('cap-chart', '글자처럼 차트(38268×17008, X08 꼴) — 아래 캡션(번호 포함)·위 캡션.',
+  [text('차트 캡션 시작.', { pageBreak: true }), objPara(chart({ cap: { num: true, lastWidth: 38268, label: '차트 아래 캡션' } })), text('차트 아래 캡션 뒤 글.'),
+    objPara(chart({ cap: { side: 'TOP', lastWidth: 38268, label: '[위] 차트 캡션' } })), text('차트 위 캡션 뒤 글.')]);
+addCap('cap-chart-note', 'X08 과 같은 문단: 왼 여백 3543 차트 + 아래 캡션(번호) + 줄바꿈 + 주석 글 두 줄.',
+  [text('차트 주석 시작.', { pageBreak: true }),
+    para({ paraPr: PARA_PLAIN, runs: [`<hp:run charPrIDRef="${CHAR_BODY}"><hp:t></hp:t>${chart({ margin: [3543, 0, 0, 0], cap: { num: true, lastWidth: 38268, label: '차트 아래 캡션' } })}<hp:t><hp:lineBreak/></hp:t></hp:run>`, textRun('주: ' + LONG(2), CHAR_CAPTION)] }),
+    text('주석 뒤 글.')]);
+addCap('cap-rect-float', '자리차지(글자처럼 아님) 위아래 사각형 + 아래 캡션 / 여러 줄 아래 캡션 — 캡션 줄 합성이 배치에 쓰이는 반례.',
+  [text('자리차지 캡션 시작.', { pageBreak: true }), para({ runs: [`<hp:run charPrIDRef="${CHAR_BODY}">${rect({ tac: false, cap: { label: '[자리차지] 아래 캡션' } })}<hp:t/></hp:run>`] }), text('자리차지 아래 캡션 뒤 글.'),
+    para({ runs: [`<hp:run charPrIDRef="${CHAR_BODY}">${rect({ tac: false, cap: { label: CAP3 } })}<hp:t/></hp:run>`] }), text('자리차지 여러 줄 캡션 뒤 글.')]);
+addCap('cap-pic-float', '자리차지 그림(빈 앵커) + 아래 캡션 / 위 캡션 — 그림도 같은 띠 규칙인지.',
+  [text('자리차지 그림 캡션 시작.', { pageBreak: true }), para({ runs: [picRun({ tac: false, w: 30000, h: 8000, margin: [0, 0, 0, 0], cap: { label: '[자리차지 그림] 아래 캡션' } })] }), text('자리차지 그림 아래 캡션 뒤 글.'),
+    para({ runs: [picRun({ tac: false, w: 30000, h: 8000, margin: [0, 0, 0, 0], cap: { side: 'TOP', label: '[자리차지 그림] 위 캡션' } })] }), text('자리차지 그림 위 캡션 뒤 글.')]);
+const CASE_SETS = { objects: { cases: CASES, out: 'probe_objects.hwpx' }, captions: { cases: CAPTION_CASES, out: 'probe_objects_captions.hwpx', extra: { 'Chart/chart1.xml': path.join(FIX, 'probe_chart.xml') } } };
+
 // ── 문서 만들기 ─────────────────────────────────────────────────────────
 function png(w, h) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
@@ -146,7 +219,8 @@ function png(w, h) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-export async function buildProbe(templatePath, outPath) {
+export async function buildProbe(templatePath, outPath, set = 'objects') {
+  const { cases: CASES_OF_SET, extra = {} } = CASE_SETS[set];
   const zin = await JSZip.loadAsync(fs.readFileSync(templatePath));
   const section = await zin.file('Contents/section0.xml').async('string');
   // 첫 문단의 구역·단 정의만 남긴다(글·메모는 뺀다).
@@ -155,7 +229,7 @@ export async function buildProbe(templatePath, outPath) {
   const colEnd = section.indexOf('</hp:ctrl>', secEnd) + '</hp:ctrl>'.length;
   const head = section.slice(0, start);
   const first = section.slice(start, colEnd).replace(/paraPrIDRef="\d+"/, `paraPrIDRef="${PARA_PLAIN}"`) + `</hp:run>${textRun('조판 시험지 — 사례마다 새 쪽에서 시작한다.')}</hp:p>`;
-  const body = CASES.flatMap((c) => c.paras).join('');
+  const body = CASES_OF_SET.flatMap((c) => c.paras).join('');
   const out = new JSZip();
   for (const [name, f] of Object.entries(zin.files)) {
     if (f.dir) continue;
@@ -164,6 +238,7 @@ export async function buildProbe(templatePath, outPath) {
     else if (/^Preview\//.test(name)) continue;
     else out.file(name, await f.async('uint8array'), { compression: name === 'mimetype' ? 'STORE' : 'DEFLATE' });
   }
+  for (const [name, src] of Object.entries(extra)) out.file(name, fs.readFileSync(src));
   // mimetype 은 첫 항목·무압축이어야 한다.
   const ordered = new JSZip();
   ordered.file('mimetype', await out.file('mimetype').async('uint8array'), { compression: 'STORE' });
@@ -171,14 +246,16 @@ export async function buildProbe(templatePath, outPath) {
   fs.writeFileSync(outPath, await ordered.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
   // 사례 경계 — 사례 i 는 문단 [startPara, endPara) (0번 문단은 구역 정의 문단).
   let pi = 1;
-  return CASES.map((c) => { const r = { name: c.name, desc: c.desc, startPara: pi, endPara: pi + c.paras.length }; pi += c.paras.length; return r; });
+  return CASES_OF_SET.map((c) => { const r = { name: c.name, desc: c.desc, startPara: pi, endPara: pi + c.paras.length }; pi += c.paras.length; return r; });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const template = args.includes('--template') ? args[args.indexOf('--template') + 1] : path.join(root, 'testdata', '매크로테스트용_저장.hwpx');
-  const outPath = args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(FIX, 'probe_objects.hwpx');
-  const cases = await buildProbe(template, outPath);
+  const set = args.includes('--set') ? args[args.indexOf('--set') + 1] : 'objects';
+  if (!CASE_SETS[set]) throw new Error(`--set 은 ${Object.keys(CASE_SETS).join('|')}`);
+  const outPath = args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(FIX, CASE_SETS[set].out);
+  const cases = await buildProbe(template, outPath, set);
   console.log(`시험지: ${outPath} (사례 ${cases.length}개)`);
   if (args.includes('--hangul')) {
     // 한/글 기준: 인쇄 없이 CreatePageImage 쪽 그림(그림은 표식 색 사본) + 재저장본 저장 줄 + 문단 쪽 번호(scripts/hangul-oracle.mjs)

@@ -21,35 +21,47 @@ import JSZip from 'jszip';
 import { WORKER_PACKAGE_FILES } from '../server/worker-package.js';
 import { removeFile } from '../server/fs-safe.js';
 import { findNpmCli } from '../deploy/portable/common/npm-location.mjs';
-import { assertFontDistributionBundle } from './font-distribution-policy.mjs';
+import { assertFontDistributionBundle } from './rhwp-original-font-policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sourceRoots = new Map();
+function sourceFile(relative) {
+  for (const [prefix, directory] of sourceRoots) {
+    if (relative === prefix || relative.startsWith(prefix + '/')) return path.join(directory, relative.slice(prefix.length));
+  }
+  return path.join(root, relative);
+}
 const templates = path.join(root, 'deploy', 'portable');
 const rootPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 // lite = 런타임 없는 판(설치된 Node 22+ 사용, 없으면 install-node 로 공식 Node 를 받음). win·linux = Node 런타임 포함판(폐쇄망용)
 // personal-lite = 개인용 앱(내 PC 폴더의 HWPX 를 여는 1인용 — deploy/portable/personal.mjs, docs/LOCAL_FOLDER_APP_2026-11-10.md): 서버 묶음과 같은 app/ 에 시작 파일만 다르다
-const TARGETS = ['server-install', 'worker-install', 'user-app', 'server-lite', 'worker-lite', 'server-win', 'server-linux', 'worker-win', 'personal-lite'];
+// windows = Windows 설치 묶음 두 개(개인용·공동 작업용, 2026-11-16): 프로그램만 담고 Node·npm 모듈은 받는 PC 에서 처음 실행할 때 인터넷으로 받는다
+const TARGETS = ['windows', 'server-install', 'worker-install', 'user-app', 'server-lite', 'worker-lite', 'server-win', 'server-linux', 'worker-win', 'personal-lite'];
 const TARGET_ALIASES = { 'worker-node': 'worker-lite' };
 // 묶거나 install-node 로 받을 Node 판. 24.11.1 은 Windows 에서 한글 경로의 fs.rmSync 가 프로세스를 죽여 24.22.2(LTS)로 올렸다(server/fs-safe.js)
 const DEFAULT_NODE_VERSION = '24.22.2';
+// Node 24의 최소 macOS 13.5보다 오래된 Mac(11~13.4)은 공식 Node 22 바이너리를 쓴다.
+const MACOS_COMPAT_NODE_VERSION = '22.23.5';
 
 // ── 허용 목록 ──────────────────────────────────────────────────────────────
 // 서버가 실제로 import 하는 외부 패키지(server/launcher.js·index.js 부터 따라간 결과). vue 는 브라우저용 파일 하나만 내보낸다.
 const SERVER_DEPENDENCIES = ['@modelcontextprotocol/sdk', '@resvg/resvg-wasm', 'diff', 'exceljs', 'express', 'ipaddr.js', 'jszip', 'standardwebhooks', 'unpdf', 'ws', 'zod'];
 const WORKER_DEPENDENCIES = ['@modelcontextprotocol/sdk', 'zod'];   // Claude API 는 SDK 없이 fetch(api-messages-agent)
-const SERVER_TREES = ['server', 'engine', 'web', 'extensions/drive-bridge', 'studio/dist', 'docs/manuals'];   // docs/manuals = 첫 실행 따라하기 설명서(scripts/build-manuals.mjs)
+// 2026-11-16 사용자 지시: 배포물에 기관 자료·개인정보를 넣지 않는다. 첫 실행 설명서(docs/manuals)·튜토리얼 연습 문서(tutorial/)·
+// 체험 소개 화면(web/teaser*)은 묶지 않는다. 설명서는 manuals.seed=false 라 읽지 않고, 튜토리얼은 설치 도우미 설정에서 꺼져 있으며
+// (tutorial.enabled=false) 연습 파일이 없으면 메뉴에서 빠진다. 묶은 뒤 auditPrivate 가 글·압축 문서 안·로고 해시를 다시 검사한다.
+const SERVER_TREES = ['server', 'engine', 'web', 'extensions/drive-bridge', 'studio/dist'];
 const SERVER_FILES = [
   // 웹 설명서(/manual.md·/manual-resources)·실행기 ZIP 이 읽는 안내
   'docs/DEPLOYMENT_AND_AI_GUIDE.md', 'docs/AGENT_SETUP.md', 'docs/MCP_EVENTS_GUIDE.md', 'docs/CHATGPT_WORK_FILES.md', 'docs/AUTOMATIC_AI_GUIDE.md', 'docs/MULTI_AGENT_ORCHESTRATION.md',
-  'tutorial/결과보고서.hwpx', 'tutorial/AI 연결 — 사용자 가이드.hwpx', 'skill/hwpx-standard-report/reference/AI_작성지침.md', 'skill/hwpx-standard-report/reference/서식명세.md',
-  // 'AI로 보고서 만들기'·'AI 활용 심화' 연습 자료(2026-11-12) — 없으면 server/tutorial-catalog.js advancedCatalog 가 메뉴에서 뺀다. 예시 답변은 server/tutorial-advanced.js 가 읽는다
-  'tutorial/AI 활용 심화 — 연습 보고서.hwpx', 'tutorial/재수강 경험자 설문 결과(가상).xlsx', 'tutorial/보고서 작성 규칙(예시).skill', 'tutorial/ai-advanced-answers.json',
-  // 결과보고서 연습의 예시 답변(2026-11-12 — 모든 튜토리얼을 예시 답변으로). 없으면 그 연습의 요청은 '준비된 예시 없음' 안내로 끝난다
-  'tutorial/report-answers.json',
+  // 표준서식 작성 지침(get_writing_guide) — 기관 이름은 묶을 때 지운다(TEXT_TRANSFORMS)
+  'skill/hwpx-standard-report/reference/AI_작성지침.md', 'skill/hwpx-standard-report/reference/서식명세.md',
   'deploy/Caddyfile.example',
+  'scripts/ai-debug.mjs',
   // 웹에서 내려 주는 개인 실행기 ZIP·연결 점검·임시 터널·한글 클립보드 도우미·Claude Code 채널 준비
-  'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs', 'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/setup-user.bat', 'scripts/setup-user.ps1', 'scripts/run-settings.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'scripts/native-clipboard.py', 'scripts/seed-manuals.mjs',
-  'agent/CLAUDE.md', 'agent/.claude/settings.json', 'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md',
+  'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs', 'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/setup-user.bat', 'scripts/setup-user.ps1', 'scripts/run-settings.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'scripts/native-clipboard.py',
+  // agent/v2/CLAUDE.md = 새 MCP 연결(setup-agent.mjs --v2)의 채널 에이전트 지침 — 없으면 --v2 로 준비해도 예전 지침이 남는다
+  'agent/CLAUDE.md', 'agent/v2/CLAUDE.md', 'agent/.claude/settings.json', 'agent/.claude/ai-debug-hook.mjs', 'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md',
   // 편집기 엔진(서버 차례 새로 고침 + /vendor/rhwp-core)과 편집기 연결 모듈(/vendor/rhwp-editor)
   'vendor/rhwp/pkg/rhwp.js', 'vendor/rhwp/pkg/rhwp_bg.wasm', 'vendor/rhwp/pkg/cowork-engine.json',
   'vendor/rhwp/npm/editor/index.js', 'vendor/rhwp/npm/editor/transport.js', 'vendor/rhwp/npm/editor/document-agent-contract.js', 'vendor/rhwp/npm/editor/package.json',
@@ -61,12 +73,14 @@ const SERVER_FILES = [
 // 서버 app 의 시작 파일 — 여기서부터 상대 import 를 따라가 빠진 파일이 없는지 묶기 전에 확인한다(checkRelativeImports)
 const SERVER_ENTRIES = ['server/launcher.js', 'server/index.js', 'server/control-cli.js', 'server/mcp-stdio.js', 'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs',
   'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs'];
-const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/.claude/settings.json',
+const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/v2/CLAUDE.md', 'agent/.claude/settings.json',
   'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md'];
 // 트리 안에서 빼는 것: 편집기 빌드의 rhwp 예제 문서·쓰지 않는 옛 사본, 파이썬 캐시
 // web/quick/ = 운영 주소에 올리는 조사 보고 페이지(2026-11-12 한/글 2022 기능 대조 등) — 제품 묶음에는 넣지 않는다.
 // web/tutorial-media/ = 예전 복사 튜토리얼 촬영 영상 — 2026-11-12 웹 그림 장면(web/tutorial-scenes.js)으로 바뀌어 부르지 않는다(원본은 개발 폴더에만 보관)
-const TREE_EXCLUDE = [/^web\/quick\//, /^web\/tutorial-media\//,/^studio\/dist\/samples\//, /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/, /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.DS_Store$/];
+// web/teaser·teaser3 = 공모전 소개 화면(연습 문서 화면 포함) — 없으면 서버가 /teaser/ 를 바로 다음 주소로 넘긴다(server/index.js).
+// server/run-watchdog-silent.vbs·install-watchdog.js = 개발 PC 전용 감시 도우미(이 PC 경로가 들어 있다), server/templates/README.md = 개발 메모
+const TREE_EXCLUDE = [/^web\/quick\//, /^web\/tutorial-media\//, /^web\/teaser3?\//, /^server\/run-watchdog-silent\.vbs$/, /^server\/install-watchdog\.js$/, /^server\/templates\/README\.md$/,/^studio\/dist\/samples\//, /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/, /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.DS_Store$/];
 // 운영 의존성에서 빼는 것: 소스맵·타입 선언·TypeScript 원본·설명서(라이선스 고지는 남김), exceljs 의 브라우저 묶음(서버는 lib/)
 const STRIP_FILE = /\.(map|d\.ts|d\.mts|d\.cts|ts|mts|cts|tsbuildinfo|md|markdown)$/i;
 const KEEP_NOTICE = /^(licen[cs]e|notice|copying|authors|patents)/i;
@@ -84,6 +98,8 @@ function parseArgs(argv) {
     if (a === '--help' || a === '-h') o.help = true;
     else if (a === '--target') { const t = value(); o.targets = t === 'all' ? TARGETS : t.split(',').map((x) => TARGET_ALIASES[x] || x); }
     else if (a === '--out') o.out = path.resolve(value());
+    else if (a === '--studio-dir') o.studioDir = path.resolve(value());
+    else if (a === '--engine-pkg') o.enginePkg = path.resolve(value());
     else if (a === '--node-version') o.nodeVersion = value().replace(/^v/, '');
     else if (a === '--node-cache') o.nodeCache = path.resolve(value());
     else if (a === '--download-base') { const url = new URL(value()); if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash || url.username || url.password) throw new Error('다운로드 주소는 인증·쿼리 없는 HTTP(S) 주소여야 합니다'); o.downloadBase = url.href.replace(/\/$/, ''); }
@@ -93,6 +109,11 @@ function parseArgs(argv) {
   }
   for (const t of o.targets) if (!TARGETS.includes(t)) throw new Error(`target 은 all 또는 ${TARGETS.join('|')} 입니다: ${t}`);
   if (!/^\d+\.\d+\.\d+$/.test(o.nodeVersion)) throw new Error(`Node 판 형식이 아닙니다: ${o.nodeVersion}`);
+  for (const [field, prefix, required] of [['studioDir', 'studio/dist', 'cowork-build.json'], ['enginePkg', 'vendor/rhwp/pkg', 'rhwp_bg.wasm']]) {
+    if (!o[field]) continue;
+    if (!o[field].startsWith(path.join(root, 'artifacts') + path.sep) || !fs.existsSync(path.join(o[field], required))) throw new Error(`잘못된 후보 입력: ${field}`);
+    sourceRoots.set(prefix, o[field]);
+  }
   return o;
 }
 
@@ -110,8 +131,11 @@ function walk(dir, base = dir, out = []) {
   return out;
 }
 
-function copyInto(stage, relative, transform) {
-  const src = path.join(root, relative);
+// 묶을 때 고쳐 넣는 글(개발 폴더의 원본은 그대로 둔다)
+const dropInstitution = (b) => Buffer.from(b.toString('utf8').replaceAll('대학혁신센터 ', ''), 'utf8');
+const TEXT_TRANSFORMS = { 'skill/hwpx-standard-report/reference/AI_작성지침.md': dropInstitution, 'skill/hwpx-standard-report/reference/서식명세.md': dropInstitution };
+function copyInto(stage, relative, transform = TEXT_TRANSFORMS[relative]) {
+  const src = sourceFile(relative);
   if (!fs.statSync(src).isFile()) throw new Error(`일반 파일이 아닙니다: ${relative}`);
   const dst = path.join(stage, relative);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -121,9 +145,9 @@ function copyInto(stage, relative, transform) {
 
 function copyTrees(stage, trees, files) {
   for (const tree of trees) {
-    for (const rel of walk(path.join(root, tree))) {
+    for (const rel of walk(sourceFile(tree))) {
       const relative = `${tree}/${rel}`;
-      if (!TREE_EXCLUDE.some((re) => re.test(relative))) copyInto(stage, relative);
+      if (!relative.startsWith('web/reports/hft-native-20261106/') && !TREE_EXCLUDE.some((re) => re.test(relative))) copyInto(stage, relative);
     }
   }
   for (const relative of files) copyInto(stage, relative);
@@ -286,6 +310,38 @@ function auditEntries(entries, secrets) {
   }
 }
 
+// ── 기관·개인 흔적 검사(2026-11-16) ─────────────────────────────────────────
+// 글 파일과 압축 문서(HWPX·XLSX·DOCX·.skill·ZIP) 안의 글, 그림의 기관 로고 해시를 본다. 의존성(node_modules)·편집기 빌드 산출물은
+// 남의 코드라 우연히 겹치는 낱말이 많아 글 검사에서 뺀다(그래도 로고 해시·압축 문서는 본다). 짧은 영문 약자는 대소문자를 가려야
+// XML 속성(hasNumRef 등)과 겹치지 않는다.
+const PRIVATE_TERMS = [
+  ['기관 이름', /대학혁신센터/],
+  ['기관 구독 이름', /ChatGPT\s*\(?Edu\)?/],
+  // (공개 저장소: 원 개발 PC 의 개인 이름·계정 목록은 뺐습니다 — 배포 전에 자기 이름·계정을 여기에 더하세요)
+  ['개발 PC 경로', /[A-Za-z]:[\\/]+Users[\\/]+Nag(?![A-Za-z])|[Dd]:[\\/]+claude[\\/]/],
+];
+const PRIVATE_LOGOS = new Set(['2a2d146d0f5d9d7dc4e3edf23a78a6479c5ae120d4aa95b2057520bd3aaa8424', 'c170f8e50309621f2195c71dc16e7deea2d9ad2cdff23f5b254ea9a162a1ccea']);
+const ARCHIVE_DOC = /\.(hwpx|xlsx|docx|pptx|skill|zip)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const PRIVATE_TEXT_SKIP = /(^|\/)node_modules\/|(^|\/)studio\/dist\/assets\/|(^|\/)vendor\/rhwp\/pkg\//;
+async function auditPrivateBytes(where, bytes, depth = 0) {
+  if (IMAGE_FILE.test(where)) {
+    if (PRIVATE_LOGOS.has(crypto.createHash('sha256').update(bytes).digest('hex'))) throw new Error(`배포물에 기관 로고가 들어 있습니다: ${where}`);
+    return;
+  }
+  if (ARCHIVE_DOC.test(where) && depth < 3) {
+    const zip = await JSZip.loadAsync(bytes);
+    for (const entry of Object.values(zip.files)) if (!entry.dir) await auditPrivateBytes(`${where}!${entry.name}`, await entry.async('nodebuffer'), depth + 1);
+    return;
+  }
+  if (!(TEXT_FILE.test(where) || /\.(xml|hpf|vbs|ps1|svg|csv)$/i.test(where)) || (depth === 0 && PRIVATE_TEXT_SKIP.test(where))) return;
+  const text = bytes.toString('utf8');
+  for (const [label, re] of PRIVATE_TERMS) if (re.test(text)) throw new Error(`배포물에 ${label} 흔적이 있습니다: ${where} (${re.exec(text)[0]})`);
+}
+async function auditPrivate(entries) {
+  for (const e of entries) await auditPrivateBytes(e.path, e.data || fs.readFileSync(e.src));
+}
+
 // ── Node 런타임 ────────────────────────────────────────────────────────────
 async function download(url, file) {
   const res = await fetch(url);
@@ -365,7 +421,8 @@ function dirEntries(dir, prefix) {
 /** deploy/portable 의 시작 도우미·안내 → 묶음 항목. 배치·안내는 CRLF, 셸은 LF·실행 권한,
  *  .ps1 은 CRLF + UTF-8 BOM(Windows PowerShell 5.1 은 BOM 없는 파일을 ANSI 로 읽어 한글이 깨진다). __NODE_VERSION__ 은 묶는 Node 판으로 */
 function templateEntry(relative, target, nodeVersion) {
-  const bytes = Buffer.from(fs.readFileSync(path.join(templates, relative), 'utf8').replaceAll('__NODE_VERSION__', nodeVersion), 'utf8');
+  const bytes = Buffer.from(fs.readFileSync(path.join(templates, relative), 'utf8')
+    .replaceAll('__NODE_VERSION__', nodeVersion).replaceAll('__MACOS_COMPAT_NODE_VERSION__', MACOS_COMPAT_NODE_VERSION), 'utf8');
   if (/\.ps1$/i.test(relative)) return { path: target, data: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), crlf(bytes)]) };
   return { path: target, data: /\.(bat|cmd|txt)$/i.test(relative) ? crlf(bytes) : lf(bytes) };
 }
@@ -450,7 +507,7 @@ function appManifest(name, description, dependencies, scripts) {
 }
 
 function buildInfo(kind, nodeVersion) {
-  const read = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return null; } };
+  const read = (rel) => { try { return JSON.parse(fs.readFileSync(sourceFile(rel), 'utf8')); } catch { return null; } };
   const engine = read('vendor/rhwp/pkg/cowork-engine.json');
   const studio = read('studio/dist/cowork-build.json');
   return `${JSON.stringify({
@@ -541,7 +598,7 @@ async function main() {
 
   let serverApp = null; let workerApp = null;
   let serverInstall = null; let workerInstall = null;
-  if (o.targets.includes('server-install')) { const stage = path.join(staging, 'server-install'); stageServerApp(stage, true); serverInstall = { stage }; }
+  if (o.targets.includes('server-install') || o.targets.includes('windows')) { const stage = path.join(staging, 'server-install'); stageServerApp(stage, true); serverInstall = { stage }; }
   if (o.targets.includes('worker-install')) { const stage = path.join(staging, 'worker-install'); stageWorkerApp(stage, true); workerInstall = { stage }; }
   if (wantServer) {
     const stage = path.join(staging, 'server-app');
@@ -614,6 +671,25 @@ async function main() {
       const runtime = await nodeRuntime(o.nodeVersion, win ? 'win' : 'linux', o.nodeCache);
       const entries = [...(win ? serverWin : serverLinux), ...nodeHelpers, ...runtime, ...dirEntries(serverApp.stage, 'app/'), ...noticeEntries(serverApp.stage, rhwpNotices), { path: 'BUILD-INFO.json', data: Buffer.from(buildInfo(target, o.nodeVersion)) }];
       builds.push({ target, entries, top: 'hwpx-cowork-server', format: win ? 'zip' : 'tar.gz', unix: false, file: `hwpx-cowork-server-${version}-${stamp}-${win ? 'win-x64.zip' : 'linux-x64.tar.gz'}` });
+    } else if (target === 'windows') {
+      // 개인용(이 PC 만, PC 폴더의 파일을 바로 고침)·공동 작업용(이 PC 를 서버로, 참여자는 브라우저) — 같은 app/ 에 방식과 안내만 다르다
+      const bat = (action, tail) => ({ data: Buffer.from(['@echo off', 'chcp 65001 >nul', `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\\portable\\hwpx-windows.ps1" -Action ${action}`, tail, ''].join('\r\n'), 'utf8') });
+      const bom = (buf) => Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), crlf(buf)]);
+      for (const mode of ['personal', 'shared']) {
+        const guide = fs.readFileSync(path.join(templates, 'windows', `guide-${mode}.txt`));
+        const entries = [
+          { path: '시작.bat', ...bat('Start', 'if errorlevel 1 pause') },
+          { path: '종료.bat', ...bat('Stop', 'if errorlevel 1 pause') },
+          { path: 'AI 연결.bat', ...bat('Ai', 'pause') },
+          ...(mode === 'shared' ? [{ path: '외부 접속 열기.bat', ...bat('Share', 'pause') }] : []),
+          { path: '설치 안내.txt', data: bom(guide) },
+          { path: 'install-options.json', data: Buffer.from(`${JSON.stringify({ schema: 1, mode }, null, 2)}\n`) },
+          t('windows/hwpx-windows.ps1', 'app/portable/hwpx-windows.ps1'), t('common/install-node.ps1', 'app/portable/install-node.ps1'),
+          ...dirEntries(serverInstall.stage, 'app/'), ...rhwpNotices,
+          { path: 'BUILD-INFO.json', data: Buffer.from(buildInfo(`windows-${mode}`, `${o.nodeVersion}(처음 실행할 때 nodejs.org 에서 받음); npm ci`)) },
+        ];
+        builds.push({ target: `windows-${mode}`, mode, entries, top: `hwpx-cowork-${mode}`, format: 'zip', unix: false, file: `hwpx-cowork-windows-${mode}-${version}-${stamp}.zip` });
+      }
     } else if (target === 'user-app') {
       // Node·서버 없음. 서버 주소는 --server-url 로 미리 채우거나, 서버의 관리자 앱이 채워 내려 준다
       const entries = userAppFiles.map((name) => {
@@ -639,9 +715,10 @@ async function main() {
       builds.push({ target, entries, top: 'hwpx-ai-worker', format: 'zip', unix: !win, file: `hwpx-ai-worker-${version}-${stamp}-${win ? 'win-x64' : 'lite'}.zip` });
     }
   }
-  for (const { target, entries, top, format, unix, file: name } of builds) {
+  for (const { target, mode, entries, top, format, unix, file: name } of builds) {
     const file = path.join(outDir, name);
     auditEntries(entries, secrets);
+    await auditPrivate(entries);
     for (const entry of entries) await assertFontDistributionBundle(entry.path, entry.data || fs.readFileSync(entry.src));
     const extractedBytes = entries.reduce((n, e) => n + (e.data ? e.data.length : fs.statSync(e.src).size), 0);
     console.log(`${name} 묶는 중… (파일 ${entries.length}개, 풀면 ${mib(extractedBytes)})`);
@@ -649,7 +726,7 @@ async function main() {
     else await writeTarGz(entries, file, top);
     const bytes = fs.statSync(file).size;
     const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-    results.push({ target, file: name, bytes, sha256, files: entries.length, extractedBytes, topFolder: top, downloadUrl: `${o.downloadBase}/${encodeURIComponent(name)}`, attachmentEligible: bytes < 30000000, installRequired: target.endsWith('-install') });
+    results.push({ target, ...(mode ? { mode, platform: 'windows', node: o.nodeVersion } : {}), file: name, bytes, sha256, files: entries.length, extractedBytes, topFolder: top, downloadUrl: `${o.downloadBase}/${encodeURIComponent(name)}`, attachmentEligible: bytes < 30000000, installRequired: target.endsWith('-install') });
     console.log(`  → ${mib(bytes)}  sha256 ${sha256.slice(0, 16)}…`);
   }
 

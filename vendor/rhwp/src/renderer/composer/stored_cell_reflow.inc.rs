@@ -86,7 +86,11 @@ pub(crate) fn recompose_stored_lines_in_frame_with_known_square_band_with_storag
         // loader가 만든 합성 줄은 원본 저장 캐시가 아니다. 독립 개체가 없는
         // 본문과 프레임이 소유하는 TAC 표 host는 현재 슬롯/폭으로 다시 구성한다.
         // 옛 합성 줄을 수용하면 뒤의 폭 0 기준 문자가 차지한 줄이 사라진다.
+        // [hwpx-cowork] 2026-11-16 원본 줄 나눔에 합성 표시만 붙인 줄(끼운 문단 뒤 복원 구간)은 로더가
+        // 만든 줄이 아니다 — 줄 나눔은 한/글 것이므로 버리지 않는다(세로 좌표만 근거에서 빠진다).
+        // 고등교육법 의안원문: 이 줄을 버리고 다시 나눠 27개 문단이 한 줄씩 줄었다(엔진 80 / 한/글 81).
         let fresh_body = if !para.line_segs.is_empty()
+            && !(para.layout_source_text_partition && !para.stored_text_partition_is_dirty())
             && (para.controls.is_empty()
                 || (!stored_geometry_policy.preserve_hwp3_origins
                     && line_breaking::supports_tac_table_band_frame_controls(para)))

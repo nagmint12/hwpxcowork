@@ -516,9 +516,27 @@ impl TypesetState {
         self.data.vpos_ladder_dirty = true;
     }
 
-    pub(super) fn commit_tac_capped_bottom(&mut self, capped_bottom: f64) {
+    /// [hwpx-cowork] 흐름을 되감는 상한이라 쪽 나눔 결정 기록(`layout:trace --decisions`)에 남긴다
+    /// — 2026-11-16 표 뒤 글줄을 되감은 결함이 기록에 보이지 않아 원인 찾기가 늦었다.
+    #[track_caller]
+    pub(super) fn commit_tac_capped_bottom(
+        &mut self,
+        capped_bottom: f64,
+        detail: impl FnOnce() -> String,
+    ) {
         if self.data.current_height > capped_bottom {
+            let before = self.data.current_height;
             self.data.current_height = capped_bottom;
+            if crate::renderer::layout_trace_log::enabled() {
+                crate::renderer::layout_trace_log::record(
+                    self.data.pages.len(),
+                    "tacCap",
+                    before,
+                    capped_bottom,
+                    detail(),
+                    std::panic::Location::caller(),
+                );
+            }
         }
     }
 

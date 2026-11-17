@@ -148,6 +148,14 @@ pub struct Paragraph {
     /// 문자 분할의 유효성과 별개이며 원본 파일이나 IR로 직렬화하지 않는다.
     #[serde(skip_serializing)]
     pub layout_rebased_body_axis: bool,
+    /// [hwpx-cowork] 합성 표시(`TAG_IMPLEMENTATION_PROPERTY`)가 붙었지만 줄 나눔(textpos)은 원본
+    /// 파일(한/글)이 정한 것이다 — 저장 줄 없는 문단을 끼운 뒤의 '복원 구간'처럼 낡은 것은 세로
+    /// 좌표뿐인 줄. 조판은 세로 좌표를 근거로 쓰지 않되(합성 표시의 뜻) 줄 나눔은 버리지 않는다.
+    /// 한/글은 열 때 이 문단들을 원래 줄 나눔대로 둔다(고등교육법 의안원문 2026-11-16: 0.9.0
+    /// `fresh_body` 가 이 줄을 '로더가 만든 줄'로 보고 다시 나눠 27개 문단이 한 줄씩 줄었다 —
+    /// 병합 전 엔진과 한/글 재저장본은 81쪽 = 한/글). 파일에 실리지 않는 IR 전용 값이다.
+    #[serde(skip_serializing)]
+    pub layout_source_text_partition: bool,
     /// 원고지 구역의 칸 격자. 렌더 정규화본에만 두고 파일·IR로 직렬화하지 않는다.
     /// 있으면 문단 배치가 글자를 칸에 놓는다.
     #[serde(skip_serializing)]
@@ -1176,6 +1184,8 @@ impl Paragraph {
         self.layout_only_fill_lines = 0;
         self.source_line_seg_vertical_pos = None;
         self.layout_rebased_body_axis = false;
+        // [hwpx-cowork] 새 줄 벡터는 원본 줄 나눔이 아니다.
+        self.layout_source_text_partition = false;
         // [#5961] 새로 계산한 줄은 `char_offsets` 와 같은 HWP5 축에서 나온다. 파일에서
         // 읽은 줄에만 붙던 보정폭을 그대로 두면 다음 투영에서 이중으로 더해진다.
         self.hwpx_axis_shift = 0;
@@ -3227,6 +3237,8 @@ impl Paragraph {
             source_line_seg_vertical_pos: None,
             // 새 줄은 본문 축을 이어 붙인 저장 줄이 아니다.
             layout_rebased_body_axis: false,
+            // [hwpx-cowork] 갈라진 문단의 줄 나눔은 원본 것이 아니다.
+            layout_source_text_partition: false,
             // 갈라진 문단은 앞 문단의 새 저장 줄에 이어 계산된다.
             stored_flow_shifted: false,
             layout_cell_grid: None,

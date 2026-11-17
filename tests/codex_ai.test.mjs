@@ -151,3 +151,68 @@ test('Codex 최초 stdin은 10만 자 전문·끝 문단·원본 서식 XML을 �
     await assert.rejects(new CodexProposer({}, x.dependencies).runMcp(job, { ...connection, requestContext: { ...requestContext, attempt: 1 } }), { code: 'CODEX_INPUT_INVALID' });
   } finally { await x.close(); }
 });
+
+// 2026-11-17(작업 M): Codex 0.166 코드 모드는 MCP 도구 선언이 exec 설명에 없어 실행마다 첫 응답을 ALL_TOOLS 찾기에 썼다
+// (artifacts/mcp-round3-20261117/codex/X01·X03·X07). 새 연결 첫 입력에 부르는 꼴과 op 꼴(OPS_BRIEF 그대로)을 싣는다.
+test('새 연결 첫 입력은 코드 모드에서 부르는 꼴(실제 인자 이름)과 edit op 꼴을 싣고 실행기 흐름은 그대로다', async () => {
+  const { codexMcpPromptV2, codexCodeModeHintV2 } = await import('../server/codex-ai.js');
+  const { OPS_BRIEF } = await import('../server/mcp2/ops.js');
+  const { registerV2Tools } = await import('../server/mcp2.js');
+  const v2job = { ...job, surface: 'v2' };
+  const brief = { doc_id: v2job.docId, request_id: v2job.requestId, attempt: v2job.attempt, instruction: '고쳐 주세요' };
+  const hint = codexCodeModeHintV2(v2job);
+  assert.ok(hint.includes(OPS_BRIEF), 'op 꼴은 도구 설명과 같은 글');
+  assert.match(hint, /await tools\.mcp__hwpx__edit\(\{doc_id:"test-document", request_id:7, expected_attempt:2, ops:/);
+  assert.match(hint, /tools\.mcp__hwpx__read\(\{doc_id:"test-document"/); assert.match(hint, /tools\.mcp__hwpx__finish\(\{doc_id:"test-document", request_id:7, expected_attempt:2/);
+  // 부르는 꼴의 인자 이름이 실제 도구 inputSchema 에 있어야 한다(도구 이름 접두 mcp__hwpx__ = codexExecArgs 의 mcp_servers.hwpx)
+  const schemas = {};
+  registerV2Tools({ register: (name, def) => { schemas[name] = Object.keys(def.inputSchema); }, service: {}, user: {}, wrap: (f) => f, text: (v) => v, actor: () => ({}), agent: () => ({}), sessionId: () => null });
+  for (const name of ['edit', 'read', 'finish']) {
+    const line = hint.split('\n').find((l) => l.includes(`tools.mcp__hwpx__${name}(`));
+    const args = [...line.slice(line.indexOf('({') + 2).matchAll(/(?:^|, )([a-z_]+)\??(?=[:,}])/g)].map((m) => m[1]);
+    assert.ok(args.length >= 3, `${name} 인자 ${args}`);
+    for (const arg of args) assert.ok(schemas[name].includes(arg), `${name} 에 없는 인자: ${arg}`);
+  }
+  assert.ok(codexExecArgs({}).includes('mcp_servers.hwpx.required=true'));
+  // 첫 입력: 지침 다음, 요청 내용(document_context) 앞에 한 번
+  const prompt = codexMcpPromptV2(v2job, brief);
+  assert.equal(prompt.split(hint).length, 2); assert.ok(prompt.indexOf(hint) < prompt.indexOf('<document_context>'));
+  // 가짜 Codex 로 실행기 흐름: stdin 에 그 글이 실리고 정상 종료
+  const x = await setup();
+  try {
+    const result = await new CodexProposer({}, x.dependencies).runMcp(v2job, { ...connection, brief });
+    assert.equal(result.directMcp, true);
+    const receipt = await x.read();
+    assert.ok(receipt.prompt.includes(hint)); assert.ok(receipt.prompt.includes(OPS_BRIEF));
+  } finally { await x.close(); }
+});
+
+// 2026-11-17(작업 M, 선택 — 기본 꺼짐): 새 연결 실행에서만, 켰을 때 문서 편집에 쓰지 않는 Codex 내장 도구(웹 검색·그림 생성·goal)를 끈다.
+test('내장 도구 줄이기: 기본 꺼짐, HWPX_COWORK_CODEX_LEAN_TOOLS=1 이면 새 연결 실행에만 끄는 인자가 실리고 CLI 가 모르는 기능은 넘기지 않는다', async () => {
+  const { CODEX_LEAN_TOOL_ARGS } = await import('../server/codex-ai.js');
+  const has = (args, a, b) => args.some((v, i) => v === a && args[i + 1] === b);
+  assert.deepEqual(CODEX_LEAN_TOOL_ARGS, ['-c', 'web_search="disabled"', '--disable', 'image_generation', '--disable', 'goals']);
+  assert.ok(!has(codexExecArgs({}), '--disable', 'goals'), '기본은 그대로');
+  const lean = codexExecArgs({ leanTools: true });
+  for (let i = 0; i < CODEX_LEAN_TOOL_ARGS.length; i += 2) assert.ok(has(lean, CODEX_LEAN_TOOL_ARGS[i], CODEX_LEAN_TOOL_ARGS[i + 1]));
+  assert.equal(lean.at(-1), '-', 'stdin 표시는 맨 끝 그대로');
+  const older = codexExecArgs({ leanTools: true, features: new Set(['apps', 'plugins', 'remote_plugin', 'goals']) });
+  assert.ok(has(older, '--disable', 'goals') && !has(older, '--disable', 'image_generation') && has(older, '-c', 'web_search="disabled"'));
+  const brief = { doc_id: job.docId, request_id: job.requestId, attempt: job.attempt, instruction: '고쳐 주세요' };
+  const run = async (theJob, extraEnv, options = {}) => {
+    const x = await setup();
+    try {
+      await new CodexProposer(options, { ...x.dependencies, env: { ...x.dependencies.env, HWPX_COWORK_CODEX_LEAN_TOOLS: '', ...extraEnv } }).runMcp(theJob, { ...connection, ...(theJob.surface ? { brief } : {}) });
+      return (await x.read()).args;
+    } finally { await x.close(); }
+  };
+  const v2job = { ...job, surface: 'v2' };
+  const off = await run(v2job, {});
+  assert.ok(!has(off, '--disable', 'goals') && !has(off, '--disable', 'image_generation') && !off.includes('web_search="disabled"'), '켜지 않으면 넘기지 않는다');
+  for (const on of [await run(v2job, { HWPX_COWORK_CODEX_LEAN_TOOLS: '1' }), await run(v2job, {}, { leanTools: true })]) {
+    assert.ok(has(on, '-c', 'web_search="disabled"') && has(on, '--disable', 'image_generation') && has(on, '--disable', 'goals'), JSON.stringify(on));
+    assert.ok(has(on, '-c', 'mcp_servers.hwpx.required=true'), 'MCP 연결은 그대로');
+  }
+  const oldSurface = await run(job, { HWPX_COWORK_CODEX_LEAN_TOOLS: '1' });
+  assert.ok(!has(oldSurface, '--disable', 'goals'), '예전 연결 실행에는 켜도 넘기지 않는다');
+});

@@ -21,7 +21,7 @@ export const AdminLimitsPanel = {
           <button type="button" :disabled="busy || Number(chars) === data.defaults.mcpResponseChars" @click="chars = String(data.defaults.mcpResponseChars)">기본값으로</button></div>
       </form>
     </template>
-    <p v-else class="admin-message err" role="alert">{{ error }}</p>
+    <div v-else class="admin-message" data-testid="admin-load-failed"><p class="err" role="alert">{{ error }}</p><button type="button" @click="load">다시 읽기</button></div>
   </section>`,
   setup() {
     const data = ref(null); const loading = ref(true); const busy = ref(false); const chars = ref(''); const error = ref(''); const notice = ref('');
@@ -42,7 +42,7 @@ export const AdminLimitsPanel = {
       finally { busy.value = false; }
     }
     onMounted(load);
-    return { data, loading, busy, chars, error, notice, dirty, tokens, save };
+    return { data, loading, busy, chars, error, notice, dirty, tokens, load, save };
   },
 };
 
@@ -65,20 +65,22 @@ export const AdminUsersPanel = {
         <select id="admin-server-ai-key" :value="data.serverAi.useKeyOf || ''" :disabled="busy" data-testid="admin-server-ai-key" @change="setKeyOwner($event.target.value)">
           <option value="">서버 설정(config.ai)의 키</option>
           <option v-for="n in data.serverAi.candidates" :key="n" :value="n">{{ n }} 의 '내 AI 키'</option></select>
-        <p class="muted" data-testid="admin-server-ai-state">{{ serverAiState }} · 허용 {{ allowedCount }}명 — 아래 '관리자 AI' 칸을 체크한 계정만 씁니다</p></div>
+        <p class="muted" data-testid="admin-server-ai-state">{{ serverAiState }}<template v-if="data.serverAi.restricted"> · 허용 {{ allowedCount }}명</template></p></div>
       <div v-if="secret" class="admin-review admin-secret" role="alert" data-testid="admin-user-token"><b>{{ secret.name }} 의 접속 토큰</b>
         <p><code>{{ secret.token }}</code></p><p class="muted">이 토큰은 지금 한 번만 보입니다. 복사해 본인에게만 전달하세요.</p>
         <div class="row"><button type="button" class="small" @click="copy(secret.token)">복사</button><button type="button" class="small" @click="secret = null">확인했습니다</button></div></div>
-      <table class="admin-users" data-testid="admin-user-list"><thead><tr><th>이름</th><th>역할</th><th title="체크한 계정만 관리자 AI(서버의 API 키, 튜토리얼에서 나눠 쓰는 관리자 API 키·실행기·ChatGPT)를 씁니다. 체크하지 않은 계정은 본인 AI 키·내 에이전트만 씁니다.">관리자 AI</th><th>토큰</th><th></th></tr></thead>
+      <table class="admin-users" data-testid="admin-user-list"><thead><tr><th>이름</th><th>역할</th><th title="체크한 계정만 관리자 AI(서버의 API 키, 튜토리얼에서 나눠 쓰는 관리자 API 키·실행기·ChatGPT)를 씁니다. 체크하지 않은 계정은 본인 AI 키·연결된 AI(내 PC의 Codex·Claude Code)만 씁니다.">관리자 AI</th><th>토큰</th><th></th></tr></thead>
         <tbody><tr v-for="u in data.users" :key="u.name" :data-user="u.name">
           <td>{{ u.name }}<span v-if="u.me" class="muted"> (나)</span></td>
           <td><select :value="u.role" :disabled="busy" :aria-label="u.name + ' 역할'" @change="setRole(u, $event.target.value)"><option v-for="r in data.roles" :key="r" :value="r">{{ roleLabel(r) }}</option></select></td>
           <td><input type="checkbox" :checked="u.serverAi" :disabled="busy" :aria-label="u.name + ' 관리자 AI 허용'" data-testid="admin-user-server-ai" @change="setServerAi(u, $event.target.checked)"/></td>
           <td><code>{{ u.tokenHint }}</code></td>
           <td class="admin-user-actions">
-            <template v-if="editing === u.name"><input v-model="editToken" class="admin-token-input" maxlength="200" :placeholder="'새 토큰'" :title="TOKEN_TITLE" :aria-label="u.name + ' 새 토큰'" autocomplete="off" spellcheck="false" data-testid="admin-user-token-edit"/>
-              <button type="button" class="small" :disabled="busy" title="무작위 토큰을 채웁니다" @click="editToken = randomToken()">자동</button><button type="button" class="small primary" :disabled="busy" data-testid="admin-user-token-save" @click="reissue(u)">저장</button><button type="button" class="small" @click="editing = ''">취소</button></template>
-            <button v-else type="button" class="small" :disabled="busy" @click="editing = u.name; editToken = ''">토큰 바꾸기</button>
+            <template v-if="editing === u.name && reissuing === u.name"><span class="admin-confirm-text" role="alert" data-testid="admin-user-token-review">{{ editToken.trim() ? '새 토큰으로 바꿀까요?' : '빈 칸이라 무작위 토큰으로 바꿉니다.' }} 이전 토큰은 바로 끊깁니다.</span>
+              <button type="button" class="small danger" :disabled="busy" data-testid="admin-user-token-confirm" @click="reissue(u)">바꾸기 확인</button><button type="button" class="small" :disabled="busy" @click="reissuing = ''">취소</button></template>
+            <template v-else-if="editing === u.name"><input v-model="editToken" class="admin-token-input" maxlength="200" :placeholder="'새 토큰'" :title="TOKEN_TITLE" :aria-label="u.name + ' 새 토큰'" autocomplete="off" spellcheck="false" data-testid="admin-user-token-edit" @keyup.enter="reissuing = u.name"/>
+              <button type="button" class="small" :disabled="busy" title="무작위 토큰을 채웁니다" @click="editToken = randomToken()">자동</button><button type="button" class="small primary" :disabled="busy" data-testid="admin-user-token-save" @click="reissuing = u.name">저장</button><button type="button" class="small" @click="editing = ''">취소</button></template>
+            <button v-else type="button" class="small" :disabled="busy" @click="editing = u.name; editToken = ''; reissuing = ''">토큰 바꾸기</button>
             <template v-if="confirming === u.name"><button type="button" class="small danger" :disabled="busy" data-testid="admin-user-delete-confirm" @click="remove(u)">삭제 확인</button><button type="button" class="small" @click="confirming = ''">취소</button></template>
             <button v-else type="button" class="small" :disabled="busy || u.me" :title="u.me ? '자기 계정은 지울 수 없습니다' : ''" @click="confirming = u.name">삭제</button></td></tr></tbody></table>
       <form class="admin-user-add" @submit.prevent="add" novalidate><b>사용자 추가</b>
@@ -90,12 +92,14 @@ export const AdminUsersPanel = {
       <p v-if="error" class="admin-message err" role="alert">{{ error }}</p>
       <p v-if="notice" class="admin-message" role="status">{{ notice }}</p>
     </template>
-    <p v-else class="admin-message err" role="alert">{{ error }}</p>
+    <div v-else class="admin-message" data-testid="admin-load-failed"><p class="err" role="alert">{{ error }}</p><button type="button" @click="load">다시 읽기</button></div>
   </section>`,
   setup() {
     const data = ref(null); const loading = ref(true); const busy = ref(false); const error = ref(''); const notice = ref('');
     const name = ref(''); const role = ref('editor'); const secret = ref(null); const confirming = ref('');
-    const token = ref(''); const editing = ref(''); const editToken = ref('');
+    // reissuing: 토큰 바꾸기 확인 중인 사람 — [저장]은 확인 줄을 띄우고 [바꾸기 확인]에서 바꾼다(2026-11-17: 빈 칸 그대로 [저장]을 누르면
+    // 곧바로 무작위 토큰으로 바뀌어 그 사람의 접속이 끊겼다)
+    const token = ref(''); const editing = ref(''); const editToken = ref(''); const reissuing = ref('');
     const roleLabel = (r) => ROLE_LABELS[r] || r;
     const allowedCount = computed(() => (data.value?.users || []).filter((u) => u.serverAi).length);
     const serverAiState = computed(() => {
@@ -114,7 +118,7 @@ export const AdminUsersPanel = {
       catch (e) {
         if (e.code === 'CONFIG_CHANGED') { await load(); error.value = changedMessage; }
         else error.value = e.message;
-      } finally { busy.value = false; confirming.value = ''; }
+      } finally { busy.value = false; confirming.value = ''; reissuing.value = ''; }
     }
     const path = (u) => `/api/admin/users/${encodeURIComponent(u.name)}`;
     const add = () => run(() => api('/api/admin/users', { method: 'POST', body: { user: { name: name.value.trim(), role: role.value, ...(token.value ? { token: token.value } : {}) }, revision: data.value.revision } }),
@@ -137,6 +141,6 @@ export const AdminUsersPanel = {
     });
     async function copy(value) { notice.value = await copyText(value) ? '토큰을 복사했습니다.' : '토큰을 선택해 복사해 주세요.'; }
     onMounted(load);
-    return { data, loading, busy, error, notice, name, role, token, editing, editToken, secret, confirming, roleLabel, allowedCount, serverAiState, add, setRole, setServerAi, setKeyOwner, reissue, remove, copy, randomToken, TOKEN_TITLE };
+    return { data, loading, busy, error, notice, name, role, token, editing, editToken, reissuing, secret, confirming, roleLabel, allowedCount, serverAiState, load, add, setRole, setServerAi, setKeyOwner, reissue, remove, copy, randomToken, TOKEN_TITLE };
   },
 };

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 개인 에이전트 작업 공간 준비(docs/V3_SPEC.md §2.4, 사용자 안내: docs/AGENT_SETUP.md)
-//   node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--no-claude] [--no-server] [--no-registry]
+//   node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v2|--v1] [--no-claude] [--no-server] [--no-registry]
+//   · --v2: 새 MCP 연결(작업 도구 넷 task·read·edit·finish — docs/MCP_REDESIGN_2026-11-16.md)로 준비한다 — 브리지 인자 --v2, CLAUDE.md 는 agent/v2/CLAUDE.md
+//     (예전 본보기 CLAUDE.md 는 CLAUDE.v1.md 로 남긴다). --v1 은 예전 연결(--lean)로 되돌린다. 둘 다 없으면 지금 .mcp.json 의 방식을 지킨다(처음이면 예전 연결)
 //   · <dir>/.mcp.json 에 hwpx 항목을 쓴다(이 PC 의 절대 경로로 브리지 실행, --channel, 토큰은 ${HWPX_COWORK_TOKEN} 참조) — 다른 항목은 그대로 둔다
 //   · <dir> 가 이 프로젝트의 agent/ 가 아니면 CLAUDE.md·.claude/settings.json 본보기를 복사한다(이미 있으면 그대로)
 //   · 위 폴더들의 CLAUDE.md(개발 메모)를 에이전트 세션이 읽지 않게 <dir>/.claude/settings.local.json 의 claudeMdExcludes 에 넣는다
@@ -14,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { apiBaseFrom, redactUrl, DEFAULT_URL } from '../server/bridge.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,9 +55,11 @@ export function claudeAdvice(versionText, platform = process.platform) {
  * .mcp.json 의 hwpx 항목(토큰은 환경 변수 참조). filesDir 를 주면 로컬 파일 도구(--files-dir — 첨부 원본 내려받기·결과 파일 올리기)를 켠다.
  * --lean = 얇은 흐름(요청 내용·도구 응답을 모델용으로 짧게 — docs/MCP_LEAN_FLOW_2026-11-10.md). 예전 서버에 붙으면 예전 꼴 그대로 온다
  */
-export function mcpEntry(bridgePath, url, filesDir = null) {
-  return { command: 'node', args: [bridgePath, '--channel', '--lean', '--url', url, ...(filesDir ? ['--files-dir', filesDir] : [])], env: { HWPX_COWORK_TOKEN: TOKEN_REF } };
+export function mcpEntry(bridgePath, url, filesDir = null, { v2 = false } = {}) {
+  return { command: 'node', args: [bridgePath, '--channel', v2 ? '--v2' : '--lean', '--url', url, ...(filesDir ? ['--files-dir', filesDir] : [])], env: { HWPX_COWORK_TOKEN: TOKEN_REF } };
 }
+/** 새 MCP 연결(--v2)의 작업 도구 — 에이전트 설정(.claude/settings.json)의 허용 목록에 넣는다 */
+export const V2_PERMISSIONS = Object.freeze(['task', 'read', 'edit', 'finish'].map((name) => `mcp__${SERVER_NAME}__${name}`));
 /** 항목에 토큰이 글자 그대로 적혀 있는가(예전에 손으로 쓴 .mcp.json) */
 export function entryHasLiteralToken(entry) {
   if (!entry || typeof entry !== 'object') return false;
@@ -136,7 +140,7 @@ export function ancestorMemoryFiles(dir) {
 }
 
 function parseArgs(argv) {
-  const o = { dir: null, url: null, user: null, claude: true, server: true, registry: true, help: false, unknown: [] };
+  const o = { dir: null, url: null, user: null, claude: true, server: true, registry: true, v2: null, help: false, unknown: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = String(argv[i]);
     const eq = a.startsWith('--') ? a.indexOf('=') : -1;
@@ -149,6 +153,8 @@ function parseArgs(argv) {
       case '--no-claude': o.claude = false; break;
       case '--no-server': o.server = false; break;
       case '--no-registry': o.registry = false; break;
+      case '--v2': o.v2 = true; break;
+      case '--v1': o.v2 = false; break;
       case '-h': case '--help': o.help = true; break;
       default: o.unknown.push(a);
     }
@@ -187,7 +193,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const o = parseArgs(argv);
   const out = (s = '') => console.log(s);
   if (o.help) {
-    out('node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--no-claude] [--no-server] [--no-registry]');
+    out('node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v2|--v1] [--no-claude] [--no-server] [--no-registry]');
+    out('  --v2: 새 MCP 연결(작업 도구 넷 — task·read·edit·finish), --v1: 예전 연결. 생략하면 지금 방식을 지킵니다');
     out('  개인 에이전트(Claude Code 채널) 작업 공간을 준비합니다. 자세한 안내: docs/AGENT_SETUP.md');
     return 0;
   }
@@ -209,6 +216,14 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const templateDir = path.join(root, 'agent');
   const dir = path.resolve(o.dir || templateDir);
   const bridgePath = path.join(root, 'server', 'mcp-stdio.js').split(path.sep).join('/');
+  // 소스 폴더(시험과 묶음 스크립트가 함께 있는 곳)의 agent/ 는 배포 묶음·공개 저장소·시험이 읽는 '예전 연결' 본보기다. 그 자리에서 새 연결로 바꾸면
+  // 본보기 CLAUDE.md 가 새 연결용 글로 바뀌어 묶음과 시험이 어긋난다 — 새 연결 작업 공간은 다른 폴더에 만든다(설치본의 agent/ 는 그 자리에서 바꿔도 된다)
+  const sourceTree = fs.existsSync(path.join(root, 'tests', 'channel_bridge.mjs')) && fs.existsSync(path.join(root, 'scripts', 'package-portable.mjs'));
+  if (o.v2 === true && sourceTree && dir === path.resolve(templateDir)) {
+    out('✗ 이 폴더(소스)의 agent/ 는 배포 묶음과 시험이 읽는 본보기라 그 자리에서 새 연결(--v2)로 바꾸지 않습니다');
+    out('  새 연결 작업 공간은 다른 폴더에 만드세요:  node scripts/setup-agent.mjs --dir agent-v2 --v2');
+    return 2;
+  }
   out('hwpx-cowork 개인 에이전트(Claude Code 채널) 준비');
   out(`  작업 공간: ${dir}`);
   if (fixed.note) out(`  ! ${fixed.note}: ${redactUrl(url)}`);
@@ -226,23 +241,69 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const old = cfg.mcpServers[SERVER_NAME];
   if (entryHasLiteralToken(old)) out('! 예전 hwpx 항목에 토큰이 글자 그대로 적혀 있어 지웠습니다(환경 변수 참조로 바꿈). 그 파일이 다른 곳에 퍼졌다면 관리자에게 새 토큰을 받으세요');
   const filesDir = path.join(dir, 'work').split(path.sep).join('/');   // 에이전트의 로컬 파일 작업 폴더(.claude/settings.json 이 이 폴더만 쓰기·실행을 허용)
-  const entry = mcpEntry(bridgePath, url, filesDir);
+  // 연결 방식: --v2/--v1 을 주면 그대로, 아니면 지금 .mcp.json 의 방식(처음이면 예전 연결)
+  const v2 = o.v2 ?? (Array.isArray(old?.args) && old.args.map(String).includes('--v2'));
+  const entry = mcpEntry(bridgePath, url, filesDir, { v2 });
   const same = JSON.stringify(old ?? null) === JSON.stringify(entry);
   cfg.mcpServers[SERVER_NAME] = entry;
   fs.mkdirSync(dir, { recursive: true });
   writeJson(mcpFile, cfg);
-  out(`  ✓ .mcp.json ${same ? '그대로(이미 같음)' : '저장'} — 브리지 ${bridgePath} · 서버 ${redactUrl(url)} · 토큰은 환경 변수 참조만`);
+  out(`  ✓ .mcp.json ${same ? '그대로(이미 같음)' : '저장'} — 브리지 ${bridgePath} · 서버 ${redactUrl(url)} · ${v2 ? '새 연결(--v2, 작업 도구 넷)' : '예전 연결(--lean)'} · 토큰은 환경 변수 참조만`);
+
+  // 1-1) 새 연결이면 지침(CLAUDE.md)도 새 연결용으로: 없으면 본보기를 쓰고, 예전 본보기(예전 도구 이름이 든 것)면 CLAUDE.v1.md 로 남기고 바꾼다.
+  //      사용자가 고쳐 쓴 지침은 건드리지 않는다. --v1 로 되돌릴 때는 남겨 둔 CLAUDE.v1.md 를 되살린다
+  const claudeMd = path.join(dir, 'CLAUDE.md'); const v1Backup = path.join(dir, 'CLAUDE.v1.md'); const v2Template = path.join(templateDir, 'v2', 'CLAUDE.md');
+  if (v2 && fs.existsSync(v2Template)) {
+    const want = fs.readFileSync(v2Template, 'utf8'); const have = fs.existsSync(claudeMd) ? fs.readFileSync(claudeMd, 'utf8') : null;
+    if (have == null) { fs.writeFileSync(claudeMd, want); out('  ✓ CLAUDE.md — 새 연결용 지침을 썼습니다'); }
+    else if (have !== want) {
+      if (/start_request|propose_changes/.test(have) && !/task\(doc_id, request_id\)/.test(have)) {
+        if (!fs.existsSync(v1Backup)) fs.writeFileSync(v1Backup, have);
+        fs.writeFileSync(claudeMd, want); out('  ✓ CLAUDE.md — 새 연결용 지침으로 바꿨습니다(예전 지침은 CLAUDE.v1.md)');
+      } else out('  ! CLAUDE.md 가 본보기와 달라 그대로 둡니다 — 새 연결 도구(task·read·edit·finish) 안내는 agent/v2/CLAUDE.md 를 참고하세요');
+    }
+  } else if (o.v2 === false && fs.existsSync(v1Backup) && fs.existsSync(claudeMd) && fs.existsSync(v2Template) && fs.readFileSync(claudeMd, 'utf8') === fs.readFileSync(v2Template, 'utf8')) {
+    fs.writeFileSync(claudeMd, fs.readFileSync(v1Backup, 'utf8')); out('  ✓ CLAUDE.md — 예전 연결용 지침(CLAUDE.v1.md)을 되살렸습니다');
+  }
 
   // 2) 본보기(CLAUDE.md·.claude/settings.json·guides/ — 그림 파일·멀티에이전트·변경 요청 절차) — agent/ 가 아닌 곳이면 없는 것만 복사
-  for (const rel of ['CLAUDE.md', path.join('.claude', 'settings.json'), ...AGENT_GUIDES.map((name) => path.join('guides', name))]) {
+  for (const rel of ['CLAUDE.md', path.join('.claude', 'settings.json'), path.join('.claude', 'ai-debug-hook.mjs'), ...AGENT_GUIDES.map((name) => path.join('guides', name))]) {
     const dst = path.join(dir, rel);
     if (fs.existsSync(dst)) { out(`  ✓ ${rel.split(path.sep).join('/')} 있음`); continue; }
     const src = path.join(templateDir, rel);
     if (path.resolve(dir) !== path.resolve(templateDir) && fs.existsSync(src)) {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
-      fs.copyFileSync(src, dst);
+      if (rel === path.join('.claude', 'ai-debug-hook.mjs')) {
+        const source = fs.readFileSync(src, 'utf8').replace("'../../server/ai-debug.js'", JSON.stringify(pathToFileURL(path.join(root, 'server/ai-debug.js')).href));
+        fs.writeFileSync(dst, source, { encoding: 'utf8', mode: 0o600 });
+      } else fs.copyFileSync(src, dst);
       out(`  ✓ ${rel.split(path.sep).join('/')} 본보기를 복사했습니다`);
     } else out(`  ! ${rel.split(path.sep).join('/')} 가 없습니다 — ${path.join(templateDir, rel)} 를 참고하세요`);
+  }
+
+  // 기존 권한/deny와 사용자 hook은 보존한다. 이미 hwpx 도구를 허용한 작업 폴더에는 새 사본 도구만 더한다.
+  const agentSettings = path.join(dir, '.claude', 'settings.json');
+  if (fs.existsSync(agentSettings)) {
+    const settings = readJson(agentSettings), template = readJson(path.join(templateDir, '.claude', 'settings.json'));
+    if (settings && typeof settings === 'object' && !Array.isArray(settings) && (settings.hooks == null || (typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)))) {
+      settings.hooks ||= {}; let changed = false;
+      const allowed = settings.permissions?.allow;
+      if (Array.isArray(allowed) && allowed.some(name => /^mcp__hwpx__(?:read_document|get_request|propose_changes)$/.test(name))) {
+        for (const name of ['get_edit_capabilities', 'get_edit_workspace', 'edit_workspace', 'publish_edit_workspace', 'record_edit_stage']) {
+          const permission = `mcp__hwpx__${name}`;
+          if (!allowed.includes(permission)) { allowed.push(permission); changed = true; }
+        }
+        // 새 MCP 연결의 작업 도구 넷(예전 연결에는 없는 이름이라 미리 허용해도 달라지는 것이 없다)
+        for (const permission of V2_PERMISSIONS) if (!allowed.includes(permission)) { allowed.push(permission); changed = true; }
+      }
+      for (const [event, groups] of Object.entries(template.hooks || {})) {
+        const current = settings.hooks[event];
+        if (current != null && !Array.isArray(current)) continue;
+        const installed = (current || []).some(group => group.hooks?.some(hook => /ai-debug-hook\.mjs/.test([hook.command, ...(hook.args || [])].join(' '))));
+        if (!installed) { settings.hooks[event] = [...(current || []), ...groups]; changed = true; }
+      }
+      if (changed) { writeJson(agentSettings, settings); out('  ✓ 진단 hook·기존 hwpx 연결의 사본 편집 도구를 병합했습니다(기존 설정·deny·다른 hook 보존)'); }
+    }
   }
 
   // 3) 위 폴더의 CLAUDE.md(개발 메모)는 에이전트 세션에 필요 없다 — claudeMdExcludes(이 PC 전용 settings.local.json)
@@ -300,6 +361,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
           parts.push(st.status === 200 ? '채널 연결 지원' : st.status === 404 ? '이 서버는 채널 연결을 모릅니다(v0.3 이상 필요)' : `채널 상태 ${st.status}`);
         }
         out(`  ✓ ${parts.join(' · ')}`);
+        // 새 연결(--v2)은 서버가 그 연결을 알아야 한다(/api/config features.mcp2). 옛 서버는 예전 도구로 답해 새 연결용 지침(CLAUDE.md)과 맞지 않는다
+        if (v2 && !c.body.features?.mcp2) out('  ✗ 이 서버는 새 연결(--v2)을 모릅니다 — 서버를 최신 버전으로 올린 뒤 쓰세요. 지금 띄우면 예전 도구로 답해 지침과 맞지 않습니다(되돌리기: node scripts/setup-agent.mjs --v1)');
       }
     } catch (e) {
       reachable = false;

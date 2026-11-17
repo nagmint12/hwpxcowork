@@ -36,6 +36,7 @@
 .lib-tools .ic svg { width: 14px; height: 14px; }
 .lib-note { font-size: 12px; cursor: help; }
 .btnlike.disabled { opacity: .45; cursor: default; pointer-events: none; }
+.btnlike.busy { opacity: 1; cursor: progress; pointer-events: none; }
 .btnlike.small { padding: 3px 9px; font-size: 12.5px; }
 
 .libtable tr.folder:hover, .libtable tr.doc:hover { background: #f5f8fc; cursor: pointer; }

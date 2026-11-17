@@ -9,6 +9,9 @@ if [ -z "$NODE" ]; then
   echo "[설정 필요] Node.js 22 이상이 없습니다${NODE_OLD:+(설치된 판: $NODE_OLD)}. $HERE/install-node.sh 를 한 번 실행하세요." >&2
   exit 1
 fi
+# npm으로 설치한 AI CLI도 같은 Node를 사용한다(시스템 Node가 옛 판인 Mac 포함).
+PATH="$(dirname "$NODE"):$PATH"
+export PATH
 if [ -f "$HERE/app/portable/install-dependencies.mjs" ] && ! "$NODE" "$HERE/app/portable/install-dependencies.mjs" --check; then
   echo "[설치 필요] sh $HERE/install-dependencies.sh 를 먼저 실행하세요." >&2
   exit 1

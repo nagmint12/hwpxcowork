@@ -33,6 +33,7 @@ const HELP = `개인 AI 자동 처리 실행기
   --check: 로그인·서버 연결·필수 도구만 확인하고 종료(요청 선점·모델 호출 없음)
   codex: Codex CLI 설치 후 codex login으로 본인 ChatGPT 계정 로그인. API 키는 사용하지 않음.
     선택: --codex-command <codex 실행 파일 경로> 또는 HWPX_COWORK_CODEX_COMMAND
+    선택: --mcp 2 (또는 HWPX_COWORK_MCP=2) 새 MCP 연결 — 작업 도구 넷(task·read·edit·finish)으로 처리(짧은 요청 내용·한 번에 쓰기). 기본 1 = 예전 연결
   API 제공자는 해당 키 환경 변수도 필요:
     openai: OPENAI_API_KEY / anthropic: ANTHROPIC_API_KEY / gemini: GEMINI_API_KEY 또는 GOOGLE_API_KEY
   API 연결 방식(선택): --gateway direct|baze (기본 direct = 제공자에 직접, 또는 HWPX_COWORK_AI_GATEWAY)
@@ -54,7 +55,7 @@ export function parseWorkerArgs(argv, env = process.env) {
     const key = argv[i];
     if (key === '--help' || key === '-h') return { help: true };
     if (key === '--check') { options.check = true; continue; }
-    if (!['--provider', '--model', '--url', '--codex-command', '--cli-command', '--gateway', '--base-url', '--key-env', '--effort', '--workspace'].includes(key)) throw new Error('지원 옵션은 --provider, --model, --url, --gateway, --base-url, --key-env, --effort, --workspace, --codex-command, --cli-command, --check, --help 입니다');
+    if (!['--provider', '--model', '--url', '--codex-command', '--cli-command', '--gateway', '--base-url', '--key-env', '--effort', '--workspace', '--mcp'].includes(key)) throw new Error('지원 옵션은 --provider, --model, --url, --gateway, --base-url, --key-env, --effort, --workspace, --mcp, --codex-command, --cli-command, --check, --help 입니다');
     if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error('옵션 뒤에 값이 필요합니다');
     options[key.slice(2)] = argv[++i];
   }
@@ -92,6 +93,9 @@ export function parseWorkerArgs(argv, env = process.env) {
   if (options.provider === 'codex') {
     // codex 는 본인 ChatGPT 로그인으로 Codex CLI 를 부른다 — API 연결 방식은 없다(환경 변수의 API 설정은 무시)
     if (options.gateway || options['base-url'] || options['key-env'] || options.workspace) throw new Error('codex 는 본인 ChatGPT 로그인 전용이라 --gateway·--base-url·--key-env·--workspace 를 쓸 수 없습니다(API 키 방식에서 쓰세요)');
+    // MCP 연결: --mcp 2(또는 HWPX_COWORK_MCP=2) = 새 연결(작업 도구 넷 — server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md), 1(기본) = 예전 연결
+    options.mcp = String(options.mcp || env.HWPX_COWORK_MCP || '1').trim();
+    if (!['1', '2'].includes(options.mcp)) throw new Error('--mcp 는 1(예전 연결) 또는 2(새 연결 — 작업 도구 넷)입니다');
     // 추론 강도: --effort > HWPX_COWORK_AI_EFFORT(웹의 'AI 모델·추론 강도'에서 정하면 요청마다 그 값이 우선)
     options.effort = String(options.effort || env.HWPX_COWORK_AI_EFFORT || '').trim().toLowerCase() || null;
     if (options.effort && !CODEX_EFFORTS.includes(options.effort)) throw new Error(`--effort 는 ${CODEX_EFFORTS.join('|')} 중 하나입니다`);
@@ -123,7 +127,7 @@ export function createWorkerAi(options, env = process.env) {
   }
   if (['gemini-cli', 'antigravity'].includes(options.provider)) return new GoogleCliProposer({ provider: options.provider, model: options.model, command: options.command }, { env });
   return options.provider === 'codex'
-    ? new CodexProposer({ model: options.model, effort: options.effort || undefined, command: options.command }, { env })
+    ? new CodexProposer({ model: options.model, effort: options.effort || undefined, command: options.command, mcp: options.mcp === '2' ? 'v2' : null }, { env })
     : new AiProposer({ ai: { provider: options.provider, model: options.model, gateway: options.gateway, baseUrl: options.baseUrl, effort: options.effort, workspace: options.workspace, enabled: true, maxProposals: 10 } }, { key: options.key });
 }
 
@@ -146,6 +150,11 @@ export async function checkWorkerConnection(worker, { fetchImpl = globalThis.fet
   const response = await fetchImpl(`${apiBaseFrom(worker.url)}/api/me`, { headers: worker.headers(), redirect: 'error', signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw Object.assign(new Error('중앙 서버 주소와 본인 HWPX 토큰을 확인하세요.'), { code: 'PREFLIGHT_FAILED' });
   const user = await response.json();
+  // 새 MCP 연결(--mcp 2)은 서버가 그 연결을 알아야 한다(/api/config features.mcp2)
+  if (worker.ai?.mcpSurface === 'v2') {
+    const config = await fetchImpl(`${apiBaseFrom(worker.url)}/api/config`, { redirect: 'error', signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (!config?.features?.mcp2) throw Object.assign(new Error('중앙 서버를 최신 버전으로 업데이트하세요. --mcp 2(새 MCP 연결)를 지원하지 않는 서버입니다.'), { code: 'PREFLIGHT_FAILED' });
+  }
   const client = await worker.connected();
   const tools = []; let cursor; const seen = new Set();
   do {

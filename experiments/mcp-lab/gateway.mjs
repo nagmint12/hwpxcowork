@@ -10,6 +10,7 @@ import { modelRequestContext } from '../../server/editor-instructions.js';
 import { createInstructionStore, createInstructionTools } from './instructions.mjs';
 import { createMetrics } from './metrics.mjs';
 import { createLocalFileTools } from './local-files.mjs';
+import { debugRecord, debugError } from '../../server/ai-debug.js';
 
 const CORE = ['list_documents', 'create_document', 'claim_next_request', 'get_request', 'start_request',
   'complete_request', 'fail_request', 'read_document', 'search_document', 'propose_changes', 'add_memo', 'get_task_guidance'];
@@ -144,17 +145,19 @@ export async function createLabGateway({ runtime, user = runtime.users.owner, pr
   };
   const call = (name, args = {}) => runtime.runExclusive(async () => {
     const start = performance.now(); let result, before;
+    debugRecord('lab.tool.input', args, { tool: name, profile });
     try {
       authorize();
       const tool = definitions.get(name);
       if (!tool || !selected.has(name)) throw Object.assign(new Error(`도구 ${name}를 사용할 수 없습니다. enable_tools로 필요한 그룹을 추가하세요.`), { code: 'TOOL_NOT_LOADED' });
       if (!validators.has(name)) validators.set(name, validator.getValidator(tool.inputSchema));
       const validated = validators.get(name)(args);
-      if (!validated.valid) throw Object.assign(new Error(validated.errorMessage), { code: 'INVALID_ARGUMENT' });
+      if (!validated.valid) { debugRecord('lab.tool.schema.error', args, { validator: 'AjvJsonSchemaValidator', schema: tool.inputSchema, validation: validated }); throw Object.assign(new Error(validated.errorMessage), { code: 'INVALID_ARGUMENT' }); }
       if (args.doc_id != null) runtime.service.assertDocRead(args.doc_id, user);
       before = asResult(await tool.handler(args));
       result = compact && ['get_request', 'claim_next_request'].includes(name) ? await compactRequest(before, args, store, user) : before;
-    } catch (error) { result = errorResult(error); }
+    } catch (error) { debugRecord('lab.tool.error', debugError(error), { tool: name }); result = errorResult(error); }
+    debugRecord('lab.tool.result', result, { tool: name });
     metrics.call(name, args, result, performance.now() - start, before);
     return result;
   });

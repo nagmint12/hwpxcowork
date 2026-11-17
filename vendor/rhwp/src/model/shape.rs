@@ -604,6 +604,45 @@ impl ShapeObject {
         }
     }
 
+    /// [hwpx-cowork] 2026-11-17 이 개체의 캡션 — 배치가 쓰는 `shape_caption_for_layout` 과 같은 선택
+    /// (차트·OLE 는 자기 캡션, 없으면 그리기 속성의 캡션). 줄 높이 측정·캡션 줄 합성이 같은 캡션을 읽는다.
+    pub fn caption(&self) -> Option<&Caption> {
+        match self {
+            ShapeObject::Line(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Rectangle(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Ellipse(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Arc(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Polygon(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Curve(s) => s.drawing.caption.as_ref(),
+            ShapeObject::Group(s) => s.caption.as_ref(),
+            ShapeObject::Picture(s) => s.caption.as_ref(),
+            ShapeObject::Chart(s) => s.caption.as_ref().or(s.drawing.caption.as_ref()),
+            ShapeObject::Ole(s) => s.caption.as_ref().or(s.drawing.caption.as_ref()),
+        }
+    }
+
+    /// [hwpx-cowork] 2026-11-17 `caption` 과 같은 캡션의 가변 참조.
+    pub fn caption_mut(&mut self) -> Option<&mut Caption> {
+        match self {
+            ShapeObject::Line(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Rectangle(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Ellipse(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Arc(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Polygon(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Curve(s) => s.drawing.caption.as_mut(),
+            ShapeObject::Group(s) => s.caption.as_mut(),
+            ShapeObject::Picture(s) => s.caption.as_mut(),
+            ShapeObject::Chart(s) => match s.caption {
+                Some(ref mut caption) => Some(caption),
+                None => s.drawing.caption.as_mut(),
+            },
+            ShapeObject::Ole(s) => match s.caption {
+                Some(ref mut caption) => Some(caption),
+                None => s.drawing.caption.as_mut(),
+            },
+        }
+    }
+
     /// 그리기 공통 속성 참조 반환 (Group/Picture/Ole 내용 없는 종류는 None)
     pub fn drawing(&self) -> Option<&DrawingObjAttr> {
         match self {

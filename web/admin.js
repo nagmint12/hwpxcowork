@@ -5,13 +5,14 @@ import { webAddress, localAddress } from './connections.js';
 import { AdminLimitsPanel, AdminUsersPanel } from './admin-accounts.js';
 import { AdminCreditsPanel } from './admin-credits.js';
 import { AdminTutorialAiPanel } from './admin-tutorial-ai.js';
+import { AdminUsagePanel } from './admin-usage.js';
 
 const hostMode = (host) => host === '127.0.0.1' ? 'local' : host === '0.0.0.0' ? 'lan' : 'custom';
 const binding = (s) => s ? `${s.host.includes(':') ? `[${s.host}]` : s.host}:${s.port}` : '';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const AdminServerPanel = {
-  components: { AdminLimitsPanel, AdminUsersPanel, AdminCreditsPanel, AdminTutorialAiPanel },
+  components: { AdminLimitsPanel, AdminUsersPanel, AdminCreditsPanel, AdminTutorialAiPanel, AdminUsagePanel },
   props: { modal: Boolean, prepareRestart: Function },
   emits: ['close'],
   template: `<component :is="modal ? 'dialog' : 'section'" ref="container" :class="['admin-server', { 'admin-dialog': modal }]"
@@ -19,7 +20,6 @@ export const AdminServerPanel = {
     <header class="admin-heading"><div><span class="admin-eyebrow">관리자</span><h1 id="admin-server-title">서버 설정</h1></div>
       <button v-if="modal" class="small" data-testid="admin-close" aria-label="관리자 설정 닫기" @click="requestClose">닫기</button>
       <a v-else class="btnlike small" href="#/">← 문서 목록</a></header>
-    <p class="muted admin-intro">접속 주소·서버 실행 방식, AI 응답 크기, 사용자, AI 크레딧, 튜토리얼 AI를 관리합니다.</p>
     <nav class="admin-tabs" role="tablist" aria-label="관리자 설정"><button v-for="t in tabs" :key="t.id" type="button" role="tab" :aria-selected="tab === t.id" :class="{ active: tab === t.id }" :data-testid="'admin-tab-' + t.id" @click="selectTab(t.id)">{{ t.label }}</button></nav>
     <template v-if="tab === 'server'">
     <p v-if="loading" class="admin-message" role="status">서버 설정을 읽는 중입니다…</p>
@@ -62,6 +62,7 @@ export const AdminServerPanel = {
     <AdminLimitsPanel v-else-if="tab === 'limits'"/>
     <AdminCreditsPanel v-else-if="tab === 'credits'"/>
     <AdminTutorialAiPanel v-else-if="tab === 'tutorial-ai'"/>
+    <AdminUsagePanel v-else-if="tab === 'usage'"/>
     <AdminUsersPanel v-else/>
   </component>`,
   setup(props, { emit }) {
@@ -71,11 +72,16 @@ export const AdminServerPanel = {
     const reviewMode = ref(''); const closeReview = ref(false); const diagnostics = ref(null); const reconnectUrl = ref('');
     const reconnectDirect = ref(false); const configuredReconnectUrl = ref('');
     // 탭: 서버 접속(재시작 필요) · AI 응답 크기 · 사용자(둘 다 바로 적용 — 같은 설정 파일이라 돌아오면 서버 설정을 다시 읽는다) · AI 크레딧(읽기만)
-    const tabs = [{ id: 'server', label: '서버 접속' }, { id: 'limits', label: 'AI 응답 크기' }, { id: 'users', label: '사용자' }, { id: 'credits', label: 'AI 크레딧' }, { id: 'tutorial-ai', label: '튜토리얼 AI' }];
-    const tab = ref('server');
+    const tabs = [{ id: 'server', label: '서버 접속' }, { id: 'limits', label: 'AI 응답 크기' }, { id: 'users', label: '사용자' }, { id: 'credits', label: 'AI 크레딧' }, { id: 'usage', label: 'AI 사용량' }, { id: 'tutorial-ai', label: '튜토리얼 AI' }];
+    // 주소로 바로 여는 탭: #/admin/usage → 'AI 사용량'(관리자 페이지에서만 — 대화상자는 늘 서버 접속부터)
+    const linked = !props.modal && /^#\/admin\/([\w-]+)/.exec(location.hash)?.[1];
+    const tab = ref(tabs.some((t) => t.id === linked) ? linked : 'server');
     async function selectTab(id) {
       if (id === tab.value) return;
       tab.value = id;
+      // 관리자 페이지에서는 주소도 그 탭으로 맞춘다 — #/admin/usage 로 들어와 다른 탭을 본 뒤 새로 고치면 다시 AI 사용량이 열렸다(2026-11-16).
+      // 주소만 바꾼다(replaceState 는 hashchange 를 내지 않아 화면 경로는 그대로)
+      if (!props.modal) { try { history.replaceState(null, '', id === 'server' ? '#/admin' : `#/admin/${id}`); } catch { /* 주소를 못 바꿔도 탭은 바뀐다 */ } }
       if (id === 'server' && snapshot.value) { try { apply(await api('/api/admin/server'), !changed.value); } catch { /* 저장할 때 다시 확인한다 */ } }
     }
     let disposed = false; let focusBefore = null; let pollController = null;

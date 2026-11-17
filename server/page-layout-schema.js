@@ -12,4 +12,26 @@ export const PageLayoutOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('page_number'), section, position: z.enum(['NONE', 'TOP_LEFT', 'TOP_CENTER', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_CENTER', 'BOTTOM_RIGHT', 'OUTSIDE_TOP', 'OUTSIDE_BOTTOM', 'INSIDE_TOP', 'INSIDE_BOTTOM']).optional(), format: z.enum(['DIGIT', 'CIRCLED_DIGIT', 'ROMAN_CAPITAL', 'ROMAN_SMALL', 'LATIN_CAPITAL', 'LATIN_SMALL']).optional(), side_char: z.string().max(1).optional(), start: z.number().int().min(0).max(65535).optional(), clear: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('master_page'), section, apply_to: apply.optional(), text: text.optional(), style, attachment_id: z.string().optional().describe('배경 그림 첨부 aid. 용지 전체에 맞춘다'), clear: z.boolean().optional() }).strict(),
 ]);
-export const normalizePageLayoutOps = ops => z.array(PageLayoutOpSchema).min(1).max(50).parse(ops);
+// 개체 → 본문(2026-11-16, engine/flow.js): 쪽 좌표에 놓인 글상자·괘선을 진짜 문단·표로 옮긴다. 쪽 구성 제안과 같은 길(고치기 전 사본으로 되돌림)을 쓴다.
+// 옛 MCP 도구(propose_page_layout)의 입력 스키마는 PageLayoutOpSchema 그대로다 — 이 op 는 새 연결(server/mcp2.js edit)과 REST 가 쓴다.
+const marginMm = z.number().min(0).max(300).optional();
+const REST_KINDS = ['table', 'figure', 'shape', 'chart'];   // 개체 지우기(delete_objects)의 종류와 같다
+export const ObjectsToBodyOpSchema = z.object({
+  op: z.literal('objects_to_body'),
+  at: z.union([z.string().regex(/^(\*|s\d+|s\d+\/p\d+)$/), z.array(z.string().regex(/^s\d+\/p\d+$/)).min(1).max(1000)]).optional()
+    .describe("대상: 생략·'*' = 문서 전체, 's3' = 구역, 's3/p0' 또는 그 목록 = 그 본문 문단의 개체"),
+  join_pages: z.boolean().optional().describe('쪽마다 끊긴 같은 표(열 구조 같음)를 하나로 잇는다(기본 true)'),
+  keep_page_numbers: z.boolean().optional().describe('쪽 번호로 보이는 줄도 본문으로 옮긴다(기본 false — 버린다)'),
+  drop: z.array(z.string().regex(/^s\d+\/p\d+:L\d+$/)).max(1000).optional().describe("옮기지 않고 버릴 줄(read view=layout 의 줄 번호 — 's0/p0:L3')"),
+  header_rows: z.number().int().min(0).max(20).optional().describe('표 머리행 수(기본: 배경색이 칠해진 첫 줄들)'),
+  wrap: z.enum(['auto', 'keep']).optional().describe('표 밖 줄: auto = 이어지는 줄을 한 문단으로, keep = 줄마다 문단'),
+  margins: z.union([z.enum(['auto', 'keep']), z.object({ left: marginMm, right: marginMm, top: marginMm, bottom: marginMm, header: marginMm, footer: marginMm }).strict()]).optional()
+    .describe('쪽 여백 mm: auto(기본) = 여백이 모두 0 인 구역만 조각 위치로 추정해 넣는다, keep = 그대로'),
+  merge_sections: z.boolean().optional().describe('비게 된 구역 첫 문단을 지워 앞 구역에 합친다(기본 true — 용지가 같은 구역만)'),
+  // 옮긴 글상자·선은 언제나 지운다. 이 옵션은 옮기지 못해 그 문단에 남는 개체까지 같은 제안 안에서 지울 때 — 같은 호출의 delete_objects 도 서버가 이 꼴로 합친다(server/mcp2/ops.js)
+  remove_rest: z.union([z.boolean(), z.array(z.enum(REST_KINDS)).min(1).max(REST_KINDS.length),
+    z.array(z.object({ kinds: z.array(z.enum(REST_KINDS)).min(1).max(REST_KINDS.length).optional(), at: z.array(z.string().regex(/^s\d+\/p\d+$/)).min(1).max(1000).optional() }).strict()).min(1).max(50)]).optional()
+    .describe("옮긴 문단에 남는 개체(옮기지 못한 그림·표·차트·회전한 도형·안에 개체가 든 글상자)도 지운다: true = 모두, ['shape','figure','table','chart'] 가운데 = 그 종류만, [{kinds?, at?}] = 문단마다 따로(기본: 남긴다). 안에 든 글도 함께 지워지고 그 글자 수가 결과에 적힌다"),
+}).strict();
+export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema]);
+export const normalizePageLayoutOps = ops => z.array(StructureOpSchema).min(1).max(50).parse(ops);

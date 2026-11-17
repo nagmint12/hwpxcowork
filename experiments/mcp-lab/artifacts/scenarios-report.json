@@ -18,7 +18,7 @@
       "document": {
         "persisted": true,
         "bytes": 10855,
-        "sha256": "f7f9133d350df5bccf70809dc1aa7375d9d945c154fa33cec3b6e02cf1837aec",
+        "sha256": "e6059b9c90eec6b716318530c980cab6c11bdddceb9f23089ce92109be17291f",
         "path": "<repo>\\experiments\\mcp-lab\\artifacts\\documents\\quick_sentence.hwpx"
       },
       "metrics": {
@@ -148,7 +148,7 @@
       "document": {
         "persisted": true,
         "bytes": 11076,
-        "sha256": "a7ce60852c54db3ce3c91d1f9a91e3b2b8dd2b684f2c46768515fcc4ff7e6ea0",
+        "sha256": "b47bfa262dd7cedce0aabd15214e0af633b718c57f31b8394d185abd3101888a",
         "path": "<repo>\\experiments\\mcp-lab\\artifacts\\documents\\education_review.hwpx"
       },
       "metrics": {
@@ -339,7 +339,7 @@
       "document": {
         "persisted": true,
         "bytes": 11594,
-        "sha256": "05419fc559485055a5196b2575cdc6cf552cda6aa9e44f506d7beeb73f4246b2",
+        "sha256": "40c43eae2b9da5dfbed4c911b5ab84e76591e3a1e918251912f5ef37a3d5f9f0",
         "path": "<repo>\\experiments\\mcp-lab\\artifacts\\documents\\table_modify.hwpx"
       },
       "metrics": {
@@ -497,7 +497,7 @@
       "document": {
         "persisted": true,
         "bytes": 12335,
-        "sha256": "7e8c681b3a9225e8fc135b987b15da9317685bc0a0726447a48637d460fe2a68",
+        "sha256": "10e31a89a32ece328177aab789367bd1db01832c9db67092f8a8efc5487365ad",
         "path": "<repo>\\experiments\\mcp-lab\\artifacts\\documents\\figure_create_replace.hwpx"
       },
       "metrics": {
@@ -647,7 +647,7 @@
       "document": {
         "persisted": true,
         "bytes": 10889,
-        "sha256": "44aa7b843fe2e9265fcb787ac300ec2f330f330950344e3c27771644fafbeabf",
+        "sha256": "cc4bc8fc4034eb430f5339a60b67b7cd1960431a3827f8e5367dc1782f3dcecf",
         "path": "<repo>\\experiments\\mcp-lab\\artifacts\\documents\\report_conclusion.hwpx"
       },
       "metrics": {

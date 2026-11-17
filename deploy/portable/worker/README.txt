@@ -31,10 +31,15 @@ Windows
      그림은 SVG·차트 MCP 도구로 만듭니다. 모델·추론 강도는 웹의 'AI 모델·추론 강도'에서 요청마다 적용됩니다.
 
 macOS·Linux
-  Node.js 22 이상이 없으면 ./install-node.sh 를 한 번 실행합니다. worker-settings.txt 를 고친 뒤
+  압축을 푼 hwpx-ai-worker 폴더에서 터미널을 열고 sh install.sh 를 실행합니다(Node와 npm 모듈 설치).
+  macOS 14 포함 13.5 이상은 Node 24, macOS 11~13.4는 호환용 Node 22를 자동으로 받습니다.
+  Intel·Apple Silicon을 자동 구분하며 이미 실행 가능한 Node 22 이상이 있으면 그대로 씁니다.
+  macOS 10.15 이하는 지원하지 않습니다. 선택한 AI CLI의 macOS 요구조건·로그인은 별도로 확인하세요.
+  worker-settings.txt 를 고친 뒤
     export HWPX_COWORK_TOKEN='본인 토큰'      (API 방식이면 키 변수도 export)
-    ./start-worker.sh --check
-    ./start-worker.sh
+    sh start-worker.sh --check
+    sh start-worker.sh
+  --check는 연결·인증 준비 점검이며 실제 AI 요청 처리 성공을 뜻하지 않습니다.
 
 멀티에이전트(지휘자·작업자) 실행: app\docs\MULTI_AGENT_ORCHESTRATION.md
   예) node app\scripts\orchestration-worker.mjs --agent-id codex --provider codex   (포함판은 runtime\node.exe)

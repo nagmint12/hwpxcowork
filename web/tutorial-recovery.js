@@ -26,6 +26,7 @@ export function tutorialStoredView(state) {
     for (const key of ['instruction', 'text', 'quote']) if (typeof model[key] === 'string') model[key] = model[key].slice(0, 4096);
     if (typeof model.target?.text === 'string') model.target.text = model.target.text.slice(0, 2048);
   }
+  if (view.windows.composer?.phase === 'sending') view.windows.composer.phase = 'edit';
   return JSON.stringify(view).length <= 12000 ? view : null;
 }
 
@@ -35,5 +36,6 @@ export function restoreTutorialView(snapshot, state, closeWindow) {
     closeWindow(kind); state[kind] = clone(snapshot.windows[kind]);
     if (state[kind]) { state[kind].autoSend = false; state[kind].tutorialTyping = false; }
   }
+  if (state.composer?.phase === 'sending') state.composer.phase = 'edit';
   state.tab = snapshot.tab; state.active = clone(snapshot.active); state.activeRid = snapshot.activeRid;
 }

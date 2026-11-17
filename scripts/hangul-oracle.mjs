@@ -148,7 +148,27 @@ export function readHangulOracle(dir) {
       return bs.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     });
   };
-  return { pages: pi.pages, images: perPage('pic'), tables: tablesMeasured ? perPage('tbl') : null, tablesMeasured, colorBoxes: pi.images.map((p) => p.colors || {}), paraPages: pi.paraPages || {}, paraSections: pi.paraSections || {}, instances, saved: path.join(dir, 'saved.hwpx') };
+  return { pages: pi.pages, images: perPage('pic'), tables: tablesMeasured ? perPage('tbl') : null, tablesMeasured, colorBoxes: pi.images.map((p) => p.colors || {}), paraPages: physicalParaPages(pi.paraPages || {}, pi.paraSections), paraSections: pi.paraSections || {}, instances, saved: path.join(dir, 'saved.hwpx') };
+}
+
+/**
+ * 한/글 KeyIndicator 의 쪽은 **인쇄 쪽 번호**다 — 구역 첫머리의 '새 번호로 시작'(newNum PAGE)이 있으면 그 구역에서 1로
+ * 되감긴다(2026-11-16 표준서식 보고서: 표지·차례 구역 3쪽 뒤 본문 구역 첫 문단이 1쪽으로 나왔다). 문단 차례대로
+ * 구역이 바뀌면 앞 구역 마지막 물리 쪽 다음 쪽에서, 같은 구역 안에서 번호가 줄면(구역 중간의 새 번호) 그 다음 쪽에서
+ * 다시 센다. 구역 정보가 없는 예전 결과는 그대로 둔다.
+ */
+export function physicalParaPages(paraPages, paraSections) {
+  if (!paraSections || !Object.keys(paraSections).length) return paraPages;
+  const out = {};
+  let section = null; let base = 0; let first = 0; let prev = null; let last = -1;
+  for (const k of Object.keys(paraPages).map(Number).sort((a, b) => a - b)) {
+    const printed = paraPages[k]; const s = paraSections[k];
+    if (printed == null || s == null) { out[k] = printed ?? null; continue; }
+    if (s !== section || (prev != null && printed < prev)) { section = s; base = last + 1; first = printed; }
+    const phys = base + printed - first;
+    out[k] = phys; prev = printed; last = Math.max(last, phys);
+  }
+  return out;
 }
 
 /** 한/글이 알려 준 문단 쪽 번호로 저장 줄의 쪽(되감김으로 어림한 쪽)을 바로잡는다. 문단 번호는 구역을 지나도 이어진다. */

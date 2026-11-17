@@ -1,15 +1,18 @@
 import { fileURLToPath } from 'node:url';
+import { FONT_SELECTION_PATCHES } from './font-selection-patches.mjs';
 
 const localFaces = fileURLToPath(new URL('../fonts/exact-local-faces.ts', import.meta.url)).replaceAll('\\', '/');
 
 // Supply exact local faces before the existing, awaited font preparation.
 // This changes no document font declarations, metrics policy, LineSegs or WASM.
 export const FONT_PATCHES = [
+  ...FONT_SELECTION_PATCHES,
   {
     id: 'exact-local-face-import', file: 'src/core/font-loader.ts',
     why: 'CSS 가족명과 다른 HWP 전체 글꼴명은 local(fullName/PostScriptName)으로 확인한다',
     anchor: 'type FontEntry = ProjectedWebFontEntry;',
     replace: () => `import { isExactLocalFaceName, loadExactLocalFaces, setDocumentFontNames } from ${JSON.stringify(localFaces)};
+import { getLocalFontRecords } from './local-fonts.ts';
 type FontEntry = ProjectedWebFontEntry & { weight?: string; style?: string };`,
   },
   {
@@ -19,8 +22,11 @@ type FontEntry = ProjectedWebFontEntry & { weight?: string; style?: string };`,
     replace: () => `  setDocumentFontNames(docFonts ?? []);
   detectOSFonts(detectionNames.filter(name => !isExactLocalFaceName(name)));
   const exactTargets = [...(docFonts ?? []), ...(docFonts ?? []).flatMap(name => projectedSubstituteTargets(name).map(target => target.face))];
-  for (const name of await loadExactLocalFaces(exactTargets.filter(name =>
-    !isDetectedOSFont(name) && !isRegisteredFontFamily(name)))) {
+  const clientFontRecords = getLocalFontRecords();
+  const clientFontNames = new Set(clientFontRecords.filter(record => record.detectionSource === 'local-font-access')
+    .flatMap(record => record.aliases).map(normalizeFontFamily));
+  for (const name of await loadExactLocalFaces(exactTargets.filter(name => clientFontNames.has(normalizeFontFamily(name))
+    || (!isDetectedOSFont(name) && !isRegisteredFontFamily(name))), undefined, clientFontRecords)) {
     detectedOSFonts.add(name);
     detectedOSFontFamilies.add(normalizeFontFamily(name));
   }`,

@@ -250,7 +250,9 @@ const lines = (s) => String(s ?? '').split('\n').map((x) => x.trim()).filter(Boo
 const under = (ref, set) => { if (!ref) return false; for (const r of set) if (ref === r || ref.startsWith(`${r}/`)) return true; return false; };
 const bodyOf = (ref) => (/^s\d+\/p\d+/.exec(String(ref || ''))?.[0] ?? null);
 // 판정하지 않는 종류: 차례·쪽 구성은 문서 여러 곳을 바꾸는 것이 의도다
-const V2_SKIP = new Set(['toc', 'page_layout']);
+// 문단 지우기·옮기기(para_delete·para_move — 2026-11-17)는 문단 차례가 바뀌어 덩어리 주소(옛 문서 차례)와 제안 주소(반영 뒤 자리)를 견줄 수 없다 —
+// 대상 밖 경고가 늘 나므로 V2 에서 뺀다(V1 구조 검사는 그대로)
+const V2_SKIP = new Set(['toc', 'page_layout', 'para_delete', 'para_move']);
 
 /**
  * V2: 이번 커밋에서 적용된 제안들(applied) ↔ 편집 전후 덩어리(diffDocs). 제안마다 경고 글 목록 → Map(pid → [글]).

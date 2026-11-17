@@ -119,7 +119,7 @@ export const ReviewTab = {
       <button class="small nav-next" :disabled="!list.length" title="다음 항목 (↓)" aria-label="다음 항목" @click="step(1)">↓</button></div>
     <div class="rt-list" ref="listEl">
       <ReviewCard v-for="(it, i) in list" :key="it.key" :item="it" place="list" :pinned="i===cur" @activate="onActivate(i)"/></div>
-    <p class="muted rt-empty" v-if="!list.length" :title="filter === 'all' ? '편집기에서 글을 고르고 우클릭 → 메모 달기 · AI에게 요청' : null">{{ empty }}</p>
+    <p class="muted rt-empty" v-if="!list.length" :title="filter === 'all' ? '편집기에서 글을 고르고 우클릭 → AI에게 맡기기 · 메모 달기' : null">{{ empty }}</p>
     <CollabHost/>
   </div>`,
   setup() {

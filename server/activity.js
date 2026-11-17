@@ -22,6 +22,11 @@ const LABELS = {
   get_page_layout: () => '쪽 구성 확인',
   list_memos: () => '메모 확인',
   list_proposals: () => '제안 목록 확인',
+  list_tables: (a, v) => `표 목록 확인${v?.total != null ? ` · 전체 ${v.total}개` : ''}`,
+  get_edit_workspace: a => `작업 사본 읽기 · ${a?.part === 'format' ? '형식' : a?.part === 'mapping' ? '주소' : '내용'}`,
+  get_edit_capabilities: () => '실험 편집 기능 확인',
+  edit_workspace: a => `작업 사본 수정 · ${a?.stage === 'format' ? '형식' : '내용'}${a?.complete_stage ? ' 단계 완료' : ''}`,
+  publish_edit_workspace: () => '내용·형식 묶음 제안 저장',
   list_changes: () => '변경 추적 확인',
   list_attachments: () => '첨부 목록 확인',
   read_attachment: () => '첨부 읽기',
@@ -56,7 +61,33 @@ const LABELS = {
   add_memo: (a) => (a?.reply_to ? '답글' : '의견 남김'),
   complete_request: () => '완료',
   fail_request: () => '실패로 기록',
+  // 새 MCP 연결(server/mcp2.js — 도구 넷): 맡기·읽기·고치기·끝내기. 줄 글에는 보기 이름·범위 주소·op 종류와 수만 싣는다
+  task: () => '요청을 맡음',
+  read: (a) => {
+    const view = READ_VIEWS[a?.view || 'text'] || '문서 읽기';
+    const at = typeof a?.at === 'string' && /^[s\d/p.*]+$/.test(a.at) ? ` · ${a.at}` : '';
+    return `${view}${at}${a?.cursor ? ' · 이어 읽기' : ''}`;
+  },
+  edit: (a, v) => {
+    const tally = new Map();
+    for (const op of Array.isArray(a?.ops) ? a.ops : []) { const k = EDIT_OPS[op?.op] || '고치기'; tally.set(k, (tally.get(k) || 0) + 1); }
+    const what = [...tally].map(([k, c]) => (c > 1 ? `${k} ${c}` : k)).join(' · ') || '고치기';
+    const failed = count(v?.failed);
+    // 2026-11-17(§10.4 나-4): 저장 단계에서 실패하면 아무것도 저장하지 않는다(dry_run 이 아니면 '저장 안 됨')
+    // 2026-11-17(Z03 — artifacts/mcp-round3-20261117/codex/REPORT-G4.md 문제 2): '조판 확인' 줄은 반영 전 쪽 수라, 영수증 pages(server/page-estimate.js)의
+    // all_applied 가 now 와 다르면 '모두 반영하면 N쪽' 을 붙인다(숫자만). pages 가 없거나 skipped 면 그대로
+    const pg = v?.pages;
+    const after = pg && !pg.skipped && Number.isInteger(pg.now) && Number.isInteger(pg.all_applied) && pg.all_applied !== pg.now ? ` · 모두 반영하면 ${pg.all_applied}쪽` : '';
+    return `${a?.dry_run ? '미리 해 보기 · ' : ''}${what}${failed ? (a?.dry_run ? `(${failed}건은 다시 내야 함)` : `(${failed}건 때문에 저장 안 됨 — 다시 내야 함)`) : ''}${after}`;
+  },
+  // 2026-11-17(작업 Q): 결과를 저장한 요청은 summary+error 여도 완료로 닫는다(server/mcp2/service.js agentFinish) — 완료면 activityItem 이 ' · 완료' 를 붙인다
+  finish: (a, v) => (v?.completed === true ? (a?.error ? '못 한 것을 요약에 적음' : '요약 남김') : a?.error ? '실패로 기록' : '완료'),
 };
+const READ_VIEWS = { text: '문서 읽기', layout: '개체 배치 읽기', outline: '제목 얼개 확인', map: '문서 얼개 확인', tables: '표 확인', objects: '개체 확인', format: '서식 확인', memos: '메모 확인',
+  proposals: '제안 목록 확인', changes: '변경 추적 확인', fields: '누름틀 확인', figures: '그림 목록 확인', attachments: '첨부 목록 확인', attachment: '첨부 읽기', page: '쪽 구성 확인', guide: '작성 지침 확인', history: '문서 이력 확인', requests: '요청 목록 확인' };
+const EDIT_OPS = { replace: '수정 제안', insert: '문단 추가', table: '표 제안', table_edit: '표 고치기', format: '서식 제안', delete_objects: '개체 지우기', delete_paragraphs: '문단 지우기', move_paragraphs: '문단 옮기기', alternatives: '여러 안', memo: '의견', fill: '누름틀 채우기', toc: '차례 새로 고침',
+  chart: '차트 제안', figure: '그림 제안', objects_to_body: '개체 → 본문', paper: '쪽 구성', section: '쪽 구성', split_section: '쪽 구성', merge_section: '쪽 구성', header: '쪽 구성', footer: '쪽 구성', page_number: '쪽 구성', master_page: '쪽 구성',
+  replace_all: '일괄 바꾸기', withdraw: '제안 거두기' };   // 2026-11-17 MCP_REDESIGN §10.4 나-6·나-4
 
 /** 기록할 도구인가 */
 export const isActivityTool = (tool) => Object.hasOwn(LABELS, tool);

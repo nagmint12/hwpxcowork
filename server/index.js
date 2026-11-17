@@ -14,6 +14,7 @@ import { Service, ServiceError } from './service.js';
 import { AiProposer } from './ai.js';
 import { createMcpServer, agentFromRequest, cleanName } from './mcp.js';
 import { isLeanRequest } from './lean.js';
+import { isV2Request, v2Toolset } from './mcp2.js';
 import { KINDS, PRESETS, fmtTime } from './memotext.js';
 import { installAgentRoutes } from './routes/agents.js';
 import { installCollabRoutes } from './routes/collab.js';
@@ -45,6 +46,7 @@ import { createJournal, installProcessDiagnostics } from './recovery-state.js';
 import { createAdminMcp, ADMIN_MCP_PATH } from './admin-mcp.js';
 import { createLocalFolders } from './local-folders.js';
 import { installLocalRoutes } from './routes/local.js';
+import { withAiDebug, debugRecord, debugError, currentAiDebug, createAiDebug, debugServiceState } from './ai-debug.js';
 
 // URL.pathname 은 공백·한글을 %xx 로 남긴다 — 포터블을 '새 폴더'·한글 경로에 풀어도 되게 fileURLToPath 로 푼다
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,7 +109,9 @@ app.use((req, res, next) => {
   next();
 });
 // 파일 바이트를 받는 경로는 JSON 해석을 건너뛴다(.json 첨부가 객체로 바뀌지 않게). 수정본 저장(PUT drafts/mine)도 HWPX 바이트
-const jsonParser = express.json({ limit: '20mb' });
+const jsonParser = express.json({ limit: '20mb', verify(req, res, bytes) {
+  if (/^\/mcp(?:\/|$)/.test(req.path)) req.aiDebugRaw = Buffer.from(bytes);
+} });
 const clipboardParser = express.json({ limit: '30mb' });
 const nativeImportParser = express.json({ limit: '44mb' });
 // v0.4 실시간 밀어 넣기(PUT /live)도 편집기 내보내기 HWPX 바이트
@@ -179,6 +183,18 @@ function studioInfo() {
 // local: 언제나 같은 출처 /studio/(빌드가 없으면 그 주소가 503 + 빌드 안내), remote: config.studioUrl(cowork 플러그인 없음)
 const studioUrlOf = (st) => (st.mode === 'remote' ? cfg.studioUrl : '/studio/');
 
+// 로그인 화면의 체험 토큰 안내(2026-11-17): 체험이 켜져 있고 이름이 곧 토큰인 testN 계정이 있을 때만 'test1 ~ test100' 꼴, 없으면 null(안내 없음).
+// 예전에는 화면이 'test1 ~ test100' 을 늘 보여 체험 계정이 없는 설치(개인용·새 공동 서버)에서도 없는 토큰을 안내했다. 이름만 보이고 다른 토큰은 내보내지 않는다
+function tutorialLoginHint() {
+  try {
+    const c = tutorial.conf(); if (!c.on) return null;
+    const nums = (cfg.users || []).filter((u) => /^test\d+$/.test(u.name) && u.token === u.name && (c.everyone || c.users.has(u.name)))
+      .map((u) => Number(u.name.slice(4))).sort((a, b) => a - b);
+    if (!nums.length) return null;
+    return nums.length === 1 ? `test${nums[0]}` : `test${nums[0]} ~ test${nums.at(-1)}`;
+  } catch { return null; }
+}
+
 // ── 공개 정보 ──
 app.get('/api/config', (req, res) => {
   const studio = studioInfo();
@@ -189,7 +205,11 @@ app.get('/api/config', (req, res) => {
     allowDirectApply: cfg.changeRequests?.allowDirectApply === true,
     attachments: { maxBytes: cfg.attachments.maxBytes, maxPerDoc: cfg.attachments.maxPerDoc }, presets: PRESETS, kinds: KINDS,
     nonce: NONCE, studio,
+    // mcp2: 새 MCP 연결(작업 도구 넷 — server/mcp2.js)과 요청 내용 REST(GET …/requests/:rid/brief)를 이 서버가 안다(실행기가 --mcp 2 로 붙기 전에 확인한다)
+    // contentFormatWorkflow: 내용·형식 나눠 처리(실험)를 받는가 — config.experiments.contentFormat(기본 끔, 2026-11-16). 꺼져 있으면 편집기가 그 선택 칸을 보이지 않는다
+    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true },
     local: !!service.local,   // PC 폴더 연결(개인용 앱)이 켜져 있는가
+    tutorialLogin: tutorialLoginHint(),   // 로그인 화면 체험 토큰 안내 글(없으면 null)
     oauth: oauth.status(),
     mcpEvents: { enabled: mcpEvents.enabled(), protocolVersion: '2026-07-28', event: 'ai_request.created' },
   });
@@ -407,8 +427,25 @@ app.post('/api/docs/:id/changes/:cid/reject', auth, wrap(async (req, res) => res
 app.get('/api/docs/:id/requests', auth, wrap(async (req, res) => res.json(await service.listRequests(req.params.id, { status: req.query.status }, req.user))));
 app.post('/api/docs/:id/requests', auth, wrap(async (req, res) => res.json(await service.createRequest(req.params.id, req.body || {}, req.user))));
 app.get('/api/docs/:id/requests/:rid', auth, wrap(async (req, res) => res.json(await service.getRequestView(req.params.id, req.params.rid, req.user))));
+app.get('/api/docs/:id/requests/:rid/workspace-file', auth, wrap(async (req, res) => {
+  const kind = req.query.kind || 'hwpx';
+  const bytes = await service.editWorkspaceFile(req.params.id, req.params.rid, { kind, attempt: req.query.attempt, revision: req.query.revision }, req.user);
+  res.set('Cache-Control', 'no-store').type(kind === 'markdown' ? 'text/markdown; charset=utf-8' : 'application/vnd.hancom.hwpx');
+  res.set('Content-Disposition', `attachment; filename="request-${Number(req.params.rid)}-draft.${kind === 'markdown' ? 'md' : 'hwpx'}"`).send(bytes);
+}));
 // AI 작업 진행 기록(server/activity.js — AI 가 부른 도구를 한 줄씩. 새 줄은 WebSocket { type:'activity' } 로 온다)
 app.get('/api/docs/:id/requests/:rid/activity', auth, wrap(async (req, res) => res.json(service.requestActivity(req.params.id, req.params.rid, req.user))));
+// 새 MCP 연결의 요청 내용(task 응답과 같다 — server/mcp2/service.js agentBrief): 실행기가 모델의 첫 입력에 실어 task 호출 한 번을 아낀다
+app.get('/api/docs/:id/requests/:rid/brief', auth, wrap(async (req, res) => {
+  service.assertDocRead(req.params.id, req.user);
+  const session = /^[A-Za-z0-9_-]{1,64}$/.test(String(req.headers['x-hwpx-agent-session'] || '')) ? String(req.headers['x-hwpx-agent-session']) : null;
+  res.set('Cache-Control', 'no-store').json(await service.agentBrief(req.params.id, Number(req.params.rid), req.user, { session }));
+}));
+// 요청의 선점 상태만(문서를 읽지 않는다 — server/mcp2/service.js agentClaimState): 새 연결의 실행기 도구 연결(server/codex-mcp.js)이 쓰기 직전에 본다
+app.get('/api/docs/:id/requests/:rid/claim', auth, wrap(async (req, res) => {
+  const session = /^[A-Za-z0-9_-]{1,64}$/.test(String(req.headers['x-hwpx-agent-session'] || '')) ? String(req.headers['x-hwpx-agent-session']) : null;
+  res.set('Cache-Control', 'no-store').json(service.agentClaimState(req.params.id, Number(req.params.rid), req.user, session));
+}));
 app.patch('/api/docs/:id/requests/:rid', auth, wrap(async (req, res) => res.json(await service.patchRequest(req.params.id, req.params.rid, req.body || {}, req.user))));
 app.post('/api/docs/:id/requests/:rid/cancel', auth, wrap(async (req, res) => res.json(await service.cancelRequest(req.params.id, req.params.rid, req.user))));
 app.post('/api/docs/:id/requests/:rid/retry', auth, wrap(async (req, res) => res.json(await service.retryRequest(req.params.id, req.params.rid, req.user))));
@@ -476,7 +513,8 @@ async function handleMcp(req, res, pathToken, pathAgent) {
     const id = crypto.randomUUID();
     const claimSession = claimOwner || crypto.randomUUID();
     // 얇은 흐름(lean — 머리글 X-Hwpx-Lean: 1 또는 ?lean=1)은 initialize 때 정해 그 세션 내내 쓴다(server/lean.js)
-    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req) });
+    // 새 연결(v2 — 머리글 X-Hwpx-Mcp: 2 또는 ?v=2, 작업 도구 넷 — server/mcp2.js)도 initialize 때 정한다
+    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req), surface: isV2Request(req) ? 'v2' : null, toolset: v2Toolset(req) });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => id,
       onsessionclosed: () => { mcpSessions.delete(id); },
@@ -492,7 +530,7 @@ async function handleMcp(req, res, pathToken, pathAgent) {
     return;
   }
   // initialize 없는 기존 단발 tools/call은 응답이 닫히면 정리한다.
-  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req) });
+  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface: isV2Request(req) ? 'v2' : null, toolset: v2Toolset(req) });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { transport.close().catch(() => {}); server.close().catch(() => {}); });
   await server.connect(transport);
@@ -501,13 +539,25 @@ async function handleMcp(req, res, pathToken, pathAgent) {
 const mcpErr = (res) => (e) => { console.error(e); if (!res.headersSent) res.status(500).end(); };
 // GET SSE는 연결이 닫힐 때까지 SDK가 기다린다. 작업 drain에는 도구 실행만 포함하고
 // 수신 스트림 자체는 마지막 전송 정리 단계에서 닫아 순환 대기를 피한다.
+const recordedMcpHttp = (req, res, handle) => req.method !== 'POST' ? handle() : withAiDebug({
+    directory: path.join(cfg.dataDir, 'runtime', 'ai-debug'),
+    context: { route: req.path.startsWith(ADMIN_MCP_PATH) ? 'admin-mcp-http' : 'mcp-http', rpcId: req.body?.id, tool: req.body?.params?.name,
+      docId: req.body?.params?.arguments?.doc_id, requestId: req.body?.params?.arguments?.request_id, attempt: req.body?.params?.arguments?.expected_attempt },
+    state: () => debugServiceState(service, req.body?.params?.arguments),
+  }, async () => {
+    debugRecord('http.mcp.body', req.aiDebugRaw ?? req.body);
+    const trace = currentAiDebug(), json = res.json.bind(res);
+    res.json = value => { trace.record('http.mcp.result', value, { status: res.statusCode }); return json(value); };
+    await handle();
+    debugRecord('http.mcp.finished', { status: res.statusCode });
+  });
 const mcpRoute = (req, res) => {
-  const run = () => handleMcp(req, res, req.params.token, req.params.agent);
+  const run = () => recordedMcpHttp(req, res, () => handleMcp(req, res, req.params.token, req.params.agent));
   return (req.method === 'GET' ? run() : trackOperation(run)).catch(mcpErr(res));
 };
 const adminMcp = createAdminMcp({ service, config: cfg, oauth, events: mcpEvents, version: pkg.version, trackOperation });
 const adminMcpRoute = (req, res) => {
-  const run = () => adminMcp.handle(req, res);
+  const run = () => recordedMcpHttp(req, res, () => adminMcp.handle(req, res));
   return (req.method === 'GET' ? run() : trackOperation(run)).catch(mcpErr(res));
 };
 app.all(ADMIN_MCP_PATH, adminMcpRoute);
@@ -553,11 +603,27 @@ function staticDir(dir, opts = {}) {
 app.use('/vendor/rhwp-editor', staticDir(path.join(root, 'vendor/rhwp/npm/editor'), { setHeaders: staticHeaders }));
 app.use('/vendor/rhwp-core', staticDir(cfg.enginePkgDir, { setHeaders: staticHeaders }));
 app.use('/vendor/vue.esm-browser.prod.js', express.static(path.join(root, 'node_modules/vue/dist/vue.esm-browser.prod.js')));
+// 배포 묶음에는 소개 화면(web/teaser·teaser3)을 넣지 않는다(2026-11-16, scripts/package-portable.mjs) —
+// 첫 방문 이동(web/intro.js)과 '소개 영상' 링크는 next 주소(같은 사이트 경로만)로 바로 넘긴다
+for (const intro of ['teaser', 'teaser3']) {
+  if (fs.existsSync(path.join(root, 'web', intro, 'index.html'))) continue;
+  app.get([`/${intro}`, `/${intro}/`, `/${intro}/index.html`], (req, res) => {
+    const raw = typeof req.query.next === 'string' ? req.query.next : '/';
+    const url = new URL(/^\/(?![/\\])/.test(raw) && !/[\\\x00-\x20]/.test(raw) ? raw : '/', 'http://local.invalid');
+    url.searchParams.set('teaser', '0');
+    res.set('Cache-Control', 'no-store').redirect(302, `${url.pathname}${url.search}`);
+  });
+}
 app.use('/', staticDir(path.join(root, 'web')));
 
 // ── 본문 해석 오류(크기 초과 등)는 JSON 으로 ──
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
+  if (req.aiDebugRaw) {
+    try { createAiDebug({ directory: path.join(cfg.dataDir, 'runtime', 'ai-debug'), context: { route: 'mcp-http', stage: 'body-parser' } })
+      .record('http.mcp.rejected', req.aiDebugRaw, { error: debugError(err) }); }
+    catch (loggingError) { return res.status(500).json({ error: loggingError.code, message: loggingError.message }); }
+  }
   if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'TOO_LARGE', message: `파일·본문이 너무 큽니다(최대 ${Math.round((err.limit || cfg.attachments.maxBytes) / 1048576)}MB)` });
   if (err && err.type === 'entity.parse.failed') return res.status(400).json({ error: 'BAD_JSON', message: 'JSON 본문을 읽지 못했습니다' });
   console.error(err);

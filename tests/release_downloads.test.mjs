@@ -158,3 +158,46 @@ test('download: Android APK appears with the PC bundle and supports a correctly 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// 2026-11-16 재빌드: Windows 개인용·공동 작업용 두 묶음 + Mac 편집기 + Android. 페이지는 기능·요구 사항·설치 순서만 보여 준다.
+test('download: Windows 개인용·공동 작업용과 Mac 편집기를 기능 위주로 보여 주고, 시작 안내 링크는 고른 방식의 묶음으로 보낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-download-'));
+  const dir = path.join(root, 'artifacts/release-20261116');
+  fs.mkdirSync(dir, { recursive: true });
+  const make = (target, file, extra = {}) => {
+    const bytes = Buffer.from(`package ${file}`);
+    fs.writeFileSync(path.join(dir, file), bytes);
+    return { target, file, bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), ...extra };
+  };
+  const packages = [
+    make('windows-personal', 'hwpx-cowork-windows-personal-0.5.0-20261116.zip', { mode: 'personal', guide: '개인용 설치 안내\n<script>x</script>' }),
+    make('windows-shared', 'hwpx-cowork-windows-shared-0.5.0-20261116.zip', { mode: 'shared', guide: '공동 작업용 설치 안내' }),
+    make('local-editor-macos-universal', 'hwpx-cowork-macos-editor-1.0.5-20261116.zip', { arch: 'universal', version: '1.0.5' }),
+    make('android-rhwp-editor', 'hwpx-cowork-1.0.11.apk', { version: '1.0.11' }),
+    make('worker-install', 'hwpx-ai-worker-0.5.0-20261116-install.zip', { title: '서버 연결용 AI 실행기' }),
+  ];
+  fs.writeFileSync(path.join(dir, 'release.json'), JSON.stringify({ version: '0.5.0', releasedOn: '2026-11-16', downloadBase: 'https://example.org/download', packages }));
+  const app = express();
+  installReleaseDownloads(app, { root });
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}/download`;
+  try {
+    const html = await (await fetch(base)).text();
+    for (const p of packages) assert.ok(html.includes(`/download/${p.file}`), p.file);
+    assert.ok(html.includes('id="windows-personal"') && html.includes('id="windows-shared"') && html.includes('id="mac"') && html.includes('id="android"'));
+    assert.ok(html.includes('개인용 설치 안내') && html.includes('&lt;script&gt;'), '설치 안내 전문은 글자 그대로 보인다');
+    assert.ok(!html.includes('<script>x'));
+    // 기능과 상관없는 설명·포함 내역·설치 글꼴 언급·내부 검증 메모는 페이지에 없다
+    for (const phrase of ['AI CLI를 담았습니다', '설치된 글꼴', '원본 rhwp와 동일한 글꼴', '미검증', '오프라인 완전 포함']) assert.ok(!html.includes(phrase), phrase);
+    for (const mode of ['personal', 'shared']) {
+      const r = await fetch(`${base}/windows-setup.zip?mode=${mode}&ai=codex`, { redirect: 'manual' });
+      assert.equal(r.status, 302);
+      assert.equal(r.headers.get('location'), `/download/hwpx-cowork-windows-${mode}-0.5.0-20261116.zip`);
+    }
+    for (const p of packages) assert.equal((await fetch(`${base}/${p.file}`)).status, 200, p.file);
+  } finally {
+    server.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

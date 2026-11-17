@@ -23,7 +23,7 @@ test('폴더 나무는 이미 방문한 프로젝트 경로만 사용한다',()=
   assert.deepEqual(rows.map(r=>[r.id,r.depth]),[['root',0],['a',1],['b',2]]);
   assert.deepEqual(rows[2].path.map(f=>f.name),['개인 프로젝트','자료','회의']);
 });
-test('가져오기 위치는 내 개인편집함·작성 가능한 공용편집함으로 구분한다',()=>{
+test('가져오기 위치는 내 개인 문서함·작성 가능한 공용 문서함으로 구분한다',()=>{
   const targets=[{location:{space:'private',owner:'나'}},{location:{space:'private',owner:'다른 사람'}},{location:{space:'public'}}];
   assert.deepEqual(importSpaceTargets(targets,'private',{name:'나'}),[targets[0]]);
   assert.deepEqual(importSpaceTargets(targets,'public',{name:'나'}),[targets[2]]);

@@ -18,8 +18,30 @@
 
 ## 2. 변경 종류별로 돌릴 것
 
+내용·형식 분리 실험은 2026-11-16부터 기본으로 꺼져 있다(`config.experiments.contentFormat` — 시험은 그 값을 켠 임시 서버에서 돌고, 꺼졌을 때의 동작도 같은 파일에 있다). `node --test tests/edit_workspace.test.mjs`로 본다. 실제 임시 HTTP MCP/Node 엔진과 가짜 모델·가짜 CLI의 실제 stdio 프로세스를 사용한다. 전체 표 실험은 `node scripts/measure-content-format.mjs [새 결과 폴더]`이며 운영 데이터·유료 모델을 사용하지 않는다. 내용 동등성·새 대화·20표 전체 적용은 검사하지만 실제 AI의 토큰 절감/지시 충족률을 입증하는 시험은 아니다. 독립 한/글 확인은 `artifacts/content-format-workflow-20261114/feature-oracle-latest.json`에 기록했다.
+
+2026-11-14 추가: `tests/document_read_paging.test.mjs`는 여러 구역의 전역 본문 차례·중첩/긴 문단 cursor·변경 감지·전체 표 목록·MCP/API/Codex 응답·내부 undo 보존을 본다. `tests/table_inline_alignment.test.mjs`는 글자처럼 표의 소유 문단 정렬과 복원 충돌, 떠 있는 표 대조군, 독립 한/글 기준 대비 고정 WASM 계산값을 본다. 새 수정의 진단과 알려진 회귀 2건은 [API_MCP_AGENT.md의 11월 14일 기록](API_MCP_AGENT.md#2026-11-14-실문서-ai-14-진단-및-수정)에 있다.
+
+2026-11-16 추가: MCP 새 연결(작업 도구 넷 — `docs/MCP_REDESIGN_2026-11-16.md`)은 `tests/mcp_v2_flow.test.mjs`(예전 연결 그대로·맡기·읽기 보기·고치기·끝내기·같은 요청의 `objects_to_body` + `delete_objects` 합치기·선점 상태 REST·Codex 도구 고정과 쓰기 직전 확인·가짜 Codex CLI 로 `--mcp 2` 끝까지·브리지 `--v2`·`setup-agent --v2`), 글상자·선 문서를 문단·표로 옮기는 `objects_to_body` 는 `tests/objects_to_body.test.mjs`(좌표 읽기·쪽 넘는 표·글자 보존·구역 합치기·주소 옮김표·남는 개체도 지우기 `remove_rest`). 시험 문서는 `tests/helpers/floating-doc.mjs` 가 만든다(실제 문서를 쓰지 않는다). 요청 이어받기 한도(`config.agents.maxTakeovers` — `server/service.js startRequest`)는 `tests/queue.test.mjs`.
+
+2026-11-17 추가(`docs/MCP_REDESIGN_2026-11-16.md` §11): 새 연결의 op·반영 경로 시험 일곱 개(아래 표 첫 줄들 — 모두 `npm test` 안)와, 편집기 플러그인의 하나씩 [반영] 차례 화면 시험 `python -I tests/ui_insert_order.py`(실제 Chromium headless — 플러그인 동작이라 AGENTS §2.1 예외, 빈 포트 서버). 아직 `build:studio` 하지 않은 분리 빌드를 시험할 때는 `HWPX_COWORK_STUDIO_DIR=<분리 빌드 studio-dist>` 를 준다(없으면 `studio/dist` — 옛 플러그인 0.4.0 이면 예전 길을 본다). 실험 뒤 더한 것: 쪽 나눔 서식 `tests/format_page_break.test.mjs`, `finish` 꼴·`sparse` 등 `tests/mcp_v2_finish_hints.test.mjs`, Codex 첫 입력 `tests/codex_ai.test.mjs`, 엔진 캡션 줄 높이 `tests/layout_fidelity.test.mjs`(11-17 엔진 반영 뒤 todo 갈래를 지워 보통 시험).
+
 | 바꾼 곳 | 자동 시험(`npm test` 안) | 더 확인할 것 |
 | --- | --- | --- |
+| 반영 경로 `server/service.js` 의 넣기 차례(`_insertAfterRef`)·문단 전체를 따라가는 서식(`_formatFollowsParagraph`)·덧붙인 문단 `p.extraRefs` — 모든 연결 공통 | `apply_order`(단건·[모두 반영]·자동 반영·applyNow, 고치기 전 코드로 7건 중 6건 실패) | `npm run test:resolve`·`npm run test:live`, 비실시간 '내 수정본' 하나씩 [반영]은 `tests/ui_insert_order.py`(편집기 플러그인 0.4.1 `insertSkip` — 분리 빌드면 `HWPX_COWORK_STUDIO_DIR`) 와 `python -I tests/studio_plugin.py` |
+| 문단 지우기·옮기기 op `delete_paragraphs`·`move_paragraphs`(`server/paragraph-ops.js`·`engine/para-move.js`) | `paragraph_delete_move`(변경 추적·고친 글만, 막는 경우) | 한/글 왕복: 결과 HWPX 를 숨은 한/글 2022 로 열어 쪽 수·차례·빈 문단(변경 추적 옮기기는 반영 전 두 벌) |
+| 원자적 저장(`_agentPreflight`·`_agentRollback`)·`withdraw`(`server/proposal-withdraw.js`)·`replace_all`·영수증 줄이기 | `mcp_v2_atomic` | `mcp_v2_flow`(도구 설명 크기 한도 `OPS_BRIEF` < 3,350·core < 10,050) |
+| 쪽 수 어림 `server/page-estimate.js`(사본 ctx·`layout-worker.js` `kind:'pages'`)·`dry_run` 의 `made`·`failed` | `page_estimate` | `edit_verify_layout`, 한/글 쪽 수 대조(엔진 어림은 한/글과 다를 수 있다) |
+| 표·그림·차트 단위 줄·주석·차트 캡션 `engine/captions-notes.js` | `captions_notes` | 한/글 2022 COM 으로 번호 다시 매김·단위·주석 |
+| 제안 묶음 `p.bundle`·셈 `server/memotext.js requestOutcome` = `web/util.js requestProgress` | `proposal_bundle` | `util`, 화면 `web/ui.js BundleItem`(화면 시험은 하지 않았다) |
+| 차트 `hp:switch` 둘째 갈래 문단 = alt(`engine/section.js _run`)·`engine/chart-parts.js syncSwitchCopies` | `chart_switch_caption`(한/글이 다시 저장한 고정 자료 2개) | Section 파싱 규칙이라 `section_partial` 과 검증 모드 `HWPX_SECTION_VERIFY=1 npm test` |
+| `finish` 의 summary+error(저장된 결과가 있으면 완료 + '못 한 것')·지우기·옮기기 빈 줄 알림·`paper` `orientation`·빈 `ops` dry_run·`pages.sparse`(`server/mcp2/`·`server/page-estimate.js`) | `mcp_v2_finish_hints` | `mcp_v2_flow`(도구 설명 크기 한도), 진행 기록 '모두 반영하면 N쪽' 은 `request_activity` |
+| 쪽 나눔 서식 `paragraph.pageBreakBefore`(`engine/formatting.js`·`server/format-schema.js ParagraphFormatSchemaV2`·`server/mcp2/ops.js`) | `format_page_break` | 한/글 2022 쪽 수(문단 태그·문단 모양 쪽 나눔 — 11-17 실측 10 / 8 / 11쪽) |
+| Codex 실행기 첫 입력의 도구 꼴(`codexCodeModeHintV2`)·`HWPX_COWORK_CODEX_LEAN_TOOLS`(`server/codex-ai.js`) | `codex_ai` | `npm run test:worker`, 실제 Codex 한 건은 사용자가 요청했을 때만(`scripts/agent-run-once.mjs … --yes-real-ai`, 먼저 `--codex-command <가짜 CLI>`) |
+| 글자처럼 놓인 도형·차트·OLE 의 캡션 줄 높이(엔진 `vendor/rhwp` 커밋 6341c33e40 — 11-17 운영 반영) | `layout_fidelity`(11-17 `build:engine` 뒤 통과 — 반영 전 todo 갈래는 지웠다) | 캡션 시험지 `tests/fixtures/layout/probe_objects_captions*`(`npm run layout:probe -- --set captions --hangul` 로 다시 잼, 8.4절), 후보 빌드는 `RHWP_PKG`·`--pkg` 로 고정(11-17 후보 `artifacts/mcp-round3-20261117/engine-O/engine-pkg`) |
+| MCP 새 연결 `server/mcp2.js`·`server/mcp2/`(보기·op·서비스 쪽), 브리지 `--v2`, Codex 실행기 `--mcp 2`(`codex-mcp.js`·`codex-ai.js`·`worker.js` brief) | `mcp_v2_flow` | 예전 연결 회귀 `mcp_lean_flow`·`api_tool_providers`·`personal_chatgpt_flow`·`npm run test:channel`, 글자·토큰 `node scripts/measure-mcp2.mjs --tokens`(모델 없음). 실제 에이전트 한 건은 `node scripts/agent-run-once.mjs … --yes-real-ai`(구독 사용량 — 사용자가 요청했을 때만) |
+| 개체 → 본문 `engine/layout.js`·`engine/flow.js`, 쪽 구성 op `objects_to_body`(`engine/page-layout.js`·`server/page-layout-schema.js`), `_layoutRemap` 의 지워진 문단 | `objects_to_body`·`page_layout_skill` | 한/글 왕복: 결과 HWPX 를 숨은 한/글로 열어 쪽 수·다시 저장한 표(줄·칸·합친 칸·칸 글) 대조 — 2026-11-16 기록 `artifacts/mcp-redesign-20261116/hangul-check/` |
+| AI 수신 원문 진단 `ai-debug.js`·API/CLI/worker/MCP/채널 경계 | `ai_debug`(원문 바이트·해시·검사 원인·동시 요청 분리·부분 저장 뒤 실패·CLI 취소/출력 한도·SDK HTTP·채널 hook) | 관련 `ai_providers`·`api_tool_providers`·`codex_ai`·`claude_cli_ai`·`google_cli_ai`·`mcp_sessions`·`mcp_lean_flow`·`test:channel`·`test:e2e:channel`. 실제 API/로그인 없이, 기존 기록을 읽는 inspector는 `node scripts/ai-debug.mjs --dir <진단 폴더>` |
 | 실시간 밀어 넣기 `server/live.js`, 개체·구역 지문(`engine/doc.js` `diffDocs`·`paragraphCodes`·그림 정규 지문) | `edit_preservation`(편집기 엔진 API → 실제 `PUT /live` 왕복 보존, 2026-11-12)·`live_bulk_insert`·`live_track_batch`·`live_memo_copy`·`live_styles`·`sections` | `npm run test:live`(아래 기존 실패 참고), 큰 문서 묶음 비교 `scripts/check-live-batch.mjs`, 큰 개체 문서 밀어 넣기 시간 `research/edit-preservation-20261112/preserve/big_push_bench.mjs` |
 | 편집 뒤 검증 `server/edit-verify.js`(V1 구조 → `VERIFY_STRUCTURE` 로 저장 막음, V2 의도 → lean 영수증 경고 한 줄) | `edit_verify`(결함 주입 V1 8·V2 3 + 정상 대조 17) | `node scripts/measure-lean-flow.mjs`(영수증 글자 수 불변), 지연 `research/edit-preservation-20261112/verify/latency.mjs` |
 | 편집 뒤 조판 검사(V3) `server/layout-check.js`·`layout-worker.js`(worker 스레드) | `edit_verify_layout`(중첩 칸·표 짝짓기·큐 합치기·지연) | 측정 `research/edit-preservation-20261112/verify/v3-measure.mjs` |
@@ -194,12 +216,14 @@
 
 | 묶음 | 명령(루트) | 고정 자료(입력·한/글 기준) | 고르는 때 |
 |---|---|---|---|
-| 조판 충실도 | `npm run test:layout` | `tests/fixtures/layout/*.hwpx·*_hangul*.json`(보정 문서 `calib_widths`, 시험지 `probe_objects`, `macro_resized`, 실문서 줄 `plan_/stats_hangul_lines.json`·`big_hangul_rows.json`) | 글자 폭·줄 나눔·그림 배치·쪽 끝 |
+| 조판 충실도 | `npm run test:layout` | `tests/fixtures/layout/*.hwpx·*_hangul*.json`(보정 문서 `calib_widths`, 시험지 `probe_objects`·캡션 시험지 `probe_objects_captions`(`layout-probe.mjs --set captions`, 11-17), `macro_resized`, 실문서 줄 `plan_/stats_hangul_lines.json`·`big_hangul_rows.json`) | 글자 폭·줄 나눔·그림 배치·쪽 끝 |
 | 쪽 나눔 288사례 | `npm run test:layout:pagesplit` | `tests/fixtures/layout/pagesplit/`(`cases.json`, `pagesplit_body_hangul.json`·`_column_hangul.json`, 발견 기록 `pagesplit_known.json`) | 쪽 경계·표 나눔 |
 | 조판 회귀 두 묶음 | `npm run test:layout:regression` | `tests/fixtures/layout/regression-20261103/`(8,734사례·17,467검사), `regression-20261104/`(W 개체 폭·F 각주 줄·R 실문서A) — 각 `manifest.json`·`cases.csv`·`inputs/`·`oracle/`·`known-observations*.json`·README | 개체 배치·쪽 나눔·각주·저장 경로 |
 | 빈 문단 37조건 | `node scripts/empty-paragraph-regression.mjs check` | `tests/fixtures/layout/empty-paragraph-20261105/`(`manifest.json`·`input-definitions.json`·`native-case.json`·`oracle/`) | 빈 문단·빈 run·공백 문단 |
 | 빈 문단 입력 보존 | `node --test tests/asan_empty_paragraph.test.mjs`(`npm test` 안) | 위와 같은 묶음 | 파서·빈 요소 보존 |
 | 따옴표 줄 끝·run 없는 빈 문단 | `node --test tests/layout_hangul_probes_20261111.test.mjs`(`npm test` 안) | `tests/fixtures/layout/hangul-probes-20261111/`(한/글 재저장본 3개 + `expected.json`, 저장 줄을 지워 엔진이 새로 조판) — 재현·다시 재기 `artifacts/test-failures-20261111/` | 줄 꼬리·머리 금칙(`"`·`(`·`'`·`“`), 암묵 10pt 빈 줄(vendor/README 77) |
+| HFT 글꼴 공백(글꼴에 어울리는 빈칸)·끼운 문단 뒤 한/글 줄 나눔 보존 | `node --test tests/layout_fontspace_hft.test.mjs`(`npm run test:layout` 안) | `tests/fixtures/layout/fontspace-20261116/`(저장 줄 없는 시험지 `fontspace.hwpx` 700칸 + 한/글 12.0.0.3146 COM 재저장 줄 `fontspace_hangul.json` + 사례표 `fontspace_cases.json`, 한/글 재저장본에서 첫 문단 줄 정보만 뺀 `fontspace_saved_inserted.hwpx`) — 다시 만들기 `node scripts/layout-probe-fontspace.mjs` → 한/글 → `--read <saved.hwpx>`, `node scripts/layout-probe-fontspace-inserted.mjs <saved.hwpx>`, 엔진 비교 `--engine [pkg]` | HFT 영문 슬롯의 useFontSpace 공백 = 반각, 복원 구간 문단의 textpos 유지(vendor/README 79) |
+| 표 + 줄 바꿈 + 글줄 문단의 쪽 나눔·캡션 자동 번호 | `node --test tests/layout_tac_host_text.test.mjs`(`npm run test:layout`·`npm test` 안) | `tests/fixtures/layout/tachost-20261116/`(저장 줄 없는 입력 `*.hwpx` + 한/글 12.0.0.3146 COM 쪽 그림·재저장 줄 `*_hangul.json` + 사례표 `*_cases.json`: 흐름 `tachost`, 쪽 끝 `tachost_pageend[_wrap][_keep]` 19사례씩, 캡션 번호 `tachost_capnum` 8사례) — 다시 만들기 `node scripts/layout-probe-tachost.mjs [--pageend [--wrap] [--keep] \| --capnum]` → `node scripts/layout-trace.mjs <hwpx> --run-hangul --save-oracle <json>` | 표 뒤 "주:" 글줄의 흐름 높이·표 줄 줄간격, 쪽 끝 줄 단위 나눔·문단 보호, 자동 번호 폭의 캡션 줄 나눔(vendor/README 78) |
 | 나뉜 칸 쪽 끝 줄(28 경계쌍) | `node --test tests/layout_cellcut_hangul.test.mjs`(`npm test` 안, 저장 줄 없는 입력은 `scripts/layout-probe-cellcut.mjs` 로 다시 만듦) | `tests/fixtures/layout/cellcut-20261111/`(`boundary.json`·`saved/`·`hangul_summary.json` 496사례, 한/글 12.0.0.3146 COM) — 다시 재기: `layout-probe-cellcut.mjs` → `layout-probe-cellcut-oracle.py` → `layout-probe-cellcut-engine.mjs` | CELL 표 쪽 끝 줄·통째 수용의 1pt 경계(vendor/README 76) |
 
 - **좁혀 돌리기**: `node scripts/layout-regression.mjs check --dir tests/fixtures/layout/regression-20261103 --only <사례ID,…> --runs <임시 폴더> [--pkg <후보>]`.
@@ -275,6 +299,16 @@
   이 결과를 Android APK나 실물 휴대폰 검증으로 대신하지 않는다.
 - **Android APK**: 별도 프로젝트 `mobile-rhwp/README.md` 의 빌드·환경을 먼저 확인한다. 파일 열기 회귀 예시는
   `mobile-rhwp/android/app/src/androidTest/java/kr/hwpx/rhwp/DefaultFilterInstrumentation.java` 다.
+  검색·정렬·즐겨찾기·최근 문서·키보드·가로 화면·대량 목록은 `PickerInstrumentation.java`로 검사한다.
+  순수 Java 목록 규칙은 `node mobile-rhwp/scripts/test-picker-model.mjs`로 먼저 확인한다.
+  새 네이티브 선택기는 `gradlew.bat assembleReleaseAndroidTest "-PcoworkTestRunner=kr.hwpx.rhwp.PickerInstrumentation"`으로
+  시험 APK를 만들고 `adb -s <전용 에뮬레이터> shell am instrument -w kr.hwpx.rhwp.test/kr.hwpx.rhwp.PickerInstrumentation`으로 실행한다.
+  이 시험은 앱 전용 외부 폴더에 문서를 만들며 파일 접근 권한을 허용한 일회용 에뮬레이터에만 실행한다.
+  시험 APK를 설치한 뒤 해당 에뮬레이터에서 `adb -s <ID> shell appops set kr.hwpx.rhwp MANAGE_EXTERNAL_STORAGE allow`로
+  접근을 준비하고 `appops get kr.hwpx.rhwp MANAGE_EXTERNAL_STORAGE`의 `allow`를 확인한다. 키보드 검사는
+  `adb -s <ID> shell settings put secure show_ime_with_hard_keyboard 1`로 준비한다.
+  표본의 기존 글꼴 안내에서는 시험이 ‘대체 글꼴로 보기’를 명시적으로 선택한 뒤 실제 열기 완료를 기다린다.
+  APK 네이티브 화면·키보드 확인이며 웹 조판을 브라우저로 실측한 결과가 아니다.
   `mobile-rhwp/android` 에서 `gradlew.bat assembleRelease assembleReleaseAndroidTest` 로 후보·시험 APK를 만들고,
   대상이 일회용 에뮬레이터인지 확인한 뒤 두 APK를 설치한다(시험 APK에는 `adb install -r -t` 사용).
   `adb -s <에뮬레이터ID> shell am instrument -w -e case html-input kr.hwpx.rhwp.test/kr.hwpx.rhwp.DefaultFilterInstrumentation` 은

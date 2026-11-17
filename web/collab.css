@@ -164,6 +164,9 @@ html.memo-dragging iframe { pointer-events: none; }
 
 /* ── 결과 창: 남은 것 → 반영한 것 → 거절(접힘) → 기록(접힘) ── */
 .rs-item { display: grid; gap: 6px; }
+/* 묶음 제안(ui.js BundleItem — docs/UI_TERMS.md §9): 펼친 구성원은 한 단 들여 묶음 안임을 보인다 */
+.rs-bundle .rs-b-count { font-size: 12px; }
+.rs-bundle .rs-b-list { display: grid; gap: 6px; padding-left: 8px; border-left: 2px solid #e5e7eb; }
 .rs-alts-h { font-size: 12px; }
 .rs-others { font-size: 11.5px; }
 .rs-declined > summary, .rs-log > summary { display: list-item; cursor: pointer; list-style: revert; }

@@ -83,7 +83,8 @@ export function chartDimensions(doc, afterRef, widthMm, heightMm) {
   const available = sectionTextWidth(sec);
   const width = widthMm == null ? Math.min(42520, available) : Math.round(widthMm * 7200 / 25.4);
   const height = heightMm == null ? Math.round(width * 0.6) : Math.round(heightMm * 7200 / 25.4);
-  if (width > available) bad('차트 폭이 본문/단 너비보다 큽니다. width_mm을 줄이세요');
+  // 얼마로 줄일지 알 수 있게 본문 폭을 함께 알린다(2026-11-16 밤 실험: 수치가 없어 에이전트가 폭을 아예 빼고 다시 냈다)
+  if (width > available) bad(`차트 폭이 본문/단 너비보다 큽니다. width_mm을 줄이세요(본문 폭 ${(Math.floor(available * 25.4 / 720) / 10).toFixed(1)}mm 이하 — 빼면 본문 폭에 맞춘다)`);
   return { width, height };
 }
 

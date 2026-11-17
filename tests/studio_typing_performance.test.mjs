@@ -5,15 +5,17 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
-import { coworkBuildPlugins, verifyPatches } from '../studio/build/patches.mjs';
+import { coworkBuildPlugins, verifyPatches, patchesForStudio } from '../studio/build/patches.mjs';
+import { STANDALONE_EDITOR_PATCHES } from '../studio/build/standalone-editor-patches.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const studio = path.join(root, 'vendor/rhwp/rhwp-studio');
+const patches = patchesForStudio(studio, process.env.STUDIO_TEST_PROFILE === 'standalone' ? STANDALONE_EDITOR_PATCHES : undefined);
 
 function load(file, patched = true) {
   const filename = path.join(studio, file);
   let source = fs.readFileSync(filename, 'utf8');
-  if (patched) source = coworkBuildPlugins({ studioSrc: studio })[0].transform(source, filename)?.code ?? source;
+  if (patched) source = coworkBuildPlugins({ studioSrc: studio, patches })[0].transform(source, filename)?.code ?? source;
   const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
     .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '')
     .replace(/^export /gm, '');
@@ -54,7 +56,7 @@ const charProps = { bold: false, italic: false, underline: false, strikethrough:
 const paraProps = { alignment: 'Left', lineSpacingType: 'Percent', lineSpacing: 160 };
 
 test('build patches retain unique upstream anchors', () => {
-  assert.deepEqual(verifyPatches(studio).filter(report => !report.ok), []);
+  assert.deepEqual(verifyPatches(studio, patches).filter(report => !report.ok), []);
 });
 
 test('repeated typing preserves toolbar state without DOM rewrites or font-list scans', () => {

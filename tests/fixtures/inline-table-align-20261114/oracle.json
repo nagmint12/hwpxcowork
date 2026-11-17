@@ -1,0 +1,74 @@
+[
+  {
+    "id": "inline-left",
+    "inline": true,
+    "paragraphAlign": "LEFT",
+    "tableAlign": "LEFT",
+    "sha256": "ee35e5f5443b10f22093f3a498dbf2cb824fbb6d5257a026afc923d52d746258",
+    "tables": [
+      [
+        [
+          113,
+          154,
+          454,
+          188
+        ]
+      ]
+    ],
+    "hwpVersion": "12, 0, 0, 3146"
+  },
+  {
+    "id": "inline-pos-center",
+    "inline": true,
+    "paragraphAlign": "LEFT",
+    "tableAlign": "CENTER",
+    "sha256": "8f5583d85f3470a5d05da37a2d8cc6f5eb7e8fbdf33c68ceb8f7e9f14c4b51b4",
+    "tables": [
+      [
+        [
+          113,
+          154,
+          454,
+          188
+        ]
+      ]
+    ],
+    "hwpVersion": "12, 0, 0, 3146"
+  },
+  {
+    "id": "inline-paragraph-center",
+    "inline": true,
+    "paragraphAlign": "CENTER",
+    "tableAlign": "CENTER",
+    "sha256": "b90185f4c075f989649e48e748adb66e2f9c9f40ff8f9c57972123bfcb4ccb98",
+    "tables": [
+      [
+        [
+          227,
+          154,
+          567,
+          188
+        ]
+      ]
+    ],
+    "hwpVersion": "12, 0, 0, 3146"
+  },
+  {
+    "id": "floating-pos-center",
+    "inline": false,
+    "paragraphAlign": "LEFT",
+    "tableAlign": "CENTER",
+    "sha256": "302b2ec8c8cd58dc231392f0455e10ced29cc4893beacacc30886450a02b9631",
+    "tables": [
+      [
+        [
+          227,
+          154,
+          567,
+          188
+        ]
+      ]
+    ],
+    "hwpVersion": "12, 0, 0, 3146"
+  }
+]

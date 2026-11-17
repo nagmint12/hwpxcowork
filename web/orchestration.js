@@ -95,7 +95,7 @@ export function orchestrationAgentHelp(agent) {
 export const OrchestrationPanel = {
   props: { docs: { type: Array, default: null } },
   template: `<details class="personal-ai orchestration-panel" data-testid="orchestration-panel">
-    <summary>멀티에이전트 협업 <span class="muted">· {{ summary }}</span></summary>
+    <summary>AI 협업 <span class="muted">· {{ summary }}</span></summary>
     <p>지휘자가 작업을 나누고, 연결한 AI가 초안 작성과 검토를 분담합니다. 결과를 통합한 뒤 기존 문서의 제안으로 남깁니다.</p>
     <p class="muted">사용자 PC의 실행기나 Claude Code 채널·MCP 실행기를 켜두어야 자동 진행됩니다. MCP 연결만으로 다른 AI가 실행되지는 않습니다.</p>
     <p class="muted">일반 AI 큐와 협업 큐는 다릅니다. start-codex-agent.bat 하나로 일반 요청과 Codex 협업을 함께 처리합니다. Claude Code 등 분담 작업자도 연결해 두세요.</p>
@@ -114,7 +114,7 @@ export const OrchestrationPanel = {
     <p class="muted" v-if="loading">개인 설정을 읽는 중…</p>
     <fieldset :disabled="loading || saving" class="orchestration-profile">
       <legend>내 협업 설정</legend>
-      <label class="orchestration-check"><input type="checkbox" v-model="profile.enabled"/> 멀티에이전트 협업 사용</label>
+      <label class="orchestration-check"><input type="checkbox" v-model="profile.enabled"/> AI 협업 사용</label>
       <div class="pai-form">
         <label>대표 지휘자<select v-model="profile.conductor" aria-label="대표 지휘자"><option v-for="agent in profile.agents" :key="agent.id" :value="agent.id">{{ agent.label || agent.id }} ({{ agent.id }})</option></select></label>
         <label>동시 작업 수<input type="number" v-model.number="profile.maxParallel" min="1" max="8" aria-label="동시 작업 수"/></label>

@@ -89,5 +89,6 @@ test('두 번 클릭하는 시작 파일이 통합 실행기를 호출하고 환
   assert.match(batch, /node scripts\\codex-agent\.mjs %\* --provider codex/);
   assert.match(batch, /reg query HKCU\\Environment \/v HWPX_COWORK_TOKEN/);
   assert.match(batch, /start-server\.bat/);
-  assert.match(batch, /멀티에이전트 협업/);
+  // 화면 이름 '멀티에이전트 협업' → 'AI 협업'(2026-11-17, docs/UI_TERMS.md §2 — 보이는 글의 '에이전트'는 'AI')
+  assert.match(batch, /AI 협업의 Codex 지휘자·작업자/);
 });

@@ -4,14 +4,14 @@
 
 /** 배정된 문서 안 읽기(doc_id 고정) */
 export const DOC_READ = Object.freeze(['read_document', 'search_document', 'get_formatting', 'get_writing_guide', 'get_page_layout', 'read_skill_resource',
-  'list_memos', 'list_proposals', 'list_changes', 'list_attachments', 'read_attachment', 'list_figures', 'preview_figure', 'get_history', 'list_fields']);
+  'list_memos', 'list_proposals', 'list_changes', 'list_attachments', 'read_attachment', 'list_figures', 'list_tables', 'preview_figure', 'get_history', 'list_fields', 'get_edit_capabilities']);
 /** 배정된 요청 읽기(request_id 고정) */
-export const REQUEST_READ = Object.freeze(['get_request']);
+export const REQUEST_READ = Object.freeze(['get_request', 'get_edit_workspace']);
 /** 요청에 묶이는 결과 쓰기(request_id·expected_attempt 고정 — 쓰기 직전에 취소·재시도를 확인) */
 export const REQUEST_WRITE = Object.freeze(['propose_change', 'propose_changes', 'propose_format', 'propose_alternatives', 'propose_insert', 'propose_table',
-  'propose_table_edit', 'propose_delete', 'propose_toc_update', 'propose_page_layout', 'propose_chart', 'propose_figure', 'propose_fill_fields', 'add_memo', 'export_figure', 'export_skill_resource']);
+  'propose_table_edit', 'propose_delete', 'propose_toc_update', 'propose_page_layout', 'propose_chart', 'propose_figure', 'propose_fill_fields', 'add_memo', 'export_figure', 'export_skill_resource', 'edit_workspace', 'publish_edit_workspace']);
 /** 요청 맡기·완료·실패 — API 실행기는 실행기가 직접 부른다(모델에는 주지 않음) */
-export const REQUEST_FLOW = Object.freeze(['start_request', 'complete_request', 'fail_request']);
+export const REQUEST_FLOW = Object.freeze(['start_request', 'complete_request', 'fail_request', 'record_edit_stage']);
 /** 개인 브리지(--files-dir)의 내 PC 작업 폴더 파일 도구 */
 export const LOCAL_FILES = Object.freeze(['download_attachment_file', 'upload_result_file']);
 /** 오케스트레이션 작업 하나(Codex 작업자) — 그 밖의 *_orchestration_* 도구는 지휘·관리용 */
@@ -31,6 +31,8 @@ export const RUNNER_EXCLUDED = Object.freeze({
 });
 
 export const TOOL_PROFILES = Object.freeze({
+  // 사용자가 선택한 별도 실험 경로. 원문에 직접 제안하는 도구와 사본 편집을 섞지 않는다.
+  workspace: Object.freeze(['get_edit_workspace', 'get_edit_capabilities', 'edit_workspace', 'read_attachment', 'get_writing_guide', 'read_skill_resource', 'list_attachments', 'preview_figure', ...LOCAL_FILES]),
   // API 실행기: 읽기·결과 쓰기. 요청 흐름은 실행기, 파일은 실행기가 원본 바이트로 저장(api-responses-agent).
   // propose_change 는 propose_changes(항목 하나)와 같은 일이라 뺀다 — API 는 라운드마다 도구 정의를 다시 보낸다(약 4천 자)
   api: Object.freeze([...DOC_READ, ...REQUEST_READ, ...REQUEST_WRITE.filter(name => name !== 'propose_change')]),

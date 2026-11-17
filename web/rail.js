@@ -220,7 +220,7 @@ const MemoBody = {
     <InlineConfirm v-if="ui?.mode==='confirm'" message="이 메모를 지울까요?" ok-label="지우기" danger :busy="!!ui.busy" @ok="remove" @cancel="closeUi"/>
     <MemoEditor v-else-if="ui?.mode==='reply'" v-model="ui.text" placeholder="답글" ok-label="답글 달기" :ask-label="askLabel" :ask-tip="ASK_AI_TIP" :rows="2" :busy="!!ui.busy" :autofocus="!!ui.focus" @save="reply" @ask="ask" @cancel="closeUi" @click.stop/>
     <div class="rc-actions" v-else-if="!ui"><button class="small rc-reply" title="답글 — 한글 메모에도 남습니다" @click.stop="openUi('reply')">답글</button>
-      <button class="small rc-resolve" :class="{ ack: !resolved }" :disabled="busy" :title="resolved ? '완료를 풀고 다시 엽니다' : '완료로 표시합니다 — 문서 옆·편집기 강조에서 숨고 검토 탭 「완료」에 남습니다'" @click.stop="resolve">{{ resolved ? '다시 열기' : '완료' }}</button></div></div>`,
+      <button class="small rc-resolve" :class="{ ack: !resolved }" :disabled="busy" :title="resolved ? '완료를 풀고 다시 엽니다' : '완료로 표시합니다 — 문서 옆·편집기 강조에서 숨고 메모 탭 「완료」에 남습니다'" @click.stop="resolve">{{ resolved ? '다시 열기' : '완료' }}</button></div></div>`,
   setup(props) {
     const d = inject('doc'); const busy = ref(false);
     // 열린 칸(고치기·답글·지우기 확인)과 쓰던 글 = 문서 store 의 칸('rail:memo:3' 등) — 카드가 빠졌다 돌아와도 남는다
@@ -235,7 +235,7 @@ const MemoBody = {
     const tag = computed(() => {
       const l = m.value.link;
       if (l?.type === 'comment') return { label: `AI 의견 #${l.rid}`, cls: 'k' };
-      if (l?.type === 'proposal') { const p = d.proposal?.(l.pid); return { label: `제안 #${l.pid}${p ? ` · ${({ applied: '적용', rejected: '거절', undone: '복구됨', superseded: '다른 안' })[p.status] || p.status}` : ''}`, cls: 'prop' }; }
+      if (l?.type === 'proposal') { const p = d.proposal?.(l.pid); return { label: `제안 #${l.pid}${p ? ` · ${({ applied: '적용됨', rejected: '거절됨', undone: '복구됨', superseded: '다른 안 적용', withdrawn: '거둠' })[p.status] || p.status}` : ''}`, cls: 'prop' }; }
       if (l?.type === 'review') return { label: '검토', cls: '' };
       return null;
     });
@@ -317,7 +317,7 @@ const SummaryBody = {
     <div class="rc-head"><span class="ic rc-ai" v-html="ICON.review"></span><b class="rc-sum-head" :title="headTip || null">{{ head }}</b><span class="spacer"></span>
       <span class="pill rc-sum-chip" v-if="chip" :class="chip.cls" :title="chipTip || null">{{ chip.text }}</span></div>
     <div class="rc-body pre clamp2 rc-sum-text" v-if="summary">{{ summary }}</div>
-    <div class="rc-actions"><button class="small rc-result" title="AI 작업 탭에서 결과 보기(읽기만)" @click.stop="showResult">자세히</button></div></div>`,
+    <div class="rc-actions"><button class="small rc-result" title="AI 작업 탭에서 결과 보기(읽기만)" @click.stop="showResult">결과 보기</button></div></div>`,
   setup(props) {
     const d = inject('doc');
     const r = computed(() => d.request?.(props.item.rid) || null);
@@ -357,7 +357,9 @@ const ProposalBody = {
       <div v-else-if="p.type==='page_layout'" class="difftext"><span class="muted">쪽 구성: </span>{{ (p.pageLayout?.labels || []).join(', ') }}</div>
       <div v-else-if="p.type==='figure'" class="muted">{{ p.figure?.nativeChart ? '이 문단 뒤에 편집 가능한 차트' + (p.figure.caption ? ' 「' + p.figure.caption + '」' : '') : p.figure?.replace ? '이 문단의 그림' + (p.figure.replace.caption ? ' 「' + p.figure.replace.caption + '」' : '') + ' 교체' : '이 문단 뒤에 그림' + (p.figure?.caption ? ' 「' + p.figure.caption + '」' : '') }}{{ p.figure?.name ? ' — ' + p.figure.name : '' }}</div>
       <div v-else-if="p.type==='insert'" class="difftext" :class="{clamp: !open}"><span class="muted">이 문단 뒤에 새 문단: </span><ins>{{ p.text }}</ins></div>
+      <div v-else-if="p.type==='edit_batch'" class="difftext">내용·서식 묶음: 내용 {{p.batch?.contentOperations || 0}}건 · 형식 {{p.batch?.formatOperations || 0}}건</div>
       <div v-else-if="p.type==='format'" class="difftext" :class="{clamp: !open}">{{ p.find }}</div>
+      <div v-else-if="p.type==='para_delete' || p.type==='para_move'" class="difftext" :class="{clamp: !open}"><span class="muted">{{ p.type==='para_delete' ? '이 문단부터 ' + (p.paras?.count || 0) + '개 지우기: ' : '이 문단부터 ' + (p.paras?.count || 0) + '개 옮기기: ' }}</span>{{ (Array.isArray(p.paras?.first) ? p.paras.first : []).join(' / ') }}</div>
       <div v-else class="difftext" :class="{clamp: !open}" v-html="diff(p)"></div>
       <FormatPreview :proposal="p"/>
       <div class="muted rc-reason" v-if="p.reason && open">{{ p.reason }}</div>
@@ -366,9 +368,9 @@ const ProposalBody = {
         <template v-if="live"><button class="small primary rc-adopt rc-live" :disabled="busy" title="공유 문서에 바로 반영합니다(모두에게 보임)" @click.stop="adopt(p)">반영</button></template>
         <template v-else>
           <span class="pill ok adopted" v-if="adopted(p)" title="내 수정본에 넣었습니다 — 검토 요청 뒤 문서에 들어갑니다">반영됨</span>
-          <button v-else-if="!['table','table_edit','toc','figure','page_layout','delete'].includes(p.type)" class="small primary rc-adopt" :disabled="busy" title="내 수정본에 넣습니다(검토 요청 뒤 문서에 들어감)" @click.stop="adopt(p)">반영</button>
+          <button v-else-if="!['table','table_edit','toc','figure','page_layout','delete','edit_batch','para_delete','para_move'].includes(p.type)" class="small primary rc-adopt" :disabled="busy" title="내 수정본에 넣습니다(검토 요청 뒤 문서에 들어감)" @click.stop="adopt(p)">반영</button>
           <button v-if="canUndoFormat(p)" class="small rc-format-undo" :disabled="busy" title="서식 반영을 되돌립니다" @click.stop="undoFormat(p)">되돌리기</button>
-          <button v-if="direct" class="small rc-apply" :class="{primary: ['table','table_edit','toc','figure','page_layout','delete'].includes(p.type)}" :disabled="busy" title="공유 문서에 바로 적용합니다" @click.stop="apply(p)">문서에 바로 적용</button></template>
+          <button v-if="direct" class="small rc-apply" :class="{primary: ['table','table_edit','toc','figure','page_layout','delete','edit_batch','para_delete','para_move'].includes(p.type)}" :disabled="busy" title="공유 문서에 바로 적용합니다" @click.stop="apply(p)">문서에 바로 적용</button></template>
         <button class="small rc-reject" :disabled="busy" @click.stop="reject(p)">거절</button></div></div></div>`,
   setup(props) {
     const d = inject('doc'); const busy = ref(false);
@@ -504,7 +506,7 @@ export const ReviewCard = {
       const a = annOf(it); if (a) setActiveAnn(d, a);
       if (it.memo) d.s.activeMemo = it.memo.id;
       focusIn(d, it.range || { ref: it.ref });
-      // 남의 AI 작업 한 줄 요약(간단히): 누르면 [자세히] — AI 작업 탭 결과(읽기만, V4 §4.1)
+      // 남의 AI 작업 한 줄 요약(간단히): 누르면 [결과 보기] — AI 작업 탭 결과(읽기만, V4 §4.1)
       if (it.summary && it.rid != null) { d.s.activeRid = it.rid; d.s.tab = 'ai'; callPanel(d); }
       emit('activate', it);
     }
@@ -585,7 +587,7 @@ export const ReviewRail = {
       if (!editorOf(d)) return '편집기를 여는 중…';
       return items.value.length ? '이 화면에 검토 표시 없음' : '메모·제안 없음';
     });
-    const emptyTip = computed(() => (items.value.length ? '검토 탭에서 모두 볼 수 있습니다' : '글을 고르고 우클릭 → 메모 달기 · AI에게 요청'));
+    const emptyTip = computed(() => (items.value.length ? '메모 탭에서 모두 볼 수 있습니다' : '글을 고르고 우클릭 → AI에게 맡기기 · 메모 달기'));
     // 자리 잡기의 기준 메모 = 마지막으로 누른 것(메모·편집기 강조 누름 s.active·메모 '보기' s.activeMemo).
     // 마우스만 올린 것(s.hover)은 강조만 하고 메모를 옮기지 않는다(메모가 마우스 밑에서 움직이지 않게)
     const activeKey = computed(() => itemForAnn(index.value, items.value, d.s.active, d)?.key ?? null);

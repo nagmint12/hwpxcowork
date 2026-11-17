@@ -702,13 +702,19 @@ fn from_bytes_inner(
             for control in &mut para.controls {
                 let (caption, frame_width_hu) = match control {
                     Control::Table(table) => (
-                        &mut table.caption,
+                        table.caption.as_mut(),
                         crate::renderer::float_placement::signed_hwpunit(table.common.width),
                     ),
                     Control::Picture(picture) => {
                         let (width, _) =
                             crate::renderer::layout::picture_flow_frame_size_hu(picture);
-                        (&mut picture.caption, width)
+                        (picture.caption.as_mut(), width)
+                    }
+                    // [hwpx-cowork] 2026-11-17 도형·차트·OLE 캡션도 같은 규칙 — 글자처럼 취급한 도형 줄 높이가
+                    // 캡션 줄 높이를 쓴다(`tac_caption_extra_height_hu`).
+                    Control::Shape(shape) => {
+                        let width = shape.common().width as i32;
+                        (shape.caption_mut(), width)
                     }
                     _ => continue,
                 };
@@ -884,6 +890,20 @@ fn from_bytes_inner(
                         let owner_w = pic.common.width as i32;
                         Self::reflow_synthetic_caption(
                             pic.caption.as_mut(),
+                            owner_w,
+                            styles,
+                            dpi,
+                            include_empty,
+                            section_sized,
+                        );
+                    }
+                    // [hwpx-cowork] 2026-11-17 도형·차트·OLE 의 위/아래 캡션도 그림과 같게 먼저 합성한다 — 글자처럼 취급한
+                    // 도형 줄의 높이가 캡션 줄 높이를 쓴다(`tac_caption_extra_height_hu`, 한/글 2022 재저장 X08 차트 줄
+                    // 18958 = 17008 + 850 + 1100).
+                    if let Control::Shape(ref mut shape) = ctrl {
+                        let owner_w = shape.common().width as i32;
+                        Self::reflow_synthetic_caption(
+                            shape.caption_mut(),
                             owner_w,
                             styles,
                             dpi,
@@ -1160,6 +1180,10 @@ fn from_bytes_inner(
                     for seg in &mut para.line_segs {
                         seg.tag |= crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY;
                     }
+                    // [hwpx-cowork] 2026-11-16 낡은 것은 세로 좌표뿐 — 줄 나눔(textpos)은 한/글 것이라
+                    // 조판이 버리고 다시 나누지 않게 표시한다(`stored_cell_reflow` `fresh_body`).
+                    para.layout_source_text_partition =
+                        !para.line_segs.is_empty() && !para.stored_text_partition_is_dirty();
                 }
             }
 
@@ -1843,10 +1867,11 @@ fn from_bytes_inner(
         ) {
             return;
         }
-        let cap_w_hu = if caption.max_width > 0 {
-            caption.max_width as i32
-        } else {
-            owner_width_hu
+        // [hwpx-cowork] 2026-11-17 lastWidth 4294967295(한/글이 OLE 대체 개체에 쓰는 '정하지 않음')는 i32 로 -1 이 된다 —
+        // 양수일 때만 쓴다.
+        let cap_w_hu = match i32::try_from(caption.max_width) {
+            Ok(width) if width > 0 => width,
+            _ => owner_width_hu,
         };
         let cap_w_px = crate::renderer::hwpunit_to_px(cap_w_hu, dpi);
         for cap_para in &mut caption.paragraphs {

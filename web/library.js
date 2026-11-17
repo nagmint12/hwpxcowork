@@ -115,14 +115,14 @@ export const AccessDialog = {
       <div class="acc-mode" v-if="target.kind !== 'root'" role="radiogroup" aria-label="권한 방식">
         <label class="ds-opt" :class="{ on: inherit }" :title="inheritTip"><input type="radio" :checked="inherit" @change="setInherit(true)" data-value="inherit"/> {{ target.kind === 'doc' ? '폴더 권한 따름' : '상위 폴더 따름' }}</label>
         <label class="ds-opt" :class="{ on: !inherit }" :title="target.kind === 'doc' ? '이 문서만 따로 정합니다(폴더 권한 대신)' : '이 폴더와 그 아래(따름으로 둔 하위 폴더)에 씁니다'"><input type="radio" :checked="!inherit" @change="setInherit(false)" data-value="custom"/> 직접 지정</label>
-        <Hint text="개인 문서함은 주인과 여기 적은 사람만 봅니다. 관리자는 언제나 볼 수 있습니다." href="/help.html#library"/>
+        <Hint :text="target.space === 'private' ? '개인 문서함은 주인과 여기 적은 사람만 봅니다. 관리자는 언제나 볼 수 있습니다.' : '공용 문서함은 폴더마다 여기 적은 사람에게 권한을 줍니다. 관리자는 언제나 볼 수 있습니다.'" href="/help.html#library"/>
       </div>
       <table class="acc-table" :class="{ dim: inherit }">
         <thead><tr><th>사람</th><th v-for="p in cols" :key="p" :title="PERM_TIPS[p]">{{ PERM_LABELS[p] }}</th><th></th></tr></thead>
         <tbody>
           <tr v-if="target.space === 'private'" class="acc-owner"><td>{{ target.owner }} <span class="muted">주인</span></td><td :colspan="cols.length + 1" class="muted">전부</td></tr>
           <tr v-for="e in shown" :key="e.name" :data-person="e.name">
-            <td>{{ everyoneLabel(e.name) }}<span class="muted" v-if="roleOf(e.name) === 'viewer'" title="역할이 보기 전용이라 남의 문서함에서는 보기만 됩니다"> · 보기 전용</span></td>
+            <td>{{ everyoneLabel(e.name) }}<span class="muted" v-if="roleOf(e.name) === 'viewer'" title="역할이 '보기만'이라 남의 문서함에서는 볼 수만 있습니다"> · 보기만</span></td>
             <td v-for="p in cols" :key="p"><input type="checkbox" :checked="e.perms.includes(p)" :disabled="inherit" :data-perm="p" :aria-label="everyoneLabel(e.name) + ' ' + PERM_LABELS[p]" @change="toggle(e, p, $event.target.checked)"/></td>
             <td><button class="icon" v-if="!inherit" title="빼기" aria-label="빼기" @click="remove(e)" v-html="ICON.x"></button></td>
           </tr>

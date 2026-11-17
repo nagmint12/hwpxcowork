@@ -4,8 +4,27 @@ import { scan, attrs, escapeAttr, escapeText, decodeEntities } from './xmlscan.j
 import { Section } from './section.js';
 import { imageInfo, pictureXml, MM, PX } from './picture.js';
 import { docBytesSync } from './toc.js';
+import { objectsToBody } from './flow.js';
+import { layoutFingerprint } from './layout.js';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
+
+/** objects_to_body 의 at → 본문 문단 ref 목록 | null(문서 전체) */
+export function structureRefs(doc, at) {
+  if (at == null || at === '*') return null;
+  if (Array.isArray(at)) return at;
+  const sec = /^s(\d+)$/.exec(at);
+  if (!sec) return [at];
+  const s = doc.sections[Number(sec[1])];
+  if (!s) throw fail('NO_SECTION', `구역이 없습니다: ${at}`);
+  return s.bodyParas.map((p) => p.ref);
+}
+/** 쪽 구성 ops 가운데 개체 → 본문이 기대는 개체 상태 지문(제안한 뒤 그 개체가 바뀌었는지 — 메모·글 서식은 보지 않는다) | null */
+export function structureObjectsFingerprint(doc, ops) {
+  const list = (ops || []).filter((op) => op.op === 'objects_to_body');
+  if (!list.length) return null;
+  return crypto.createHash('sha256').update(list.map((op) => layoutFingerprint(doc, structureRefs(doc, op.at))).join('|')).digest('hex');
+}
 export function elements(xml, name) {
   const out = [], stack = [];
   for (const t of scan(xml)) {
@@ -109,12 +128,41 @@ function nestedSnapshot(doc) {
   return out;
 }
 
+/** 개체 → 본문 결과 한 줄(제안 카드·작업 기록 메모에 보인다) */
+export function structureLabel(r) {
+  if (!r) return '개체 → 본문';
+  const n = (v) => Number(v).toLocaleString('ko-KR');
+  const parts = [];
+  if (r.tables.length) parts.push(`표 ${r.tables.length}개(${r.tables.slice(0, 4).map(t => `${t.rows}×${t.cols}`).join('·')}${r.tables.length > 4 ? ' …' : ''})`);
+  if (r.paragraphs) parts.push(`문단 ${n(r.paragraphs)}개`);
+  parts.push(`글상자·선 ${n(r.removed)}개 지움`);
+  // 남는 개체도 지우기(remove_rest — 같은 호출의 개체 지우기를 합친 것 포함): 안에 든 글이 함께 사라졌으면 그 글자 수를 밝힌다
+  if (r.removedRest) parts.push(`남은 개체 ${n(r.removedRest)}개도 지움${r.text?.removedWithObjects ? `(안의 글자 ${n(r.text.removedWithObjects)}자 포함)` : ''}`);
+  if (r.dropped.length) parts.push(`${[...new Set(r.dropped.map(d => d.why))].join('·')} ${n(r.dropped.length)}줄 버림`);
+  if (r.sections[0] !== r.sections[1]) parts.push(`구역 ${r.sections[0]}→${r.sections[1]}`);
+  if (r.margins) parts.push(`여백 좌우 ${r.margins.left ?? '-'}mm`);
+  if (r.kept) parts.push(`남긴 개체 ${n(r.kept)}개`);
+  return `개체 → 본문: ${parts.join(' · ')}`;
+}
+
 /** Returns reversible address maps; callers remap proposals/requests/memo threads. */
-export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); } } = {}) {
+export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); }, author = null } = {}) {
   const beforeNested = nestedSnapshot(doc);
   const mapping = doc.sections.map((s, si) => s.bodyParas.map((_, i) => ({ old: [si, i], to: [si, i] }))).flat();
-  const move = fn => { for (const m of mapping) m.to = fn(...m.to); };
+  // 지워진 문단(to = null — 개체 → 본문이 비게 된 문단을 지운다)은 그대로 둔다
+  const move = fn => { for (const m of mapping) if (m.to) m.to = fn(...m.to); };
+  const reports = new Map();
   for (const op of ops) {
+    if (op.op === 'objects_to_body') {
+      // 개체 → 본문(engine/flow.js): 문단을 넣고 지우고 구역을 합친다 — 그 옮김표를 지금까지의 옮김표에 잇는다
+      const out = objectsToBody(doc, { refs: structureRefs(doc, op.at), joinPages: op.join_pages, keepPageNumbers: op.keep_page_numbers, drop: op.drop, headerRows: op.header_rows,
+        wrap: op.wrap, margins: op.margins ?? 'auto', mergeSections: op.merge_sections, removeRest: op.remove_rest, author });
+      rebuild(doc);
+      const moved = new Map(out.mapping.map(m => [m.old.join('/'), m.to]));
+      for (const m of mapping) if (m.to) m.to = moved.get(m.to.join('/')) ?? null;
+      reports.set(op, out.report);
+      continue;
+    }
     if (op.op === 'split_section') {
       const [, sn, pn] = /^s(\d+)\/p(\d+)$/.exec(op.before_ref) || [], si = Number(sn), pi = Number(pn), sec = doc.sections[si];
       if (!sec || !sec.bodyParas[pi] || pi < 1) throw fail('PAGE_LAYOUT', '구역 나눔 위치가 본문 문단 범위 밖입니다.');
@@ -204,13 +252,17 @@ export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail(
     doc.container.remove(name);
     doc.container.setText('Contents/content.hpf', removeElements(doc.container.getText('Contents/content.hpf'), 'opf:item', e => e.attrs.href === name));
   }
-  const afterNested = nestedSnapshot(doc), hosts = new Map(mapping.map(m => [`s${m.old[0]}/p${m.old[1]}`, `s${m.to[0]}/p${m.to[1]}`]));
+  const afterNested = nestedSnapshot(doc), hosts = new Map(mapping.map(m => [`s${m.old[0]}/p${m.old[1]}`, m.to ? `s${m.to[0]}/p${m.to[1]}` : null]));
+  // 문단마다 한 번만 훑게 문단별로 모아 둔다(글상자 수천 개인 문서에서 문단 수 × 중첩 문단 수를 피한다)
+  const byHost = new Map();
+  for (const q of afterNested) { const k = `${q.host}|${q.kind}`; if (!byHost.has(k)) byHost.set(k, []); byHost.get(k).push(q); }
   const refMapping = beforeNested.map(old => {
-    const candidates = afterNested.filter(q => q.host === hosts.get(old.host) && q.kind === old.kind);
+    const candidates = byHost.get(`${hosts.get(old.host)}|${old.kind}`) || [];
     const next = old.kind === 'body' ? candidates[old.slot] : candidates.find(q => q.xml === old.xml);
     return { old: old.ref, to: next?.ref || null };
   });
-  return { mapping, refMapping, labels: ops.map(op => {
+  return { mapping, refMapping, reports: ops.filter(op => reports.has(op)).map(op => reports.get(op)), labels: ops.map(op => {
+    if (op.op === 'objects_to_body') return structureLabel(reports.get(op));
     const name = ({ paper:'용지·여백', section:'구역 설정', split_section:'구역 나누기', merge_section:'구역 합치기', header:'머리말', footer:'꼬리말', page_number:'쪽 번호', master_page:'바탕쪽' })[op.op];
     if (op.op === 'split_section') return `${op.before_ref} 앞에서 구역 나누기`;
     const extra = op.clear ? '삭제' : [op.orientation === 'landscape' ? '가로' : op.orientation === 'portrait' ? '세로' : '', op.width_mm ? `${op.width_mm}×${op.height_mm || '기존'}mm` : '', op.margins ? Object.entries(op.margins).map(([k,v]) => `${({left:'왼쪽',right:'오른쪽',top:'위',bottom:'아래',header:'머리말',footer:'꼬리말',gutter:'제본'})[k]} ${v}mm`).join(' · ') : '', op.text?.slice(0,40), op.position, op.start != null ? `${op.start}부터` : '', op.attachment_id ? '배경 그림' : ''].filter(Boolean).join(' · ');

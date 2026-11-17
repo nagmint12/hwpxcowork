@@ -39,7 +39,7 @@ import {
   Emitter, cpLen, cpSlice, cps, debounce, throttle, rafBatch, nextFrame, sleep, safe, jsonCopy, toHost,
 } from './util';
 import {
-  PLUGIN_VERSION, EVENT_NAMES, BATCH_MAX,
+  PLUGIN_VERSION, PLUGIN_FEATURES, EVENT_NAMES, BATCH_MAX,
   type Annotations, type Anchor, type ApplyResult, type BatchItem, type BatchItemReason, type BatchItemResult, type BatchKey, type BatchResult,
   type CoworkOptions, type CoworkSelection, type DraftHunkAnn, type DraftState, type EngineParagraph, type FlashOptions, type InsertArgs, type MemoAnn,
   type Range, type Rect, type SyncResult, type TextArgs,
@@ -176,12 +176,13 @@ export class CoworkController {
     const r = h.automation.execute('ext:cowork.bootstrap');
     if (!this.services) throw new Error(`cowork: CommandServices 를 받지 못했습니다(${r.ok ? '' : r.reason})`);
 
-    // 메뉴바 항목(공식 addMenuItem): 입력 → 메모 달기, 도구 → AI에게 검토 맡기기·검토 패널 열기
+    // 메뉴바 항목(공식 addMenuItem): 입력 → 메모 달기, 도구 → AI에게 맡기기…·검토 패널 열기
+    // (도구 항목은 우클릭 'AI에게 맡기기…'와 같은 요청 창을 연다 — 이름도 같게, 2026-11-17 docs/UI_TERMS.md §3. 명령 id·동작 'review' 는 그대로)
     const cmd = (id: `ext:${string}`, label: string, action: string) => h.automation.registerCommand({
       id, label, canExecute: (ctx) => ctx.hasDocument, execute: () => { safe('메뉴바', () => this.menubarAction(action)); },
     });
     cmd('ext:cowork.memo', '메모 달기', 'memo');
-    cmd('ext:cowork.ai-review', 'AI에게 검토 맡기기', 'review');
+    cmd('ext:cowork.ai-review', 'AI에게 맡기기…', 'review');
     cmd('ext:cowork.panel', '검토 패널 열기', 'panel');
     safe('메뉴바 항목', () => {
       h.automation.addMenuItem({ menuId: 'insert', commandId: 'ext:cowork.memo' });
@@ -1294,6 +1295,13 @@ export class CoworkController {
     if (!a) return 'NO_PARAGRAPH';
     const w = this.services!.wasm;
     const lines = String(x.text ?? '').replace(/\r\n?/g, '\n').split('\n');
+    // skip(0.4.1 'insertSkip'): 기준 문단 뒤에 이미 넣은 내 초안 문단 너머로(없거나 맞는 것이 없으면 예전처럼 기준 문단 바로 뒤)
+    const past = Array.isArray(x.skip) && x.skip.length ? this.pastDrafts(a.cur, x.skip) : null;
+    if (past) {
+      const { sec: ps, para: pp, cell: pc } = past;
+      if (!pc) return { op: 'insert', cur: past, lines, len: w.getParagraphLength(ps, pp), objectOnly: false, count: w.getParagraphCount(ps) };
+      return { op: 'insert', cur: past, lines, len: w.getCellParagraphLength(ps, pp, pc.ci, pc.cell, pc.cpara), objectOnly: false, count: 0 };
+    }
     const { sec, para, cell } = a.cur;
     if (!cell) {
       return {
@@ -1302,6 +1310,38 @@ export class CoworkController {
       };
     }
     return { op: 'insert', cur: a.cur, lines, len: w.getCellParagraphLength(sec, para, cell.ci, cell.cell, cell.cpara), objectOnly: false, count: 0 };
+  }
+
+  /**
+   * 넣기 자리를 기준 문단 뒤에 이미 넣어 둔 내 초안 문단 너머로 옮긴다(2026-11-17 docs/MCP_REDESIGN_2026-11-16.md §10.4 나-3).
+   * 비실시간 문서에서 같은 요청·같은 기준 문단의 넣기 제안 #1·#2·#3 을 하나씩 '내 수정본에 반영'하면 매번 기준 문단 바로 뒤에 넣어 3·2·1 로
+   * 쌓였다 — 내 수정본에만 있는 초안 문단은 기준 ref 가 없어 호스트가 가리킬 수 없으므로, 호스트가 앞 차례 형제의 글(skip)을 주고 여기서 찾는다.
+   * 기준 문단(cur) 바로 뒤에 잇달아 있는 '내 수정본에만 있는' 문단(align.draftOnly — 같은 칸 안이면 그 칸의 칸 문단)만 본다: 짝 있는 기준 문단을
+   * 만나면 멈춘다(엉뚱한 기준 문단 뒤에 넣지 않게). 그 문단들을 앞에서부터 skip 줄(글마다 줄바꿈으로 나눈 줄 — 넣을 때 줄마다 문단 하나)과
+   * 견주어, 어떤 문단의 글이 아직 맞추지 않은 skip 줄 가운데 첫 같은 줄과 같으면 그 줄까지 맞춘 것으로 하고 그 문단을 '마지막으로 맞은 문단'으로 둔다.
+   * 맞춘 줄은 앞으로만 나아가므로 차례를 거스르지 않는다. 사람이 고친 초안(어느 줄과도 다름)·사람이 쓴 문단·뒤 차례 제안 문단은 그 뒤에서
+   * 맞는 문단이 나올 때만 함께 넘는다 — 그래서 더 큰 pid 형제가 이미 들어가 있으면 그 앞에 놓인다. 표·그림 문단은 글로 맞추지 않는다.
+   * → 마지막으로 맞은 문단 자리(그 뒤에 넣는다), 없으면 null
+   */
+  private pastDrafts(cur: CurPara, skip0: unknown[]): CurPara | null {
+    const want: string[] = [];
+    for (const t of skip0) if (typeof t === 'string') want.push(...t.replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()));
+    if (!want.length) return null;
+    const w = this.services!.wasm;
+    const { sec, para, cell } = cur;
+    const at = (k: number): CurPara => (cell ? { sec, para, cell: { ...cell, cpara: k } } : { sec, para: k });
+    const end = cell ? w.getCellParagraphCount(sec, para, cell.ci, cell.cell) : this.align.paragraphCount(sec);
+    let j = 0; let last: CurPara | null = null;
+    for (let k = (cell ? cell.cpara : para) + 1; k < end && j < want.length; k++) {
+      const c = at(k);
+      if (!this.align.draftOnly(c)) break;
+      if (!cell && ['table', 'object'].includes(this.align.curKind(sec, k))) continue;
+      const text = this.align.curText(c).trim();
+      const m = want.indexOf(text, j);
+      if (m < 0) continue;
+      j = m + 1; last = c;
+    }
+    return last;
   }
 
   /**
@@ -1437,6 +1477,7 @@ export class CoworkController {
     };
     return {
       version: PLUGIN_VERSION,
+      features: [...PLUGIN_FEATURES],
       events: [...EVENT_NAMES],
       ready: this.ready,
       on(event: string, cb: (payload: unknown) => void): () => void { return self.emitter.on(String(event), cb); },

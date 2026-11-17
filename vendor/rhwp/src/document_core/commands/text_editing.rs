@@ -4951,12 +4951,18 @@ impl DocumentCore {
                     _ => new_prev_end.saturating_add(prev.map(|pp| gap(&paras[pp], &paras[pi])).unwrap_or(0)),
                 }
             };
+            // [hwpx-cowork] 2026-11-16 옮기기 전 줄이 한/글 저장 줄(또는 이미 원본 줄 나눔 표시)이었는가.
+            let source_partition = paras[pi].layout_source_text_partition
+                || paras[pi].line_segs.iter().all(|seg| seg.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0);
             shift_paragraph_vpos_origin(&mut paras[pi], to);
             // 이 줄 좌표는 한/글이 조판해 저장한 값이 아니다 — 합성 줄로 표시해 조판이 저장 좌표 근거(쪽 끝 넘침 허용 등)로 쓰지 않고
             // 높이로 가르게 한다(한/글도 나누기를 고친 뒤 다시 조판한다). 저장기는 합성 줄만인 문단의 줄 캐시를 내지 않는다(#5847)
             for seg in &mut paras[pi].line_segs {
                 seg.tag |= LineSeg::TAG_IMPLEMENTATION_PROPERTY;
             }
+            // [hwpx-cowork] 낡은 것은 세로 좌표뿐 — 한/글 줄 나눔은 조판이 버리지 않게 표시한다(문서 열기 복원 구간과 같은 규칙).
+            paras[pi].layout_source_text_partition =
+                source_partition && !paras[pi].stored_text_partition_is_dirty();
             prev_stored_end = if pi == k && fresh { None } else { stored_end };
             prev = Some(pi);
         }

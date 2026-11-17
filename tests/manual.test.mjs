@@ -63,7 +63,8 @@ test('실제 배포 설명서의 서버 설정 빠른 안내·전체 절·표와
   for (const heading of sections) assert.ok(html.includes(`>${heading}</h3>`), heading);
   assert.equal((html.match(/<pre><code/g) || []).length, (markdown.match(/^```/gm) || []).length / 2);
   assert.equal((html.match(/<table>/g) || []).length, (markdown.match(/^\|(\s*:?-+:?\s*\|)+\s*$/gm) || []).length);
-  assert.equal((html.match(/<table>/g) || []).length, 5);
+  // 표 6개: 2026-11-14 '10. … AI 수신 원문과 오류 판정 기록' 절에 경로 표가 더해졌다(바로 위 줄이 원문 표 수와 같은지도 본다)
+  assert.equal((html.match(/<table>/g) || []).length, 6);
   assert.match(html, /npm run build:studio/);
   assert.match(html, /bearer_token_env_var = &quot;HWPX_COWORK_TOKEN&quot;/);
   assert.match(html, /href="\/manual-resources\/AGENT_SETUP.md"/);

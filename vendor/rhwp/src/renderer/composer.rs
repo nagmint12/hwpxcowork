@@ -358,7 +358,8 @@ pub(crate) use line_breaking::{condense_space_savings_px, overflowing_space_cut}
 mod picture_anchor_projection;
 pub(crate) use line_breaking::{
     control_is_square_float_object, control_is_width_neutral_marker, frame_metrics_for_line,
-    paragraph_end_font_size_px, picture_flow_extra_height_hu, text_word_ranges,
+    paragraph_end_font_size_px, picture_flow_extra_height_hu, tac_caption_extra_height_hu,
+    text_word_ranges,
     text_word_ranges_with_storage,
 };
 pub mod lineseg_compare;

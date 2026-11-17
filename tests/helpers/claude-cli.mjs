@@ -45,6 +45,17 @@ if (mode === 'fail') { init('connected'); console.error('private provider secret
 if (mode === 'limit') { init('connected'); say({ type: 'result', subtype: 'success', is_error: true, result: 'Claude AI usage limit reached|1794600000' }); process.exit(1); }
 if (mode === 'session-lost') { init('connected'); say({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' }); process.exit(1); }
 if (mode === 'mcp-down') { init('failed'); say({ type: 'result', subtype: 'success', is_error: false, result: '도구가 없어 처리하지 못했습니다', usage: { input_tokens: 5, output_tokens: 5 } }); process.exit(0); }
+if (mode === 'workspace') {
+ const c=new Client({name:'claude-workspace-test',version:'1'});const transport=new StdioClientTransport({command:server.command,args:server.args,env:process.env,stderr:'pipe'});transport.stderr?.on('data',()=>{});
+ try {
+  await c.connect(transport);const names=(await c.listTools()).tools.map(t=>t.name);assert.ok(names.includes('edit_workspace'));assert.ok(!names.includes('propose_changes'));init('connected',names);
+  const w=state.requestContext.editWorkflow,stage=w.stage;
+  const operations=stage==='content'?[{op:'replace',args:{ref:'s0/p1',find:'둘째',replace:'두 번째'}}]:[{op:'format',args:{refs:['s0/p1'],format:{char:{bold:true}}}}];
+  const r=await c.callTool({name:'edit_workspace',arguments:{stage,revision:w.revision,operations,complete_stage:true,summary:stage+' completed'}});assert.ok(!r.isError,JSON.stringify(r));
+  fs.appendFileSync(receipt+'.workspace.jsonl',JSON.stringify({pid:process.pid,cwd:process.cwd(),stage,prompt})+'\\n');
+ } finally {await c.close();await transport.close()}
+ say({type:'result',subtype:'success',is_error:false,result:'stage completed',usage:{input_tokens:200,output_tokens:20,cache_read_input_tokens:40}});process.exit(0);
+}
 if (mode === 'mcp') {
   const c = new Client({ name: 'claude-code-test', version: 'test' });
   // 진짜 claude 처럼 설정의 env 없이 자기 환경 변수를 그대로 물려준다(토큰·작업은 환경 변수로만 전달된다)

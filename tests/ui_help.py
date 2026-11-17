@@ -86,8 +86,9 @@ def main():
                 page.wait_for_function("document.querySelector('#manual-content').getAttribute('aria-busy') === 'false' && document.querySelector('#manual-content').textContent.includes('11. 검증 결과')")
                 manual = page.locator('#manual-content')
                 ok(manual.locator('h3').filter(has_text='1. 어느 PC에 무엇을 설치하나요?').count() == 1 and manual.locator('h3').filter(has_text='11. 검증 결과').count() == 1, '관리자는 상세 운영 매뉴얼을 처음부터 마지막 절까지 읽음')
-                ok(manual.locator('table').count() == 5 and manual.locator('pre code').count() >= 10, '원본 매뉴얼의 표와 명령 예제를 본문에 표시')
-                ok(manual.locator('a[href="/manual-resources/AGENT_SETUP.md"]').count() == 1 and manual.locator('a[href="/manual-resources/Caddyfile.example"]').count() == 1, '보조 설정 문서 링크를 서버 자료 경로로 연결')
+                # 표 6개·AGENT_SETUP 링크 2개: 2026-11-14 매뉴얼에 'AI 수신 원문과 오류 판정 기록' 표와 Claude Code 실행기 절의 [Claude Code 안내] 링크가 더해졌다
+                ok(manual.locator('table').count() == 6 and manual.locator('pre code').count() >= 10, '원본 매뉴얼의 표와 명령 예제를 본문에 표시')
+                ok(manual.locator('a[href="/manual-resources/AGENT_SETUP.md"]').count() == 2 and manual.locator('a[href="/manual-resources/Caddyfile.example"]').count() == 1, '보조 설정 문서 링크를 서버 자료 경로로 연결')
 
                 attempts = [0]
                 def manual_failure_once(route):

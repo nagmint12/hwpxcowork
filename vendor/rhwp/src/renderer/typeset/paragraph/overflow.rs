@@ -230,8 +230,15 @@ pub(in crate::renderer::typeset) fn tail_overflow_candidate(
                 .and_then(|line| line_seg_visible_bounds_px(line, base, dpi))
                 .is_some_and(|(_, bottom)| bottom > page.body_height)
         });
-    let font_drift_tail =
-        !para.text.trim().is_empty() && fmt.line_heights.len() >= 2 && !stored_tail_outside_body;
+    // [hwpx-cowork] 저장 줄이 하나도 없는 문단(생성 문서 — rhwp 가 줄을 구성)에는 "한컴보다 커진 글꼴" 근거가 없다.
+    // 줄 높이·폭을 한/글과 같은 글꼴 폭 표로 재므로 한 줄 미만 넘침도 실제 넘침이고, 한/글은 그 꼬리 줄을 다음 쪽에 둔다
+    // — 다음 문단이 쪽 나누기여도 한 줄짜리 쪽을 만든다(2026-11-16 한/글 2022 COM: 표준서식 생성 보고서 본문 245번 문단,
+    // 7줄 중 마지막 줄이 6.7px 넘쳐 한/글은 37쪽에 그 한 줄만 두고 다음 쪽 나누기 문단을 38쪽에 놓았다. 엔진은 이 갈래로
+    // 통째 수용해 본문 아래에 그렸고 뒤 쪽이 모두 하나씩 당겨졌다). 저장 줄 문단은 종전 #1537 그대로다.
+    let font_drift_tail = !para.text.trim().is_empty()
+        && fmt.line_heights.len() >= 2
+        && !stored_tail_outside_body
+        && !crate::renderer::para_has_no_stored_line_segs(para);
     if std::env::var("RHWP_DIAG_6031").is_ok() {
         eprintln!(
             "DIAG_TAIL pi={para_idx} stored_valid={} base={:?} text_dirty={} cell_dirty={} stored_outside={stored_tail_outside_body} font_drift={font_drift_tail}",

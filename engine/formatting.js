@@ -12,7 +12,10 @@ const LANGS = ['hangul', 'latin', 'hanja', 'japanese', 'other', 'symbol', 'user'
 // [hwpx-cowork] 2026-10-30: 한/글 글자 모양의 자주 쓰는 속성 — 취소선·위첨자·아래첨자·장평·자간·음영 색도
 const CHAR_KEYS = ['font', 'sizePt', 'bold', 'italic', 'underline', 'color', 'strikeout', 'superscript', 'subscript', 'ratioPct', 'spacingPct', 'shadeColor'];
 // [hwpx-cowork] oneLine = 한/글 문단 모양 '한 줄로 입력'(hh:breakSetting lineWrap SQUEEZE — 넘치면 자간을 줄여 한 줄에)
-const PARA_KEYS = ['align', 'lineSpacing', 'spaceBeforePt', 'spaceAfterPt', 'indentPt', 'leftMarginPt', 'rightMarginPt', 'oneLine'];
+// [hwpx-cowork] 2026-11-17 pageBreakBefore = 이 문단 앞에서 강제로 쪽을 나눈다(true: 문단 태그 pageBreak="1" — 한/글 Ctrl+Enter, 표준서식의 '장은 새 쪽에서'.
+// false: 문단 태그를 끄고 문단 모양의 '문단 앞에서 항상 쪽 나눔'(breakSetting pageBreakBefore)도 그 문단만 끈다). 한/글 2022 실측: 둘은 따로 저장되고
+// 어느 쪽이든 그 문단 앞에서 쪽을 나눈다(artifacts/mcp-round3-20261117/P/DESIGN.md §2). 본문 문단만(표 칸·글상자 안은 받지 않음)
+const PARA_KEYS = ['align', 'lineSpacing', 'spaceBeforePt', 'spaceAfterPt', 'indentPt', 'leftMarginPt', 'rightMarginPt', 'oneLine', 'pageBreakBefore'];
 const ALIGN = ['LEFT', 'CENTER', 'RIGHT', 'JUSTIFY', 'DISTRIBUTE', 'DISTRIBUTE_SPACE'];
 // 취소선으로 그려지는 hh:strikeout shape. 그 밖(NONE·한/글 2018 이 자리만 채운 3D·모르는 값)은 취소선 없음 —
 // 한/글이 그리지 않고 편집기(rhwp)는 NONE 으로 다시 적는다(docs/CLIPBOARD_AND_FORMAT_COPY.md '화면에 나타나지 않는 값')
@@ -60,6 +63,7 @@ export function validateFormatSpec(spec) {
     if (spec.paragraph.align !== undefined && !ALIGN.includes(spec.paragraph.align)) fail('FORMAT_SPEC', '문단 정렬이 올바르지 않습니다');
     for (const k of PARA_KEYS.filter(k => k.endsWith('Pt'))) if (spec.paragraph[k] !== undefined) number(spec.paragraph[k], k === 'indentPt' ? -10000 : 0, 10000, k);
     if (spec.paragraph.oneLine !== undefined && typeof spec.paragraph.oneLine !== 'boolean') fail('FORMAT_SPEC', 'oneLine(한 줄로 입력)은 true/false입니다');
+    if (spec.paragraph.pageBreakBefore !== undefined && typeof spec.paragraph.pageBreakBefore !== 'boolean') fail('FORMAT_SPEC', 'pageBreakBefore(문단 앞 쪽 나눔)는 true/false입니다');
     if (spec.paragraph.lineSpacing !== undefined) {
       const ls = spec.paragraph.lineSpacing; keys(ls, ['type', 'value'], '줄 간격');
       if (!SPACING.includes(ls.type)) fail('FORMAT_SPEC', '줄 간격 종류가 올바르지 않습니다');
@@ -84,6 +88,18 @@ function paragraphBreaks(sec, p) {
 /** want 의 나누기(값이 있는 것만)를 have 와 다를 때만 문단 태그 속성으로 */
 function breakPatch(want, have) {
   return Object.fromEntries(BREAKS.filter(([k]) => typeof want[k] === 'boolean' && want[k] !== have[k]).map(([k]) => [k, want[k] ? '1' : '0']));
+}
+/** 문단 모양의 '문단 앞에서 항상 쪽 나눔'(hh:breakSetting pageBreakBefore) */
+function paraPrBreakBefore(header, paraPrId) {
+  const xml = header.block('paraPr', paraPrId);
+  return !!xml && elements(xml, 'hh:breakSetting').some(t => ['1', 'true'].includes(attrXml(t.xml, 'pageBreakBefore')));
+}
+const NESTED_REF = /\/[nd]\d+/;
+/** 이 문단 앞에서 강제로 쪽이 나뉘는가(문단 태그 쪽 나누기 또는 문단 모양 — 본문 문단만, 표 칸·글상자 안은 false) */
+export function forcedPageBreak(doc, ref) {
+  if (NESTED_REF.test(String(ref))) return false;
+  const { sec, p } = doc.resolve(ref);
+  return paragraphBreaks(sec, p).pageBreak || paraPrBreakBefore(doc.header, attr(sec.xml, sec.tokens[p.openTok], 'paraPrIDRef') ?? '0');
 }
 /** 두 문단의 쪽·단 나누기 차이 이름표(diffDocs format 덩어리 요약) — 같으면 [] */
 export function breakChangeLabels(a, aRef, b, bRef) {
@@ -261,6 +277,10 @@ function paraVariant(header, baseId, patch = {}, modern = true) {
     if (!bs.length) fail('FORMAT_UNSUPPORTED', '줄 나눔 설정(hh:breakSetting) 요소가 없습니다');
     xml = patchElements(xml, 'hh:breakSetting', { lineWrap: patch.oneLine ? 'SQUEEZE' : 'BREAK' });
   }
+  // [hwpx-cowork] 쪽 나눔 끄기: 문단 모양이 켜 둔 것도 그 문단만 끈다(켜기는 문단 태그로 — formatRange). 문단 모양이 없거나 꺼져 있으면 그대로
+  if (patch.pageBreakBefore === false && elements(xml, 'hh:breakSetting').some(t => ['1', 'true'].includes(attrXml(t.xml, 'pageBreakBefore')))) {
+    xml = patchElements(xml, 'hh:breakSetting', { pageBreakBefore: '0' });
+  }
   return xml === src ? String(baseId) : header.addItem('paraProperties', 'paraPr', xml);
 }
 
@@ -345,10 +365,10 @@ function inlineTabEdits(source, sourceRef, sec, p) {
 function commit(doc, sec, p, edits, header) {
   if (edits.length) for (const ls of Section.linesegs(p)) edits.push({ start: ls.start, end: ls.end, text: '' }); // [hwpx-cowork] member 마다
   const xml = apply(sec.xml, edits);
-  // 먼저 파싱해 실패 시 기존 문서·헤더가 그대로 남는다.
-  if (xml !== sec.xml) new Section(xml, sec.index);
-  if (header) doc.header.xml = header.xml;
+  // 먼저 구역을 바꿔 끼우고 헤더는 그 뒤에 — 읽다가 실패하면 기존 문서·헤더가 그대로 남는다.
+  // [hwpx-cowork] (2026-11-16) Section.load 는 새 상태를 다 만든 뒤에만 바꿔 끼운다. 예전에는 같은 XML 을 버리는 파싱으로 한 번 더 읽었다(큰 구역에서 50ms+)
   if (xml !== sec.xml) sec.load(xml);
+  if (header) doc.header.xml = header.xml;
 }
 
 export function formatRange(doc, ref, input) {
@@ -369,7 +389,14 @@ export function formatRange(doc, ref, input) {
   const emptyId = changesChar && !before.length ? variant(before.emptyCharPrId) : null;
   const edits = characterShapeEdits(sec, p, desired, emptyId);
   const pp = changesPara ? paraVariant(header, spec.paraPrId ?? (paraStyle ? style.paraPrId : before.paraPrId), spec.paragraph, modernUnits(doc)) : before.paraPrId;
-  edits.push(...paragraphEdits(sec, p, { paraPrIDRef: pp, ...(paraStyle ? { styleIDRef: style.id } : {}) }));
+  // 쪽 나눔(pageBreakBefore): 켜기는 문단 태그 pageBreak="1"(새 문단 모양이 이미 켜 두었으면 그대로), 끄기는 문단 태그 "0"(문단 모양은 paraVariant 가 껐다)
+  const wantBreak = spec.paragraph?.pageBreakBefore; const tagBreak = {};
+  if (typeof wantBreak === 'boolean') {
+    if (NESTED_REF.test(String(ref))) fail('FORMAT_SPEC', '쪽 나눔(pageBreakBefore)은 본문 문단에만 줄 수 있습니다(표 칸·글상자 안 문단은 안 됨)');
+    if (!wantBreak) tagBreak.pageBreak = '0';
+    else if (!before.pageBreak && !paraPrBreakBefore(header, pp)) tagBreak.pageBreak = '1';
+  }
+  edits.push(...paragraphEdits(sec, p, { paraPrIDRef: pp, ...(paraStyle ? { styleIDRef: style.id } : {}), ...tagBreak }));
   commit(doc, sec, p, edits, header);
   const after = inspectFormatting(doc, ref); const changed = before.fingerprint !== after.fingerprint;
   return { changed, ref, start: spec.start, end: spec.end, before, after, undo: changed ? { ref, before, afterFingerprint: after.fingerprint } : null };
@@ -629,6 +656,37 @@ export async function copyStyleDefinitionsFrom(doc, source) {
   doc.header.xml = header.xml;
   remember();
   return { changed: before !== header.xml };
+}
+
+/** 실험 편집의 동기 트랜잭션용. 번호·글머리표·글꼴 참조도 기존 importer로 함께 옮긴다. */
+export function copyStyleDefinitionsFromSync(doc, source) {
+  const before = doc.header.xml;
+  const { header, imported, remember } = formatImporter(doc, source);
+  const names = new Set(elements(doc.header.xml, 'hh:style').map(t => attrXml(t.xml, 'name')).filter(Boolean));
+  for (const item of elements(source.header.xml, 'hh:style')) {
+    if (!names.has(attrXml(item.xml, 'name'))) imported('style', attrXml(item.xml, 'id'));
+  }
+  doc.header.xml = header.xml; remember();
+  return { changed: before !== header.xml };
+}
+
+/** 임의 XML 없이 기존 스타일을 바탕으로 이름 있는 문단/글자 스타일을 정의한다. */
+export function defineStyle(doc, { name, baseStyle, type = 'PARA', format = {} }) {
+  if (typeof name !== 'string' || !name.trim() || name.length > 160 || /[\x00-\x1f<>]/.test(name)) fail('FORMAT_SPEC', '스타일 이름을 확인하세요');
+  const catalog = formattingCatalog(doc);
+  if (catalog.styles.some(s => s.name === name)) fail('STYLE_EXISTS', `이미 있는 스타일입니다: ${name}`);
+  const base = catalog.styles.find(s => s.id === String(baseStyle) || s.name === baseStyle) || (baseStyle == null ? catalog.styles[0] : null);
+  if (!base) fail('NO_FORMAT', '기준 스타일을 찾지 못했습니다');
+  if (!['PARA', 'CHAR'].includes(type)) fail('FORMAT_SPEC', '스타일 종류는 PARA/CHAR입니다');
+  const spec = validateFormatSpec(format);
+  if (spec.styleId != null || spec.charPrId != null || spec.paraPrId != null || spec.start != null || spec.end != null) fail('FORMAT_SPEC', '정의할 char/paragraph 값만 전달하세요');
+  if (type === 'CHAR' && spec.paragraph) fail('FORMAT_SPEC', '글자 스타일에는 문단모양을 넣지 않습니다');
+  const header = new doc.header.constructor(doc.header.xml);
+  const charId = charVariant(header, base.charPrId, spec.char);
+  const paraId = paraVariant(header, base.paraPrId, spec.paragraph, modernUnits(doc));
+  const styleId = header.addItem('styles', 'style', `<hh:style id="0" type="${type}" name="${escapeAttr(name.trim())}" engName="" paraPrIDRef="${paraId}" charPrIDRef="${charId}" nextStyleIDRef="${base.id}" langID="1042" lockForm="0"/>`);
+  doc.header.xml = header.xml;
+  return { id: String(styleId), name: name.trim(), type };
 }
 
 function formattingCopyEdits(doc, source, sourceRef, targetRef, sourceInfo, before, imported) {

@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-13T06:39:48.045Z",
-  "enginePackage": "artifacts\\public-build-20261113\\engine-pkg",
+  "builtAt": "2026-11-17T02:08:07.253Z",
+  "enginePackage": "artifacts\\public-build-20261117\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "c21316ab3bd4f9b84b15a06f8be5ff45d39cdebe"
+    "commit": "6341c33e406bf9fe58959be35ea00ba9b6178960"
   },
   "patches": [
     {
@@ -237,6 +237,41 @@
       "id": "uncompressed-hwpx-bridge",
       "file": "src/core/wasm-bridge.ts",
       "why": "기존 HWPX XML 생성·저장 훅을 그대로 사용하고 압축만 분리한다"
+    },
+    {
+      "id": "desktop-local-font-automatic-preparation",
+      "file": "src/main.ts",
+      "why": "로컬 앱과 cowork 앱 모두 신뢰한 호스트에서 설치 글꼴을 자동 준비한다"
+    },
+    {
+      "id": "desktop-local-font-suppressed-dialog-preparation",
+      "file": "src/main.ts",
+      "why": "내장 편집기의 대화상자 생략 옵션이 글꼴 준비까지 생략하지 않게 한다"
+    },
+    {
+      "id": "font-choice-resource-hook",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "선택한 글꼴의 실제 face 준비를 편집기 호스트에 알린다"
+    },
+    {
+      "id": "font-choice-resource-all-languages",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "전체 언어 글꼴 변경을 준비한다"
+    },
+    {
+      "id": "font-choice-resource-language-slot",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "언어별 글꼴·대표 글꼴 세트도 준비한다"
+    },
+    {
+      "id": "font-choice-resource-queue-import",
+      "file": "src/main.ts",
+      "why": "준비 요청을 묶고 문서 교체 경합을 막는다"
+    },
+    {
+      "id": "font-choice-resource-refresh",
+      "file": "src/main.ts",
+      "why": "준비 후 측정·그리기만 갱신하며 원문·선택·undo는 보존한다"
     },
     {
       "id": "exact-local-face-import",
@@ -631,7 +666,7 @@
   ],
   "plugin": {
     "id": "cowork",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "externalFonts": false
 }
