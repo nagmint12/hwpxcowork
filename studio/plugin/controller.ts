@@ -718,6 +718,9 @@ export class CoworkController {
     const json = JSON.stringify(sel);
     if (json === this.lastSelJson) return;
     this.lastSelJson = json;
+    // [hwpx-cowork] 안내의 '대신 골라 주기' 등으로 선택을 바꿔도 열려 있는
+    // 미니 도구 막대가 이전 범위를 AI 요청·메모 대상으로 보내지 않게 맞춥니다.
+    if (this.toolbar.visible) this.toolbar.reposition(sel);
     this.emitter.emit('selection', sel);
   }
 

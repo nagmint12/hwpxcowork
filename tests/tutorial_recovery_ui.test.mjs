@@ -126,3 +126,29 @@ test('전송 중 재접속한 요청 창은 새 실행의 입력 상태로 돌�
   assert.equal(restored.composer.phase, 'edit');
   assert.equal(restored.composer.instruction, '확인 요청');
 });
+
+test('같은 창을 연속 복원해도 Vue 창 키를 바꿔 입력·전송 모델을 새 복사본에 연결한다', () => {
+  const state = { composer: { key: Date.now(), phase: 'edit', rid: null, instruction: '예시 요청' },
+    popover: { key: 2, target: { ref: 's0/p1' }, text: '메모' }, reply: { key: 3, memoId: 'm1', text: '답글' } };
+  const snapshot = tutorialViewSnapshot(state);
+  const mounted = new Map();
+  const componentFor = model => {
+    if (!mounted.has(model.key)) mounted.set(model.key, { model });
+    return mounted.get(model.key);
+  };
+  const original = componentFor(state.composer);
+  for (let round = 0; round < 2; round++) {
+    const previous = { ...state };
+    restoreTutorialView(snapshot, state, kind => { state[kind] = null; });
+    for (const kind of ['composer', 'popover', 'reply']) {
+      assert.notEqual(state[kind].key, previous[kind].key);
+      assert.notEqual(state[kind].key, snapshot.windows[kind].key);
+    }
+    const component = componentFor(state.composer);
+    component.model.rid = round + 1; component.model.phase = 'result';
+    assert.equal(state.composer.rid, round + 1);
+    assert.equal(state.composer.phase, 'result');
+  }
+  assert.equal(original.model.rid, null);
+  assert.equal(snapshot.windows.composer.rid, null);
+});

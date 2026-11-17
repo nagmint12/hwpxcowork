@@ -3,7 +3,8 @@
 export function tutorialDock(viewport, editor, large = false, { height = null, avoid = null, target = avoid, center = false } = {}) {
   const { x = 0, y = 0, w, h } = viewport;
   const desktop = w > 900;
-  const width = Math.min(large ? 640 : 440, Math.max(160, w - 24));
+  // 보조 동작·다음 단추가 함께 있어도 글자가 좁게 꺾이지 않도록 일반 안내 폭을 확보합니다.
+  const width = Math.min(large ? 640 : 520, Math.max(160, w - 24));
   const top = Math.max(y, !desktop && !center && editor?.h ? editor.y : y);
   const bottom = Math.min(y + h, !desktop && !center && editor?.h ? editor.y + editor.h : y + h);
   const available = bottom - top;

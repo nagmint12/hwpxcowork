@@ -28,7 +28,8 @@ function tempService(t) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-api-tools-'));
   t.after(() => { assert.equal(path.dirname(tmp), os.tmpdir()); fs.rmSync(tmp, { recursive: true, force: true }); });
   const user = { name: '시험 사용자', role: 'admin' };
-  const config = { dataDir: path.join(tmp, 'data'), configFile: path.join(tmp, 'config.json'), ai: {}, agents: { leaseMinutes: 10 } };
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다(새 연결은 tests/api_mcp_v2.test.mjs)
+  const config = { dataDir: path.join(tmp, 'data'), configFile: path.join(tmp, 'config.json'), ai: { mcp: 'v1' }, agents: { leaseMinutes: 10 } };
   const store = new Store(path.join(tmp, 'store'));
   const service = new Service({ store, hub: { broadcast() {}, broadcastAll() {} }, config, ai: { enabled: false } });
   const docId = store.create({ fileName: 'sample.hwpx', bytes: fs.readFileSync(fixture('tool_memo_tracked.hwpx')), by: user.name }).id;

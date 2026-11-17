@@ -1,12 +1,12 @@
 # 서버 자동 복구와 명시적 종료
 
-`npm start`, `start-server.bat`, 포터블 관리자 앱은 `server/launcher.js`의 관리 실행기를 사용한다. 앱 서버가 예기치 않게 종료되면 다시 기동한다. `npm run start:direct`는 앱만 실행하므로 관리 실행기의 복구 기능을 제공하지 않는다.
+`npm start`(= `node server/launcher.js`), 포터블 관리자 앱은 `server/launcher.js`의 관리 실행기를 사용한다(예전 `start-server.bat`·`stop-server.bat`·`start-https.bat`은 2026-11-17에 지웠다 — 서버 감시 작업은 bat 이 아니라 `server/launcher.js`·`https/run-https.mjs`를 직접 부른다). 앱 서버가 예기치 않게 종료되면 다시 기동한다. `npm run start:direct`는 앱만 실행하므로 관리 실행기의 복구 기능을 제공하지 않는다.
 
 ## 복구 범위
 
 - 예외·처리되지 않은 Promise 오류·강제 종료·표시 없이 끝난 종료 코드 0은 비정상 종료로 취급한다. 재시도 간격은 1·2·4·8·16·32초, 이후 최대 60초다. 정상 기동 상태가 60초 이상 유지되면 다음 장애의 간격은 다시 1초부터 시작한다.
 - 앱은 10초마다 관리 실행기에 생존 신호를 보낸다. 120초 이상 신호가 없으면 정상 종료를 요청한다. 추가 5초 동안 응답이 없을 때만 소유한 앱 프로세스를 종료하고 교체한다. 정상 종료 요청 뒤 생존 신호가 돌아오면 강제 종료 타이머를 취소하고 기존 저장 작업의 종료를 기다린다.
-- 명시적인 종료는 `stop-server.bat`, `node server/control-cli.js stop`, Ctrl+C/SIGTERM, 포터블 관리자 앱의 끄기, 또는 관리자 인증과 최신 설정 revision을 사용한 `POST /api/admin/stop`으로 한다. 종료 의도는 데이터 폴더에 기록하며 다음 직접 시작 전까지 복구하지 않는다. 종료 중 작업은 기존 정상 종료 절차로 마친다.
+- 명시적인 종료는 `node server/control-cli.js stop`, Ctrl+C/SIGTERM, 포터블 관리자 앱의 끄기, 또는 관리자 인증과 최신 설정 revision을 사용한 `POST /api/admin/stop`으로 한다. 종료 의도는 데이터 폴더에 기록하며 다음 직접 시작 전까지 복구하지 않는다. 종료 중 작업은 기존 정상 종료 절차로 마친다.
 - `server/watchdog.js`는 관리 실행기와 독립되어 실행기를 복구한다. 다른 프로그램이 포트를 사용 중이면 건드리지 않는다. 관리 실행기의 제어 파이프는 설정 파일별로 하나만 열 수 있으므로 중복 실행기를 막는다.
 
 Windows 설치:
@@ -17,7 +17,7 @@ node server/install-watchdog.js
 
 현재 사용자로 작업 스케줄러에 1분 간격 및 로그인 시 감시를 등록한다. 관리자 권한·비밀번호 입력은 요구하지 않는다. 등록 권한이 없으면 사용자 Startup 폴더의 숨김 감시 프로세스로 대체한다. 설치 결과는 `<dataDir>/runtime/watchdog-installation.json`에 기록한다. 스케줄러 방식은 사용자 로그인 세션에서 실행한다. PC가 꺼져 있거나 로그아웃된 동안 서비스를 제공하는 Windows 시스템 서비스 설치는 별도 구성이다.
 
-고정 HTTPS 주소(`https/run-https.mjs` + `https/duckdns-token.txt`, 포터블 묶음에는 없음)가 있는 PC 에서는 같은 작업의 VBS 가 `https/run-https.mjs --background` 도 숨겨 부른다. 이름 있는 파이프로 하나만 돌고 이미 켜져 있으면 바로 끝나며, Caddy·443 중계가 죽으면 프로세스가 끝나 1분 안에 다시 켜진다(DuckDNS IP 갱신 5분마다 포함). 일부러 끄려면 `https/off` 파일을 만든 뒤 그 node·caddy 프로세스를 끈다. 지우면 다시 켜진다. `start-https.bat` 는 켜져 있으면 그렇게 알리고 끝난다.
+고정 HTTPS 주소(`https/run-https.mjs` + `https/duckdns-token.txt`, 포터블 묶음에는 없음)가 있는 PC 에서는 같은 작업의 VBS 가 `https/run-https.mjs --background` 도 숨겨 부른다. 이름 있는 파이프로 하나만 돌고 이미 켜져 있으면 바로 끝나며, Caddy·443 중계가 죽으면 프로세스가 끝나 1분 안에 다시 켜진다(DuckDNS IP 갱신 5분마다 포함). 일부러 끄려면 `https/off` 파일을 만든 뒤 그 node·caddy 프로세스를 끈다. 지우면 다시 켜진다. 직접 켤 때는 `node https/run-https.mjs` 를 쓴다(예전 `start-https.bat` 은 2026-11-17에 지웠다).
 
 `server/watchdog.js --watch`는 별도 숨김 프로세스에서 15초 간격으로 확인하는 대체 방식이며, 기본 스케줄러 방식에서는 필요하지 않다. Linux 배포에는 기존 systemd `Restart=on-failure` 예제를 사용한다.
 

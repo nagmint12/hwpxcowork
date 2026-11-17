@@ -87,6 +87,90 @@ export const pageLayoutStateFingerprint = doc => crypto.createHash('sha256').upd
   masters: [...doc.container.files.keys()].filter(n => /^Contents\/masterpage\d+\.xml$/.test(n)).sort().map(n => [n, doc.container.getText(n)]),
 })).digest('hex');
 
+// ───────── [hwpx-cowork] 쪽 구성 제안이 '기대는 상태'만 보는 지문(2026-11-17) ─────────
+// 예전 지문(pageLayoutStateFingerprint)은 구역마다 본문 문단 수를 넣어, 같은 요청의 문단 넣기·표 넣기를 먼저 반영하면 쪽 구성 제안이 언제나 STALE 이었다
+// (실제 일: 24쪽 문서 제안 80건 — #80 용지·여백 + 구역 합치기 ×23 + 쪽 번호를 '마지막에 반영하라'고 냈는데 [모두 반영]에서 37건 뒤 실패, 빈 쪽 8쪽이 남음).
+// op 마다 기대는 것을 가린다(editPageLayout 의 갈래):
+//  - paper·section·header·footer·page_number·master_page: 구역 번호(op.section)의 구역 정의(hp:secPr)·머리말·꼬리말·쪽 번호 조판 부호·바탕쪽 파일.
+//    머리말·꼬리말·쪽 번호는 구역 첫 문단 첫 run 에 넣는다(firstRunInsert — 구역 첫 문단은 문단 지우기가 고를 수 없다). 문단 수·차례와는 무관하다.
+//  - merge_section: 구역 수와 다음 구역의 정의·머리말·꼬리말·쪽 번호(합칠 때 지운다) — 문단 수와 무관하다.
+//  - split_section(before_ref)·objects_to_body(at·drop·remove_rest.at): 문단 주소를 쓴다. 주소를 바꾸는 op(구역 나누기·합치기·개체 → 본문) 앞에 있는 op 의
+//    주소는 지금 문서의 주소라, 대기 중에는 서버가 문단을 넣고 지울 때 다른 제안 주소와 함께 옮긴다(remapLayoutOps — service._remapSectionsDeep).
+//    그 뒤에 오는 op 의 주소는 앞 op 를 한 뒤의 문서 주소라 옮길 수 없다 — 그런 op 가 있으면 예전처럼 구역마다 문단 수도 지문에 넣는다(sizes).
+//  - objects_to_body: 옮길 글상자·선(종류·자리·크기·글 — layoutFingerprint)과 그 개체 문단 자신의 글을 문단 번호 없이(구역 번호와 차례만) 본다.
+//    앞에 문단이 들어와 주소만 밀려도 개체가 그대로면 같은 지문, 개체가 바뀌거나 생기거나 없어지면(개체 문단에 글이 들어가도) 다른 지문이다.
+// → { v: 2, parts(구역 구성 — 구역 수 포함), sizes?(구역별 문단 수), objects?(옮길 개체) } — 반영 때 같은 ops 로 다시 재어 견준다(server/service.js _applyCore).
+const REF_OPS = new Set(['split_section', 'objects_to_body']);
+const MOVES_REFS = new Set(['split_section', 'merge_section', 'objects_to_body']);
+const PARA_REF = /^(s\d+\/p\d+)(:L\d+)?$/;
+const digest = (v) => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
+/** op 안의 문단 주소 글('s1/p3', 'drop' 의 's1/p3:L2') — 주소를 쓰는 op(REF_OPS)만, 머리말 글 같은 사용자 글은 보지 않는다 */
+function opRefs(op) {
+  const out = [];
+  const walk = (v) => { if (typeof v === 'string') { if (PARA_REF.test(v)) out.push(v); } else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') Object.values(v).forEach(walk); };
+  if (REF_OPS.has(op?.op)) walk(op);
+  return out;
+}
+/** ops 의 문단 주소 쓰임: lead = 지금 문서 주소를 쓰는 op 차례(주소를 바꾸는 op 앞 — 그 op 자신 포함), trailing = 그 뒤 op 가 주소를 쓰는가 */
+export function layoutOpsRefs(ops) {
+  const lead = []; let moved = false; let trailing = false;
+  (ops || []).forEach((op, i) => {
+    if (opRefs(op).length) { if (moved) trailing = true; else lead.push(i); }
+    if (MOVES_REFS.has(op?.op)) moved = true;
+  });
+  return { lead, trailing };
+}
+/** 쪽 구성 제안이 기대는 상태(위 머리 주석) */
+export function pageLayoutState(doc, ops) {
+  const { trailing } = layoutOpsRefs(ops);
+  const out = { v: 2, parts: digest({
+    sections: doc.sections.map(s => ['hp:secPr','hp:header','hp:footer','hp:pageNum'].map(tag => elements(s.xml, tag).map(e => e.xml))),
+    masters: [...doc.container.files.keys()].filter(n => /^Contents\/masterpage\d+\.xml$/.test(n)).sort().map(n => [n, doc.container.getText(n)]),
+  }) };
+  if (trailing) out.sizes = digest(doc.sections.map(s => s.bodyParas.length));
+  const moves = (ops || []).filter((op) => op?.op === 'objects_to_body');
+  if (moves.length) out.objects = digest(moves.map((op) => {
+    // 앞 op 를 한 뒤에만 있는 구역('s3' — 구역 나누기 뒤) 등 지금 문서로 풀 수 없는 대상은 그 글 그대로(문단 수는 sizes 가 지킨다)
+    let hosts; try { hosts = JSON.parse(layoutFingerprint(doc, structureRefs(doc, op.at))); } catch { return ['?', op.at ?? null]; }
+    // 개체 문단 자신의 글도 본다 — 옮긴 뒤 비게 된 구역 첫 문단을 지워 구역을 합칠지(merge_sections)가 그 글에 달렸다(다른 제안이 그 문단에 글을 넣으면 STALE)
+    const own = (ref) => { try { return doc.text(ref, 'final'); } catch { return null; } };
+    return hosts.map(([ref, items]) => [Number(/^s(\d+)/.exec(ref)?.[1] ?? -1), own(ref), items]);
+  }));
+  return out;
+}
+/**
+ * 대기 중인 쪽 구성 제안 ops 의 문단 주소를 옮긴다(service._remapSectionsDeep — 다른 제안 반영·사람 편집으로 문단이 들어가거나 빠질 때).
+ * 주소를 바꾸는 op 앞의 op(layoutOpsRefs lead)만 옮긴다. mapRef(본문 ref) → 새 본문 ref | null(지워짐).
+ * 목록(at·drop·remove_rest[].at) 안 주소가 지워지면 목록에서 빼고(지운 문단의 개체는 objects 지문이 잡는다), 목록이 비거나 하나뿐인 주소(at 문자열·before_ref)가
+ * 지워지면 lost(그 제안을 반영하면 GONE). → { ops(바뀌었으면 새 배열, 아니면 그대로), changed, lost }
+ */
+export function remapLayoutOps(ops, mapRef) {
+  if (!Array.isArray(ops)) return { ops, changed: false, lost: false };
+  const { lead } = layoutOpsRefs(ops);
+  if (!lead.length) return { ops, changed: false, lost: false };
+  let changed = false; let lost = false;
+  const one = (v) => {
+    const m = PARA_REF.exec(v); if (!m) return v;
+    const to = mapRef(m[1]);
+    if (to == null) return null;
+    if (to !== m[1]) changed = true;
+    return to + (m[2] || '');
+  };
+  const fix = (v) => {
+    if (typeof v === 'string') { const r = one(v); if (r == null) { lost = true; return v; } return r; }
+    if (Array.isArray(v)) {
+      const out = [];
+      for (const x of v) { if (typeof x === 'string') { const r = one(x); if (r == null) changed = true; else out.push(r); } else out.push(fix(x)); }
+      if (v.length && !out.length) lost = true;
+      return out;
+    }
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'op' ? x : fix(x)]));
+    return v;
+  };
+  const next = ops.map((op, i) => (lead.includes(i) ? fix(op) : op));
+  return { ops: changed || lost ? next : ops, changed, lost };
+}
+
 export function getPageLayout(doc) {
   return { unit: 'mm', sections: doc.sections.map((sec, section) => {
     const prop = elements(sec.xml, 'hp:secPr')[0]?.xml || '', page = elements(prop, 'hp:pagePr')[0]?.attrs || {};
@@ -141,7 +225,13 @@ export function structureLabel(r) {
   if (r.dropped.length) parts.push(`${[...new Set(r.dropped.map(d => d.why))].join('·')} ${n(r.dropped.length)}줄 버림`);
   if (r.sections[0] !== r.sections[1]) parts.push(`구역 ${r.sections[0]}→${r.sections[1]}`);
   if (r.margins) parts.push(`여백 좌우 ${r.margins.left ?? '-'}mm`);
+  // 쪽 배경 그림(2026-11-17 — engine/flow.js pageBackgrounds): 지운 수, 글 뒤로 보낸 수(내용으로 보여 지우지 않은 것 포함)
+  const bg = r.backgrounds;
+  if (bg?.removed) parts.push(`쪽 배경 그림 ${n(bg.removed)}장 지움`);
+  if (bg?.behind) parts.push(`쪽 배경 그림 ${n(bg.behind)}장 글 뒤로${bg.content ? `(내용으로 보여 지우지 않음 ${n(bg.content)}장)` : ''}`);
   if (r.kept) parts.push(`남긴 개체 ${n(r.kept)}개`);
+  // 옮긴 글 영역에 겹치는 글 앞 개체(알림 — engine/flow.js coveringObjects)
+  if (r.covering?.count) parts.push(`⚠ 글 앞 개체 ${n(r.covering.count)}개가 옮긴 글 영역에 겹침`);
   return `개체 → 본문: ${parts.join(' · ')}`;
 }
 
@@ -156,7 +246,7 @@ export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail(
     if (op.op === 'objects_to_body') {
       // 개체 → 본문(engine/flow.js): 문단을 넣고 지우고 구역을 합친다 — 그 옮김표를 지금까지의 옮김표에 잇는다
       const out = objectsToBody(doc, { refs: structureRefs(doc, op.at), joinPages: op.join_pages, keepPageNumbers: op.keep_page_numbers, drop: op.drop, headerRows: op.header_rows,
-        wrap: op.wrap, margins: op.margins ?? 'auto', mergeSections: op.merge_sections, removeRest: op.remove_rest, author });
+        wrap: op.wrap, margins: op.margins ?? 'auto', mergeSections: op.merge_sections, removeRest: op.remove_rest, background: op.background, author });
       rebuild(doc);
       const moved = new Map(out.mapping.map(m => [m.old.join('/'), m.to]));
       for (const m of mapping) if (m.to) m.to = moved.get(m.to.join('/')) ?? null;

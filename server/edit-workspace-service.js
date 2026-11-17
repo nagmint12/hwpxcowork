@@ -28,10 +28,21 @@ function referenceState(meta, excludePid) {
 const stateHash = state => crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex');
 function putState(target, values, keys) { for (const k of keys) { if (Object.hasOwn(values, k)) target[k] = structuredClone(values[k]); else delete target[k]; } }
 
+/**
+ * 실험이 꺼진 서버에서 사본 도구를 부르면 돌려줄 오류(2026-11-17). 그 방식으로 맡긴 요청(options.workflow = content_format — 서버가 실패로 닫는다)이면
+ * 예전 그대로 '그만두라', 보통 요청이면 '이 도구만 꺼져 있다 — 보통 도구로 계속하라'(일반 요청을 맡은 Claude 가 첫 호출로 get_edit_workspace 를 불렀다가
+ * '이 요청은 그만두세요'를 받은 일이 있다 — 모델이 무시하고 계속해 다행이었다). 오류 코드는 같다
+ */
+export function editWorkflowOffError(r) {
+  if (r?.options?.workflow === 'content_format') return error('EDIT_WORKFLOW_OFF', '내용·형식 나눠 처리(실험)는 이 서버에서 쓰지 않습니다 — 이 요청은 그만두세요');
+  return error('EDIT_WORKFLOW_OFF', '실험 사본 도구(내용·형식 나눠 처리 — get_edit_workspace·edit_workspace·record_edit_stage·publish_edit_workspace)는 이 서버에서 꺼져 있습니다. '
+    + '이 요청은 실험 방식이 아니니 그대로 계속 처리하세요 — 문서는 read_document·search_document 로 읽고, 고칠 것은 propose_changes·propose_insert 같은 보통 제안 도구로 남깁니다');
+}
+
 export const editWorkspaceMethods = {
   _editWorkspaceActor(meta, r, user) {
     // 실험이 꺼져 있으면(기본 — server/config.js experiments.contentFormat) 사본을 읽거나 고치는 처리 중 작업을 받지 않는다. 이미 저장된 사본 파일 내려받기(editWorkspaceFile)는 그대로다
-    if (!this._contentFormatOn()) throw error('EDIT_WORKFLOW_OFF', '내용·형식 나눠 처리(실험)는 이 서버에서 쓰지 않습니다 — 이 요청은 그만두세요');
+    if (!this._contentFormatOn()) throw editWorkflowOffError(r);
     if (!Number.isSafeInteger(user?.agentAttempt) || user.agentAttempt < 1) throw error('ATTEMPT_REQUIRED', '실험 사본에는 expected_attempt가 필요합니다');
     this._assertCanEdit(user, meta); this._assertRequestAttempt(r, user);
     this._assertResultClaim(r, user, user.agentSession);
@@ -62,6 +73,8 @@ export const editWorkspaceMethods = {
       const { doc, meta } = await this._load(id), r = this._req(meta, rid);
       if (r.status === 'working') this._editWorkspaceActor(meta, r, user);
       else if (r.by !== user.name && user.role !== 'admin') throw error('NOT_OWNER', '내 실험 사본만 읽을 수 있습니다');
+      // 실험이 꺼졌으면 끝난 요청이라도 사본을 새로 만들지 않는다(이미 있는 사본은 읽는다)
+      else if (!this._contentFormatOn() && !r.editWorkspace) throw editWorkflowOffError(r);
       const w = this._editWorkspaceEnsure(id, doc, meta, r);
       if (documentEditHash(doc) !== w.baseHash && w.stage !== 'published') throw error('EDIT_SOURCE_CHANGED', '원문이 바뀌었습니다. 실험을 다시 요청하세요. 작업 사본은 보존했습니다');
       const draft = this._editWorkspaceDoc(id, r);

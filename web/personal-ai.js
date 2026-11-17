@@ -98,7 +98,7 @@ export const AiRunPanel = {
       <thead><tr><th>연결</th><th>모델</th><th>추론 강도</th><th></th></tr></thead>
       <tbody>
         <tr v-for="k in view.kinds" :key="k.id" :data-kind="k.id">
-          <td :title="(k.applies === 'launch' ? '다음에 띄울 때부터 적용' : '요청마다 적용') + ' — ' + k.start + (k.launchNote ? ' · ' + k.launchNote : '')">{{ k.label }}
+          <td :title="(k.applies === 'launch' ? '다음에 띄울 때부터 적용' : '요청마다 적용') + (k.start ? ' — 켜기: ' + k.start : '') + (k.launchNote ? ' · ' + k.launchNote : '')">{{ k.label }}
             <label v-if="k.canSelectModel" style="display:block"><input type="checkbox" style="min-width:0;width:auto" :checked="form[k.id].modelSelection === 'auto'" @change="form[k.id].modelSelection = $event.target.checked ? 'auto' : 'manual'; save(k)"/> Codex가 자동 선택</label>
           </td>
           <td>
@@ -156,7 +156,7 @@ export const AiRunPanel = {
       } catch (e) { toastError(e, '저장하지 못했습니다: '); await load(); }
     }
     const srcLabel = (k) => (k.modelsFrom === 'reported' ? `목록 ${fmt(k.modelsAt)}` : k.modelsFrom === 'builtin' ? '기본 목록' : '');
-    const srcTip = (k) => (k.modelsFrom === 'reported' ? '실행기가 켜질 때 이 계정으로 쓸 수 있다고 알려 준 목록' : k.modelsFrom === 'builtin' ? '알려진 모델 목록(별칭 opus·sonnet 등은 직접 입력)' : `실행기(${k.start})를 켜면 쓸 수 있는 모델 목록이 여기에 들어옵니다`);
+    const srcTip = (k) => (k.modelsFrom === 'reported' ? '실행기가 켜질 때 이 계정으로 쓸 수 있다고 알려 준 목록' : k.modelsFrom === 'builtin' ? '알려진 모델 목록(별칭 opus·sonnet 등은 직접 입력)' : `실행기를 켜면 쓸 수 있는 모델 목록이 여기에 들어옵니다${k.start ? ` — 켜기: ${k.start}` : ''}`);
     const summary = computed(() => {
       if (!view.value) return '';
       const set = view.value.kinds.filter((k) => view.value.settings[k.id]).map((k) => `${k.label.split(' ')[0]} ${view.value.settings[k.id].modelSelection === 'auto' ? '자동 선택' : [view.value.settings[k.id].model, view.value.settings[k.id].effort].filter(Boolean).join('·')}`);

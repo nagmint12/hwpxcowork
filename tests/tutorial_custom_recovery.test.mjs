@@ -17,40 +17,31 @@ test('custom 선택은 문구가 같아도 다른 문단·범위·끝 문단을 
   env.locate = () => null; assert.equal(select.until(), false, '원문이 사라진 경우 선택 문자열만으로 통과하지 않음');
 });
 
-test('custom 선택의 이전 실행은 새 세대에 늦게 끝나도 오류를 남기지 않는다', async () => {
-  for (const reject of [false, true]) {
-    const env = environment(); let identity = {}; env.stepIdentity = () => identity;
-    let settle; env.selectFor = () => new Promise((resolve, fail) => { settle = reject ? fail : resolve; });
-    const pending = selectStep(env).action.run(); identity = {}; settle(reject ? new Error('이전 선택 실패') : null);
-    await assert.doesNotReject(pending);
-  }
+test('custom 선택은 대행 실행을 만들지 않고 재진입 중에도 사용자의 선택을 보존한다', () => {
+  const env = environment(); let called = 0; env.selectFor = () => { called++; };
+  env.s.selection = { ...range, text };
+  for (let i = 0; i < 2; i++) { const step = selectStep(env); assert.equal(step.action, undefined); assert.equal(step.until(), true); }
+  assert.equal(called, 0); assert.deepEqual(env.s.selection, { ...range, text });
 });
 
-test('custom 선택은 현재 실행의 실패를 알리고 정상 선택은 정확한 범위로 완료한다', async () => {
-  const env = environment(); const identity = {}; env.stepIdentity = () => identity;
-  env.selectFor = async () => null; await assert.rejects(selectStep(env).action.run(), /찾지 못/);
-  env.selectFor = async () => { throw new Error('현재 선택 실패'); }; await assert.rejects(selectStep(env).action.run(), /현재 선택 실패/);
-  env.selectFor = async chosen => { assert.equal(chosen, text); return env.s.selection = { ...range, endRef: range.ref, text }; };
-  const select = selectStep(env); await select.action.run(); assert.equal(select.until(), true);
+test('custom 선택은 선택 해제와 원문 삭제를 인식하고 정상 범위에서만 완료한다', () => {
+  const env = environment(); const step = selectStep(env);
+  assert.equal(step.until(), false); env.s.selection = { ...range, text }; assert.equal(step.until(), true);
+  env.s.selection = null; assert.equal(step.until(), false);
+  env.s.selection = { ...range, text }; env.locate = () => null; assert.equal(step.until(), false);
 });
 
-test('custom 타이핑은 같은 제목의 새 실행이 시작되면 이전 입력을 중단한다', async () => {
-  const env = environment(); let identity = {}; env.stepIdentity = () => identity; const events = [];
-  const input = { tagName: 'TEXTAREA', value: '', isConnected: true, focus() {}, setAttribute() {}, removeAttribute() {},
-    dispatchEvent() { events.push(this.value); if (events.length === 1) identity = {}; } };
-  env.q = () => input;
-  const action = buildCustomAction({ actionId: 'type-text', title: '같은 제목', params: { scope: 'document', selector: '#input', value: '가나다' } }, env);
-  const original = globalThis.setTimeout;
-  globalThis.setTimeout = callback => { queueMicrotask(callback); return 0; };
-  try { await action.action.run(); } finally { globalThis.setTimeout = original; }
-  assert.equal(input.value, '가'); assert.deepEqual(events, ['가']); assert.equal(action.until(), false);
+test('custom 입력은 재진입해도 직접 쓰던 글을 자동 타이핑으로 덮지 않는다', () => {
+  const env = environment(); const input = { value: '직접 쓰던 글' }; env.q = () => input;
+  const ref = { actionId: 'type-text', title: '같은 제목', params: { scope: 'document', selector: '#input', value: '가나다' } };
+  for (let i = 0; i < 2; i++) { const step = buildCustomAction(ref, env); assert.equal(step.action.label, '대신 예시 작성하기'); assert.equal(step.until(), false); }
+  assert.equal(input.value, '직접 쓰던 글');
 });
 
-test('custom 타이핑 정상 실행은 입력을 완성하고 직접 클릭은 자동 실행하지 않는다', async () => {
-  const env = environment(); const identity = {}; env.stepIdentity = () => identity; env.motionReduced = () => true;
-  const input = { tagName: 'INPUT', value: '', isConnected: true, focus() {}, dispatchEvent() {} }; env.q = () => input;
+test('custom 입력은 직접 입력한 값을 확인하고 직접 클릭은 자동 실행하지 않는다', () => {
+  const env = environment(); const input = { value: '' }; env.q = () => input;
   const type = buildCustomAction({ actionId: 'type-text', title: '정상 입력', params: { scope: 'document', selector: '#input', value: '정상 예시' } }, env);
-  await type.action.run(); assert.equal(input.value, '정상 예시'); assert.equal(type.until(), true);
+  assert.equal(type.until(), false); input.value = '정상 예시'; assert.equal(type.until(), true);
   let clicks = 0; const button = { click() { clicks++; } }; env.q = () => button;
   const click = buildCustomAction({ actionId: 'click-target', title: '직접 클릭', params: { scope: 'document', selector: '#button' } }, env);
   assert.equal(click.click(), button); assert.equal(clicks, 0);

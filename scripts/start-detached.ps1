@@ -1,6 +1,7 @@
 ﻿# 도구 세션(Claude Code·Codex 의 명령 실행)에서 오래 켜 둘 프로세스를 띄울 때 쓴다 — 그 세션의 작업 묶음(job)에서 떼어 새 콘솔 창(또는 창 없이)으로 띄운다.
 # 도구가 띄운 프로세스는 도구의 job 에 묶여 세션이 정리될 때 함께 끝날 수 있다(2026-11-12 숨긴 에이전트가 그렇게 꺼졌다 — CREATE_BREAKAWAY_FROM_JOB 로 띄운 것은 남았다).
-#   powershell -NoProfile -File scripts\start-detached.ps1 -Command 'cmd.exe /c ""<repo>\start-codex-agent-v2.bat""'
+#   powershell -NoProfile -File scripts\start-detached.ps1 -Command 'cmd.exe /k node scripts\codex-agent.mjs --mcp 2' -WorkDir <repo>
+#     (예전 start-codex-agent-v2.bat 자리 — 2026-11-17 실행기 bat 을 지웠고 Windows 앱 [AI → 실행기 관리]가 대신한다. 토큰은 HWPX_COWORK_TOKEN 환경 변수)
 #   powershell -NoProfile -File scripts\start-detached.ps1 -Command '...' -WorkDir <repo> -Hidden
 # 띄운 프로세스의 pid 를 한 줄로 낸다. 이 세션이 물려준 표식(CLAUDE*·MCP_CONNECTION_* 환경 변수)은 지우고 넘긴다. job 이 떼어 내기를 막으면 그대로 띄우고 알린다.
 param(

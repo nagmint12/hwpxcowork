@@ -105,7 +105,8 @@ async function fetchConfig(base, notNonce, timeoutMs = 10000) {
  *   users   [{ name, role, token? }] — 없으면 관리자 + 편집자 a(홍길동)·b(김검토). 토큰이 없으면 새로 만든다
  *   env     서버에 더 줄 환경 변수(예: { HWPX_COWORK_STUDIO_DIR: 빈 폴더 }). 값이 null 이면 지운다.
  *           밖(process.env)의 HWPX_COWORK_* 는 넘기지 않는다.
- *   config  임시 config 에 덧붙일 값(예: { studio: { mode: 'remote' }, studioUrl: '…' })
+ *   config  임시 config 에 덧붙일 값(예: { studio: { mode: 'remote' }, studioUrl: '…' }). MCP 기본 연결은 받침 기본이 예전 연결(mcp.defaultSurface 'v1') —
+ *           운영 기본(새 연결)을 재려면 { mcp: {} }
  *   log     서버 출력을 덧붙여 쓸 파일 경로(선택)
  * → { base, port, nonce, config(/api/config 응답), users: { admin, a, b }, tokens: { admin, a, b }, userList,
  *     dataDir, configPath, tmpDir, child, lines(stdout 줄), output(), api(who), restart({ ai }), stop() }
@@ -131,6 +132,10 @@ export async function startServer({ ai = 'off', port = 0, users, env: moreEnv = 
     // 키 파일은 없는 경로: 어떤 경우에도 실제 API 를 부르지 않는다(이 PC 에는 키가 없다 — 모의 AI 로만 시험)
     ai: { enabled: false, mock: false, keyFile: path.join(tmpDir, 'no-such-key.txt'), model: 'claude-opus-5-5', effort: 'medium', maxProposals: 10 },
     studio: { mode: 'local' }, agents: { leaseMinutes: 15, othersCanTake: false }, changeRequests: { requireApprovals: 1 },
+    // MCP 기본 연결: 운영 기본은 새 연결(v2 — 2026-11-17, server/mcp2.js mcpSurface)이지만, 시험들은 머리글 없이 붙어 예전 연결 도구(propose_changes 등)의
+    // 계약을 잰다 — 그 시험들이 그대로 예전 계약을 재게 받침 서버는 예전 연결을 기본으로 둔다. 새 연결은 머리글(X-Hwpx-Mcp: 2)·?v=2·브리지 기본으로 열리고,
+    // 운영 기본(설정 없음 = v2)을 재는 시험은 config: { mcp: {} } 로 덮는다(tests/mcp_default_v2.test.mjs)
+    mcp: { defaultSurface: 'v1' },
     ...moreConfig,
   };
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 1));

@@ -3,6 +3,7 @@
 // 저장된 기록 파일을 열고 조판 결과만 읽는다(읽기 전용 — 문서를 고치거나 저장하지 않는다). 엔진 호출은 동기라 서버 스레드를 막지 않게 여기서 한다.
 // 받는 일: { job, id, file(편집 뒤 기록 파일), beforeFile(편집 전 — 이 작업자가 그 문서의 앞 결과를 기억하지 않을 때만 연다), version, beforeVersion, positions:[{ref, sec, para}] }
 //   또는 쪽 수 어림(2026-11-17): { job, kind: 'pages', docs: [{ bytes } | { file }] } → { job, ok, results: [{ pages, sections, lastFill, fills }] } (아래 estimatePages)
+//     — 문서마다 ops(구조 op 를 이 스레드에서 문서 엔진으로 반영한 뒤 잰다 — 큰 문서의 개체 → 본문)·covered(글 앞 그림이 본문 글을 덮는 쪽)를 줄 수 있다
 // 돌려줌: { job, ok, before:{pages}, after:{pages}, changedPages:[쪽(0부터)], refPages:[{ref, page}], overflow:[{kind, page, cell}], ms, rss }
 import { parentPort, workerData } from 'node:worker_threads';
 import fs from 'node:fs';
@@ -142,12 +143,62 @@ function pageStats(d, sparseBelow = null) {
   return { pages, sections: sections.map((n) => n || 0), lastFill, fills };
 }
 
-/** 쪽 수 어림 일: { job, kind: 'pages', docs: [{ bytes } | { file }] } → { job, ok, results: [{ pages, sections, lastFill, fills }], ms } */
-function estimatePages(m, t0) {
+/**
+ * 가려진 쪽(2026-11-17 — 개체 → 본문 결과, server/page-estimate.js covered): 글 앞(inFrontOfText) 그림이 본문 글 줄 위에 그려지는 쪽(0부터).
+ * 글 줄이 그 그림보다 위 차례(zOrder)의 글 앞 개체(글상자 등) 안에 있으면 가리지 않는다. 그림의 투명도는 보지 않는다(엔진 배치 결과의 어림)
+ */
+function coveredPages(d, pages) {
+  const out = [];
+  const meet = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0.5;
+  for (let p = 0; p < pages; p++) {
+    let controls = []; try { controls = JSON.parse(d.getPageControlLayout(p)).controls || []; } catch { continue; }
+    const fronts = controls.filter((c) => c.type === 'image' && c.wrap === 'inFrontOfText' && c.w > 0 && c.h > 0);
+    if (!fronts.length) continue;
+    let runs = []; try { runs = JSON.parse(d.getPageTextLayout(p)).runs || []; } catch { continue; }
+    const holder = new Map(controls.map((c) => [`${c.secIdx}/${c.paraIdx}/${c.controlIdx}`, c]));
+    const hit = runs.some((r) => {
+      if (!r.text || !String(r.text).trim()) return false;
+      const own = r.parentParaIdx != null ? holder.get(`${r.secIdx}/${r.parentParaIdx}/${r.controlIdx}`) : null;
+      return fronts.some((f) => own !== f && !(own?.wrap === 'inFrontOfText' && (own.zOrder ?? 0) > (f.zOrder ?? 0)) && meet(r, f));
+    });
+    if (hit) out.push(p);
+  }
+  return out;
+}
+
+// 구조 op 반영(2026-11-17 — 큰 문서의 쪽 수 어림, server/page-estimate.js _structureOnly): 서버 스레드를 막지 않게 이 스레드에서 문서 엔진(engine/ — 순수 JS)으로
+// 개체 → 본문·쪽 구성을 반영한 뒤 그 결과를 조판한다. 엔진은 처음 쓸 때만 읽는다
+let engine = null;
+function structureEngine() {
+  engine ??= Promise.all([import('../engine/doc.js'), import('../engine/toc.js'), import('../engine/page-layout.js')])
+    .then(([doc, toc, layout]) => ({ HwpxDoc: doc.HwpxDoc, containerFromBytesSync: toc.containerFromBytesSync, docBytesSync: toc.docBytesSync, editPageLayout: layout.editPageLayout }));
+  return engine;
+}
+async function applyStructure(bytes, lists) {
+  const e = await structureEngine();
+  const doc = new e.HwpxDoc(e.containerFromBytesSync(new Uint8Array(bytes)));
+  for (const ops of lists) e.editPageLayout(doc, ops, { author: '쪽 수 어림' });
+  return e.docBytesSync(doc);
+}
+
+/**
+ * 쪽 수 어림 일: { job, kind: 'pages', docs: [{ bytes | file, ops?, covered? }] } → { job, ok, results: [{ pages, sections, lastFill, fills, covered? } | { error }], ms }.
+ * ops(구조 op 묶음 목록)를 주면 반영한 결과를 잰다 — 반영이 실패하면 그 문서만 { error }(다른 문서의 쪽 수는 그대로). covered:true 면 가려진 쪽도
+ */
+async function estimatePages(m, t0) {
   const results = [];
   for (const x of m.docs || []) {
-    const d = x.file ? open(x.file) : new mod.HwpDocument(new Uint8Array(x.bytes));
-    try { results.push(pageStats(d, Number.isFinite(m.sparseBelow) ? m.sparseBelow : null)); } finally { d.free?.(); }
+    let bytes = x.bytes;
+    if (Array.isArray(x.ops) && x.ops.length) {
+      try { bytes = await applyStructure(x.file ? fs.readFileSync(x.file) : x.bytes, x.ops); }
+      catch (e) { results.push({ error: `${e?.code ? `${e.code}: ` : ''}${String(e?.message || e)}`.slice(0, 200) }); continue; }
+    }
+    const d = x.file && bytes === x.bytes ? open(x.file) : new mod.HwpDocument(new Uint8Array(bytes));
+    try {
+      const stats = pageStats(d, Number.isFinite(m.sparseBelow) ? m.sparseBelow : null);
+      if (x.covered) stats.covered = coveredPages(d, stats.pages);
+      results.push(stats);
+    } finally { d.free?.(); }
   }
   return { job: m.job, ok: true, results, ms: performance.now() - t0, rss: process.memoryUsage().rss };
 }
@@ -155,7 +206,7 @@ function estimatePages(m, t0) {
 parentPort.on('message', (m) => {
   const t0 = performance.now();
   if (m?.kind === 'pages') {
-    try { parentPort.postMessage(estimatePages(m, t0)); } catch (e) { parentPort.postMessage({ job: m.job, ok: false, error: String(e?.message || e).slice(0, 200), ms: performance.now() - t0 }); }
+    estimatePages(m, t0).then((r) => parentPort.postMessage(r), (e) => parentPort.postMessage({ job: m.job, ok: false, error: String(e?.message || e).slice(0, 200), ms: performance.now() - t0 }));
     return;
   }
   try {

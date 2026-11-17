@@ -159,8 +159,9 @@ export function routeOptions(env) {
 }
 
 // ───────── AI 연결 차례(2026-11-13 운영 결정) ─────────
-// ① 기본: 내 PC 의 구독 AI 를 MCP 로 — Codex(ChatGPT 로그인: CLI·IDE 확장, 실행기 start-codex-agent.bat)·Claude Code(Claude 로그인:
-//    실행기 start-claude-worker.bat, 채널 start-agent.bat). 켜 두는 동안 실시간, 추가 비용 없음(구독 사용 한도에서 차감)
+// ① 기본: 내 PC 의 구독 AI 를 MCP 로 — Codex(ChatGPT 로그인: CLI·IDE 확장)·Claude Code(Claude 로그인, 채널 start-agent.bat)의 실행기를
+//    Windows 앱 [AI → 실행기 관리…] 또는 npm run worker -- --provider codex|claude-code 로 켠다(2026-11-17 실행기 bat 을 지움).
+//    켜 두는 동안 실시간, 추가 비용 없음(구독 사용 한도에서 차감)
 // ② 선택: ChatGPT 앱(웹)에 주소로 연결(OAuth) — 대화로 대기열 처리  ③ 선택: 내 AI 키·API — 사용료 별도, 기본으로 권하지 않는다
 // 연결 안내 글(상단 AI 알약·요청 창·대기 중 카드·문서 목록 'AI 연결')은 이 차례로 쓴다. '연결 방법' 단추·'?'는 사용 설명서 ①절 '#agents'(내 PC의 AI)로
 // — 세 길을 한눈에 보는 '#ai' 는 문서 목록 'AI 연결'의 [연결 방법]만

@@ -30,12 +30,22 @@ export const RUNNER_EXCLUDED = Object.freeze({
   get_drive_context: '드라이브(AI 꺼짐)', propose_drive_upload: '드라이브(AI 꺼짐)', prepare_drive_file: '드라이브(AI 꺼짐)',
 });
 
+/**
+ * API 실행기의 새 MCP 연결(v2 — server/mcp2.js 의 tools=core, 2026-11-17): 작업 도구(read·edit·finish)와 그림·스킬 파일 도구.
+ * task(맡기 + 요청 내용)는 주지 않는다 — 실행기가 맡고 요청 내용(brief)을 첫 입력에 싣는다. 서버 AI 의 선점(서버 실행 표)은 task 로 맡을 수 없다(CLAIMED).
+ * download_attachment_file·upload_result_file 은 내 PC 브리지 도구라 API 에는 없다(만든 파일은 실행기가 결과 첨부로 저장 — api-responses-agent).
+ * 이름은 server/mcp2.js(V2_TOOLS·CORE_KEEP)와 같아야 한다 — 개인 실행기 ZIP 에 mcp2.js 가 없어 여기 적는다(tests/api_mcp_v2.test.mjs 가 대조)
+ */
+export const API_V2 = Object.freeze(['read', 'edit', 'finish', 'preview_figure', 'export_figure', 'read_skill_resource', 'export_skill_resource']);
+
 export const TOOL_PROFILES = Object.freeze({
   // 사용자가 선택한 별도 실험 경로. 원문에 직접 제안하는 도구와 사본 편집을 섞지 않는다.
   workspace: Object.freeze(['get_edit_workspace', 'get_edit_capabilities', 'edit_workspace', 'read_attachment', 'get_writing_guide', 'read_skill_resource', 'list_attachments', 'preview_figure', ...LOCAL_FILES]),
   // API 실행기: 읽기·결과 쓰기. 요청 흐름은 실행기, 파일은 실행기가 원본 바이트로 저장(api-responses-agent).
   // propose_change 는 propose_changes(항목 하나)와 같은 일이라 뺀다 — API 는 라운드마다 도구 정의를 다시 보낸다(약 4천 자)
   api: Object.freeze([...DOC_READ, ...REQUEST_READ, ...REQUEST_WRITE.filter(name => name !== 'propose_change')]),
+  // API 실행기의 새 연결(v2): 위 API_V2 — 쓰기·완료는 edit(done)·finish 가 한다
+  apiV2: API_V2,
   // Codex CLI: 같은 도구 + 스스로 시작·완료·실패 + 내 PC 작업 폴더 파일
   codex: Object.freeze([...DOC_READ, ...REQUEST_READ, ...REQUEST_FLOW, ...REQUEST_WRITE, ...LOCAL_FILES]),
 });

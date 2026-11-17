@@ -198,7 +198,8 @@ test('채널/MCP의 SDK 인자 검사 이전 원문과 거절 응답을 한 실�
 });
 
 test('사용자 실패와 같은 서버 개인 Claude 키 경로: 도구 저장 후 최종 실패 원문·부분 결과·엔진 상태 보존', async t => {
-  const dir = workspace(t), user = { name: 'tester', role: 'admin' }, config = { dataDir: dir, configFile: path.join(dir, 'config.json'), ai: {}, agents: { leaseMinutes: 10 } };
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다
+  const dir = workspace(t), user = { name: 'tester', role: 'admin' }, config = { dataDir: dir, configFile: path.join(dir, 'config.json'), ai: { mcp: 'v1' }, agents: { leaseMinutes: 10 } };
   const store = new Store(path.join(dir, 'docs')), service = new Service({ store, config, hub: { broadcast() {}, broadcastAll() {} }, ai: { enabled: false } });
   const doc = store.create({ fileName: 'fixture.hwpx', bytes: fs.readFileSync(fixture('tool_memo_tracked.hwpx')), by: user.name });
   let round = 0;

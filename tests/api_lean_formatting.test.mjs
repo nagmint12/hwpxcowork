@@ -65,7 +65,8 @@ test('도구 없는 실행(toolContext 없음)은 서식을 그대로 싣고, �
 test('서버 개인 API: 서식 없이 보내고 모델이 get_formatting 으로 한 문단만 받음 · 굵게 요청은 다 싣는다 · 반복 횟수로 자르지 않는다(55 라운드)', async t => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-native-lean-'));
   t.after(() => { assert.equal(path.dirname(tmp), os.tmpdir()); fs.rmSync(tmp, { recursive: true, force: true }); });
-  const user = { name: '시험', role: 'admin' }, config = { dataDir: path.join(tmp, 'data'), configFile: path.join(tmp, 'config.json'), ai: {}, agents: { leaseMinutes: 10 } };
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다
+  const user = { name: '시험', role: 'admin' }, config = { dataDir: path.join(tmp, 'data'), configFile: path.join(tmp, 'config.json'), ai: { mcp: 'v1' }, agents: { leaseMinutes: 10 } };
   const store = new Store(path.join(tmp, 'store'));
   const service = new Service({ store, hub: { broadcast() {}, broadcastAll() {} }, config, ai: { enabled: false } });
   const docId = store.create({ fileName: 'fixture.hwpx', bytes: fs.readFileSync(fixture('tool_memo_tracked.hwpx')), by: user.name }).id;

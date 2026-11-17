@@ -200,7 +200,8 @@ test('연결 확인은 모델 정보만 조회하고(생성 호출 없음) 결�
 
 test('서비스: 키를 등록한 사람의 요청은 서버가 그 사람 키로 처리하고, 등록하지 않은 사람은 대기열로 간다', async (t) => {
   const seen = [];
-  const s = setup(t, { fetchImpl: async (url, init) => {
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다
+  const s = setup(t, { ai: { mcp: 'v1' }, fetchImpl: async (url, init) => {
     seen.push({ url: String(url), auth: new Headers(init.headers).get('authorization') });
     return json({ status: 'completed', model: 'gpt-6.1-sol', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(result({ comments: [{ ref: 's0/p0', find: '', text: '개인 키 의견' }] })) }] }], usage: { input_tokens: 5, output_tokens: 4 } });
   } });

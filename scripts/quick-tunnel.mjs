@@ -1,6 +1,6 @@
 // Cloudflare Quick Tunnel(임시 https://….trycloudflare.com 주소)로 이 PC 서버를 인터넷에 잠깐 연다.
 // 켜면 발급 주소를 서버 공유 주소(publicUrl)로 저장하고 서버를 다시 시작한다. 끄면(Ctrl+C·창 닫기·터널 끊김) 공유 주소를 비워 로컬로 되돌린다.
-//   node scripts/quick-tunnel.mjs [--cloudflared <cloudflared.exe>]      (두 번 클릭은 start-tunnel.bat)
+//   node scripts/quick-tunnel.mjs [--cloudflared <cloudflared.exe>]      (= npm run tunnel. Windows 앱은 [함께 쓰기 → 외부 접속 열기]가 IPC 로 띄운다 — 2026-11-17 두 번 클릭 시작 파일은 지웠다)
 // · 계정·도메인이 필요 없는 대신(Cloudflare 공식 제한) 켤 때마다 주소가 바뀌고, 동시 요청 200개, SSE 미지원, 가동 보장 없음.
 //   웹 공동 편집은 WebSocket 이라 되지만 SSE 를 쓰는 원격 MCP 스트림·원격 채널 알림은 안 된다. 이 PC 의 에이전트는 localhost 로 붙으므로 상관없다.
 // · 관리자 토큰은 config.json 의 첫 관리자(없으면 HWPX_COWORK_TOKEN). 토큰·주소 외 설정은 건드리지 않는다.
@@ -134,7 +134,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   let local;
   try { local = readLocalSettings(env); } catch { err('config.json 을 읽지 못했습니다.'); return 1; }
   const base = `http://${originHost(local.host)}:${local.port}`;
-  try { await fetch(`${base}/api/config`, { signal: AbortSignal.timeout(3000) }); } catch { err(`서버가 꺼져 있습니다(${base}). start-server.bat 로 먼저 켜세요.`); return 1; }
+  try { await fetch(`${base}/api/config`, { signal: AbortSignal.timeout(3000) }); } catch { err(`서버가 꺼져 있습니다(${base}). 서버를 먼저 켜세요(npm start).`); return 1; }
   if (!local.token) { err('관리자 토큰을 찾지 못했습니다(config.json 의 role "admin" 사용자 또는 HWPX_COWORK_TOKEN).'); return 1; }
   const call = adminClient(base, local.token);
   try { await call('GET', '/api/admin/server'); } catch (e) { err(e.status === 403 ? '관리자 토큰이 아닙니다 — 공유 주소를 바꿀 수 없습니다.' : `관리 API 에 붙지 못했습니다: ${e.message}`); return 1; }
@@ -185,7 +185,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     let r;
     try { r = await applyPublicUrl(call, url); } catch (e) { err(`공유 주소를 저장하지 못했습니다: ${e.message}`); finish(1); return; }
     if (r.locked) out('[주의] 서버의 공유 주소가 환경 변수 HWPX_COWORK_PUBLIC_URL 로 고정되어 있어 바꾸지 않았습니다. 웹 접속은 되지만 안내·OAuth 주소는 예전 값입니다.');
-    else if (r.restartUnsupported) out('[주의] 공유 주소는 저장했지만 이 서버는 웹 재시작을 못 합니다 — start-server.bat 로 다시 켜야 반영됩니다.');
+    else if (r.restartUnsupported) out('[주의] 공유 주소는 저장했지만 이 서버는 웹 재시작을 못 합니다 — 서버를 다시 켜야 반영됩니다(npm start).');
     else if (r.restarted) out((await waitRunning(call, (u) => u === url)) ? '공유 주소를 저장하고 서버를 다시 시작했습니다.' : '[주의] 서버 재시작을 확인하지 못했습니다. 서버 창을 보세요.');
     out(`
  인터넷 주소(임시) — 이 창을 켜 둔 동안만 열립니다

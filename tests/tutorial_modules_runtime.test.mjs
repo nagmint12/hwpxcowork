@@ -65,11 +65,11 @@ test('보고서 선택 결과와 복구 위치는 안내나 다른 모듈을 끼
   const at = { ref: 's0/p1', start: 0, end: 17 };
   let available = true;
   env.locate = () => available ? at : null;
-  env.selectExact = async text => { env.s.selection = { ...at, text }; };
+  env.selHas = text => !!env.s.selection?.text?.includes(text);
   const steps = compose('report', [ref('guide', 'intro-note', { title: '준비', text: '안내입니다.' }), ref('report-flow', 'first'), ref('report-flow', 'second')], env);
   for (const key of ['first', 'second']) {
     const pick = steps.find(step => step.moduleKey === key && step.title === '고칠 글 고르기');
-    await pick.action.run();
+    assert.equal(pick.action, undefined); env.s.selection = { ...at, text: '일정 부분 기여한 것으로 보인다' }; env.selHas = text => env.s.selection.text.includes(text);
     assert.equal(pick.until(), true);
     assert.equal(steps[steps.indexOf(pick) + 1].title, 'AI에게 맡기기');
     const lost = steps.find(step => step.moduleKey === key && step.title === 'AI에게 맡기기');

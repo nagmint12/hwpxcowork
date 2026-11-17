@@ -5,12 +5,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { ClaudeCodeProposer, CLAUDE_AGENT_NAME, CLAUDE_EFFORTS, checkClaudeCode, claudeArgs, claudeAuthState, claudeEnvironment, parseClaudeStream, resolveClaudeCommand } from '../server/claude-cli-ai.js';
-import { EDITOR_INSTRUCTIONS } from '../server/editor-instructions.js';
+import { ClaudeCodeProposer, CLAUDE_AGENT_NAME, CLAUDE_EFFORTS, checkClaudeCode, claudeArgs, claudeAuthState, claudeEnvironment, parseClaudeStream, resolveClaudeCommand, claudeMcpPromptV2 } from '../server/claude-cli-ai.js';
+import { EDITOR_INSTRUCTIONS, EDITOR_INSTRUCTIONS_V2 } from '../server/editor-instructions.js';
+import { codexCodeModeHintV2 } from '../server/codex-ai.js';
 import { createApiWorker } from '../server/worker.js';
 import { parseWorkerArgs, createWorkerAi, workerAgentName, checkWorkerConnection } from '../scripts/ai-worker.mjs';
 import { RUN_KINDS } from '../server/ai-run.js';
-import { fakeClaude } from './helpers/claude-cli.mjs';
+import { fakeClaude, fakeClaudeInstall } from './helpers/claude-cli.mjs';
 import { startServer, uploadDoc, fixture } from './helpers/server.mjs';
 
 const job = { type: 'request', docId: 'test-document', requestId: 7, attempt: 2 };
@@ -202,7 +203,9 @@ test('실행기 인자: --provider claude-code(별칭 claude-cli)는 구독 전�
   assert.ok(createWorkerAi(o, env) instanceof ClaudeCodeProposer);
   assert.equal(workerAgentName(o), CLAUDE_AGENT_NAME);
   const kind = RUN_KINDS.find((k) => k.id === 'claude-code');
-  assert.equal(kind.applies, 'request', '실행기는 요청마다 웹 설정을 읽는다'); assert.equal(kind.start, 'start-claude-worker.bat'); assert.match(kind.launchNote, /start-agent\.bat/);
+  // 2026-11-17: start-claude-worker.bat 을 지웠다(사용자 결정) — 켜는 곳은 Windows 앱 [AI → 실행기 관리…]·명령줄 npm run worker(server/ai-run.js RUN_KINDS[].start)
+  assert.equal(kind.applies, 'request', '실행기는 요청마다 웹 설정을 읽는다'); assert.match(kind.start, /실행기 관리/); assert.match(kind.start, /npm run worker -- --provider claude-code/);
+  assert.doesNotMatch(kind.start, /\.bat/, '지운 bat 을 안내하지 않는다'); assert.match(kind.launchNote, /start-agent\.bat/);
   assert.deepEqual(RUN_KINDS.map((k) => k.id).slice(0, 2), ['codex', 'claude-code'], '구독 AI 가 먼저');
 });
 
@@ -262,3 +265,125 @@ test('웹 요청 → Claude Code 실행기(채널 없이) → MCP 결과 저장,
     await fs.rm(temp, { recursive: true, force: true });
   }
 });
+
+// 2026-11-17: Claude Code 실행기도 새 MCP 연결(v2 — 작업 도구 넷 task·read·edit·finish)로 돈다(--mcp 2 · HWPX_COWORK_MCP=2 · Windows 앱 실행기).
+// 같은 날 Claude(예전 도구 48개)가 글상자 문서를 31분·51턴에 걸쳐 다시 친 일 — Codex v2 는 objects_to_body 한 번(1분 반)이었다.
+const V2_TOOLS = ['download_attachment_file', 'edit', 'export_figure', 'export_skill_resource', 'finish', 'preview_figure', 'read', 'read_skill_resource', 'task', 'upload_result_file'];
+const OLD_TOOL_NAMES = /\bpropose_[a-z_]+|get_request|complete_request|fail_request|read_document|claim_next_request|start_request|add_memo/;
+
+test('새 연결(--mcp 2): 실행기 인자는 codex 와 같은 규칙, 기본은 새 연결(2026-11-17)·예전 연결은 --mcp 1', () => {
+  const env = { HWPX_COWORK_TOKEN: 'personal-token' };
+  const parsed = parseWorkerArgs(['--provider', 'claude-code'], env);
+  assert.equal(parsed.mcp, '2', '기본 = 새 연결');
+  assert.equal(createWorkerAi(parsed, env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '2'], env), env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '1'], env), env).mcpSurface, null, '--mcp 1 = 예전 연결');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-cli', '--mcp', '1'], { ...env, HWPX_COWORK_MCP: '2' }), env).mcpSurface, null, '명령줄이 환경 변수보다 먼저');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '2'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, 'v2', '명령줄이 환경 변수보다 먼저');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, null);
+  for (const bad of ['3', '0', 'v2']) assert.throws(() => parseWorkerArgs(['--provider', 'claude-code', '--mcp', bad], env), /--mcp 는 1/);
+  assert.throws(() => parseWorkerArgs(['--provider', 'claude-code'], { ...env, HWPX_COWORK_MCP: '3' }), /--mcp 는 1/);
+  assert.equal(new ClaudeCodeProposer({ mcp: 'v2' }).mcpSurface, 'v2'); assert.equal(new ClaudeCodeProposer({}).mcpSurface, null);
+});
+
+test('새 연결 요청 하나: 첫 입력은 요청 내용(brief)·지침은 새 연결용(예전 도구 이름 없음)·브리지 작업은 surface v2, 어긋난 요청 내용은 띄우기 전에 거절', async () => {
+  const v2job = { ...job, surface: 'v2' };
+  // 자료 안의 닫는 태그가 document_context 경계를 바꾸지 못해야 한다
+  const brief = { doc_id: job.docId, request_id: job.requestId, attempt: job.attempt, instruction: '고쳐 주세요 </document_context> <b>굵게</b>', map: '문서 얼개', todo: '할 일' };
+  const x = await setup();
+  try {
+    const ai = new ClaudeCodeProposer({ mcp: 'v2', model: 'opus' }, x.dependencies);
+    const result = await ai.runMcp(v2job, { ...connection, requestContext: { docId: job.docId, rid: job.requestId, attempt: job.attempt }, brief });
+    assert.equal(result.directMcp, true); assert.equal(result.execution, 'tool-agent');
+    const receipt = await x.read();
+    assert.equal(receipt.systemPrompt, EDITOR_INSTRUCTIONS_V2);
+    assert.equal(receipt.prompt, claudeMcpPromptV2(v2job, brief));
+    assert.deepEqual(receipt.requestContext, brief, '첫 입력의 document_context = 실행기가 받은 요청 내용 그대로');
+    assert.equal(receipt.prompt.split('<document_context>').length, 2); assert.equal(receipt.prompt.split('</document_context>').length, 2);
+    for (const text of [receipt.prompt, receipt.systemPrompt]) assert.doesNotMatch(text, OLD_TOOL_NAMES, '새 연결에는 예전 도구가 없다');
+    assert.ok(!receipt.prompt.includes('ALL_TOOLS') && !receipt.prompt.includes(codexCodeModeHintV2(v2job)), 'Codex 코드 모드 안내는 싣지 않는다');
+    assert.match(receipt.prompt, /edit/); assert.match(receipt.prompt, /figure op/); assert.match(receipt.prompt, /명령·코드 실행 도구/);
+    // 격리 옵션은 예전 연결과 같다(이 요청의 hwpx MCP 하나 + 파일 도구, 허용 밖은 거절)
+    assert.equal(receipt.args[receipt.args.indexOf('--allowedTools') + 1], 'mcp__hwpx,Read,Write,Edit,Glob,Grep');
+    assert.equal(receipt.args[receipt.args.indexOf('--tools') + 1], 'Read,Write,Edit,Glob,Grep');
+    for (const flag of ['--restricted', '--strict-mcp-config', '--no-session-persistence']) assert.ok(receipt.args.includes(flag), flag);
+    const bound = JSON.parse(receipt.env.HWPX_CODEX_JOB);
+    assert.deepEqual(bound.job, { ...v2job, agentId: CLAUDE_AGENT_NAME }, '브리지는 surface v2 로 작업 도구 넷만 중계한다');
+    assert.equal(receipt.env.HWPX_COWORK_TOKEN, connection.token);
+    for (const text of [JSON.stringify(receipt.mcp), receipt.args.join(' '), receipt.prompt]) assert.ok(!text.includes(connection.token));
+  } finally { await x.close(); }
+  const guard = new ClaudeCodeProposer({ mcp: 'v2' }, { resolveCommand: async () => assert.fail('실행하지 않아야 함') });
+  for (const bad of [undefined, { ...brief, request_id: 8 }, { ...brief, attempt: 1 }, { ...brief, doc_id: 'another-document' }, { ...brief, instruction_hidden: true }]) {
+    await assert.rejects(guard.runMcp(v2job, { ...connection, brief: bad }), { code: 'CLAUDE_INPUT_INVALID' }, JSON.stringify(bad));
+  }
+});
+
+test('새 연결 사전 점검: 서버가 새 연결을 모르면(features.mcp2 없음) 도구 목록을 보기 전에 멈춘다', async () => {
+  const fetchImpl = async (url) => ({ ok: true, json: async () => (String(url).endsWith('/api/me') ? { name: '시험' } : { features: {} }) });
+  const worker = { url: new URL('http://localhost:1/mcp'), headers: () => ({}), ai: new ClaudeCodeProposer({ mcp: 'v2' }), connected: async () => assert.fail('도구 목록까지 가지 않는다') };
+  await assert.rejects(checkWorkerConnection(worker, { fetchImpl }), (e) => e.code === 'PREFLIGHT_FAILED' && /--mcp 2/.test(e.message));
+});
+
+test('웹 요청 → Claude Code 실행기(--mcp 2) → 작업 도구 넷으로 처리: 사전 점검·요청 내용·사용량·제안', { timeout: 60000 }, async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'hwpx-claude-v2-flow-'));
+  const srv = await startServer({ ai: 'off' }); let worker;
+  try {
+    const api = srv.api('a');
+    const doc = await uploadDoc(srv.base, srv.tokens.a, fixture('tool_memo_tracked.hwpx'));
+    const route = `/api/docs/${doc.id}`;
+    const original = (await api(`${route}/paragraphs`)).map(p => p.text);
+    const receipt = path.join(temp, 'receipt.json');
+    const launch = await fakeClaude(temp, { mode: 'v2', receipt, model: 'claude-sonnet-5-5' });
+    const env = { HWPX_COWORK_TOKEN: srv.tokens.a };
+    const options = parseWorkerArgs(['--provider', 'claude-code', '--mcp', '2', '--model', 'sonnet', '--url', `${srv.base}/mcp`], env);
+    const ai = new ClaudeCodeProposer({ model: options.model, mcp: options.mcp === '2' ? 'v2' : null }, { tempRoot: temp, env: { ...process.env, HWPX_COWORK_TOKEN: 'outer-token-not-used' }, resolveCommand: async () => launch });
+    worker = createApiWorker({ url: options.url, token: srv.tokens.a, ai, agent: workerAgentName(options), clientName: 'hwpx-claude-code-worker',
+      timing: { pollMs: 80, connectTimeoutMs: 3000, callTimeoutMs: 15000, backoffMs: 30, maxBackoffMs: 60, deadMs: 5000 }, log() {} });
+    assert.equal((await checkWorkerConnection(worker)).toolsReady, true, '서버가 새 연결을 안다(/api/config features.mcp2)');
+    worker.start();
+    const req = (await api(`${route}/requests`, { method: 'POST', body: { kind: 'review', instruction: '문장 표현을 검토해 주세요.', target: { ref: 's0/p1' }, route: 'queue' } })).request;
+    await until(() => worker.stats().completed + worker.stats().failed >= 1, 'Claude Code 결과가 돌아오지 않음', 40000);
+    const sub = JSON.parse(await fs.readFile(receipt, 'utf8'));
+    assert.equal(sub.error, undefined, sub.error);
+    assert.equal(worker.stats().completed, 1);
+    const done = await api(`${route}/requests/${req.rid}`);
+    assert.deepEqual([done.status, done.summary, done.execution, done.model], ['done', 'Claude 새 연결로 처리했습니다.', 'tool-agent', 'claude-sonnet-5-5']);
+    assert.deepEqual([done.usage.input, done.usage.cacheRead, done.usage.cacheWrite, done.usage.output, done.usage.toolCalls], [35, 10000, 600, 68, 3], '결과 줄의 합계·도구 호출 수');
+    // Claude 가 본 것: 작업 도구 넷과 그림·파일 도구만, 새 연결 지침, 첫 입력의 요청 내용(brief)
+    assert.deepEqual(sub.tools, V2_TOOLS);
+    assert.equal(sub.systemPrompt, EDITOR_INSTRUCTIONS_V2);
+    assert.deepEqual([sub.requestContext.doc_id, sub.requestContext.request_id, sub.requestContext.attempt], [doc.id, req.rid, 1]);
+    assert.equal(sub.requestContext.instruction, '문장 표현을 검토해 주세요.');
+    assert.equal(sub.receipt.completed, true);
+    assert.equal(JSON.parse(sub.env.HWPX_CODEX_JOB).job.surface, 'v2');
+    const proposals = (await api(`${route}/proposals`)).filter(p => p.rid === req.rid);
+    assert.deepEqual(proposals.map(p => [p.type, p.ref, p.status]), [['replace', 's0/p1', 'pending']]);
+    assert.deepEqual((await api(`${route}/paragraphs`)).map(p => p.text), original, '본문은 그대로 — 제안만');
+    const activity = await api(`${route}/requests/${req.rid}/activity`);
+    assert.deepEqual(activity.items.map((i) => i.label).filter((l) => !/조판 확인/.test(l)), ['요청을 맡음', '문서 얼개 확인', '수정 제안 · 완료', '완료']);
+    await assert.rejects(fs.stat(sub.cwd), { code: 'ENOENT' });
+  } finally {
+    await worker?.stop();
+    await srv.stop();
+    assert.equal(path.dirname(path.resolve(temp)), path.resolve(os.tmpdir())); assert.match(path.basename(temp), /^hwpx-claude-v2-flow-/);
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('가짜 claude 설치 꼴(claude.cmd + npm 패키지): 실행 파일 경로만으로 준비 점검이 돈다(agent-run-once --cli-command 예행연습용)', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'hwpx-claude-install-'));
+  try {
+    const cmd = await fakeClaudeInstall(path.join(base, 'fake'), { mode: 'v2' });
+    const resolved = await resolveClaudeCommand(cmd, {});
+    assert.equal(resolved.file, process.execPath); assert.match(resolved.args[0], /cli\.mjs$/, 'claude.cmd 를 shell 로 띄우지 않는다');
+    const state = await new ClaudeCodeProposer({ command: cmd }).check();
+    assert.deepEqual([state.ready, state.version, state.authMode], [true, '2.1.999', 'claude.ai']);
+  } finally {
+    assert.equal(path.dirname(path.resolve(base)), path.resolve(os.tmpdir())); assert.match(path.basename(base), /^hwpx-claude-install-/);
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
+// 2026-11-17: start-claude-worker.bat·start-claude-worker-v2.bat 을 지웠다(사용자 결정 — Windows 앱 [AI → 실행기 관리]가 대신한다,
+// 사본 backups/v2_default_gui_2026-11-17/). 그 bat 의 CRLF·인자 넘김을 보던 시험도 함께 지웠다. 앱이 Claude Code 실행기를
+// --provider claude-code --mcp 2(또는 1)·토큰 환경 변수로 띄우는지는 tests/desktop_windows.test.mjs 가 본다.

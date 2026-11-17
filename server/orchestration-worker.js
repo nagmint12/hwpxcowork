@@ -138,7 +138,8 @@ class OrchestrationWorker {
     this.reportUnsupported = false; this.reportTask = null; this.reportPending = false;
   }
 
-  headers() { return { Authorization: `Bearer ${this.token}`, 'X-Hwpx-Agent-Session': this.session }; }
+  // 협업 큐 도구는 예전 연결로 받는다 — 서버 기본 연결이 새 연결(v2)로 바뀌어도(2026-11-17) 같은 도구 목록이 오게 밝힌다
+  headers() { return { Authorization: `Bearer ${this.token}`, 'X-Hwpx-Agent-Session': this.session, 'X-Hwpx-Mcp': '1' }; }
   say(line) { try { this.log(line); } catch { /* 로그는 작업 결과와 무관 */ } }
   stats() { return { ...this.statsValue, active: this.active ? { run_id: this.active.run.id, task_id: this.active.task.id } : null }; }
   transition(phase, message) {

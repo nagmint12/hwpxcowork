@@ -200,3 +200,23 @@ test('연속 글 입력 중에도 입력 중 알림은 초당 한 번 유지하�
     t.mock.timers.reset();
   }
 });
+
+test('프로그램으로 선택을 보정하면 열린 미니 도구 막대도 새 요청·메모 범위를 사용한다', () => {
+  const cw = new CoworkController({});
+  const previous = { ref: 's0/p3', start: 2, end: 8, text: '연습 문장.' };
+  let selection = { ...previous, end: 7, text: '연습 문장' };
+  let target = previous; let updates = 0; const emitted = [];
+  cw.toolbar = { visible: true, reposition: value => { target = value; updates++; } };
+  cw.computeSelection = () => selection;
+  cw.emitter = { has: () => true, emit: (_name, value) => { emitted.push(value); assert.equal(target, value); } };
+  cw.emitSelection();
+  assert.equal(target, selection, '새로 고른 범위를 도구 막대에 먼저 반영');
+  cw.emitSelection();
+  assert.equal(updates, 1, '같은 선택의 반복 알림은 재배치하지 않음');
+  selection = null; cw.emitSelection();
+  assert.equal(target, null, '선택 해제도 도구 막대에 전달');
+  assert.equal(emitted.length, 2);
+  cw.toolbar.visible = false; cw.emitter.emit = (_name, value) => emitted.push(value);
+  selection = previous; cw.emitSelection();
+  assert.equal(updates, 2, '닫힌 도구 막대를 자동으로 열지 않음');
+});

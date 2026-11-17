@@ -1,16 +1,50 @@
-// 새 MCP 연결(2026-11-16, docs/MCP_REDESIGN_2026-11-16.md) — 내 PC 에서 도는 에이전트(Codex·Claude Code 채널)가 쓰는 작업 도구 넷.
+// 새 MCP 연결(2026-11-16, docs/MCP_REDESIGN_2026-11-16.md) — 내 PC 에서 도는 에이전트(Codex·Claude Code 채널)와 웹 AI 커넥터가 쓰는 작업 도구 넷.
 //   task(맡기 + 요청 내용) · read(읽기 — 보기 하나를 고름) · edit(고치기 — ops 를 한 번에, done 으로 완료까지) · finish(쓰기 없이 끝내기)
 // 예전 연결은 읽기·제안·요청 도구가 50개쯤이라 도구 정의만 2만 토큰이 넘고(모델이 부를 때마다 다시 읽는다), 한 가지 일에 4~8번을 불러야 했다.
 // 새 연결은 (1) 부르는 횟수 (2) 응답 글 (3) 도구 정의를 함께 줄인다: 맡으면서 요청 내용·문서 얼개를 받고, 읽기는 글과 주소만, 쓰기는 한 번에 모아 내고 완료까지.
-// 켜기: 머리글 X-Hwpx-Mcp: 2 또는 주소 ?v=2 (브리지 --v2). 예전 연결(기본·lean)은 그대로다 — 실행기·ChatGPT 연결이 쓴다.
+// 2026-11-17 사용자 결정: 서버 기본 연결이 새 연결이다(/mcp — ChatGPT·Claude.ai 같은 웹 AI 커넥터 포함, mcpSurface). 예전 연결(기본 꼴·lean)은
+// 밝힐 때만 쓴다 — 머리글 X-Hwpx-Mcp: 1 · 주소 ?v=1 · lean(X-Hwpx-Lean: 1 · ?lean=1) · 서버 설정 config.mcp.defaultSurface 'v1'.
+// 이미 배포된 옛 실행기·브리지(clientInfo 이름 'hwpx-…', 머리글 없음)와 세션 없는 한 번짜리 호출도 예전 연결로 연다(대기열 도구를 잃지 않게).
 // 사람이 정할 일(반영·거절·되돌리기), 변경 요청 검토, 멀티에이전트, 그림 미리보기·꺼내기, 새 문서는 예전 도구를 그대로 둔다(V2_KEEP — 도구 범위 tools=core 면 뺀다).
 import { z } from 'zod';
 import { OP_NAMES, OPS_BRIEF } from './mcp2/ops.js';
+import { isLeanRequest } from './lean.js';
 
-/** 이 MCP 연결이 새 연결인가: 머리글 X-Hwpx-Mcp: 2 또는 주소 ?v=2 */
+/** 머리글·주소가 밝힌 연결: 'v2' | 'v1' | null(밝히지 않음). 머리글 X-Hwpx-Mcp(1|2)가 주소 ?v=(1|2)보다 먼저다 */
+export function requestedSurface(req) {
+  const header = String(req?.headers?.['x-hwpx-mcp'] ?? '').trim();
+  if (header === '1' || header === '2') return header === '2' ? 'v2' : 'v1';
+  let query = '';
+  try { query = String(new URL(req.url, 'http://x').searchParams.get('v') ?? '').trim(); } catch { query = ''; }
+  return query === '2' ? 'v2' : query === '1' ? 'v1' : null;
+}
+
+/** 이 MCP 연결이 새 연결을 밝혔는가: 머리글 X-Hwpx-Mcp: 2 또는 주소 ?v=2(밝히지 않은 연결의 기본은 mcpSurface 가 정한다) */
 export function isV2Request(req) {
-  if (String(req?.headers?.['x-hwpx-mcp'] ?? '').trim() === '2') return true;
-  try { return new URL(req.url, 'http://x').searchParams.get('v') === '2'; } catch { return false; }
+  return requestedSurface(req) === 'v2';
+}
+
+/** 옛 클라이언트 이름: 이 저장소의 실행기·브리지·가드·멀티에이전트 작업자(hwpx-codex-worker·hwpx-cowork-bridge·hwpx-codex-guard·hwpx-orchestration-… 등) */
+export const isLegacyClientName = (name) => typeof name === 'string' && /^hwpx-/i.test(name.trim());
+
+/**
+ * 이 HTTP MCP 연결에 줄 도구 모음 — 'v2'(새 연결, 작업 도구 넷) | 'v1'(예전 연결 — lean 이면 얇은 흐름).
+ * 2026-11-17 사용자 결정으로 서버 기본은 새 연결이다. 차례대로(앞이 이긴다):
+ *  1) 머리글 X-Hwpx-Mcp: 1|2 · 주소 ?v=1|2 — 밝힌 대로
+ *  2) lean(X-Hwpx-Lean: 1 · ?lean=1) — 예전 연결의 얇은 흐름
+ *  3) 서버 설정 config.mcp.defaultSurface 'v1' — 모든 연결을 예전 연결로(되돌리기)
+ *  4) 옛 클라이언트 호환 — clientInfo 이름이 'hwpx-' 로 시작(밝히지 않는 옛 실행기·브리지), 세션 없는 한 번짜리 tools/call(legacyCall —
+ *     initialize 없이 예전 도구를 이름으로 부르는 스크립트용 옛 길. 지금 저장소의 실행기·브리지·웹은 이 길을 쓰지 않는다)
+ *  5) 그 밖 — 새 연결
+ * clientName: initialize 의 params.clientInfo.name(또는 2026-07-28 요청의 _meta clientInfo.name)
+ */
+export function mcpSurface(req, { config = null, clientName = null, legacyCall = false } = {}) {
+  const asked = requestedSurface(req);
+  if (asked) return asked;
+  if (isLeanRequest(req)) return 'v1';
+  if (config?.mcp?.defaultSurface === 'v1') return 'v1';
+  if (legacyCall || isLegacyClientName(clientName)) return 'v1';
+  return 'v2';
 }
 /** 새 연결의 도구 범위: 'core'(작업 도구 + 그림·스킬 파일) | 'all'(+ 사람이 정할 일·변경 요청·멀티에이전트·새 문서) — 머리글 X-Hwpx-Tools 또는 ?tools= */
 export function v2Toolset(req) {
@@ -32,10 +66,14 @@ export function v2Keeps(name, toolset = 'all') {
   return ALL_KEEP.includes(name) || /orchestration/.test(name);
 }
 
-/** 새 연결의 서버 안내(브리지가 채널 안내를 앞에 붙인다 — server/mcp.js MAX_SERVER_INSTRUCTIONS 1456자 이하) */
-export function v2Instructions(userName) {
+/**
+ * 새 연결의 서버 안내(브리지가 채널 안내를 앞에 붙인다 — server/mcp.js MAX_SERVER_INSTRUCTIONS 1456자 이하).
+ * toolset 'all'(웹 AI 커넥터·채널 에이전트 — 2026-11-17 부터 서버 기본)이면 맡은 요청 없이 직접 시킬 때의 길(list_documents·create_document)을 한 줄 더한다
+ */
+export function v2Instructions(userName, { toolset = 'all' } = {}) {
   return `HWPX(한글) 문서 공동 검토 서버입니다. 사용자(${userName})의 문서에서 맡은 AI 작업을 처리합니다. 결과는 제안·메모로 남고 반영은 사람이 정합니다.
-- 흐름: task(맡기 — 지시·대상·문서 얼개·주변 글이 함께 온다) → 필요할 때만 read → edit(ops 를 한 번에, 끝이면 done="공유 요약 1~2문장") . 쓰기 없이 끝내면 finish.
+- 흐름: task(맡기 — 지시·대상·문서 얼개·주변 글이 함께 온다) → 필요할 때만 read → edit(ops 를 한 번에, 끝이면 done="공유 요약 1~2문장") . 쓰기 없이 끝내면 finish.${toolset === 'core' ? '' : `
+- 맡은 요청 없이 사용자가 직접 시키면 list_documents 로 문서를 찾아 read → edit(request_id 없이). 새 문서 작성을 명시했을 때만 create_document. '대기열을 처리해 줘'는 인자 없는 task 를 none 이 나올 때까지 되풀이한다.`}
 - 부를 때마다 대화 전체를 다시 읽는다. 받은 글로 충분하면 바로 edit 하고, 읽기는 필요한 범위만(at·find), 쓰기는 한 호출에 모은다.
 - 주소: [s0/p12] = 문단, s0/p3#t0 = 표(칸은 {table,row,col}), [s0/p3/n2] = 표 칸·글상자 안 문단. read 가 보여 준 주소·글을 그대로 쓴다(find 는 그 문단에 그대로 있는 글).
 - 글과 서식은 따로다: read 는 글과 주소(〔 〕 = 문단 스타일 이름)만 준다. 글만 바꾸면 그 자리 서식이 유지된다. 서식을 바꾸거나 맞출 때만 read(view='format', at=문단들).

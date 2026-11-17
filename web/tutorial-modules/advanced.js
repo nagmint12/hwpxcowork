@@ -9,7 +9,7 @@ function loadAdvancedKey() {
   advancedKeyLoading = fetch('/tutorial-assets/ai-advanced-key.json').then((r) => (r.ok ? r.json() : null)).then((k) => { advancedKey = k; return k; }).catch(() => null);
   return advancedKeyLoading;
 }
-import { stepHelpers, el, sendTutorialExample } from './common.js';
+import { stepHelpers, el, tutorialExampleAction } from './common.js';
 
 export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
   const { d, s, ctx, config, focusIn, rectOf, pad, q, fdoc, inFrame, frameRect, selectFor, locate, phraseRect, cw } = env;
@@ -40,23 +40,23 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
       if (!target) throw new Error(`‘${titleOf(task)}’을(를) 문서에서 찾지 못했습니다`);
       return target;
     }
-    async function openTask(task, stepTitle) {
+    async function openTask(task, stepTitle, instant = false) {
       const ticket = env.stepIdentity?.();
       if (s.composer?.tutorialStep === task.id || newRequest(task)) return;
       const t = await targetOf(task);
       if ((env.stepIdentity && env.stepIdentity() !== ticket) || env.isCurrentStep?.(stepTitle) === false || s.composer?.tutorialStep === task.id) return;
       d.openComposer(t, 'instruct', { instruction: '', tutorialStep: task.id, attachments: attachmentsOf(task) });
-      await typePrompt(task, stepTitle);
+      await typePrompt(task, stepTitle, instant);
     }
     // 요청 글을 한 글자씩 쳐 넣는 연출(2026-11-04) — 치는 동안은 [보내기] 테두리를 숨기고, 단계를 떠나거나 창을 닫으면 멈춘다
     let typing = null;
-    async function typePrompt(task, stepTitle) {
+    async function typePrompt(task, stepTitle, instant = false) {
       const ticket = env.stepIdentity?.();
       const composer = s.composer; const me = typing = {};
       try {
         await typeTutorialPrompt({ composer, text: task.prompt,
           current: () => (!env.stepIdentity || env.stepIdentity() === ticket) && typing === me && s.composer === composer && env.isCurrentStep?.(stepTitle) !== false,
-          reduced: env.motionReduced || (() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) });
+          reduced: instant || env.motionReduced || (() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) });
       } finally { if (typing === me) typing = null; }
     }
     const keyLines = (task) => {
@@ -78,27 +78,18 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
       const lead = () => { const names = attachNames(task); return [task.why, names.length ? `첨부: ${names.map((x) => `「${x}」`).join(' ')}` : ''].filter(Boolean).join(' '); };
       const askText = (line) => (lead() ? `${lead()}\n${line}` : line);
       steps.push({ title: askTitle, press: '보내기', pressHidden: () => !!typing,   // 입력하는 동안은 첨부 칸을 금빛으로(이름표 없이) — 다 적으면 [보내기] 초록
-        text: () => askText(!s.composer ? '요청 창을 여는 중입니다. 열리지 않으면 아래 [요청 창 열기]를 누르세요.' : typing ? (task.attach ? 'AI에게 보낼 요청을 입력하고 있습니다… 금빛 테두리가 함께 보낼 첨부입니다.' : 'AI에게 보낼 요청을 입력하고 있습니다…') : '요청을 다 적었습니다. 초록 테두리의 [보내기]를 누르세요.'),
+        text: () => askText(!s.composer ? '아래 [대신 예시 작성하기]를 누르면 요청 창을 열고 예시를 채웁니다.' : typing ? (task.attach ? 'AI에게 보낼 요청을 입력하고 있습니다… 금빛 테두리가 함께 보낼 첨부입니다.' : 'AI에게 보낼 요청을 입력하고 있습니다…') : '요청을 다 적었습니다. 초록 테두리의 [보내기]를 누르세요.'),
         enter: () => {
           ctx[`before${task.id}`] ||= (s.requests || []).map((r) => r.rid);
           if (!task.target.doc) { const at = locate(titleOf(task)); if (at) focusIn(d, at, { quiet: true }); }
-          return openTask(task, askTitle).catch(() => { /* [요청 창 열기]로 다시 */ });
+          return openTask(task, askTitle).catch(() => { /* [대신 예시 작성하기]로 다시 */ });
         },
         ring: () => (typing ? (task.attach ? pad(rectOf(chips()), 4) : null) : pad(rectOf(sendButton()), 4)), open: () => rectOf(q('.composer-win')) || frameRect(),
         motion: () => s.composer?.phase === 'edit' ? { rect: rectOf(typing ? q('.composer-win .cmp-instr') : sendButton()), mode: typing ? 'typing' : 'click' } : null,
-        action: { label: '요청 창 열기', show: () => s.composer?.tutorialStep !== task.id, run: () => openTask(task, askTitle) },
-        quickWhen: () => s.info?.tutorialOwnAi === true,
-        quick: async () => {
-          const ticket = env.stepIdentity?.();
-          const target = s.composer?.tutorialStep === task.id ? s.composer.target : await targetOf(task);
-          if (env.stepIdentity && env.stepIdentity() !== ticket) return;
-          const attachments = attachmentsOf(task);
-          if (task.attach?.some(part => !(s.attachments || []).some(a => String(a.name || '').toLowerCase().includes(part.toLowerCase())))) throw new Error('요청에 필요한 연습 첨부를 찾지 못했습니다.');
-          const request = await sendTutorialExample(d, target, task.prompt, { tutorialStep: task.id, attachments });
-          ctx[`rid${task.id}`] = request.rid;
-        },
+        action: tutorialExampleAction(task.prompt, () => s.composer?.tutorialStep === task.id ? typePrompt(task, askTitle, true) : openTask(task, askTitle, true)),
         // WS로 먼저 완료가 와도 전송 함수가 마무리되기 전에 요청 창을 닫지 않는다.
-        until: () => { const r = newRequest(task); if (r) ctx[`rid${task.id}`] = r.rid; return !!r && !s.sending; } });
+        until: () => { const r = newRequest(task); if (r) ctx[`rid${task.id}`] = r.rid; return !!r && !s.sending; },
+        lost: () => !newRequest(task) && !task.target.doc && !locate(titleOf(task)) ? askIndex : null });
       steps.push({ title: `${name} — 결과 반영`, press: '모두 반영', wait: true, idle: () => finished(task),
         reviewApplied: () => propsOf(task),
         // 모두 반영이 끝난 뒤 한꺼번에 한 번만 본문을 보여 준다 — 남은 제안이 있어도 반영 수가 3초 동안 그대로면(충돌·하나만 반영) 더 기다리지 않는다
@@ -125,8 +116,7 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
         reveal: () => requestControl(document, ridOf(task)),
         motion: () => ({ rect: rectOf(requestControl(document, ridOf(task))), mode: 'click' }),
         ...(['S3', 'S4'].includes(task.id) ? { example: keyBox(task) } : {}),
-        until: () => completed(task), quickWhen: () => reqOf(ridOf(task))?.status === 'done' && pendingOf(task).length > 0,
-        quick: async () => { await d.resolveRequest(reqOf(ridOf(task)), 'adopt'); },
+        until: () => completed(task), 
         lost: () => {
           const r = reqOf(ridOf(task));
           if (!r || (r.status === 'done' && !propsOf(task).length)) return askIndex;

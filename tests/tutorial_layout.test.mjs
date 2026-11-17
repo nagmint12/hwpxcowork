@@ -5,9 +5,9 @@ import { shapeDialog, proposalControl } from '../web/tutorial-targets.js';
 
 test('PC 안내는 중앙에 배치하고 내용 높이를 제한한다', () => {
   const view = { x: 0, y: 0, w: 1440, h: 900 }; const editor = { x: 0, y: 50, w: 1100, h: 850 };
-  assert.deepEqual(tutorialDock(view, editor), { x: 500, y: 320, w: 440, h: 260, max: 260 });
+  assert.deepEqual(tutorialDock(view, editor), { x: 460, y: 320, w: 520, h: 260, max: 260 });
   assert.deepEqual(tutorialDock(view, { ...editor, w: 800 }), tutorialDock(view, editor));
-  assert.deepEqual(tutorialDock(view, editor, false, { height: 120 }), { x: 500, y: 390, w: 440, h: 120, max: 260 });
+  assert.deepEqual(tutorialDock(view, editor, false, { height: 120 }), { x: 460, y: 390, w: 520, h: 120, max: 260 });
   assert.equal(tutorialDock(view, editor, false, { height: 900 }).h, 260, '긴 안내는 최대 높이 안에서 스크롤한다');
   assert.equal(tutorialDock(view, editor, false, { height: 120, avoid: { x: 600, y: 700, w: 100, h: 40 } }).y, 756);
 });

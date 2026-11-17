@@ -14,7 +14,7 @@ import { Service, ServiceError } from './service.js';
 import { AiProposer } from './ai.js';
 import { createMcpServer, agentFromRequest, cleanName } from './mcp.js';
 import { isLeanRequest } from './lean.js';
-import { isV2Request, v2Toolset } from './mcp2.js';
+import { mcpSurface, v2Toolset } from './mcp2.js';
 import { KINDS, PRESETS, fmtTime } from './memotext.js';
 import { installAgentRoutes } from './routes/agents.js';
 import { installCollabRoutes } from './routes/collab.js';
@@ -28,7 +28,7 @@ import { createRuntimeControl } from './runtime-control.js';
 import { createOAuthService } from './oauth.js';
 import { openAiClaimSession } from './mcp-session.js';
 import { createMcpEvents } from './mcp-events.js';
-import { handleModernMcp, isModernRequest } from './mcp-modern.js';
+import { handleModernMcp, isModernRequest, modernClientName } from './mcp-modern.js';
 import { automationStatus } from './automation-status.js';
 import { createWorkFiles } from './work-files.js';
 import { createPersonalAi } from './personal-ai.js';
@@ -207,7 +207,8 @@ app.get('/api/config', (req, res) => {
     nonce: NONCE, studio,
     // mcp2: 새 MCP 연결(작업 도구 넷 — server/mcp2.js)과 요청 내용 REST(GET …/requests/:rid/brief)를 이 서버가 안다(실행기가 --mcp 2 로 붙기 전에 확인한다)
     // contentFormatWorkflow: 내용·형식 나눠 처리(실험)를 받는가 — config.experiments.contentFormat(기본 끔, 2026-11-16). 꺼져 있으면 편집기가 그 선택 칸을 보이지 않는다
-    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true },
+    // mcpDefault: 머리글·주소로 밝히지 않은 MCP 연결을 무엇으로 여는가('v2' 기본 | 'v1' — config.mcp.defaultSurface, 2026-11-17). 연결 안내 화면이 기본·예전 연결 주소를 고를 때 본다
+    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true, mcpDefault: cfg.mcp.defaultSurface },
     local: !!service.local,   // PC 폴더 연결(개인용 앱)이 켜져 있는가
     tutorialLogin: tutorialLoginHint(),   // 로그인 화면 체험 토큰 안내 글(없으면 null)
     oauth: oauth.status(),
@@ -459,6 +460,8 @@ app.delete('/api/docs/:id/locks', auth, wrap(async (req, res) => res.json({ ok: 
 // 주소: /mcp (Authorization: Bearer 토큰) · /mcp/t/<토큰> · /mcp/t/<토큰>/<에이전트이름> · ?agent=Claude
 // HTTP 전송 세션과 작업 선점을 구분한다. OpenAI 호스트 작업 ID는 재연결에도 유지한다.
 // 표준 세션은 요청 응답이 끝나도 유지하고 DELETE/30분 유휴/256개 상한에서 정리한다.
+// 연결 종류(2026-11-17 사용자 결정 — server/mcp2.js mcpSurface): 밝히지 않으면 새 연결(작업 도구 넷, 'all'). 예전 연결은 X-Hwpx-Mcp: 1·?v=1·lean·
+// config.mcp.defaultSurface 'v1' 일 때와, 밝히지 않는 옛 실행기·브리지(clientInfo 'hwpx-…')·세션 없는 한 번짜리 호출일 때. 세션은 initialize 때 정해 끝까지 쓴다.
 const mcpSessions = new Map();
 const MCP_SESSION_IDLE_MS = 30 * 60 * 1000;
 const MCP_SESSION_MAX = 256;
@@ -493,7 +496,9 @@ async function handleMcp(req, res, pathToken, pathAgent) {
   const claimOwner = agentSession || openAiClaimSession(req.headers, user);
   if (isModernRequest(req)) {
     const principal = await oauth.eventPrincipal(oauthToken) || { user };
-    return handleModernMcp({ req, res, user, principal, events: mcpEvents, service, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req) });
+    // 2026-07-28 은 무상태 — 연결 종류를 요청마다 정한다(clientInfo 는 요청의 _meta 에 실린다)
+    const surface = mcpSurface(req, { config: cfg, clientName: modernClientName(req.body) });
+    return handleModernMcp({ req, res, user, principal, events: mcpEvents, service, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface, toolset: v2Toolset(req) });
   }
   if (!sessionId && req.method !== 'POST') return mcpHttpError(res, 405, -32000, 'Method not allowed (without MCP session: POST only)');
   sweepMcpSessions();
@@ -512,9 +517,10 @@ async function handleMcp(req, res, pathToken, pathAgent) {
     }
     const id = crypto.randomUUID();
     const claimSession = claimOwner || crypto.randomUUID();
-    // 얇은 흐름(lean — 머리글 X-Hwpx-Lean: 1 또는 ?lean=1)은 initialize 때 정해 그 세션 내내 쓴다(server/lean.js)
-    // 새 연결(v2 — 머리글 X-Hwpx-Mcp: 2 또는 ?v=2, 작업 도구 넷 — server/mcp2.js)도 initialize 때 정한다
-    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req), surface: isV2Request(req) ? 'v2' : null, toolset: v2Toolset(req) });
+    // 연결 종류(새 연결 v2 | 예전 연결 — lean 이면 얇은 흐름, server/lean.js)는 initialize 때 정해 그 세션 내내 쓴다(server/mcp2.js mcpSurface).
+    // clientInfo 이름이 'hwpx-' 인 옛 실행기·브리지는 밝히지 않으면 예전 연결이다(업데이트하지 않은 참여자 PC 가 대기열 도구를 잃지 않게)
+    const surface = mcpSurface(req, { config: cfg, clientName: req.body?.params?.clientInfo?.name });
+    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req), surface: surface === 'v2' ? 'v2' : null, toolset: v2Toolset(req) });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => id,
       onsessionclosed: () => { mcpSessions.delete(id); },
@@ -530,7 +536,9 @@ async function handleMcp(req, res, pathToken, pathAgent) {
     return;
   }
   // initialize 없는 기존 단발 tools/call은 응답이 닫히면 정리한다.
-  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface: isV2Request(req) ? 'v2' : null, toolset: v2Toolset(req) });
+  // 이 길은 예전 도구를 이름으로 부르는 스크립트용 옛 길이라(표준 MCP 클라이언트는 initialize 한다) 밝히지 않으면 예전 연결이다 — 새 연결은 X-Hwpx-Mcp: 2·?v=2
+  const surface = mcpSurface(req, { config: cfg, legacyCall: true });
+  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface: surface === 'v2' ? 'v2' : null, toolset: v2Toolset(req) });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { transport.close().catch(() => {}); server.close().catch(() => {}); });
   await server.connect(transport);

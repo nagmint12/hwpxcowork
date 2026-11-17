@@ -88,6 +88,38 @@ export const EDITOR_INSTRUCTIONS_V2 = `당신은 hwpx-cowork의 한글(HWPX) 공
 - 취소·시도 변경·선점 상실 오류면 즉시 멈춥니다.
 - 제안·메모·요약은 한국어로 쓰고, 요약에 지시 원문·개인정보·키를 넣지 않습니다.`;
 
+/**
+ * API 실행기(OpenAI·Claude·Gemini API — 개인 API 실행기·서버 AI·서버에 등록한 개인 키)의 새 연결(v2) 지침(2026-11-17).
+ * 일하는 방식은 Codex·Claude Code 실행기와 같은 EDITOR_INSTRUCTIONS_V2 를 그대로 쓰고, 도구 줄만 API 에 있는 도구로 바꾼다
+ * (task 는 실행기가 맡고 요청 내용을 첫 입력에 싣는다, 내 PC 파일 도구 download_attachment_file·upload_result_file 은 없다 — server/tool-profiles.js API_V2).
+ * 덧붙인 줄은 API 고리의 끝 판정(server/api-tool-loop.js — edit 의 done·finish 로 끝나면 그 자리에서 멈춘다)에 맞춘 것이다.
+ * EDITOR_INSTRUCTIONS_V2 의 도구 줄 글이 바뀌어도 '- 도구는 ' 로 시작하면 바뀐다(tests/api_mcp_v2.test.mjs 가 task·내 PC 파일 도구 이름이 남지 않는지 본다)
+ */
+const API_V2_TOOLS_LINE = '- 도구는 hwpx 작업 도구 read·edit·finish입니다(그림 미리 보기·꺼내기는 preview_figure·export_figure, 첨부 스킬은 read_skill_resource·export_skill_resource). 결과는 edit로 저장한 제안·메모이며, 말로 했다고 하는 것은 결과가 아닙니다.';
+export const EDITOR_INSTRUCTIONS_API_V2 = `${EDITOR_INSTRUCTIONS_V2.split('\n').map((line) => (line.startsWith('- 도구는 ') ? API_V2_TOOLS_LINE : line.replace('read·task가 보여 준', 'read·요청 내용이 보여 준'))).join('\n')}
+- 요청 맡기·선점과 문서·요청·시도는 실행기가 고정합니다(도구에 doc_id·request_id·expected_attempt를 쓰지 않습니다). 요청 내용(지시·대상·문서 얼개·주변 글·할 일)은 첫 입력에 있습니다.
+- 요청은 edit의 done(공유 요약) 또는 finish로 끝냅니다. 그 호출로 실행이 끝나므로 남은 결과도 그 호출에 모읍니다. 끝내는 도구 없이 글로만 답하면 요청이 끝나지 않습니다.
+- 서로 기다릴 필요 없는 읽기(여러 범위·보기)는 한 응답에 함께 부릅니다. Base64를 쓰거나 베끼지 않습니다.`;
+/** OpenAI hosted 작업공간(code_interpreter — 개인 키 workspace 'hosted')일 때만 지침 끝에 붙인다 */
+export const API_V2_HOSTED_NOTE = "\n- 코드 실행(code_interpreter)으로 만든 그림 파일은 실행기가 결과 첨부로 저장하고 attachment_id를 알려 줍니다. edit의 {op:'figure', after|replace, attachment_id}로 넣습니다. 첨부 원본은 그 작업공간에도 올라가 있습니다.";
+
+// 자료 JSON 의 태그 문자(< >)를 JSON 유니코드 이스케이프로 — 자료 안의 닫는 태그가 document_context 경계를 바꾸지 못하게(server/codex-ai.js tagSafe 와 같은 일. 순환 import 를 피해 따로 둔다)
+const BACKSLASH = String.fromCharCode(92);
+const tagSafeJson = (json) => json.replace(/[<>]/g, (ch) => `${BACKSLASH}u00${ch.charCodeAt(0).toString(16)}`);
+
+/**
+ * API 실행기 새 연결(v2)의 첫 입력 글: 요청 내용(brief — task 응답·REST …/brief 와 같다)을 document_context 에 싣는다(Codex·Claude Code 실행기의 첫 입력과 같은 뜻).
+ * included = 이 글 앞에 원본으로 실은 첨부(PDF·그림)의 id — 다시 읽지 않게 알린다
+ */
+export function apiTaskPromptV2(brief, { included = [] } = {}) {
+  const files = included.length ? `\n첨부 원본 ${included.length}개(id ${included.map((x) => String(x).replace(/[^A-Za-z0-9_-]/g, '')).join('·')})는 이 글 앞에 실었습니다 — read로 다시 읽지 않아도 됩니다(그 밖의 첨부는 read(view='attachment', id)).` : '';
+  return `배정된 작업 하나를 처리하세요. 아래 document_context 는 이 요청의 내용입니다: 지시(instruction)·대상(target)·문서 얼개(map)·대상 주변 글(context)·할 일(todo).
+받은 내용으로 충분하면 바로 edit 를 부르고, 더 볼 것이 있을 때만 read 로 필요한 범위만 읽습니다. 결과는 edit 의 ops 에 모아 내고(op 꼴은 edit 도구 설명, 자세한 인자는 read(view='guide', id='ops')), 일이 끝나는 호출에 done="공유 요약 1~2문장" 을 줍니다(쓰기 없이 끝내면 finish).${files}
+<document_context>
+${tagSafeJson(JSON.stringify(brief))}
+</document_context>`;
+}
+
 export const EDITOR_INSTRUCTIONS = `당신은 hwpx-cowork의 한글(HWPX) 공동 문서 편집자입니다.
 - Work 등 create_document가 제공되는 연결에서 새 보고서를 처음부터 작성하라는 요청이면 그 도구로 새 문서를 만들고 반환된 id의 전체 문맥·서식을 읽어 작성합니다. 문서함·권한과 사용자가 선택한 반영 정책을 따릅니다. 이미 배정된 문서가 있으면 그 문서에서 작업합니다.
 - 사용자의 지시 전체를 하나의 목표로 수행합니다. 복합 요청의 본문·서식·표·그림·차례 등 모든 항목을 끝까지 처리합니다. 사용자가 작업을 여러 번 나누어 지시하게 하거나 계획·권고만 제시하고 끝내지 않습니다.

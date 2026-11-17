@@ -20,7 +20,7 @@ export const ObjectsToBodyOpSchema = z.object({
   op: z.literal('objects_to_body'),
   at: z.union([z.string().regex(/^(\*|s\d+|s\d+\/p\d+)$/), z.array(z.string().regex(/^s\d+\/p\d+$/)).min(1).max(1000)]).optional()
     .describe("대상: 생략·'*' = 문서 전체, 's3' = 구역, 's3/p0' 또는 그 목록 = 그 본문 문단의 개체"),
-  join_pages: z.boolean().optional().describe('쪽마다 끊긴 같은 표(열 구조 같음)를 하나로 잇는다(기본 true)'),
+  join_pages: z.boolean().optional().describe("쪽마다 끊긴 같은 표(열 구조 같음)를 하나로 잇는다(기본 true — 되풀이된 머리행은 넣지 않고 버린 줄 '되풀이 머리행'으로 알린다). false = 쪽마다 따로 표"),
   keep_page_numbers: z.boolean().optional().describe('쪽 번호로 보이는 줄도 본문으로 옮긴다(기본 false — 버린다)'),
   drop: z.array(z.string().regex(/^s\d+\/p\d+:L\d+$/)).max(1000).optional().describe("옮기지 않고 버릴 줄(read view=layout 의 줄 번호 — 's0/p0:L3')"),
   header_rows: z.number().int().min(0).max(20).optional().describe('표 머리행 수(기본: 배경색이 칠해진 첫 줄들)'),
@@ -32,6 +32,9 @@ export const ObjectsToBodyOpSchema = z.object({
   remove_rest: z.union([z.boolean(), z.array(z.enum(REST_KINDS)).min(1).max(REST_KINDS.length),
     z.array(z.object({ kinds: z.array(z.enum(REST_KINDS)).min(1).max(REST_KINDS.length).optional(), at: z.array(z.string().regex(/^s\d+\/p\d+$/)).min(1).max(1000).optional() }).strict()).min(1).max(50)]).optional()
     .describe("옮긴 문단에 남는 개체(옮기지 못한 그림·표·차트·회전한 도형·안에 개체가 든 글상자)도 지운다: true = 모두, ['shape','figure','table','chart'] 가운데 = 그 종류만, [{kinds?, at?}] = 문단마다 따로(기본: 남긴다). 안에 든 글도 함께 지워지고 그 글자 수가 결과에 적힌다"),
+  // 쪽 배경 그림(2026-11-17 — engine/flow.js pageBackgrounds: 옮길 글상자 밑에 깔린, 용지의 80% 넘게 덮는 종이·쪽 기준 그림). 글이 본문으로 내려오면 글 앞 그림은 글을 덮는다
+  background: z.enum(['remove', 'behind']).optional()
+    .describe("쪽 배경 그림(옮길 글상자 밑에 깔린 쪽 크기 그림): remove(기본) = 지운다(내용으로 보이는 그림은 지우지 않고 글 뒤로), behind = 모두 글 뒤로 보내 남긴다(그 구역은 앞 구역에 합치지 않아 원래 쪽마다 새 쪽에서 시작)"),
 }).strict();
 export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema]);
 export const normalizePageLayoutOps = ops => z.array(StructureOpSchema).min(1).max(50).parse(ops);

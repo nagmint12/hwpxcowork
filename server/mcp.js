@@ -78,17 +78,26 @@ ${work}
 }
 
 /**
+ * 연결 종류별 서버 안내: surface 'v2' = 새 연결(server/mcp2.js v2Instructions — toolset 'core' 면 직접 시킬 때의 줄을 뺀다), 그 밖 = 예전 연결(lean 이면 얇은 흐름).
+ * createMcpServer(initialize)와 2026-07-28 어댑터(server/mcp-modern.js 의 server/discover)가 같은 글을 낸다
+ */
+export function mcpInstructions(userName, service, { surface = null, lean = false, toolset = 'all' } = {}) {
+  return surface === 'v2' ? v2Instructions(cleanName(userName, 20, { keepParens: true }), { toolset }) : serverInstructions(userName, service, { lean });
+}
+
+/**
  * agentSession: 머리글 X-Hwpx-Agent-Session(검사된 값) 또는 null(→ '사용자|에이전트'). session 은 예전 이름(같은 뜻).
  * lean: 얇은 흐름 연결(머리글 X-Hwpx-Lean: 1 또는 ?lean=1 — server/lean.js, docs/MCP_LEAN_FLOW_2026-11-10.md). 모델이 직접 읽는 연결용:
  *   start_request·claim_next_request·get_request 는 모델용 요약을, 쓰기·완료 도구는 영수증을 돌려주고, 쓰기 도구의 complete 로 완료까지 한다.
  *   도구는 그대로 다 준다. 기본(lean 아님)은 실행기·옛 클라이언트가 쓰는 응답 꼴 그대로다.
  */
 export function createMcpServer({ service, user, version = '0.2.0', agentName = null, agentSession = null, session = null, trackOperation = (fn) => fn(), lean: leanOpt = false, surface = null, toolset = 'all' }) {
-  // surface 'v2'(머리글 X-Hwpx-Mcp: 2 또는 ?v=2 — server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md): 내 PC 에이전트용 작업 도구 넷(task·read·edit·finish).
-  //   읽기·제안·요청 흐름의 예전 도구는 등록하지 않고(v2Keeps), 응답은 들여쓰기 없이, 도구 스키마는 lean 처럼 줄여 싣는다. 기본·lean 연결은 그대로다.
+  // surface 'v2'(server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md): 작업 도구 넷(task·read·edit·finish). HTTP 연결은 2026-11-17 부터 밝히지 않으면 이것이다
+  //   (server/index.js 가 mcpSurface 로 정해 넘긴다). 읽기·제안·요청 흐름의 예전 도구는 등록하지 않고(v2Keeps), 응답은 들여쓰기 없이, 도구 스키마는 lean 처럼 줄여 싣는다.
+  //   이 함수 자체의 기본(surface 없음)은 예전 연결이다 — 서버 안 연결(server/api-service-tools.js 등)은 그대로다.
   const v2 = surface === 'v2';
   const lean = v2 || leanOpt;
-  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: v2 ? v2Instructions(cleanName(user.name, 20, { keepParens: true })) : serverInstructions(user.name, service, { lean }) });
+  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: mcpInstructions(user.name, service, { surface: v2 ? 'v2' : null, lean, toolset }) });
   const connect = server.connect.bind(server);
   server.connect = transport => connectDebugTransport({ connect }, transport, {
     directory: service.cfg?.dataDir ? path.join(service.cfg.dataDir, 'runtime', 'ai-debug') : undefined,

@@ -376,7 +376,8 @@ const DocList = {
     const personalLine = computed(() => { const p = state.me?.personalAi; const n = personalEnvName(p); if (p?.method === 'mcp-events') return p.active ? '튜토리얼 AI 요청은 관리자 ChatGPT가 처리합니다' : '관리자 ChatGPT의 이벤트 구독을 기다리고 있습니다'; if (p?.apiOnly) return p.active ? '체험 AI 요청은 관리자가 공유한 API로만 처리합니다' : '체험용 관리자 API 연결이 필요합니다'; if (n && p?.shared) return `내 AI 요청은 관리자가 공유한 ${n}로 처리합니다`; return ''; });
     const keyLine = computed(() => { const p = state.me?.personalAi; const n = personalEnvName(p); return n && !p?.shared && !p?.apiOnly ? `${n} 등록됨` : ''; });
     const WAY_TIPS = {
-      subscription: 'Codex: start-codex-agent.bat(먼저 codex login). Claude Code: start-claude-worker.bat(먼저 claude auth login).\n명령으로 실행하려면 node scripts/ai-worker.mjs --provider codex 또는 --provider claude-code. 실행기를 켜 두는 동안 기존 대기 요청과 새 요청을 자동 처리합니다.\nCodex CLI·IDE 확장에 MCP를 직접 등록한 대화는 대기열 처리를 지시해야 합니다. Claude Code 채널은 start-agent.bat에서 선택할 수 있습니다. 사용량은 각 구독의 사용 한도에서 차감됩니다',
+      // 2026-11-17: 실행기 bat 을 지웠다(사용자 결정) — Windows 앱 [AI → 실행기 관리…] 또는 명령줄 npm run worker
+      subscription: 'Codex(먼저 codex login)·Claude Code(먼저 claude auth login) 실행기를 켜 둡니다. Windows 앱은 [AI → 실행기 관리…]에서 켭니다.\n명령으로 실행하려면 npm run worker -- --provider codex 또는 --provider claude-code. 실행기를 켜 두는 동안 기존 대기 요청과 새 요청을 자동 처리합니다.\nCodex CLI·IDE 확장에 MCP를 직접 등록한 대화는 대기열 처리를 지시해야 합니다. Claude Code 채널은 start-agent.bat에서 선택할 수 있습니다. 사용량은 각 구독의 사용 한도에서 차감됩니다',
       app: 'ChatGPT 앱의 사용자 지정 MCP에 이 주소를 넣고 OAuth로 연결합니다. 대화창에서 "대기열을 처리해 줘"라고 하면 쌓인 요청을 처리합니다(대화를 보낼 때만 처리)',
       key: '아래 \'내 AI 키\'에 API 키를 등록하면 서버가 내 키로 바로 처리합니다. 키 사용료가 따로 듭니다',
     };

@@ -7,8 +7,7 @@ const examples = {
   chatMenu: { src: 'chatgpt-add-menu.png', width: 1908, height: 951, crop: [630, 0, 1000, 200], caption: '실제 ChatGPT 계정의 Plugins 화면과 Add 버튼. 계정 정보는 가렸습니다.' },
   chatForm: { src: 'chatgpt-mcp-form.png', width: 1200, height: 1520, caption: '실제 계정의 Add custom MCP server 입력창을 배경 없이 캡처했습니다. 등록은 본인 계정에서 진행합니다.' },
   apiKeys: { src: 'api-keys.png', width: 1200, height: 480, caption: 'API 키 관리 화면의 일반 예시입니다. 실제 화면과 메뉴는 제공업체마다 다릅니다.' },
-  apiCreate: { src: 'api-create-key.png', width: 1200, height: 480, caption: 'API 키 생성 양식의 일반 예시입니다. 실제 키를 생성하거나 저장하지 않습니다.' },
-};
+  apiCreate: { src: 'api-create-key.png', width: 1200, height: 480, caption: 'API 키 생성 양식의 일반 예시입니다. 실제 키를 생성하거나 저장하지 않습니다.' } };
 
 export function image(root, key, target = null, activate = null, crop = null) {
   const spec = examples[key]; const figure = el('figure', null, 'tour-example');
@@ -61,52 +60,28 @@ export function commandExample(root, label, value) {
 const sameTutorialStep = (env, step, title) => (!env.stepIdentity || env.stepIdentity() === step)
   && (!title || env.isCurrentStep?.(title) !== false);
 
-export function typeInTutorialField(env, input, value, title = null) {
+export const tutorialExampleAction = (value, run, show) => ({ label: '대신 예시 작성하기', exampleText: value, run, ...(show ? { show } : {}) });
+
+export function typeInTutorialField(env, input, value, title = null, { instant = false } = {}) {
   if (!input) throw new Error('입력 창을 먼저 열어 주세요');
+  if (input.disabled || input.readOnly) throw new Error('현재 입력할 수 없는 칸입니다');
   const step = env.stepIdentity?.(); input.focus?.();
   const popover = env.s?.popover; const reply = env.s?.reply;
-  return typeTutorialInput({ input, text: value, reduced: env.motionReduced || (() => true),
+  return typeTutorialInput({ input, text: value, reduced: instant || env.motionReduced || (() => true),
     current: () => sameTutorialStep(env, step, title) && env.s?.popover === popover && env.s?.reply === reply });
 }
 
-export function typeInTutorialComposer(env, value, title = null) {
+export function typeInTutorialComposer(env, value, title = null, { instant = false } = {}) {
   const composer = env.s.composer; if (!composer) return Promise.resolve();
   const step = env.stepIdentity?.();
-  return typeTutorialPrompt({ composer, text: value, reduced: env.motionReduced || (() => true),
+  return typeTutorialPrompt({ composer, text: value, reduced: instant || env.motionReduced || (() => true),
     current: () => env.s.composer === composer && sameTutorialStep(env, step, title) });
-}
-
-export async function sendTutorialExample(d, target, instruction, options = {}) {
-  const model = d.s.composer;
-  const result = await d.createRequest({ kind: 'instruct', target, instruction, attachments: [], ...options, route: 'example' });
-  if (result?.request?.rid == null) throw new Error(result?.message || '연습 요청을 만들지 못했습니다.');
-  if (model && d.s.composer === model) {
-    model.rid = result.request.rid; model.phase = 'result'; model.error = result.failed ? result.message : '';
-  }
-  return result.request;
 }
 
 export function openTutorialMemoReply(d, memo) {
   if (!memo) throw new Error('연습 메모를 찾지 못했습니다. 준비 단계부터 다시해 주세요.');
   d.s.active = { kind: 'memo', id: memo.id };
   d.openReply({ key: Date.now(), kind: 'memo', memoId: memo.id, ref: memo.ref, quote: memo.body ?? memo.text ?? '', anchor: null });
-}
-
-export async function applyTutorialProposal(d, proposal) {
-  if (proposal?.status !== 'pending') throw new Error('반영할 연습 제안이 없습니다. 준비 단계의 상태를 확인해 주세요.');
-  await d.applyProposal(proposal);
-}
-
-export function enableTutorialTools(env) {
-  const button = () => env.q('[data-testid="toggle-editor-tools"]');
-  const menu = () => env.q('[data-testid="bar-more-toggle"]');
-  return {
-    allowControl: control => control === button() || control === menu(),
-    quick: async () => {
-      if (!button()) { env.activate(menu()); await Promise.resolve(); }
-      env.activate(button());
-    },
-  };
 }
 
 export function stepHelpers(env) {

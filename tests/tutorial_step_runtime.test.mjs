@@ -27,9 +27,9 @@ test('단계 목록은 DOM과 네트워크 없이 결과보고서 15개 행동�
   } finally { globalThis.fetch = oldFetch; }
 });
 
-test('개별 문구를 수정하고 안내를 끼워 넣어도 빠른 선택은 그 안내를 넘기지 않는다', async () => {
+test('개별 문구를 수정하고 안내를 끼워 넣어도 직접 선택은 그 안내를 넘기지 않는다', async () => {
   const env = environment(); const at = { ref: 's0/p1', start: 0, end: 17 };
-  env.locate = () => at; env.selectExact = async text => { env.s.selection = { ...at, text }; };
+  env.locate = () => at; env.selHas = text => !!env.s.selection?.text?.includes(text);
   const refs = refsFor('report-flow');
   refs[0].title = '첫 문장 고르기'; refs[0].text = '수정한 안내'; refs[0].next = '조건 우회 금지';
   refs.splice(1, 0, { key: 'notice', kind: 'custom', actionId: 'notice', title: '선택 확인', text: '선택 상태를 확인하세요.' });
@@ -39,7 +39,7 @@ test('개별 문구를 수정하고 안내를 끼워 넣어도 빠른 선택은 
   assert.equal(steps[1].text, '수정한 안내');
   assert.equal(steps[1].originalTitle, '1. 고칠 글 고르기');
   assert.equal(steps[1].next, undefined, '버튼 문구는 자동 완료 조건을 없애지 않음');
-  assert.equal(await steps[1].action.run(), undefined);
+  assert.equal(steps[1].action, undefined); env.s.selection = { ...at, text: '일정 부분 기여한 것으로 보인다' }; env.selHas = text => env.s.selection.text.includes(text);
   assert.equal(steps[1].until(), true);
   assert.equal(steps[2].title, '선택 확인');
 });
@@ -60,9 +60,9 @@ test('등록된 custom 동작은 복잡한 기존 행동과 상태를 그대로 
   const refs = refsFor('report-flow').slice(0, 5);
   refs[0] = { key: 'custom-select', kind: 'custom', actionId: 'registered-handler', title: '직접 연결한 선택 행동', text: '원래 선택 기능을 사용합니다.', params: { handlerId: specs[0].handlerId } };
   const env = environment(); const at = { ref: 's0/p1', start: 0, end: 17 };
-  env.locate = () => at; env.selectExact = async text => { env.s.selection = { ...at, text }; };
+  env.locate = () => at; env.selHas = text => !!env.s.selection?.text?.includes(text);
   const steps = buildComposedTutorialSteps(course([entry(refs)]), env);
-  await steps[1].action.run();
+  assert.equal(steps[1].action, undefined); env.s.selection = { ...at, text: '일정 부분 기여한 것으로 보인다' }; env.selHas = text => env.s.selection.text.includes(text);
   assert.equal(steps[1].until(), true);
   assert.equal(steps[2].title, 'AI에게 맡기기');
   assert.equal(steps[1].id, 'report/custom/custom-select');
@@ -85,8 +85,8 @@ test('custom 모듈은 직접 클릭·글 선택·타이핑을 연결하고 전�
   const steps = buildComposedTutorialSteps(course(modules), env);
   assert.equal(steps[1].click(), button); assert.equal(button.clicked, 0);
   assert.equal(steps[2].motionEnabled, false);
-  await steps[2].action.run(); assert.equal(input.value, '입력 예시'); assert.equal(steps[2].until(), true);
-  await steps[3].action.run(); assert.equal(steps[3].until(), true); assert.equal(button.clicked, 0);
+  assert.equal(steps[2].action.exampleText, '입력 예시'); await steps[2].action.run(); assert.equal(input.value, '입력 예시'); assert.equal(steps[2].until(), true);
+  assert.equal(steps[3].action, undefined); env.s.selection = { ...env.locate('문서의 글'), text: '문서의 글' }; assert.equal(steps[3].until(), true); assert.equal(button.clicked, 0);
 });
 
 test('효과를 단계별로 끄고 모듈 전체에서 끌 수 있으며 단계 편집 뒤에도 ID로 이어한다', () => {

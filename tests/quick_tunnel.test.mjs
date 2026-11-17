@@ -78,9 +78,11 @@ test('환경 변수로 고정이면 바꾸지 않고, 웹 재시작이 안 되�
   assert.equal(plain.saved, 'https://x.trycloudflare.com');
 });
 
-test('start-tunnel.bat 은 CRLF 이고 서버를 먼저 켠 뒤 실행기를 부른다', () => {
-  const bat = fs.readFileSync(fileURLToPath(new URL('../start-tunnel.bat', import.meta.url)), 'utf8');
-  assert.ok(!/[^\r]\n/.test(bat));
-  assert.match(bat, /start-server\.bat/);
-  assert.match(bat, /node scripts\\quick-tunnel\.mjs %\*/);
+// 2026-11-17: start-tunnel.bat·start-server.bat 을 지웠다(사용자 결정 — Windows 앱의 [함께 쓰기 → 외부 접속 열기]가 이 실행기를 IPC 로 띄우고,
+// 개발 폴더는 npm run tunnel·npm start). 그 bat 의 CRLF·호출 순서를 보던 시험은 지우고, 앱 쪽 경로는 tests/desktop_windows.test.mjs 가 본다.
+test('안내 글은 지운 bat(start-tunnel·start-server) 대신 npm 명령을 알린다', () => {
+  assert.equal(fs.existsSync(fileURLToPath(new URL('../start-tunnel.bat', import.meta.url))), false);
+  const source = fs.readFileSync(fileURLToPath(new URL('../scripts/quick-tunnel.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(source, /start-(tunnel|server)\.bat/);
+  assert.match(source, /npm start/);
 });

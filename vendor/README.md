@@ -7,7 +7,7 @@
 - 처음 출처: https://github.com/edwardkim/rhwp (MIT, Edward Kim) · 태그 `v0.8.7` · 커밋 `1a76570e833917d15817415a53c09ad61ab3203f`
 - 2026-10-22 에 한 번 내려받아 고정했고(그때는 GitHub 원격을 지웠다 — 0.9.0 병합 때 다시 붙임), **2026-10-27 부터 우리가 직접 고친다**(사용자 결정 — rhwp 를 독자적으로 개선).
 - 받은 경로(sparse checkout): `rhwp-studio/`(편집기 TS 소스), `npm/editor/`(호스트 SDK), `npm/hwpctrl-ocx/`(hwpctrl 플러그인), `assets/fonts/`(웹 글꼴), `src/`·`crates/`(Rust 엔진 소스), 루트 파일들(LICENSE, THIRD_PARTY_LICENSES.md, Cargo.* 등). 빌드에 필요해 2026-10-27 에 같은 커밋에서 `saved/blank2010.hwp`(새 문서 틀, `include_bytes!`)를 더 받았다.
-- `pkg/` — WASM 엔진 빌드 결과(rhwp.js, rhwp_bg.wasm, *.d.ts, `cowork-engine.json` = 빌드 시각·프로필·고친 파일). `npm run build:engine` 이 만든다. 원본 저장소의 .gitignore 대상이라 git 에는 안 보인다. 원래 npm 배포본 `@rhwp/core@0.8.7` 의 pkg 는 `backups/rhwp_pkg_npm_0.8.7_2026-10-27/`.
+- `pkg/` — WASM 엔진 빌드 결과(rhwp.js, rhwp_bg.wasm, *.d.ts, `cowork-engine.json` = 빌드 시각·프로필·고친 파일). `npm run build:engine` 이 만든다. 원본 저장소의 .gitignore 대상이라 git 에는 안 보인다. 원래 npm 배포본 `@rhwp/core@0.8.7` 의 pkg 는 `old/backups/rhwp_pkg_npm_0.8.7_2026-10-27/`.
 - `rhwp-studio/node_modules/` — 빌드 도구(vite, typescript 등). `rhwp-studio/package-lock.json` 그대로 `npm ci` 로 설치.
 
 ### 고치는 법

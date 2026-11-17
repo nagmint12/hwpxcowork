@@ -19,7 +19,7 @@ const moduleSource = source
   .replace("import { AdminCreditsPanel } from './admin-credits.js';", 'const AdminCreditsPanel = {};');
 const ui = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}`);
 const view = admin => ({ kinds: [{ id: 'codex', label: 'Codex (ChatGPT 로그인)', efforts: ['low', 'high'],
-  applies: 'request', start: 'start-codex-agent.bat', models: [{ id: 'judge-model', efforts: ['low', 'high'] }],
+  applies: 'request', start: 'Windows 앱 [AI → 실행기 관리…] · npm run worker -- --provider codex', models: [{ id: 'judge-model', efforts: ['low', 'high'] }],
   ...(admin ? { canSelectModel: true } : {}) }], settings: { codex: { model: 'judge-model', effort: 'high', ...(admin ? { modelSelection: 'auto' } : {}) } } });
 
 async function renderPanel(response) {

@@ -36,6 +36,7 @@ export class LayoutChecker {
    * 이미 돌고 있는 검사는 끊지 않고 끝나기를 기다린다(검사 한도 timeoutMs). 줄에서 estimateWaitMs 를 넘게 기다리면 빼고 { ok:false, reason:'busy' }.
    * 도는 중에 estimateTimeoutMs 를 넘으면 검사와 같이 작업자를 끝낸다(다음 작업 때 다시 띄움) → { ok:false, reason:'timeout' }.
    * docs: [{ bytes: Uint8Array } | { file }] → Promise<{ ok, results?: [{ pages, sections, lastFill, fills }], reason?, ms? }> (던지지 않는다)
+   *   문서마다 ops(구조 op 묶음 — 작업자가 반영한 뒤 잰다, 실패하면 그 결과는 { error })·covered(가려진 쪽도 잰다)를 더 줄 수 있다(server/layout-worker.js)
    * sparseBelow: 거의 빈 쪽 문턱(2026-11-17 작업 Q — server/page-estimate.js SPARSE_FILL). 주면 마지막 쪽이 아닌 글 적은 쪽의 찬 비율(fills)도 잰다
    */
   estimate(docs, { waitMs = this.opts.estimateWaitMs, timeoutMs = this.opts.estimateTimeoutMs, sparseBelow = null } = {}) {
@@ -61,7 +62,8 @@ export class LayoutChecker {
     this.running = { n, job, w, timer: setTimeout(() => this._timeout(n), job.timeoutMs) };
     this.running.timer.unref?.();
     // 바이트는 복사해 보낸다(넘기면 — transfer — 호출자의 버퍼가 비게 된다)
-    w.postMessage({ job: n, kind: 'pages', sparseBelow: job.sparseBelow ?? null, docs: job.docs.map((d) => (d.file ? { file: d.file } : { bytes: d.bytes })) });
+    // ops·covered(2026-11-17 server/page-estimate.js — 큰 문서의 구조 op 반영·가려진 쪽)는 그대로 넘긴다
+    w.postMessage({ job: n, kind: 'pages', sparseBelow: job.sparseBelow ?? null, docs: job.docs.map((d) => ({ ...(d.file ? { file: d.file } : { bytes: d.bytes }), ...(d.ops ? { ops: d.ops } : {}), ...(d.covered ? { covered: true } : {}) })) });
   }
 
   _finishEstimate(job, m) {

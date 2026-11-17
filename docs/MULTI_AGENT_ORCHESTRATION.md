@@ -4,7 +4,7 @@
 
 ## 실행 준비
 
-**Codex는 `start-codex-agent.bat` 하나로 일반 요청과 협업 큐를 함께 처리합니다.** `start-codex-agent.bat --check`로 로그인과 두 큐의 준비 상태를 확인할 수 있습니다. Node 명령으로는 `npm run agent:codex`입니다. 프로필에서 Codex 지휘자를 우선 선택하고, 협업 사용이 꺼져 있으면 켤 때까지 기다립니다. Claude Code 작업자는 기존 채널 연결을 유지합니다.
+**2026-11-17부터 Codex 실행기(`npm run agent:codex` = `scripts/codex-agent.mjs`)는 기본으로 일반 요청만 처리합니다.** 협업 큐까지 함께 처리하려면 환경 변수 `HWPX_COWORK_ORCHESTRATION=1`을 주고 실행합니다(사용자 결정: AI 협업 메뉴는 나중에 개발한다 — 켜 두면 협업 설정이 꺼져 있어도 5초마다 프로필 조회·상태 보고를 보냈다). 켰을 때 `npm run agent:codex -- --check`로 로그인과 두 큐의 준비 상태를 확인할 수 있습니다(예전 `start-codex-agent.bat`은 같은 날 지웠습니다. Windows 앱의 [AI → 실행기 관리…]가 띄우는 실행기는 일반 요청용 `scripts/ai-worker.mjs`라 협업 큐를 처리하지 않습니다). 프로필에서 Codex 지휘자를 우선 선택하고, 협업 사용이 꺼져 있으면 켤 때까지 기다립니다. 협업 전용으로 띄우려면 아래 `npm run orchestrator`를 씁니다. Claude Code 작업자는 기존 채널 연결을 유지합니다.
 
 Node.js와 프로젝트 의존성을 준비합니다. 실행기를 배포 ZIP으로 받은 경우 해제한 폴더에서 `npm install`을 실행합니다. PowerShell에서 본인의 서버 주소와 사용자 토큰을 설정합니다.
 
@@ -39,11 +39,11 @@ npm run orchestrator -- --agent-id api-worker --provider openai --gateway baze -
 
 Google CLI 실행기는 현재 문서 문맥과 글이 추출된 첨부를 지원합니다. 이미지·스캔 PDF 첨부는 무시하지 않고 실패로 알립니다. CLI 자식 프로세스에는 HWPX 토큰과 API 키를 넘기지 않으며 문서 내용은 표준 입력으로 전달합니다. Google 계정의 사용 한도와 기관 정책에 따라 실제 요청이 제한될 수 있습니다.
 
-## BAT 실행
+## 일반 요청 실행기(2026-11-17 — BAT 대신)
 
-`start-codex-agent.bat`는 일반 문단 검토·다듬기와 Codex 협업 작업을 함께 처리합니다. `start-gemini-agent.bat`, `start-antigravity-agent.bat`는 일반 AI 작업 대기열을 처리하며, Google CLI의 협업 참여는 위 `npm run orchestrator` 명령으로 실행합니다.
+예전 실행기 BAT(`start-codex-agent.bat`·`start-gemini-agent.bat`·`start-antigravity-agent.bat`·`start-google-agent.bat`)은 2026-11-17에 지웠습니다. 일반 AI 요청은 Windows 앱의 [AI → 실행기 관리…](Codex·Claude Code·Gemini CLI·Antigravity) 또는 `npm run worker -- --provider codex|claude-code|gemini-cli|antigravity`로 처리합니다. Codex 협업 작업은 `npm run agent:codex`를 `HWPX_COWORK_ORCHESTRATION=1`로 띄울 때만 함께 처리하고, Google CLI의 협업 참여는 위 `npm run orchestrator` 명령으로 실행합니다.
 
-Google CLI BAT 두 개는 `start-google-agent.bat`를 공통 실행기로 사용하므로 같은 폴더에 보관합니다. 최초 HWPX 토큰 설정은 `setx HWPX_COWORK_TOKEN "본인-개인-토큰"`이며 원격 서버는 `--url`로 지정합니다.
+최초 HWPX 토큰 설정은 `setx HWPX_COWORK_TOKEN "본인-개인-토큰"`이며 원격 서버는 `--url`로 지정합니다. 실행기의 모델 연결은 새 MCP 연결(v2)이 기본이고, 협업 큐 연결은 실행기가 예전 연결을 밝혀 그대로 씁니다.
 
 공식 CLI 문서: [Gemini CLI headless](https://geminicli.com/docs/cli/headless/), [Antigravity CLI headless](https://antigravity.google/docs/cli/headless/).
 

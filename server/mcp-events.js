@@ -29,6 +29,16 @@ export const TUTORIAL_EVENT_DEFINITION = {
   ...EVENT_DEFINITION, name: TUTORIAL_EVENT_NAME,
   description: '관리자 공유 ChatGPT가 처리할 사용자들의 튜토리얼 AI 요청. 일반 문서·준비된 예시·튜토리얼 6은 제외한다. get_request → start_request → 제안/의견 → complete_request 순서로 처리하고 본문 반영은 사람이 결정한다.',
 };
+// 새 MCP 연결(작업 도구 넷 — server/mcp2.js, 2026-11-17 부터 서버 기본)에서 보이는 설명: 같은 이벤트·같은 알림 내용이고 처리 순서만 그 연결의 도구 이름으로 적는다
+// (예전 이름 get_request·start_request·complete_request 는 새 연결에 없다). 구독·전달은 연결 종류와 상관없다
+export const EVENT_DEFINITION_V2 = {
+  ...EVENT_DEFINITION,
+  description: '내가 HWPX 웹에서 대기열로 보낸 새 AI 요청 또는 다시 요청한 작업. 자동 처리는 이 이벤트를 구독한다. 도착하면 task(doc_id=document_id, request_id)로 맡는다(요청 내용이 함께 온다) → 필요할 때만 read → 첨부 원본은 get_attachment_file → Work 자체 도구로 처리 → 결과 파일은 save_result_file → edit(ops, done=공유 요약)(쓰기 없이 끝내면 finish). 본문 반영은 사람이 결정한다. 본인 요청만 전달된다.',
+};
+export const TUTORIAL_EVENT_DEFINITION_V2 = {
+  ...TUTORIAL_EVENT_DEFINITION,
+  description: '관리자 공유 ChatGPT가 처리할 사용자들의 튜토리얼 AI 요청. 일반 문서·준비된 예시·튜토리얼 6은 제외한다. task(doc_id=document_id, request_id) → 필요할 때만 read → edit(ops, done=요약) 순서로 처리하고 본문 반영은 사람이 결정한다.',
+};
 
 export function createMcpEvents({ config, service, hub, oauth, now = () => Date.now(), webhookFetch = secureWebhookFetch, autoStart = true, log = message => console.error(message) }) {
   const file = path.join(config.dataDir, 'mcp-events.json');
@@ -244,7 +254,12 @@ export function createMcpEvents({ config, service, hub, oauth, now = () => Date.
   if (autoStart) { timer = setInterval(kick, 1000); timer.unref?.(); kick(); }
   return {
     enabled,
-    list(user) { if (!enabled()) throw err(-32026, 'MCP Events is disabled', { feature: 'events' }); return { events: [EVENT_DEFINITION, ...(service.tutorialChatGPTUser?.(user) ? [TUTORIAL_EVENT_DEFINITION] : [])] }; },
+    // surface 'v2' = 새 MCP 연결로 물었다(설명의 처리 순서만 그 연결의 도구 이름으로) — server/mcp-modern.js 가 요청마다 넘긴다
+    list(user, { surface = null } = {}) {
+      if (!enabled()) throw err(-32026, 'MCP Events is disabled', { feature: 'events' });
+      const v2 = surface === 'v2';
+      return { events: [v2 ? EVENT_DEFINITION_V2 : EVENT_DEFINITION, ...(service.tutorialChatGPTUser?.(user) ? [v2 ? TUTORIAL_EVENT_DEFINITION_V2 : TUTORIAL_EVENT_DEFINITION] : [])] };
+    },
     hasTutorialSubscriber() { return Object.values(data().subscriptions).some(sub => sub.name === TUTORIAL_EVENT_NAME && !sub.filters.document_id && validSubscription(sub)); },
     tutorialRequestStatus(docId, rid, attempt) {
       const subs = Object.values(data().subscriptions).filter(sub => sub.name === TUTORIAL_EVENT_NAME && validSubscription(sub) && (!sub.filters.document_id || sub.filters.document_id === docId));

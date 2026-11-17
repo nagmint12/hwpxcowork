@@ -5,7 +5,7 @@
       "args": [
         "<repo>/server/mcp-stdio.js",
         "--channel",
-        "--lean",
+        "--v2",
         "--url",
         "http://localhost:8787/mcp",
         "--files-dir",

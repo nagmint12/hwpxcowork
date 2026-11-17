@@ -114,7 +114,9 @@ class ApiWorker {
   say(line) { try { this.log(line); } catch { /* 로그 실패는 작업과 무관 */ } }
   /** 로그·실패 문구에 쓸 처리자 이름(Codex·Claude Code 실행기가 같은 MCP 경로를 쓴다 — 2026-11-13) */
   who() { const a = String(this.agent || ''); return /claude/i.test(a) ? 'Claude Code' : /codex/i.test(a) ? 'Codex' : (a || 'AI'); }
-  headers() { return { Authorization: `Bearer ${this.token}`, 'X-Hwpx-Agent-Session': this.session }; }
+  // 실행기 자신의 MCP 연결(대기열 맡기·선점 갱신·완료 — claim_next_request·get_request·start_request·complete_request)은 예전 연결 도구를 쓴다.
+  // 서버 기본 연결이 새 연결(v2)로 바뀐 뒤에도(2026-11-17) 그 도구가 있게 X-Hwpx-Mcp: 1 로 예전 연결을 밝힌다(모델이 쓰는 연결은 따로 — 브리지·API 도구).
+  headers() { return { Authorization: `Bearer ${this.token}`, 'X-Hwpx-Agent-Session': this.session, 'X-Hwpx-Mcp': '1' }; }
   stats() { return { ...this.statsValue, active: this.active ? { docId: this.active.request.docId, rid: this.active.request.rid } : null }; }
 
   start() {
@@ -295,6 +297,58 @@ class ApiWorker {
     return brief;
   }
 
+  /**
+   * API 모델(server/ai.js AiProposer)을 새 MCP 연결(v2)로 돌리는가 — 생성 인자 ai.mcp 'v2'(scripts/ai-worker.mjs --mcp 2, 기본)일 때 AiProposer.mcpSurface 가 'v2'.
+   * CLI 실행기(runMcp)는 따로 고른다(job.surface)
+   */
+  get apiV2() { return typeof this.ai.runMcp !== 'function' && this.ai.mcpSurface === 'v2' && typeof this.ai.runV2 === 'function'; }
+
+  /** 요청의 선점 상태만(REST …/claim — server/mcp2/service.js agentClaimState, 문서를 읽지 않는다) → { attempt, status, mine, expired }. 시도가 바뀌었으면 ATTEMPT_CHANGED */
+  async claimState(request, signal) {
+    const res = await this.fetch(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/claim`, { headers: this.headers(), signal, redirect: 'error' });
+    if (res.status === 404) throw Object.assign(new Error('요청을 찾지 못했습니다'), { code: 'REQUEST_CLOSED' });
+    if (!res.ok) throw Object.assign(new Error('요청 상태를 확인하지 못했습니다'), { code: 'TOOL_FAILED' });
+    const state = await res.json();
+    this.assertAttempt(request, state);
+    return state;
+  }
+
+  /**
+   * 새 MCP 연결(v2)의 API 모델 도구(server/api-mcp-tools.js surface 'v2'): 이 요청 동안만 여는 두 번째 MCP 연결 — 머리글 X-Hwpx-Mcp: 2·X-Hwpx-Tools: core,
+   * 같은 실행기 세션(X-Hwpx-Agent-Session)이라 선점이 같다. 실행기 자신의 연결(claim_next_request·get_request·start_request·complete_request)은 예전 연결 그대로.
+   * 도구를 부르기 직전 확인과 끝내는 호출 뒤 요청 상태는 선점 상태 REST(claimState — Codex 실행기의 새 연결과 같다. get_request 는 큰 문서에서 쓰기마다 2초쯤 걸린다)
+   */
+  async apiToolsV2(request, signal) {
+    const live = (s) => AbortSignal.any([s || signal, this.shutdown.signal]);
+    const url = new URL(this.url); url.searchParams.set('agent', this.agent);
+    const client = new Client({ name: this.clientName, version: '0.4.1' }, { capabilities: {} });
+    const transport = new StreamableHTTPClientTransport(url, { fetch: this.fetch, requestInit: { headers: { ...this.headers(), 'X-Hwpx-Mcp': '2', 'X-Hwpx-Tools': 'core' }, redirect: 'error' } });
+    await client.connect(transport, { timeout: this.timing.connectTimeoutMs, signal: live(signal) });
+    try {
+      const context = await createApiToolContext({
+        surface: 'v2', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
+        listTools: async () => { const tools = []; let cursor; do { const page = await client.listTools(cursor ? { cursor } : undefined, { signal: live(signal) }); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor); return tools; },
+        callTool: (name, args, toolSignal) => client.callTool({ name, arguments: args }, undefined, { timeout: this.timing.callTimeoutMs, signal: live(toolSignal) }),
+        assertCurrent: async (toolSignal) => {
+          const state = await this.claimState(request, live(toolSignal));
+          if (state.status !== 'working') throw Object.assign(stopError(), { code: 'REQUEST_CLOSED' });
+          if (state.mine !== true || state.expired !== false) throw Object.assign(stopError(), { code: 'CLAIMED' });
+        },
+        requestStatus: (toolSignal) => this.claimState(request, live(toolSignal)),
+        // OpenAI hosted 작업공간이 만든 파일을 요청 결과 첨부로(예전 연결과 같은 REST — 선점 세션·시도 검사)
+        uploadFile: async ({ bytes, name }, toolSignal) => {
+          if (/\.(png|jpe?g|gif|bmp)$/i.test(name)) validateImage(bytes);
+          const files = new URL(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/files`);
+          files.searchParams.set('attempt', String(request.attempt ?? 1)); files.searchParams.set('agent', this.agent);
+          const response = await this.fetch(files, { method: 'POST', body: bytes, headers: { ...this.headers(), 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) }, redirect: 'error', signal: live(toolSignal) });
+          if (!response.ok) throw Object.assign(new Error('API 결과 파일 저장 실패'), { code: 'API_FILE_SAVE' });
+          return response.json();
+        },
+      });
+      return { context, close: () => client.close().catch(() => {}) };
+    } catch (e) { await client.close().catch(() => {}); throw e; }
+  }
+
   assertAttempt(request, current) {
     if (Number(current.attempt ?? 1) !== Number(request.attempt ?? 1)) throw Object.assign(stopError(), { code: 'ATTEMPT_CHANGED' });
   }
@@ -307,7 +361,7 @@ class ApiWorker {
   }
 
   async renew(request, signal) {
-    if (typeof this.ai.runMcp === 'function') {
+    if (typeof this.ai.runMcp === 'function' || this.apiV2) {
       const state = await this.callJson('get_request', { doc_id: request.docId, request_id: request.rid }, signal);
       this.assertAttempt(request, state);
       // Codex가 MCP로 완료한 직후 CLI가 종료되기까지의 짧은 구간에는 lease를 갱신하지 않는다.
@@ -378,6 +432,23 @@ class ApiWorker {
         this.say(finished.status === 'done' ? `${this.who()} MCP 작업을 완료했습니다. 결과는 편집기에서 확인할 수 있습니다.` : `${this.who()}가 수행하지 못한 사유를 MCP에 등록했습니다.`);
         return;
       }
+      if (this.apiV2) {
+        // 새 MCP 연결(v2 — 2026-11-17): API 모델(OpenAI·Claude·Gemini)도 Codex·Claude Code 실행기처럼 요청 내용(brief)을 첫 입력에 받고 작업 도구(read·edit·finish)로 처리한다.
+        // 결과 저장과 완료·실패는 모델의 edit(done)·finish 가 서버에서 한다 — 실행기는 완료를 다시 등록하지 않고 사용량·모델만 덧붙인다(persistNativeUsage)
+        this.say('API 모델이 작업 도구(read·edit·finish)로 필요한 범위만 읽고 결과를 직접 등록합니다.');
+        const brief = await this.brief(request, signal);
+        const tools = await this.apiToolsV2(request, signal);
+        try { nativeResult = await abortable(this.ai.runV2({ brief }, { signal, toolContext: tools.context }), signal); }
+        finally { await tools.close(); }
+        this.reportUsage(nativeResult?.usage, nativeResult?.execution);
+        const finished = await this.callJson('get_request', { doc_id: request.docId, request_id: request.rid }, signal);
+        this.assertAttempt(request, finished);
+        if (!['done', 'failed'].includes(finished.status)) throw Object.assign(new Error('MCP 완료 등록이 없습니다.'), { code: 'API_MCP_INCOMPLETE' });
+        await this.persistNativeUsage(request, finished, nativeResult, signal);
+        this.statsValue[finished.status === 'done' ? 'completed' : 'failed']++;
+        this.say(finished.status === 'done' ? '내 AI 작업 한 건을 완료했습니다. 결과는 편집기에서 확인할 수 있습니다.' : 'AI가 수행하지 못한 사유를 등록했습니다.');
+        return;
+      }
       const previous = await this.previous(current, signal);
       const attachments = this.ai.supportsTools ? current.attachments || [] : await this.attachments(current, signal);
       const toolContext = this.ai.supportsTools ? await createApiToolContext({
@@ -411,8 +482,8 @@ class ApiWorker {
     } catch (e) {
       debugRecord('worker.error', debugError(e), { stage: 'execute-save-complete' });
       this.reportModelSelection(e);
-      // 완료 응답 직후 프로세스가 끊겼더라도 서버에 등록된 성공을 실패로 바꾸지 않는다.
-      if (typeof this.ai.runMcp === 'function' && !this.stopped) {
+      // 완료 응답 직후 프로세스가 끊겼더라도 서버에 등록된 성공을 실패로 바꾸지 않는다(모델이 완료를 직접 등록하는 실행기 — CLI 실행기·API 새 연결).
+      if ((typeof this.ai.runMcp === 'function' || this.apiV2) && !this.stopped) {
         try {
           const final = await this.callJson('get_request', { doc_id: request.docId, request_id: request.rid });
           this.assertAttempt(request, final);
@@ -427,6 +498,7 @@ class ApiWorker {
         const message = ['NO_RESULTS', 'API_RESULT_INCOMPLETE'].includes(e?.code) ? '실제로 저장한 결과가 없어 작업을 완료하지 않았습니다. 변경이 불필요한 검토라면 확인한 범위와 사유를 명시해야 합니다.'
           : e?.code === 'API_RESULT_FORMAT' ? 'AI의 최종 응답이 정해진 JSON 형식과 맞지 않습니다. 형식 재요청 후에도 확인하지 못했습니다. 저장된 부분 결과를 확인한 뒤 다시 요청해 주세요.'
           : e?.code === 'CODEX_MCP_INCOMPLETE' ? `${this.who()}가 서버에 작업 결과의 완료·실패를 등록하지 않았습니다. 저장된 부분 결과를 확인한 뒤 다시 요청해 주세요.`
+          : e?.code === 'API_MCP_INCOMPLETE' ? 'AI가 요청을 끝내는 도구(edit 의 done 또는 finish)를 부르지 않고 멈췄습니다. 저장된 부분 결과를 확인한 뒤 다시 요청해 주세요.'
           : e?.code?.startsWith('EDIT_') ? String(e.message).slice(0, 450)
           : e?.code?.startsWith('API_FILE_') ?'API에서 생성한 파일을 회수·저장하지 못했습니다. 게이트웨이의 파일 다운로드 지원을 확인해 주세요.'
           : e?.code === 'SERVER_UPDATE_REQUIRED' ? '개인 AI 자동 처리에는 최신 중앙 서버가 필요합니다.'

@@ -76,9 +76,17 @@ function compactSaved(rows, summaries = []) {
 function compactReports(reports) {
   const n = (v) => Number(v || 0).toLocaleString('ko-KR');
   // removed = 본문으로 옮기고 지운 글상자·선, removed_rest = 옮기지 못해 남았다가 함께 지운 개체(remove_rest·합친 delete_objects), kept = 그래도 남긴 개체
+  // 2026-11-17 안전장치(engine/flow.js): backgrounds = 쪽 배경 그림을 지웠는지·글 뒤로 보냈는지, warning = 옮긴 글 영역에 겹치는 글 앞 개체(글을 가릴 수 있다),
+  // numbers = 숫자 토큰 보존 검사를 지난 수(붙거나 갈라지면 제안이 만들어지지 않는다)
+  const bgText = (b) => (!b ? null : [b.removed ? `${n(b.removed)}장 지움` : '', b.behind ? `${n(b.behind)}장 글 뒤로${b.content ? `(내용으로 보여 지우지 않음 ${n(b.content)}장)` : ''}` : ''].filter(Boolean).join(' · ') || null);
+  const coverText = (c) => (!c?.count ? null : `글 앞 개체 ${n(c.count)}개가 옮긴 글 영역에 겹친다(${c.items.map((x) => `${x.ref} ${x.name} ${x.mm}mm`).join(' · ')}${c.count > c.items.length ? ' …' : ''}) — 글을 가릴 수 있다: remove_rest 로 지우거나, 쪽 배경이면 background:'behind'`);
   return (reports || []).map((r) => dropEmpty({ tables: r.tables, paragraphs: r.paragraphs, removed: r.removed, removed_rest: r.removedRest || null, kept: r.kept || null,
+    backgrounds: bgText(r.backgrounds), warning: coverText(r.covering),
     dropped: r.dropped.length ? { count: r.dropped.length, why: [...new Set(r.dropped.map((d) => d.why))].join('·'), sample: r.dropped.slice(0, 5).map((d) => clip(d.text, 20)) } : null,
+    // 쪽을 넘어 이은 표(join_pages 기본 true — 되풀이 머리행은 dropped 의 '되풀이 머리행'으로 센다)
+    joined: r.tables.some((t) => t.pages > 1) ? `쪽을 넘는 표 ${r.tables.filter((t) => t.pages > 1).length}개를 한 표로 이었다(쪽마다 따로는 join_pages:false)` : null,
     sections: r.sections[0] !== r.sections[1] ? `${r.sections[0]} → ${r.sections[1]}` : null, margins_mm: r.margins,
+    numbers: r.text.numbers != null ? `숫자 ${n(r.text.numbers)}개 그대로` : null,
     text: `옮긴 글자 ${n(r.text.moved)} + 버린 글자 ${n(r.text.dropped)}${r.text.removedWithObjects ? ` + 남은 개체와 함께 지운 글자 ${n(r.text.removedWithObjects)}` : ''} = 원문 글상자·본문 글자 ${n(r.text.source)}(빠진 글자 ${r.text.lost})` }));
 }
 

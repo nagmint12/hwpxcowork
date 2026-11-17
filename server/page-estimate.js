@@ -6,6 +6,8 @@
 //   · 사본 흉내는 사본 전용 서비스(Object.create — store·hub·attach·activity 를 막은 것)로 한다: 실제 meta·문서·제안 상태·방송·저장·작업 기록은 바뀌지 않는다
 //   · 이벤트 루프: 사본 만들기·반영 흉내는 서버 스레드(동기 엔진)라 문서 크기·대기 제안 수·시간 한도를 두고, 넘으면 '모두 반영하면'을 빼고 이유를 한 줄로.
 //     조판은 작업자 스레드(server/layout-check.js estimate — 기다리는 편집 뒤 검사보다 먼저, 바쁘면 이유를 적고 뺀다)
+//   · 문서가 한도보다 커도 개체 → 본문(결과가 훨씬 작아지는 구조 op)이 들면 사본 흉내 대신 작업자가 문서 바이트에 구조 op 만 반영해 어림한다(_structureOnly —
+//     2026-11-17: 24쪽 PDF 변환 문서 XML 16MB 에서 쪽 수 어림을 건너뛰어 24→48쪽을 모른 채 완료했다). 개체 → 본문 결과는 가려진 쪽(covered)도 잰다
 // 쪽 수는 편집기(rhwp) 조판이라 한/글과 다를 수 있다(알려진 차이 vendor/README.md) — 응답에 basis 로 적는다.
 // 끄기: 환경 HWPX_COWORK_PAGE_ESTIMATE=0 또는 config.verify.pages === false. 한도: config.verify.pages = { maxChars, maxPending, budgetMs, waitMs }
 import { HwpxDoc, EngineError } from '../engine/doc.js';
@@ -27,6 +29,8 @@ const FULL_NOTE = '마지막 쪽이 거의 찼다 — 한/글에서는 한 쪽 �
 // 글이 적은 쪽만 재므로(server/layout-worker.js SPARSE_TEXT) 글자가 아주 작은 쪽은 놓칠 수 있다
 const SPARSE_FILL = 0.15;
 const SPARSE_NOTE = (list) => `${list.map((x) => `${x.page}쪽`).join('·')}이 거의 비었다(sparse — 앞 쪽에서 넘친 몇 줄). 분량을 줄이는 일이면 그 몇 줄을 줄여 한 쪽을 줄일 수 있다`;
+// 가려진 쪽(2026-11-17 — 24쪽 PDF 변환 문서: 개체 → 본문 뒤 쪽 배경 그림이 글 앞에 남아 16쪽의 본문 글이 그 그림 밑에 그려졌다). 작업자가 개체 → 본문 결과만 잰다
+const COVERED_NOTE = (list, total) => `${list.join('·')}쪽${total > list.length ? ` 등 ${total}쪽` : ''}에서 글 앞 그림이 본문 글을 덮는다(covered) — 그 그림을 지우거나(remove_rest) 글 뒤로(objects_to_body background:'behind') 보낸다`;
 const isolated = (e) => e instanceof ServiceError || e instanceof EngineError;
 // 문서를 건드렸는가(service.js docSig·sameDoc 과 같은 생각 — 같은 글 객체면 비교가 빠르다)
 const docSig = (doc) => [doc.header?.xml, ...doc.sections.map((s) => s.xml)];
@@ -81,14 +85,19 @@ export const pageEstimateMethods = {
         const pending = r ? MT.requestItems(this._reqProposals(meta, r)).filter((x) => x.state === 'open' && x.gid == null).flatMap((x) => x.list.filter((p) => p.status === 'pending')).length
           : meta.proposals.filter((p) => pids.includes(p.pid) && p.status === 'pending').length;
         const want = dry || pending > 0;
-        const tooBig = chars > lim.maxChars ? `문서가 커서(XML ${Math.round(chars / 1e4) / 100}MB > ${Math.round(lim.maxChars / 1e4) / 100}MB) 반영 흉내를 하지 않았다` : pending > lim.maxPending ? `대기 제안이 많아(${pending} > ${lim.maxPending}) 반영 흉내를 하지 않았다` : null;
+        const big = chars > lim.maxChars ? `문서가 커서(XML ${Math.round(chars / 1e4) / 100}MB > ${Math.round(lim.maxChars / 1e4) / 100}MB)` : null;
+        const tooBig = big ? `${big} 반영 흉내를 하지 않았다` : pending > lim.maxPending ? `대기 제안이 많아(${pending} > ${lim.maxPending}) 반영 흉내를 하지 않았다` : null;
+        // 큰 문서의 구조 op(2026-11-17): 개체 → 본문은 글상자 수천 개를 문단·표로 바꿔 결과가 훨씬 작다(24쪽 PDF 변환 문서 XML 16MB → 결과 1MB 남짓).
+        // 사본 흉내(서버 스레드) 대신 조판 작업자가 문서 바이트에 구조 op 만 반영해 어림한다 — 서버 스레드는 직렬화(16MB 45ms)만 한다
+        const structure = big && want && pending <= lim.maxPending ? this._structureOnly(meta, r, { pids, steps }) : null;
         const needNow = !nowCache.has(key);
-        const bytes = (want && !tooBig) || needNow ? docBytesSync(doc) : null;
-        return { key, version: meta.version, pending, want, tooBig, bytes, meta: want && !tooBig ? structuredClone(meta) : null };
+        const bytes = (want && !tooBig) || needNow || structure ? docBytesSync(doc) : null;
+        return { key, version: meta.version, pending, want, tooBig, structure, bytes, meta: want && !tooBig ? structuredClone(meta) : null };
       });
       if (snap.gone) return result({ skipped: snap.gone });
       // ② 사본에서 제안 만들기(dry_run)·반영 흉내 — 서버 스레드, 시간 한도
-      if (snap.want && snap.tooBig) out.note = snap.tooBig;
+      if (snap.want && snap.structure) out.note = `${snap.tooBig.replace(' 반영 흉내를 하지 않았다', '')} 사본 반영 흉내 대신 조판 작업자에서 구조 op(개체 → 본문·쪽 구성)만 반영해 어림했다${snap.structure.others ? ` — 다른 대기 제안·op ${snap.structure.others}건은 넣지 않았다` : ''}`;
+      else if (snap.want && snap.tooBig) out.note = snap.tooBig;
       else if (snap.want) {
         sim = await this._simulateAll(id, { bytes: snap.bytes, meta: snap.meta, rid: rid != null ? Number(rid) : null, pids, steps, author, deadline: t0 + lim.budgetMs });
         if (sim.abort) { out.note = sim.abort; sim.after = null; }
@@ -96,13 +105,17 @@ export const pageEstimateMethods = {
       // ③ 조판(작업자 스레드)
       const docs = []; const cached = nowCache.get(snap.key);
       if (!cached) docs.push({ bytes: snap.bytes });
-      if (sim?.after) docs.push({ bytes: sim.after });
+      // covered: 글 앞 그림이 본문 글을 덮는 쪽을 잰다(개체 → 본문 결과만 — 쪽마다 배치를 읽어 작업자 시간이 든다)
+      if (sim?.after) docs.push({ bytes: sim.after, ...(sim.flow ? { covered: true } : {}) });
+      else if (snap.want && snap.structure) docs.push({ bytes: snap.bytes, ops: snap.structure.lists, covered: true });
       let res = { ok: true, results: [] };
       if (docs.length) res = await layoutChecker().estimate(docs, { waitMs: lim.waitMs, sparseBelow: SPARSE_FILL });
       if (!res.ok) return result({ skipped: BUSY[res.reason] || `쪽 수를 빼었다(${res.error || res.reason})` });
       const now = cached || res.results[0];
       if (!cached) remember(snap.key, now);
-      const after = sim?.after ? res.results[cached ? 0 : 1] : null;
+      let after = docs.length > (cached ? 0 : 1) ? res.results[cached ? 0 : 1] : null;
+      // 구조 op 를 작업자에서 반영하지 못했으면(지문이 바뀐 대기 제안 등) '모두 반영하면'을 뺀다
+      if (after?.error) { out.note = [out.note, `구조 op 를 반영해 보지 못해 모두 반영한 쪽 수를 빼었다(${String(after.error).slice(0, 120)})`].filter(Boolean).join(' · '); after = null; }
       const shown = after || now;
       Object.assign(out, {
         now: now.pages,
@@ -120,6 +133,8 @@ export const pageEstimateMethods = {
       // 거의 빈 쪽(쪽 번호는 1부터 — now·all_applied 와 같은 셈)
       const sparse = (shown.fills || []).filter(([, f]) => f < SPARSE_FILL).map(([p, f]) => ({ page: p + 1, fill: f }));
       if (sparse.length) { out.sparse = sparse.slice(0, 10); out.note = [out.note, SPARSE_NOTE(out.sparse)].filter(Boolean).join(' · '); }
+      // 가려진 쪽(2026-11-17 — 개체 → 본문 결과): 글 앞 그림이 본문 글 위에 그려지는 쪽(쪽 번호 1부터 — 엔진 배치로 잰 값, 그림의 투명도는 보지 않는다)
+      if (after?.covered?.length) { out.covered = after.covered.slice(0, 10).map((p) => p + 1); out.note = [out.note, COVERED_NOTE(out.covered, after.covered.length)].filter(Boolean).join(' · '); }
       return result(out);
     } catch (e) {
       // 어림은 덤이다 — 실패가 쓰기·읽기 응답을 깨지 않게
@@ -129,7 +144,23 @@ export const pageEstimateMethods = {
   },
 
   /**
-   * 사본 흉내(동기 부분 앞에 그림만 비동기로 그린다) → { after(바이트)|null, made, failed, skippedOps, applied, applyFailed, tracked, abort? }.
+   * 큰 문서에서 조판 작업자가 반영해 볼 구조 op 묶음(문서 대기열 안 — meta 만 본다) → { lists: [ops…](반영 차례), others(넣지 않은 대기 제안·op 수) } | null.
+   * 개체 → 본문(objects_to_body)이 들 때만 — 결과가 원문보다 훨씬 작아지는 op 라야 원문 대신 결과로 어림하는 뜻이 있다. 첨부가 드는 op(바탕쪽 그림)는 작업자에 첨부가 없어 하지 않는다.
+   * 고르기는 [모두 반영]·_simulateAll 과 같다: rid 면 그 요청의 열린 항목·비교안 아닌 대기 제안(제안 번호 차례), 아니면 pids 가운데 대기 제안, dry_run 이면 이번 ops 의 구조 단계를 맨 뒤에
+   */
+  _structureOnly(meta, r, { pids = [], steps = null } = {}) {
+    const pend = (r ? MT.requestItems(this._reqProposals(meta, r)).filter((x) => x.state === 'open' && x.gid == null).flatMap((x) => x.list.filter((p) => p.status === 'pending'))
+      : meta.proposals.filter((p) => p.status === 'pending' && p.gid == null && pids.includes(p.pid))).sort((a, b) => a.pid - b.pid);
+    const layout = pend.filter((p) => p.type === 'page_layout' && Array.isArray(p.pageLayout?.ops));
+    const step = Array.isArray(steps) ? steps.find((s) => s.kind === 'structure') : null;
+    const lists = [...layout.map((p) => p.pageLayout.ops), ...(step ? [step.ops] : [])];
+    if (!lists.some((ops) => ops.some((op) => op.op === 'objects_to_body')) || lists.some((ops) => ops.some((op) => op.attachment_id))) return null;
+    const others = pend.length - layout.length + (Array.isArray(steps) ? steps.filter((s) => !['structure', 'memo', 'reply', 'withdraw'].includes(s.kind)).length : 0);
+    return { lists, others };
+  },
+
+  /**
+   * 사본 흉내(동기 부분 앞에 그림만 비동기로 그린다) → { after(바이트)|null, made, failed, skippedOps, applied, applyFailed, tracked, flow(개체 → 본문을 반영함), abort? }.
    * 실제 반영 경로(_proposeCore·_orderedApplier·_applyCore)를 사본 ctx(preview — 되돌리기 사본 파일을 쓰지 않는다)에 그대로 돌린다
    */
   async _simulateAll(id, { bytes, meta, rid, pids, steps, author, deadline, createOnly = false }) {
@@ -206,6 +237,7 @@ export const pageEstimateMethods = {
     let todo = r ? MT.requestItems(sim._reqProposals(meta, r)).filter((x) => x.state === 'open' && x.gid == null).flatMap((x) => x.list.filter((p) => p.status === 'pending'))
       : meta.proposals.filter((p) => p.status === 'pending' && p.gid == null && (made.has(p.pid) || pids.includes(p.pid)));
     todo = todo.sort((a, b) => Number(a.type === 'toc') - Number(b.type === 'toc') || a.pid - b.pid);
+    out.flow = todo.some((p) => p.type === 'page_layout' && (p.pageLayout?.ops || []).some((op) => op.op === 'objects_to_body'));
     out.tracked = doc.changes().length > 0;
     const before = new Set(doc.changes().map((c) => c.id));
     const ordered = sim._orderedApplier(ctx, todo, author);

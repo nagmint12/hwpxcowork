@@ -18,6 +18,10 @@
     "redirectUris": [],
     "allowLoopbackClients": false
   },
+  "mcp": {
+    "defaultSurface": "v2",
+    "_comment": "defaultSurface: 주소·머리글로 밝히지 않은 /mcp 연결(ChatGPT 같은 웹 AI 커넥터 포함)을 여는 방식. v2(기본) = 새 연결(task·read·edit·finish), v1 = 예전 연결로 되돌림. ?v=1·?v=2 로 밝힌 연결은 그대로. 서버 AI 는 ai.mcp(v2 기본, v1 = 예전 연결)"
+  },
   "users": [
     {
       "name": "관리자",
@@ -42,6 +46,7 @@
     "keyFile": "~/.needs/anthropic_api_key.txt",
     "model": "claude-opus-5-5",
     "effort": "medium",
+    "mcp": "v2",
     "maxProposals": 10
   },
   "attachments": {

@@ -4,7 +4,7 @@ setlocal
 rem 내 에이전트(Claude Code 채널 세션) 띄우기 — 두 번 클릭. 웹에서 맡긴 AI 작업을 이 창의 Claude 가 알림으로 받아 처리한다.
 rem = cd agent ^& claude --dangerously-load-development-channels server:hwpx  (덧붙인 인자는 claude 에 그대로 넘김. 예: start-agent.bat --debug)
 rem 개발은 이 PC 서버(localhost)만 쓴다 — agent\.mcp.json 이 다른 주소(예: 예전 ngrok)면 http://localhost:포트/mcp 로 고친다.
-rem 서버가 꺼져 있으면 start-server.bat 로 먼저 켠다. 이 창을 닫으면 에이전트 연결도 끊긴다.
+rem 서버가 꺼져 있으면 새 창에서 node server\launcher.js(= npm start)로 먼저 켠다(2026-11-17 start-server.bat 을 지웠다). 이 창을 닫으면 에이전트 연결도 끊긴다.
 cd /d "%~dp0agent"
 title hwpx-cowork 에이전트 (Claude Code 채널)
 
@@ -49,8 +49,8 @@ if errorlevel 1 (
 
 powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort %LOCALPORT% -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
-  echo 서버가 꺼져 있어 start-server.bat 로 먼저 켭니다...
-  start "" "%~dp0start-server.bat"
+  echo 서버가 꺼져 있어 새 창에서 먼저 켭니다 ^(node server\launcher.js^)...
+  start "hwpx-cowork server" /d "%~dp0." node "%~dp0server\launcher.js"
   powershell -NoProfile -Command "for ($i = 0; $i -lt 60; $i++) { if (Get-NetTCPConnection -LocalPort %LOCALPORT% -State Listen -ErrorAction SilentlyContinue) { exit 0 }; Start-Sleep -Milliseconds 500 }; exit 1"
   if errorlevel 1 echo [주의] 서버가 아직 응답하지 않습니다. 서버 창을 확인하세요.
 )

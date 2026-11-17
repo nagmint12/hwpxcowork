@@ -1,6 +1,6 @@
 // 채널 끝에서 끝까지 시험(docs/V3_SPEC.md §2.2·§2.3·§6.1) — 가짜 서버가 아니라 진짜 서버 + 진짜 브리지 프로세스.
 //   서버: 시험 받침(tests/helpers/server.mjs) — 빈 포트, 서버 AI 끔, 임시 data·config(토큰도 새로).
-//   브리지: node server/mcp-stdio.js --channel --url <base>/mcp --token <a 토큰> 을 SDK StdioClientTransport 로 띄운다
+//   브리지: node server/mcp-stdio.js --channel --v1 --url <base>/mcp --token <a 토큰> 을 SDK StdioClientTransport 로 띄운다(예전 연결 — 2026-11-17 부터 브리지 기본은 새 연결)
 //          (Claude Code 가 하는 것처럼 — 클라이언트 이름 claude-code, 알림은 notifications/claude/channel).
 //   1) 브리지가 붙으면 /api/agent/status 에 a 는 online(채널 세션 1개), b 는 offline
 //   2) b 의 요청(route auto → 대기열)은 a 의 브리지에 오지 않음. a 가 REST 로 요청(route auto) → route 'agent'·delivery.session = 브리지 세션·
@@ -89,9 +89,11 @@ try {
   ws = watchWs(srv.base, srv.tokens.a, docId); await ws.ready;
 
   // ───────── 1. 브리지 띄우기 ─────────
-  section('브리지 프로세스(--channel --url <base>/mcp --token <a>) → SSE 연결');
-  // env 를 주지 않으면 SDK 는 허용 목록 환경 변수만 물려준다(밖의 HWPX_COWORK_TOKEN 등은 안 넘어감) — 토큰은 인자로만
-  const transport = new StdioClientTransport({ command: process.execPath, args: [BRIDGE_CLI, '--channel', '--url', `${srv.base}/mcp`, '--token', srv.tokens.a], stderr: 'pipe', cwd: root });
+  section('브리지 프로세스(--channel --v1 --url <base>/mcp --token <a>) → SSE 연결');
+  // env 를 주지 않으면 SDK 는 허용 목록 환경 변수만 물려준다(밖의 HWPX_COWORK_TOKEN 등은 안 넘어감) — 토큰은 인자로만.
+  // 이 시험은 예전 연결 도구(get_request → start_request → … → complete_request)로 끝에서 끝까지 잰다 — 브리지 기본이 새 연결(2026-11-17)이라 --v1 로 밝힌다
+  // (새 연결의 브리지 흐름은 tests/mcp_v2_flow.test.mjs·tests/mcp_default_v2.test.mjs)
+  const transport = new StdioClientTransport({ command: process.execPath, args: [BRIDGE_CLI, '--channel', '--v1', '--url', `${srv.base}/mcp`, '--token', srv.tokens.a], stderr: 'pipe', cwd: root });
   transport.stderr?.on('data', (s) => { out.stderr += s; });
   const origStart = transport.start.bind(transport);
   transport.start = async () => {

@@ -100,18 +100,46 @@ function render() {
     : u.source === 'diagnostic' ? '서버 점검에서 찾은 주소 후보입니다. 다른 PC에서 실제로 접속되는지 확인한 뒤 공유하세요.'
       : '주소에는 토큰을 넣지 않습니다. AI는 연결할 때 내 토큰으로 인증합니다.');
   const mcp = u.mcpUrl || 'CENTRAL_MCP_URL';
-  // 이 PC 의 서버(localhost)면 시작 파일이 주소를 스스로 맞춘다. 다른 PC 의 서버면 주소를 넘긴다
+  // 이 PC 의 서버(localhost)면 채널 시작 파일(start-agent.bat)이 주소를 스스로 맞춘다. 다른 PC 의 서버면 주소를 넘긴다
   const here = !u.mcpUrl || u.localOnly;
   setText('codex-mcp-command', `codex mcp add hwpx --url ${psQuote(`${mcp}?agent=Codex`)} --bearer-token-env-var HWPX_COWORK_TOKEN`);
   setText('codex-mcp-config', `[mcp_servers.hwpx]\nurl = "${mcp}?agent=Codex"\nbearer_token_env_var = "HWPX_COWORK_TOKEN"`);
-  setText('codex-start', here ? '.\\start-codex-agent.bat' : `.\\start-codex-agent.bat --url ${psQuote(mcp)}`);
+  // 2026-11-17: 실행기 bat(start-codex-agent·start-claude-worker)을 지웠다 — Windows 앱 [AI → 실행기 관리…] 또는 명령줄 npm run worker(기본 새 MCP 연결 --mcp 2).
+  // 주소를 모르면 --url 없이(ai-worker 기본 http://localhost:8787/mcp)
+  const urlArg = u.mcpUrl ? ` --url ${psQuote(mcp)}` : '';
+  setText('codex-start', `npm.cmd run worker -- --provider codex${urlArg}`);
   setText('codex-command', `$env:HWPX_COWORK_URL = ${psQuote(mcp)}\nnpm.cmd run worker -- --provider codex --check\nnpm.cmd run worker -- --provider codex`);
-  setText('claude-start', here ? '.\\start-claude-worker.bat' : `.\\start-claude-worker.bat --url ${psQuote(mcp)}`);
+  setText('claude-start', `npm.cmd run worker -- --provider claude-code${urlArg}`);
   setText('claude-command', `$env:HWPX_COWORK_URL = ${psQuote(mcp)}\nnpm.cmd run worker -- --provider claude-code --check\nnpm.cmd run worker -- --provider claude-code`);
   setText('claude-mcp-command', `claude mcp add --scope user --transport http hwpx ${psQuote(mcp)} --header 'Authorization: Bearer ${TOKEN_REF}'`);
+  // 채널 작업 공간(setup-agent.mjs)은 기본 새 연결(v2), 예전 연결은 --v1 을 붙인다(2026-11-17)
   setText('channel-command', here ? '.\\start-agent.bat'
     : `node scripts/setup-agent.mjs --url ${psQuote(mcp)}\ncd agent\nclaude --dangerously-load-development-channels server:hwpx`);
+  mcpSurfaceText(mcp);
   workerCommand();
+}
+// MCP 기본 연결(/api/config features.mcpDefault — server/mcp2.js mcpSurface, 2026-11-17): 'v2'(기본 — 작업 도구 넷) | 'v1'(관리자가 예전 연결로 되돌린 서버).
+// 주소에 ?v= 를 붙이지 않은 연결은 이 값대로 열린다 — ChatGPT 프롬프트와 '다른 연결 주소'를 그에 맞춘다
+const QUEUE_PROMPT = {
+  v1: 'HWPX 공동 검토에서 내 대기 요청을 처리해 줘. claim_next_request로 가장 오래된 요청부터 하나씩 가져와 지시와 첨부를 읽고, 필요한 수정 제안과 의견을 남긴 뒤 complete_request에 짧은 요약을 적어 완료해 줘. 수정안은 기본 1개, 비교를 요청한 경우에만 여러 안을 만들어 줘. 본문에 직접 반영하지 마. CLAIMED·NOT_OWNER·REQUEST_CLOSED 오류가 나면 그 요청은 건너뛰어 줘. 더 가져올 요청이 없으면 몇 건을 처리했는지 알려 주고 끝내 줘.',
+  v2: 'HWPX 공동 검토에서 내 대기 요청을 처리해 줘. task를 인자 없이 불러 가장 오래된 요청부터 하나씩 맡고, 함께 온 지시·대상·주변 글을 보고 필요한 범위만 read로 읽어 줘. 수정 제안과 의견은 edit 한 번에 모아 남기고 done에 짧은 공유 요약을 적어 완료해 줘. 고칠 것이 없으면 finish에 확인한 범위와 사유를 적어 끝내 줘. 수정안은 기본 1개, 비교를 요청한 경우에만 여러 안을 만들어 줘. 본문에 직접 반영하지 마. CLAIMED·NOT_OWNER·REQUEST_CLOSED·ATTEMPT_CHANGED 오류가 나면 그 요청은 건너뛰어 줘. task가 none을 돌려주면 몇 건을 처리했는지 알려 주고 끝내 줘.',
+};
+function mcpSurfaceText(mcp) {
+  // features 는 있는데 mcpDefault 가 없으면 기본이 예전 연결이던 판의 서버(2026-11-17 전 — web/ 은 재시작 없이 바로 보이므로 그 사이에도 맞게).
+  // /api/config 를 아직 못 읽었으면 HTML 의 글(새 연결)을 그대로 둔다
+  const f = config.features;
+  const legacy = !!f && f.mcpDefault !== 'v2';
+  setText('queue-prompt', legacy ? QUEUE_PROMPT.v1 : QUEUE_PROMPT.v2);
+  setText('mcp-other-title', legacy ? '새 연결 주소 · 고급' : '예전 연결 주소 · 고급');
+  setText('mcp-other-note', legacy
+    ? '이 서버는 위 주소를 예전 연결(claim_next_request·complete_request 등)로 엽니다. 작업 도구 넷(task·read·edit·finish)은 아래 주소로 연결합니다.'
+    : '위 주소는 작업 도구 넷(task·read·edit·finish)으로 연결됩니다. 예전 도구 이름(claim_next_request·propose_changes·complete_request 등)을 쓰는 스크립트·프롬프트만 아래 주소를 씁니다.');
+  const label = document.querySelector('#mcp-other .address-card span');
+  if (label) label.textContent = legacy ? '새 연결 MCP 주소' : '예전 연결 MCP 주소';
+  setText('other-mcp', `${mcp}${mcp.includes('?') ? '&' : '?'}v=${legacy ? '2' : '1'}`);
+  setText('queue-prompt-note', legacy
+    ? '이 서버는 ChatGPT 연결을 예전 도구(claim_next_request·complete_request)로 엽니다.'
+    : '이 주소는 작업 도구 넷(task·read·edit·finish)으로 연결됩니다. 예전 도구(claim_next_request·complete_request)를 쓰던 프롬프트는 위 MCP 서버의 예전 연결 주소로 연결합니다.');
 }
 function workerCommand() {
   if (!$('worker-command')) return;

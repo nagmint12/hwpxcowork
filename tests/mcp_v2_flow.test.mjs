@@ -52,7 +52,9 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
   // op 마다 짧은 꼴(BRIEF — 인자 이름·필수 여부·틀리기 쉬운 규칙만, 자세한 뜻은 read view='guide' id='ops' 의 sig)로 줄여 3,192자. 한도 = 3,192 + 여유 150.
   // 더 늘릴 때는 위와 같은 근거(실험에서 그 꼴이 없어 틀리거나 지침을 더 읽었다)를 댄다
   // 2026-11-17(작업 P): +97자(3,289) — format·insert 의 pageBreakBefore. 실제 Codex Y05 는 쪽 나눔 키가 없어 장 제목을 지우고 다시 넣었다(한도는 그대로)
-  assert.ok(OPS_BRIEF.length < 3350, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
+  // 2026-11-17(objects_to_body 안전장치): +117자(3,429) — 쪽 배경 그림도 지운다는 것·background:'behind'(+29, 실제 24쪽 PDF 변환 문서에서 남긴 배경 그림이 옮긴 글
+  // 16쪽을 덮었다)와 쪽을 넘는 표 잇기·되풀이 머리행을 버린 줄로 알림·join_pages:false(+88, 같은 실행에서 모델이 join_pages:false 로 표 24개를 냈다). 한도 = 3,429 + 여유 40
+  assert.ok(OPS_BRIEF.length < 3470, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
   // 짧은 꼴(BRIEF)이 실제 꼴과 맞는지: 꼴 줄에 적힌 인자만으로 만든 op 가 꼴 검사(zod)를 지난다(2026-11-17 작업 I — 틀린 꼴 한 줄이 중복 제안을 남긴 일이 있다, §10.4 2차 T09)
   const briefExamples = [
     { op: 'replace', at: 's0/p1', find: '가', with: '나', occurrence: 2, style: '바탕글', reason: '까닭' }, { op: 'replace', at: 's0/p1', whole: true, with: '' }, { op: 'replace', at: { table: 's0/p3#t0', row: 0, col: 1 }, find: '', with: '값' },
@@ -132,7 +134,7 @@ test('임시 서버: 예전 연결은 그대로이고 새 연결은 작업 도�
   const start = [...para.text.slice(0, para.text.indexOf(find))].length;
   const make = async (body) => (await api(`${D}/requests`, { method: 'POST', body: { route: 'queue', ...body } })).request;
 
-  // 도구 목록: 기본 연결은 예전 그대로, 새 연결(core)은 작업 도구 넷 + 그림·스킬 파일
+  // 도구 목록: 밝히지 않은 연결은 예전 그대로(시험 받침 설정 mcp.defaultSurface 'v1' — 운영 기본 v2 는 tests/mcp_default_v2.test.mjs), 새 연결(core)은 작업 도구 넷 + 그림·스킬 파일
   const legacy = await connect(srv, 'a'); open.push(legacy);
   const legacyNames = (await legacy.client.listTools()).tools.map((x) => x.name);
   assert.ok(legacyNames.includes('read_document') && legacyNames.includes('propose_changes') && !legacyNames.includes('task') && !legacyNames.includes('edit'));
@@ -147,7 +149,8 @@ test('임시 서버: 예전 연결은 그대로이고 새 연결은 작업 도�
   // node scripts/measure-mcp2.mjs --tokens)로. 한도 = 9,852 + 여유 200
   // 2026-11-17(작업 P): 9,949자 — 위 OPS_BRIEF 의 pageBreakBefore 몫(+97)
   // 2026-11-17(작업 Q): 10,017자 — finish 의 부분 달성 규칙·paper orientation 값·빈 ops dry_run·sparse(+118), edit 설명 한 구절을 줄이고 ops 의 minItems 를 뺌(−50)
-  assert.ok(size < 10050, `새 연결(core) 도구 정의 ${size}자`);
+  // 2026-11-17(objects_to_body 안전장치): 10,134자 — 위 OPS_BRIEF 의 objects_to_body 줄 몫(+117). 한도 = 10,134 + 여유 40
+  assert.ok(size < 10175, `새 연결(core) 도구 정의 ${size}자`);
   assert.match(v2.client.getInstructions(), /task\(맡기/);
   const all = await connect(srv, 'a', { headers: { 'X-Hwpx-Mcp': '2' } }); open.push(all);
   const allNames = (await all.client.listTools()).tools.map((x) => x.name);
@@ -444,11 +447,12 @@ test('개인 실행기(Codex): --mcp 2 는 짧은 요청 내용을 첫 입력에
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'hwpx-v2-codex-'));
   const srv = await startServer({ ai: 'off' }); let worker;
   t.after(async () => { await worker?.stop(); await srv.stop(); await fs.rm(temp, { recursive: true, force: true }); });
-  // 명령줄: --mcp 2 → 새 연결, 기본은 예전 연결
+  // 명령줄: 기본(2026-11-17 사용자 결정)·--mcp 2 → 새 연결, --mcp 1(또는 HWPX_COWORK_MCP=1) → 예전 연결
   const env = { HWPX_COWORK_TOKEN: srv.tokens.a };
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '2'], env), env).mcpSurface, 'v2');
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, null);
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], { ...env, HWPX_COWORK_MCP: '2' }), env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '1'], env), env).mcpSurface, null);
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, null);
   assert.throws(() => parseWorkerArgs(['--provider', 'codex', '--mcp', '3'], env));
 
   const api = srv.api('a');
@@ -514,35 +518,52 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   assert.match(viaUrl.instructions, /task\(맡기/);
   await viaUrl.stop();
 
-  // 에이전트 준비: --v2 는 .mcp.json 에 --v2, CLAUDE.md 는 새 연결용, 허용 목록에 작업 도구 넷. --v1 로 되돌릴 수 있다
+  // 에이전트 준비(2026-11-17 — 기본 새 연결): .mcp.json 에 --v2, CLAUDE.md 는 새 연결 본보기(agent/CLAUDE.md), 허용 목록에 작업 도구 넷.
+  // --v1 은 예전 연결(--v1 --lean, CLAUDE.md 는 agent/v1/CLAUDE.md) — 고른 것이 남아 다시 준비해도 그대로, --v2 로 돌아올 수 있다
   assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp', '/w', { v2: true }).args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp', '--files-dir', '/w']);
-  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--lean', '--url', 'http://x/mcp']);
+  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp']);
+  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp', null, { v2: false }).args, ['/b.js', '--channel', '--v1', '--lean', '--url', 'http://x/mcp']);
   const dir = path.join(tmp, 'agent');
   const quiet = async (argv) => { const log = console.log; const lines = []; console.log = (s = '') => lines.push(String(s)); try { return { code: await setupAgent(argv, { ...process.env, HWPX_COWORK_TOKEN: '' }), lines }; } finally { console.log = log; } };
   const args = ['--dir', dir, '--url', `${srv.base}/mcp`, '--no-claude', '--no-server', '--no-registry'];
-  await quiet(args);   // 처음: 예전 연결(지금 본보기)
+  const v2Guide = fs.readFileSync(path.join(root, 'agent', 'CLAUDE.md'), 'utf8'); const v1Guide = fs.readFileSync(path.join(root, 'agent', 'v1', 'CLAUDE.md'), 'utf8');
+  await quiet(args);   // 처음: 새 연결(기본)
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
-  assert.ok(JSON.parse(read('.mcp.json')).mcpServers.hwpx.args.includes('--lean'));
-  assert.match(read('CLAUDE.md'), /start_request/);
-  await quiet([...args, '--v2']);
-  assert.ok(JSON.parse(read('.mcp.json')).mcpServers.hwpx.args.includes('--v2') && !JSON.parse(read('.mcp.json')).mcpServers.hwpx.args.includes('--lean'));
-  assert.match(read('CLAUDE.md'), /task\(doc_id, request_id\)/); assert.ok(!/start_request/.test(read('CLAUDE.md')));
-  assert.match(read('CLAUDE.v1.md'), /start_request/, '예전 지침은 남긴다');
+  const hwpxArgs = () => JSON.parse(read('.mcp.json')).mcpServers.hwpx.args;
+  assert.ok(hwpxArgs().includes('--v2') && !hwpxArgs().includes('--lean'));
+  assert.equal(read('CLAUDE.md'), v2Guide); assert.ok(!fs.existsSync(path.join(dir, 'CLAUDE.v1.md')));
   const allow = JSON.parse(read(path.join('.claude', 'settings.json'))).permissions.allow;
   for (const p of V2_PERMISSIONS) assert.ok(allow.includes(p), p);
-  await quiet(args);   // 방식을 주지 않으면 지금 방식(새 연결)을 지킨다
-  assert.ok(JSON.parse(read('.mcp.json')).mcpServers.hwpx.args.includes('--v2'));
-  await quiet([...args, '--v1']);
-  assert.ok(JSON.parse(read('.mcp.json')).mcpServers.hwpx.args.includes('--lean'));
-  assert.match(read('CLAUDE.md'), /start_request/, '--v1 은 예전 지침을 되살린다');
+  await quiet([...args, '--v1']);   // 예전 연결로: 손대지 않은 새 연결 지침은 예전 본보기로 바꾼다
+  assert.ok(hwpxArgs().includes('--v1') && hwpxArgs().includes('--lean') && !hwpxArgs().includes('--v2'));
+  assert.equal(read('CLAUDE.md'), v1Guide, '--v1 은 예전 지침(agent/v1/CLAUDE.md)');
+  await quiet(args);   // 방식을 주지 않으면 --v1 로 고른 예전 연결을 지킨다
+  assert.ok(hwpxArgs().includes('--v1')); assert.equal(read('CLAUDE.md'), v1Guide);
+  await quiet([...args, '--v2']);   // 새 연결로: 예전 지침은 CLAUDE.v1.md 로 남기고 바꾼다
+  assert.ok(hwpxArgs().includes('--v2') && !hwpxArgs().includes('--lean'));
+  assert.match(read('CLAUDE.md'), /task\(doc_id, request_id\)/); assert.ok(!/start_request/.test(read('CLAUDE.md')));
+  assert.match(read('CLAUDE.v1.md'), /start_request/, '예전 지침은 남긴다');
+  await quiet([...args, '--v1']);   // 다시 예전 연결로: 남겨 둔 CLAUDE.v1.md 를 되살린다
+  assert.equal(read('CLAUDE.md'), v1Guide);
+  // 예전 기본(--lean 만 — 고르지 않은 예전 연결)으로 준비된 옛 작업 공간: 인자 없이 다시 준비하면 새 기본으로 바꾸고 알린다(예전 지침은 CLAUDE.v1.md)
+  const oldDir = path.join(tmp, 'agent-old-default');
+  fs.mkdirSync(oldDir, { recursive: true });
+  fs.writeFileSync(path.join(oldDir, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'x' }, hwpx: { command: 'node', args: ['/old/mcp-stdio.js', '--channel', '--lean', '--url', `${srv.base}/mcp`], env: { HWPX_COWORK_TOKEN: '${HWPX_COWORK_TOKEN}' } } } }));
+  fs.writeFileSync(path.join(oldDir, 'CLAUDE.md'), `${v1Guide}\n- 내가 더한 규칙 한 줄\n`);
+  const switched = await quiet(['--dir', oldDir, '--url', `${srv.base}/mcp`, '--no-claude', '--no-server', '--no-registry']);
+  const oldCfg = JSON.parse(fs.readFileSync(path.join(oldDir, '.mcp.json'), 'utf8'));
+  assert.ok(oldCfg.mcpServers.hwpx.args.includes('--v2') && oldCfg.mcpServers.other.command === 'x');
+  assert.ok(switched.lines.some((l) => /예전 기본\(예전 연결\)으로 준비된 작업 공간을 새 기본/.test(l)), switched.lines.join('\n'));
+  assert.equal(fs.readFileSync(path.join(oldDir, 'CLAUDE.md'), 'utf8'), v2Guide);
+  assert.match(fs.readFileSync(path.join(oldDir, 'CLAUDE.v1.md'), 'utf8'), /내가 더한 규칙 한 줄/, '고쳐 쓴 예전 지침도 CLAUDE.v1.md 로 남긴다');
 
-  // 소스 폴더의 agent/(배포 묶음·시험이 읽는 예전 연결 본보기)는 그 자리에서 새 연결로 바꾸지 않는다 — 아무것도 쓰지 않고 다른 폴더를 안내한다
+  // 소스 폴더의 agent/(배포 묶음·시험이 읽는 새 연결 본보기)는 그 자리에서 예전 연결로 바꾸지 않는다 — 아무것도 쓰지 않고 다른 폴더를 안내한다
   const realAgent = path.join(root, 'agent');
   const snapshot = () => ['.mcp.json', 'CLAUDE.md', 'CLAUDE.v1.md'].map((name) => { try { return fs.readFileSync(path.join(realAgent, name), 'utf8'); } catch { return null; } });
   const beforeReal = snapshot();
-  const inPlace = await quiet(['--no-claude', '--no-server', '--no-registry', '--v2']);
+  const inPlace = await quiet(['--no-claude', '--no-server', '--no-registry', '--v1']);
   assert.equal(inPlace.code, 2);
-  assert.ok(inPlace.lines.some((l) => /본보기라 그 자리에서 새 연결\(--v2\)로 바꾸지 않습니다/.test(l)) && inPlace.lines.some((l) => /--dir agent-v2 --v2/.test(l)), inPlace.lines.join('\n'));
+  assert.ok(inPlace.lines.some((l) => /새 연결 본보기라 그 자리에서 예전 연결\(--v1\)로 바꾸지 않습니다/.test(l)) && inPlace.lines.some((l) => /--dir agent-v1 --v1/.test(l)), inPlace.lines.join('\n'));
   assert.deepEqual(snapshot(), beforeReal, '진짜 agent/ 의 파일은 그대로');
 
   // 서버 확인: 새 연결을 모르는 서버(/api/config 에 features.mcp2 없음)에 --v2 로 준비하면 알린다 — 그 서버는 예전 도구로 답해 새 지침과 맞지 않는다
@@ -556,8 +577,10 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   const unknown = /이 서버는 새 연결\(--v2\)을 모릅니다/;
   const onOld = await quiet(['--dir', path.join(tmp, 'agent-old'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry', '--v2']);
   assert.ok(onOld.lines.some((l) => unknown.test(l)), onOld.lines.join('\n'));
-  const onOldV1 = await quiet(['--dir', path.join(tmp, 'agent-old1'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry']);
-  assert.ok(!onOldV1.lines.some((l) => unknown.test(l)), '예전 연결로 준비할 때는 알리지 않는다');
+  const onOldV1 = await quiet(['--dir', path.join(tmp, 'agent-old1'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry', '--v1']);
+  assert.ok(!onOldV1.lines.some((l) => unknown.test(l)), '예전 연결(--v1)로 준비할 때는 알리지 않는다');
+  const onOldDefault = await quiet(['--dir', path.join(tmp, 'agent-old2'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry']);
+  assert.ok(onOldDefault.lines.some((l) => unknown.test(l) && /--v1/.test(l)), `기본(새 연결)으로 옛 서버에 준비하면 알리고 --v1 을 안내한다: ${onOldDefault.lines.join('\n')}`);
   const onNew = await quiet(['--dir', path.join(tmp, 'agent-new'), '--url', `${srv.base}/mcp`, '--no-claude', '--no-registry', '--v2']);
   assert.ok(!onNew.lines.some((l) => unknown.test(l)), onNew.lines.join('\n'));
 });

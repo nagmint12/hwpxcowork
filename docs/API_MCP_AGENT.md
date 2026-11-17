@@ -4,6 +4,22 @@
 
 2026-11-05 검증 추가: native 흐름과 현재 읽기 규칙을 유지하면서, 모델 입력의 정확한 문단 중복만 제거하고 표·그림 자동번호를 원문과 분리한 메타데이터로 전달했다. 총 모델 토큰 절감은 실측에서 입증되지 않았다. 변경 범위·실측·제외 기록·운영 미반영 상태는 [검증 보고서](NATIVE_CONTEXT_DEDUP_2026-11-05.md)를 따른다. 아래 날짜별 측정/설계는 당시 기록이다.
 
+## 2026-11-17 — 새 MCP 연결(v2)이 기본(모든 제공자)
+
+사용자 결정(서버 기본 주소까지 새 연결)에 따라 API 실행기와 서버 AI 도 새 연결로 옮겼다. 규칙·측정·남은 문제의 근거는 [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md) §13. **실제 유료 API 로는 아직 확인하지 않았다**(가짜 fetch 시험 `tests/api_mcp_v2.test.mjs` 14개).
+
+- **대상**: OpenAI(Responses)·Anthropic(Messages)·Gemini(generateContent)·호환 게이트웨이(`--gateway baze`·`--base-url`) — 개인 API 실행기(`scripts/ai-worker.mjs` → `server/worker.js` apiV2)와 서버 AI·서버에 등록한 개인 키(내 AI 키)·체험 공유 키(`server/service.js _serverAiV2`·`_runAiV2`).
+- **고르기**: 개인 API 실행기는 `--mcp 2`(기본) | `--mcp 1`(예전 — 아래 '기본 MCP 모드'의 길). 환경 변수 `HWPX_COWORK_MCP` 로도 정하며 명령줄이 먼저다. 서버 쪽은 `config.ai.mcp`(`"v2"` 기본 | `"v1"` — 바꾸면 서버 재시작, 모르는 값이면 서버 AI 를 켜지 않고 까닭을 알림, `server/ai.js normalizeMcp`). 모의 AI·튜토리얼 예시 답변은 이 값과 관계없이 예전 길이다.
+- **첫 입력**: 실행기가 요청을 맡고, `task` 응답과 같은 요청 내용(brief — 지시·대상·문서 얼개·주변 글·할 일)을 모델의 첫 사용자 글로 싣는다. 서버가 읽은 PDF·그림 첨부는 원본으로 함께 싣고(Gemini 는 GIF 를 받지 않음) 다시 읽지 않게 알린다. 시스템 지침은 `EDITOR_INSTRUCTIONS_API_V2`(OpenAI `--workspace hosted` 면 코드 실행 결과를 `edit` 의 figure op 로 넣으라는 한 줄을 더함).
+- **도구**: `TOOL_PROFILES.apiV2` 7개 — `read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`. `task` 는 실행기가 맡으므로 주지 않는다. 서버 AI 는 같은 MCP 서버를 메모리로 연다(`server/api-service-tools.js` — surface 'v2', 도구 범위 core).
+- **끝 판정**: 최종 JSON 이 없다. 결과는 `edit` 가 곧바로 저장하고, 모델이 `edit` 의 `done` 이나 `finish` 를 부르면 요청 상태(완료·실패)를 보고 고리를 멈춘다(끝낸 뒤 모델을 한 번 더 부르지 않음). 도구 없이 글로만 답하면 두 번까지 재촉하고(`server/api-tool-loop.js V2_NUDGES`), 그래도 끝내지 않으면 `API_MCP_INCOMPLETE` 로 실패로 닫는다 — 그때까지 저장한 제안·메모는 남는다. 응답 길이 한도로 끊기면 이어 하라고 다시 부른다(`V2_CONTINUE`). 취소·다시 요청이면 멈춘다.
+- **사용량**: 토큰·모델은 예전처럼 요청 기록(`r.usage`)에 남는다. 서버 AI 는 완료를 다시 하지 않고 사용량·모델만 적고, 개인 API 실행기는 완료를 다시 등록하지 않고 사용량만 덧붙인다.
+- **측정(모델 없음, o200k 토큰 추정)**: 도구 정의 36개 13,616 → 7개 3,279토큰, 지침 3,468 → 1,096토큰, 호출마다 다시 보내는 고정 글 약 1만 7천 → 4천 4백 토큰(캐시 할인 전).
+- **v2 에 없는 것**(예전 길에만): 선택 서식 자동 보충, `instructionSummary`, `config.ai.documentContext`, 표준서식 지침을 시스템 글에 싣기(필요하면 모델이 `read view='guide'`), `maxProposals`.
+- **시험**: 새 `tests/api_mcp_v2.test.mjs`. 예전 길을 보는 기존 API 시험 12개 파일은 `ai.mcp:'v1'` 로 고정했다.
+
+아래 '기본 MCP 모드'·'도구는 모델이 고른다'·캐시 실측은 예전 길(`--mcp 1`·`ai.mcp:'v1'`)의 기록이다 — 2026-11-17 전에는 그것이 기본이었다.
+
 ## 2026-11-14 내용·형식 분리 실험 경로
 
 > **2026-11-16: 이 방식은 쓰지 않는다(기본 끔 — 사용자 결정).** 형식 단계가 큰 문서에서 서버를 멈추게 했고 그 요청이 밤새 되풀이됐다(`docs/MCP_REDESIGN_2026-11-16.md` §2). `config.experiments.contentFormat` 이 true 일 때만 아래 내용이 동작한다. 꺼져 있으면 `/api/config.features.contentFormatWorkflow` 가 false 라 편집기에 선택 칸이 없고, 그 선택으로 보낸 새 요청은 보통 방식으로 만들며, `start_request(workflow=…)`·사본 도구는 `EDIT_WORKFLOW_OFF` 로 거절하고, 남아 있던 그 방식의 요청은 누가 맡으려 할 때 실패로 닫는다('다시 요청'하면 보통 방식). 글상자·선 문서를 표로 옮기는 일은 새 연결의 `objects_to_body` 를 쓴다.
@@ -107,6 +123,8 @@ MCP 기능 경계(코드 연결 기준):
 2026-11-03. **Claude(Messages API)·Gemini(generateContent) API도 같은 MCP 도구를 쓴다.** 세 제공자 모두 같은 허용 목록(`server/tool-profiles.js`의 `api` 프로필 — 읽기 13·요청 읽기 1·결과 쓰기 12, 26개)을 받는다. 같은 날 오후부터는 요청 종류별로 그 일에 쓰는 도구만 준다(아래 '요청 종류별 도구'). 개인 API 실행기, 서버 개인 키, 서버 공용 AI 모두 같다. 설계 근거는 [MCP_TOOLSET_PLAN_2026-11-03.md §10](MCP_TOOLSET_PLAN_2026-11-03.md).
 
 ## 기본 MCP 모드
+
+> 2026-11-17 부터 이 절은 **예전 길**(`--mcp 1`·`config.ai.mcp:'v1'`)이다. 기본은 맨 위 '2026-11-17 — 새 MCP 연결(v2)이 기본'.
 
 `대기 요청 → 모델 도구 요청 → MCP 실행 → 결과를 모델에 전달 → 최종 결과 → 완료`
 

@@ -1,0 +1,32 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 실행기</title><link rel="stylesheet" href="runners.css">
+<main>
+  <header class="top">
+    <div><span class="eyebrow">HWPX COWORK</span><h1>AI 실행기</h1></div>
+    <div class="top-actions"><button id="stopAll" class="ghost" title="켜 둔 실행기를 모두 정상 종료합니다" hidden>모두 끄기</button><button id="close" class="ghost" title="편집기로 돌아갑니다(실행기는 계속 돕니다)">닫기</button></div>
+  </header>
+  <p id="notice" class="notice" role="alert" hidden></p>
+  <section aria-label="실행기 목록"><ul id="runners" class="runners"></ul><p id="empty" class="empty" hidden>실행기가 없습니다.</p></section>
+  <details id="add" class="panel"><summary>실행기 추가</summary>
+    <div class="form">
+      <fieldset id="aiChoice" class="choices"><legend>AI</legend></fieldset>
+      <label class="field"><span>서버</span><select id="server" title="실행기가 요청을 받아 올 서버"></select></label>
+      <div id="newServer" class="newserver" hidden>
+        <label class="field"><span>주소</span><input id="url" type="text" inputmode="url" placeholder="https://서버 주소/" autocomplete="off" spellcheck="false" title="웹 화면 주소 또는 …/mcp 주소"></label>
+        <label class="field"><span>내 토큰</span><input id="token" type="password" autocomplete="off" spellcheck="false" title="그 서버에서 받은 내 접속 토큰 — 이 PC에 암호화해 보관합니다"></label>
+        <button id="checkServer" class="secondary" title="서버에서 내 이름·권한과 새 연결 지원을 확인한 뒤 저장합니다">확인</button>
+      </div>
+      <label class="check"><input id="auto" type="checkbox" checked><span title="앱을 켜면 이 실행기도 켭니다">자동 시작</span></label>
+      <details id="advanced" class="advanced"><summary>고급</summary>
+        <label class="field"><span>연결</span><select id="mcp" title="새 연결(v2) = 작업 도구 넷(task·read·edit·finish). 예전 서버면 예전 연결(v1)"><option value="2">새 연결(v2)</option><option value="1">예전 연결(v1)</option></select></label>
+      </details>
+      <p id="formError" class="msg error" role="alert" hidden></p>
+      <button id="addRunner" class="primary">추가하고 켜기</button>
+    </div>
+  </details>
+  <section id="serverSection" class="panel" hidden><h2>다른 서버</h2><ul id="servers" class="servers"></ul></section>
+  <section id="logPanel" class="panel" hidden>
+    <div class="loghead"><h2 id="logTitle">기록</h2><div><button id="openLogs" class="ghost" title="기록 파일이 있는 폴더를 엽니다">폴더</button><button id="closeLog" class="ghost">닫기</button></div></div>
+    <pre id="log" class="log" tabindex="0"></pre>
+  </section>
+</main>
+<script src="runners.js"></script></html>

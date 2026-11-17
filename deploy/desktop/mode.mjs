@@ -1,19 +1,24 @@
-// 데스크톱 앱의 운영 방식(2026-11-17): 혼자 쓰기(personal) · 여러 사람과 함께 쓰기(shared).
-// 앱 설정 폴더의 desktop-app.json 에 두고, 방식마다 설정·문서 기록 폴더를 따로 쓴다(<앱 설정>/personal · <앱 설정>/shared).
+// 데스크톱 앱의 운영 방식(2026-11-17): 혼자 쓰기(personal) · 여러 사람과 함께 쓰기(shared) · AI 실행기만(runner).
+// 앱 설정 폴더의 desktop-app.json 에 두고, 방식마다 설정·문서 기록 폴더를 따로 쓴다(<앱 설정>/personal · shared · runner).
+// runner(같은 날 더함 — 실행기 bat 을 앱이 대신하면서): 이 PC 에 서버를 두지 않고 다른 서버(운영 서버·공동 작업 서버)에 내 구독 AI 실행기만 붙인다.
+//   운영 서버를 따로 돌리는 관리자 PC 와 공동 작업 서버의 참여자 PC 에서, 쓰지 않는 개인 서버·문서함을 띄우지 않으려고.
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const MODES = ['personal', 'shared'];
+export const MODES = ['personal', 'shared', 'runner'];
+/** 메뉴·확인 창에 쓰는 이름 */
+export const MODE_LABELS = Object.freeze({ personal: '혼자 쓰기(개인용)', shared: '여러 사람과 함께 쓰기(공동 작업용)', runner: 'AI 실행기만(다른 서버에 연결)' });
 export const MODE_CHOICE = Object.freeze({
   message: 'Hwpx Cowork를 어떻게 쓰시겠어요?',
   detail: '혼자 쓰기 — 이 PC의 한글 문서를 혼자 열고 고칩니다. PC 폴더를 바로 연결할 수 있습니다.\n\n'
     + '여러 사람과 함께 쓰기 — 이 PC가 공동 작업 서버가 됩니다. 참여자를 추가하고, 외부 접속 주소를 열어 다른 PC에서도 함께 고칩니다.\n\n'
-    + '나중에 [Hwpx Cowork → 운영 방식 바꾸기]에서 바꿀 수 있습니다. 두 방식의 문서와 설정은 따로 보관됩니다.',
-  buttons: ['혼자 쓰기', '여러 사람과 함께 쓰기'],
-  modes: ['personal', 'shared'],
+    + 'AI 실행기만 — 이 PC에 서버를 두지 않고, 이미 있는 서버(공동 작업 서버 등)에 내 구독 AI만 연결합니다. 문서는 그 서버의 웹 화면에서 엽니다.\n\n'
+    + '나중에 [Hwpx Cowork → 운영 방식 바꾸기]에서 바꿀 수 있습니다. 방식마다 문서와 설정은 따로 보관됩니다.',
+  buttons: ['혼자 쓰기', '여러 사람과 함께 쓰기', 'AI 실행기만'],
+  modes: ['personal', 'shared', 'runner'],
 });
 
-/** 명령줄 --mode personal|shared(바로 가기·시험용) → 방식 또는 null */
+/** 명령줄 --mode personal|shared|runner(바로 가기·시험용) → 방식 또는 null */
 export function modeFromArgs(argv) {
   const at = argv.indexOf('--mode');
   const value = at >= 0 ? argv[at + 1] : argv.find((a) => a.startsWith('--mode='))?.slice(7);

@@ -15,6 +15,18 @@ export function responseFailure(error, usage = {}, model) {
 const STOP = ['ABORTED', 'ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER', 'API_TOOL_SCOPE', 'EDIT_STAGE_ADVANCED', 'EDIT_SOURCE_CHANGED'];
 const callId = value => value == null || (typeof value === 'string' && value.length <= 200 && !/[\x00-\x1f]/.test(value));
 
+// 새 MCP 연결(v2 — toolContext.surface 'v2', 2026-11-17): 최종 JSON 이 없다. 결과는 edit 가 바로 저장하고, 모델이 edit 의 done·finish 로 요청을 끝내면
+// (toolContext.finished) 그 자리에서 실행을 멈춘다 — 끝낸 뒤 모델을 한 번 더 부르지 않는다(Codex·Claude Code 실행기는 이 한 번이 더 든다).
+// 끝내는 도구 없이 글로만 답하면 그 글을 대화에 남기고 V2_NUDGES 번까지 다시 부른다. 그래도 끝내지 않으면 API_MCP_INCOMPLETE(저장된 결과는 남는다)
+export const V2_NUDGES = 2;
+export function v2NudgeText(n) {
+  return n > 1
+    ? '요청이 아직 열려 있습니다. 이번 응답에서 반드시 도구로 끝내세요: 결과를 저장했으면 finish(summary=공유 요약 — 못 한 것은 요약에 적음), 저장할 것이 남았으면 edit(ops, done=공유 요약), 고칠 것이 정말 없으면 finish(no_changes_reason), 쓸 만한 결과를 하나도 못 냈으면 finish(error=짧은 사유).'
+    : '요청이 아직 끝나지 않았습니다(글로 답한 것은 결과·완료가 아닙니다). 남은 일이 있으면 도구로 이어 하고, 일이 끝났으면 edit 의 done(공유 요약 1~2문장) 또는 finish 로 요청을 끝내세요.';
+}
+/** 새 연결: 응답 길이 한도로 끊긴 글(도구 호출 없음) 다음에 보내는 글 — 예전 연결의 'JSON 을 이어 쓰라' 대신 */
+export const V2_CONTINUE = '응답 길이 한도로 끊겼습니다. 보존된 대화와 실제 도구 결과에서 이어서 남은 작업을 하고, 끝나면 edit 의 done 또는 finish 로 요청을 끝내세요.';
+
 // 그림 도구를 받았을 때만 붙이는 규칙
 const PREVIEW_RULE = `
 - 그림은 제안하기 전에 preview_figure(propose_figure 에 줄 svg·chart·width_mm·after_ref/replace_ref 그대로)로 한 번 그려 보고, 글자 겹침·잘림·너무 작은 글자·빈 공간·색을 고친 뒤 propose_figure 로 제안한다. 미리보기는 그림마다 두 번까지 — 고칠 것이 없으면 바로 제안한다.`;
@@ -49,11 +61,14 @@ API 작업 도구 사용 규칙:
  *   send(signal) → { calls: [{ id, name, args(객체 또는 JSON 글) }], more?(도구 호출 없이 한 번 더), text, refusal?, usage: { input, output, cacheRead?(캐시에서 읽은 입력), cacheWrite?(캐시에 쓴 입력) }, model }
  *   output(MCP 결과, signal) → 이 제공자의 도구 결과 · failure(오류 글) → 이 제공자의 도구 오류 결과
  *   reply([{ call, output, isError }], signal) — 모델 차례(도구 호출)와 결과를 대화에 잇는다
+ *   nudge?(글, signal) — 새 연결: 도구 없이 끝난 모델 차례를 대화에 남기고 사용자 글 하나를 잇는다(끝내는 도구를 부르게)
  *   size() → 대화 바이트 · close?()
+ * 새 연결(toolContext.surface 'v2')이면 parse 를 쓰지 않고 → { finished: { status, tool }, model, usage, execution }
  */
 // requireResult: 문서 작업 실행은 실제 저장 결과나 변경 불필요 사유가 있어야 완료(한 번 판단하는 JSON·파일만 만드는 보조 실행은 아님)
 export async function runToolLoop(ai, input, adapter, { signal, toolContext, parse, singleTurn = false, requireResult = !singleTurn }) {
   const total = { input: 0, output: 0 }; let cacheRead = 0, cacheWrite = 0, modelCalls = 0, toolCalls = 0, model = ai.cfg.model, failure, repaired = false;
+  const v2 = toolContext?.surface === 'v2'; let nudges = 0;
   const addUsage = usage => { total.input += Number(usage?.input) || 0; total.output += Number(usage?.output) || 0; cacheRead += Number(usage?.cacheRead) || 0; cacheWrite += Number(usage?.cacheWrite) || 0; };
   const usage = () => ({ ...total, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}), modelCalls, toolCalls });
   const combined = signal || new AbortController().signal;
@@ -86,6 +101,11 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
                 summary: '실험 단계 사본을 저장했습니다.', stageAdvanced: true, model, usage: usage(), execution: 'tool-agent' };
             }
             debugRecord('tool.result', executed, { tool: call.name, callId: call.id });
+            // 새 연결: 모델이 edit(done)·finish 로 요청을 끝냈다 — 같은 차례의 남은 호출은 하지 않고 모델도 다시 부르지 않는다
+            if (v2 && toolContext.finished) {
+              debugRecord('v2.finished', toolContext.finished, { modelCalls, toolCalls, model, skippedCalls: turn.calls.length - turn.calls.indexOf(call) - 1 });
+              return { finished: { ...toolContext.finished }, model, usage: usage(), execution: 'tool-agent' };
+            }
             results.push({ call, output: await adapter.output(executed, combined), isError: !!executed.isError });
           } catch (e) {
             debugRecord('tool.error', raw, { tool: call.name, callId: call.id, error: debugError(e) });
@@ -97,6 +117,12 @@ export async function runToolLoop(ai, input, adapter, { signal, toolContext, par
         continue;
       }
       if (turn.refusal) throw fail('API_REFUSAL', '모델이 요청을 처리하지 못했습니다.');
+      if (v2) {
+        // 새 연결에는 최종 JSON 이 없다 — 끝내는 도구(edit 의 done·finish) 없이 글로만 답했으면 그 글을 남기고 다시 부른다
+        debugRecord('v2.unfinished', turn.text, { modelCalls, toolCalls, model, nudges });
+        if (nudges < V2_NUDGES && typeof adapter.nudge === 'function') { nudges++; await adapter.nudge(v2NudgeText(nudges), combined); continue; }
+        throw fail('API_MCP_INCOMPLETE', 'AI가 요청을 끝내는 도구(edit 의 done 또는 finish)를 부르지 않고 멈췄습니다. 저장된 부분 결과를 확인한 뒤 다시 요청해 주세요.');
+      }
       // 도구로 이미 남긴 결과(같은 실행) — 그리고 이어받은 시도의 그림 — 는 최종 JSON 에서 빼 두 번 넣지 않는다
       let parsed;
       debugRecord('result.parse.input', turn.text, { modelCalls, toolCalls, model, repaired, singleTurn, requireResult });

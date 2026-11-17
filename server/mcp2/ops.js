@@ -79,7 +79,7 @@ export const OPS = {
     schema: z.object({ op: z.literal('withdraw'), pids: z.array(z.number().int().min(1)).min(1).max(2000).optional(), all: z.boolean().optional(), reason }).strict() },
 };
 const STRUCTURE_SIG = {
-  objects_to_body: "{op:'objects_to_body', at?, join_pages?, keep_page_numbers?, drop?, header_rows?, margins?, remove_rest?} — 떠 있는 글상자·괘선으로 그려진 쪽을 진짜 본문 문단·표로 옮기고 그 글상자·선을 지운다(좌표로 줄·칸·합친 칸·쪽을 넘는 표를 읽는다 — 글을 다시 치지 않는다). 이 op 하나로 옮기기와 지우기가 끝난다 — delete_objects 를 함께 내지 않는다. 옮기지 못해 남는 개체(그림·표·회전한 도형 등)까지 지우려면 remove_rest:true(또는 종류 목록). at 생략 = 문서 전체. 구조는 요청 내용의 배치 요약이나 read view='layout' 로 확인하고, 결과를 미리 보려면 dry_run",
+  objects_to_body: "{op:'objects_to_body', at?, join_pages?, keep_page_numbers?, drop?, header_rows?, margins?, remove_rest?, background?} — 떠 있는 글상자·괘선으로 그려진 쪽을 진짜 본문 문단·표로 옮기고 그 글상자·선을 지운다(좌표로 줄·칸·합친 칸·쪽을 넘는 표를 읽는다 — 글을 다시 치지 않는다). 이 op 하나로 옮기기와 지우기가 끝난다 — delete_objects 를 함께 내지 않는다. join_pages(기본 true): 다음 쪽의 첫 내용이 열 구조가 같은 표면 앞 쪽 표에 이어 한 표로 만든다 — 쪽마다 되풀이된 머리행은 넣지 않고 버린 줄(why '되풀이 머리행')로 알린다(글자 검사는 버린 글자로 센다). false = 쪽마다 따로 표. 옮길 글상자 밑에 깔린 쪽 크기 그림(쪽 배경)은 background:'remove'(기본)면 지운다(내용으로 보이는 그림은 지우지 않고 글 뒤로), 'behind' 면 모두 글 뒤로 남긴다(그 구역은 앞 구역에 합치지 않아 원래 쪽마다 새 쪽에서 시작). 옮긴 표는 쪽에서 나뉘고, 비게 된 구역은 앞 구역에 합친다(merge_sections 기본 true). 옮기지 못해 남는 개체(그림·표·회전한 도형 등)까지 지우려면 remove_rest:true(또는 종류 목록). 글자·숫자가 원문과 어긋나면(숫자가 붙거나 갈라짐) 적용하지 않는다. at 생략 = 문서 전체. 구조는 요청 내용의 배치 요약이나 read view='layout' 로 확인하고, 결과(쪽 수 pages.all_applied, 글 앞 그림에 가려진 쪽 pages.covered)를 미리 보려면 dry_run",
   paper: "{op:'paper', section, margins?:{left,right,top,bottom,header,footer}, width_mm?, height_mm?, orientation?:'portrait'|'landscape'} — 용지·여백(mm). section 은 0부터(화면의 '구역 2' = section 1 — read view='page')",
   section: "{op:'section', section, page_start?, hide_first_header?…}", split_section: "{op:'split_section', before_ref}", merge_section: "{op:'merge_section', section} — 다음 구역을 합침",
   header: "{op:'header'|'footer', section, text?|clear?, apply_to?, style?} — 머리말·꼬리말 글(쪽 번호는 page_number 로)", footer: "{op:'footer', …}", page_number: "{op:'page_number', section, position?:'BOTTOM_CENTER'|'BOTTOM_LEFT'|'BOTTOM_RIGHT'|'TOP_CENTER'|'TOP_LEFT'|'TOP_RIGHT'|'NONE'…, format?:'DIGIT'…, start?|clear?} — 쪽 번호", master_page: "{op:'master_page', section, text?|attachment_id?|clear?}",
@@ -105,7 +105,9 @@ const BRIEF = {
   delete_objects: "{op:'delete_objects', at, kinds?:['table'|'figure'|'shape'|'chart'], reason?} — 개체째 지운다(안의 글도). at: 's0/p3'·목록·'s0/p3..p9'·'s2'·'*'",
   delete_paragraphs: "{op:'delete_paragraphs', at, reason?} — 본문 문단을 통째로(안의 표·그림까지, 빈 줄 없이). at: 's1/p8'·'s1/p8..p13'·이어진 목록(한 구역, p0 제외)",
   move_paragraphs: "{op:'move_paragraphs', at, after|before, reason?} — 원본 그대로(표·서식째) 옮긴다. 같은 구역, 옮기기 전 주소",
-  objects_to_body: "{op:'objects_to_body', at?, remove_rest?, drop?, …} — 글상자·괘선으로 그린 쪽을 본문 문단·표로 옮기고 그 글상자·선을 지운다(글을 다시 치지 않는다). 같은 문단에 delete_objects 를 내지 않는다 — 남는 개체까지 지우려면 remove_rest:true. at 생략 = 전체",
+  // 2026-11-17(안전장치): 쪽 배경 그림도 지운다는 것과 background(+29자 — 실제 24쪽 문서에서 배경이 글을 덮었다), 쪽을 넘는 표 잇기(join_pages)와 되풀이 머리행을
+  // 버린 줄로 알린다는 것(+59자 — 같은 실행에서 모델이 join_pages:false 로 표 24개를 냈다. 되풀이 머리행은 engine/layout.js analyzeLayout dropped). 'drop?' 은 sig·guide 에만
+  objects_to_body: "{op:'objects_to_body', at?, join_pages?, remove_rest?, background?, …} — 글상자·괘선으로 그린 쪽을 본문 문단·표로 옮기고(글을 다시 치지 않는다) 그 글상자·선·쪽 배경 그림을 지운다('behind' = 배경을 글 뒤로). 쪽을 넘는 표는 열 구조가 같으면 한 표로 잇는다(되풀이 머리행은 버린 줄로 알림, join_pages:false = 쪽마다 따로). 같은 문단에 delete_objects 를 내지 않는다 — 남는 개체는 remove_rest:true. at 생략 = 전체",
   memo: "{op:'memo', at, text, find?} — 의견 메모. 답글은 {op:'memo', reply_to:'memo3', text}",
   alternatives: "{op:'alternatives', at, find, options:[{text, reason?}…]} — 여러 안(비교 요청 때만)",
   fill: "{op:'fill', fields:[{name, value, occurrence?}…], reason?} — 누름틀. name 만 주면 그 이름의 칸 모두, 한 칸만은 occurrence(0부터 — read view='fields' 차례). 값은 한 줄",

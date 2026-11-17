@@ -83,7 +83,9 @@ export function localStatus(settings, { alive = pidAlive } = {}) {
 }
 
 async function makeReady(settings, dependencies = {}) {
-  const ai = dependencies.aiFactory ? dependencies.aiFactory(settings) : new CodexProposer({ model: settings.model, command: settings.command }, { env: dependencies.env || process.env });
+  // 2026-11-17: 실행기 기본 연결은 새 연결(v2 — 작업 도구 넷). 예전 연결은 HWPX_COWORK_MCP=1
+  const mcpEnv = (dependencies.env || process.env).HWPX_COWORK_MCP;
+  const ai = dependencies.aiFactory ? dependencies.aiFactory(settings) : new CodexProposer({ model: settings.model, command: settings.command, mcp: String(mcpEnv ?? '').trim() === '1' ? null : 'v2' }, { env: dependencies.env || process.env });
   const auth = await ai.check();
   if (!auth.ready) throw fault(auth.code || 'CODEX_AUTH_REQUIRED', auth.reason || 'ChatGPT 로그인 상태를 확인해 주세요.');
   const worker = (dependencies.workerFactory || createApiWorker)({ url: settings.url, token: settings.token, ai, tutorialOnly: !!settings.tutorialOnly, timing: settings.tutorialOnly ? { pollMs: 1000 } : {}, agent: settings.tutorialOnly ? '관리자 Codex' : 'ChatGPT (Codex)', clientName: settings.tutorialOnly ? 'hwpx-tutorial-codex-worker' : 'hwpx-codex-worker', log: dependencies.log || (() => {}) });

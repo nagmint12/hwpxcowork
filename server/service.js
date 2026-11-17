@@ -22,11 +22,11 @@ import * as MT from './memotext.js';
 import { josa } from './josa.js';
 import { validateFormatSpec, forcedPageBreak } from '../engine/formatting.js';
 import { normalizeFormat, normalizeRuns, requestedFormat, requestedRuns, formatHinted } from './format-schema.js';
-import { needsFormatting, LEAN_FORMATTING_NOTE } from './ai.js';
+import { needsFormatting, LEAN_FORMATTING_NOTE, normalizeMcp } from './ai.js';
 import { validEditUsage } from './edit-usage.js';
 import { normalizeTableOps } from './table-schema.js';
 import { normalizePageLayoutOps } from './page-layout-schema.js';
-import { getPageLayout, editPageLayout, pageLayoutFingerprint, pageLayoutStateFingerprint, structureObjectsFingerprint } from '../engine/page-layout.js';
+import { getPageLayout, editPageLayout, pageLayoutFingerprint, pageLayoutStateFingerprint, structureObjectsFingerprint, pageLayoutState, remapLayoutOps } from '../engine/page-layout.js';
 import { tocRegions, physicalParas, regionXml, replaceRegion, docBytesSync, containerFromBytesSync, importRegionXml, preserveTocFormatting, validateTocQuality, tocRole, TOC_STYLE_NAMES } from '../engine/toc.js';
 import { refreshTocInEngine, createTocInEngine, lineCountsInEngine } from './toc-engine.js';
 import { tutorialConfig, shareAgentMatches } from './tutorial.js';
@@ -151,6 +151,8 @@ function normEditors(v, strict = false) {
 /** 문서 상태 표(머리·구역 XML 글 — 문자열은 바뀌지 않으므로 가리킴만 둔다): 일괄 처리의 항목 하나가 문서를 고쳤는지 본다 */
 const docSig = (doc) => [doc.header?.xml, ...doc.sections.map((s) => s.xml)];
 const sameDoc = (doc, sig) => doc.sections.length === sig.length - 1 && doc.header?.xml === sig[0] && doc.sections.every((s, i) => s.xml === sig[i + 1]);
+/** [hwpx-cowork] 지금 반영 중인 쪽 구성 제안 표시(기호 열쇠 — 저장되지 않음): 제 반영의 주소 옮김(_layoutRemap)이 제 ops 주소를 옮기거나 lost 로 만들지 않게(2026-11-17) */
+const LAYOUT_SELF = Symbol('layoutSelf');
 const publicProposal = p => { const { layoutUndo, childSnapshot, batchSnapshot, batchUndoSnapshot, ...view } = p; return view; };
 
 /** 중첩 문단(표 셀 등) 목록 — 메모 본문은 뺀다 */
@@ -739,7 +741,8 @@ export class Service {
     if (typeof ctx.beforeSave === 'function') ctx.beforeSave(ctx);
     if (ctx.layoutSnapshots?.length) {
       for (const p of ctx.layoutSnapshots) p.layoutUndo.after = null;
-      ctx.layoutSnapshots.at(-1).layoutUndo.after = pageLayoutFingerprint(ctx.doc);
+      // [hwpx-cowork] 마지막 쪽 구성 뒤에 같은 커밋에서 다른 제안을 반영·되돌렸으면(ctx.layoutLater — _applyCore·_undoCore) 그것도 사본으로 되돌리지 않는다(2026-11-17)
+      if (!ctx.layoutLater) ctx.layoutSnapshots.at(-1).layoutUndo.after = pageLayoutFingerprint(ctx.doc);
     }
     // 개체 지우기(고친 글만): 이 커밋의 문서 지문 — 되돌릴 때 문서가 그대로면 지우기 직전 사본으로 통째로 되돌린다(같은 커밋의 앞선 지우기는 그 뒤가 바뀌었다)
     if (ctx.objectSnapshots?.length) {
@@ -1161,6 +1164,13 @@ export class Service {
       if (p.appliedRange?.ref) {
         let gone = false; const v = map(p.appliedRange.ref, () => { gone = true; });
         if (gone) { delete p.appliedRange; p.refGone = true; } else p.appliedRange.ref = v;
+      }
+      // [hwpx-cowork] 대기 쪽 구성 제안 ops 안의 문단 주소(구역 나누기 before_ref·개체 → 본문 at·drop·remove_rest.at — 주소를 바꾸는 op 앞의 것만,
+      // engine/page-layout.js remapLayoutOps). 기대는 상태 지문 v2(pageLayout.state)로 낸 제안만 — 예전 제안은 문단 수가 바뀌면 어차피 STALE 이다(2026-11-17)
+      if (p.type === 'page_layout' && p.status === 'pending' && p.pageLayout?.state?.v === 2 && !p[LAYOUT_SELF]) {
+        const out = remapLayoutOps(p.pageLayout.ops, (r) => { let gone = false; const v = map(r, () => { gone = true; }); return gone ? null : v; });
+        if (out.changed || out.lost) p.pageLayout.ops = out.ops;
+        if (out.lost) p.lost = true;
       }
     }
     // 실시간 글 마지막 작성자(V4 §2.3): 문단 번호를 따라가고, 지워진 문단 것은 버린다
@@ -2491,7 +2501,9 @@ export class Service {
       const ops = normalizePageLayoutOps(inp.pageLayout?.ops);
       const clone = new HwpxDoc(containerFromBytesSync(docBytesSync(doc)));
       const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), author }));
-      p.pageLayout = { ops, labels: dry.labels, fingerprint: pageLayoutStateFingerprint(doc) };
+      // fingerprint = 예전 지문(문단 수 포함 — 같으면 제안 때와 같은 상태라 바로 반영), state = 기대는 상태만(v2 — 같은 요청의 다른 제안이 먼저 반영돼
+      // 문단 수만 바뀌어도 반영한다, engine/page-layout.js pageLayoutState·2026-11-17)
+      p.pageLayout = { ops, labels: dry.labels, fingerprint: pageLayoutStateFingerprint(doc), state: pageLayoutState(doc, ops) };
       // 개체 → 본문(objects_to_body — engine/flow.js): 미리 해 본 결과 요약과, 그 개체가 제안 뒤 바뀌었는지 볼 지문을 남긴다
       if (dry.reports?.length) { p.pageLayout.result = dry.reports; p.pageLayout.objects = structureObjectsFingerprint(doc, ops); }
       const section = ops[0].section ?? Number(/^s(\d+)/.exec(ops[0].before_ref)?.[1] || 0);
@@ -3515,14 +3527,34 @@ export class Service {
     if (p.type === 'edit_batch') {
       this._applyEditBatch(ctx, p); p.changeIds = []; p.appliedFinal = true;
     } else if (p.type === 'page_layout') {
-      if (p.pageLayout.fingerprint !== pageLayoutStateFingerprint(doc)) throw new ServiceError('STALE', '쪽 구성이 변경됐습니다. get_page_layout으로 다시 읽고 제안하세요.', 409);
-      if (p.pageLayout.objects && p.pageLayout.objects !== structureObjectsFingerprint(doc, p.pageLayout.ops)) throw new ServiceError('STALE', '제안한 뒤 옮길 글상자·도형이 바뀌었습니다. 다시 요청하세요.', 409);
+      const state = p.pageLayout.state;
+      if (state?.v === 2) {
+        // [hwpx-cowork] 기대는 상태만 견준다(engine/page-layout.js pageLayoutState — 2026-11-17): 같은 요청의 문단 넣기·표 넣기·글 바꾸기를 먼저 반영해 문단 수만
+        // 바뀐 것은 막지 않는다(예전 지문은 문단 수를 넣어 '마지막에 반영하라'고 낸 쪽 구성이 늘 STALE). 구역 구성·옮길 개체가 바뀌었으면 STALE 그대로
+        const now = pageLayoutState(doc, p.pageLayout.ops);
+        if (now.parts !== state.parts) throw new ServiceError('STALE', '제안한 뒤 구역 구성(구역 수·용지·여백·머리말·꼬리말·쪽 번호·바탕쪽)이 바뀌었습니다. get_page_layout으로 다시 읽고 제안하세요.', 409);
+        if ((now.sizes ?? null) !== (state.sizes ?? null)) throw new ServiceError('STALE', '제안한 뒤 문단이 늘거나 줄었습니다 — 이 쪽 구성 제안은 구역 나누기·합치기 뒤의 문단 주소를 써서 따라 옮길 수 없습니다. 다시 요청하세요.', 409);
+        if ((now.objects ?? null) !== (state.objects ?? null)) throw new ServiceError('STALE', '제안한 뒤 옮길 글상자·도형이 바뀌었습니다. 다시 요청하세요.', 409);
+      } else {
+        if (p.pageLayout.fingerprint !== pageLayoutStateFingerprint(doc)) throw new ServiceError('STALE', '쪽 구성이 변경됐습니다. get_page_layout으로 다시 읽고 제안하세요.', 409);
+        if (p.pageLayout.objects && p.pageLayout.objects !== structureObjectsFingerprint(doc, p.pageLayout.ops)) throw new ServiceError('STALE', '제안한 뒤 옮길 글상자·도형이 바뀌었습니다. 다시 요청하세요.', 409);
+      }
       const before = docBytesSync(doc), keys = new Map(doc.memos().map(m => [m.id,m.key]));
-      const result = this._engine(() => editPageLayout(doc, p.pageLayout.ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), author }));
+      let result;
+      try { result = this._engine(() => editPageLayout(doc, p.pageLayout.ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), author })); }
+      catch (e) {
+        // [hwpx-cowork] ops 를 차례로 문서에 하다 가운데서 실패하면(앞 op 는 이미 바뀜) 반영 전 사본으로 되돌린다 — [모두 반영](resolveRequest)이 문서가 그대로인
+        // 실패만 그 항목의 실패로 적고 반쯤 바뀌었으면 앞서 반영한 제안까지 통째로 버린다. 엔진 오류(PAGE_LAYOUT 등 — 코드 있는 보통 Error)는 사유가 남게 ServiceError 로
+        Object.assign(doc, new HwpxDoc(containerFromBytesSync(before)));
+        if (e instanceof ServiceError || !e?.code) throw e;
+        throw new ServiceError(e.code, `쪽 구성을 반영하지 못했습니다: ${e.message}`, 409);
+      }
       if (result.reports?.length) p.pageLayout.result = result.reports;
       // 되돌릴 때는 옮겨 간 중첩 주소만 쓴다(없어진 주소는 싣지 않는다 — 글상자 수천 개가 본문으로 옮겨진 문서)
       p.layoutUndo = { before: deflateRawSync(before).toString('base64'), mapping: result.mapping, refs: result.refMapping.filter(m => m.to), proposalSeq: meta.seq.proposal };
-      this._layoutRemap(ctx, result.mapping, keys, result.refMapping);
+      // 제 반영의 주소 옮김은 제 ops 를 옮기지 않는다(_remapSectionsDeep 의 대기 쪽 구성 ops 옮기기 — ops 는 반영 전 문서의 주소 그대로 남는다)
+      p[LAYOUT_SELF] = true;
+      try { this._layoutRemap(ctx, result.mapping, keys, result.refMapping); } finally { delete p[LAYOUT_SELF]; }
       (ctx.layoutSnapshots ||= []).push(p);
       ctx.formatting = true; ctx.changed.add(p.ref);
     } else if (p.type === 'format') {
@@ -3796,6 +3828,10 @@ export class Service {
     }
     const at = nowIso();
     p.status = 'applied'; p.appliedBy = by; p.appliedAt = at; p.appliedVersion = meta.version + 1;
+    // [hwpx-cowork] 같은 커밋에서 쪽 구성을 반영한 뒤 다른 제안을 반영했으면(예: [모두 반영]에서 쪽 구성 제안 번호가 앞) 그 쪽 구성은 고치기 전 사본으로 되돌리지
+    // 않는다 — 사본에는 뒤 제안의 글이 없어 되돌리면 그 글이 사라지고 제안은 '반영'으로 남았다(2026-11-17 확인). _finish 가 layoutUndo.after 를 비워 STALE 로 막는다
+    if (p.type === 'page_layout') ctx.layoutLater = false;
+    else if (ctx.layoutSnapshots?.length) ctx.layoutLater = true;
     this._advancePendingFormats(ctx, p, pendingFormats);
     this._paraPrintsAfter(ctx, paraPrints);
     // 개체·바이너리는 글이 같아도 달라진다. formatVersion으로 편집기가 원본을 다시 읽게 한다.
@@ -4039,6 +4075,8 @@ export class Service {
     delete p.formatUndo; delete p.formatBefore; delete p.formatAfterFingerprint;
     if (p.type !== 'replace') { p.insertedRef = null; p.captionRef = null; if (p.type !== 'table_edit') p.tableKey = null; delete p.binId; delete p.replaced; delete p.tableUndo; delete p.tocUndo; }
     ctx.dirty = true;
+    // 같은 커밋에서 쪽 구성을 반영한 뒤 다른 제안을 되돌렸으면 그 쪽 구성은 사본으로 되돌리지 않는다(_finish — 아래 _applyCore 끝과 같은 까닭)
+    if (p.type !== 'page_layout' && ctx.layoutSnapshots?.length) ctx.layoutLater = true;
     this._paraPrintsAfter(ctx, paraPrints);
     this._markUndone(ctx, p, by, detail);
   }
@@ -5479,6 +5517,9 @@ export class Service {
         return { failed: true, request, usage: e.usage, version: this._meta(id).version };
       }
     }
+    // 새 MCP 연결(v2 — 2026-11-17): API 키(OpenAI·Claude·Gemini)도 Codex·Claude Code 실행기와 같은 작업 도구(read·edit·finish)로 처리한다.
+    // 예전 연결(아래 — 도구 + 최종 JSON)은 config.ai.mcp = 'v1'(또는 그 키의 ai.mcp 'v1'), 모의 AI·튜토리얼 예시 답변은 늘 예전 길
+    if (this._serverAiV2(ai)) return this._runAiV2(id, rid, input, user, run, ai);
     let result = null; let err = null;
     let apiTools;
     try {
@@ -5585,6 +5626,77 @@ export class Service {
     this.hub.broadcast(id, { type: 'request', action: 'done', rid, by, owner: out.request.by, version: out.version });
     if (out.proposals.length) this.hub.broadcast(id, { type: 'proposal', action: 'batch', count: out.proposals.length, by, version: out.version });
     if (out.comments.length) this.hub.broadcast(id, { type: 'memo', action: 'add', count: out.comments.length, by, version: out.version });
+    return { queued: false, ...out };
+  }
+
+  /**
+   * 서버 AI·서버에 등록한 개인 키가 새 MCP 연결(v2)로 도는가: 그 AI 에 밝힌 ai.mcp > config.ai.mcp > 기본 'v2'(2026-11-17 — 예전 연결은 'v1' 로 고른다).
+   * 도구를 쓰지 않는 모의 AI·runV2 가 없는 실행기(튜토리얼 예시 답변 등)는 예전 길
+   */
+  _serverAiV2(ai) {
+    if (!ai?.supportsTools || ai.mock || typeof ai.runV2 !== 'function') return false;
+    let fallback = 'v2';
+    try { fallback = normalizeMcp(this.cfg?.ai?.mcp) || 'v2'; } catch { /* 틀린 값이면 AiProposer 가 이미 AI 를 꺼 두었다 */ }
+    return (ai.mcp || fallback) === 'v2';
+  }
+
+  /**
+   * 서버 AI 실행 하나를 새 MCP 연결(v2)로: 요청 내용(agentBrief — task 응답과 같다)을 첫 입력에 싣고, 같은 MCP 서버를 메모리로 열어
+   * (server/api-service-tools.js — surface 'v2', 도구 범위 core) 모델이 read·edit·finish 로 처리한다. 결과 저장과 완료·실패는 모델의 edit(done)·finish 가
+   * 서버 길(agentEdit·agentFinish → completeRequest·failRequest — 알림·버전·자동 반영 포함)로 바로 한다. 여기서는 완료를 다시 하지 않고 사용량·모델만 적는다.
+   * 모델이 끝내지 못했으면(오류·API_MCP_INCOMPLETE) 예전 길처럼 실패로 닫는다(저장된 제안·메모는 남는다).
+   * 선점은 예전 길과 같은 이 실행의 서버 선점(run) — 바뀌었으면(취소 → 다시 요청 등) 늦게 끝난 실행은 아무것도 쓰지 않는다
+   */
+  async _runAiV2(id, rid, input, user, run, ai) {
+    const r0 = this._req(this._meta(id), rid);
+    const actor = { ...user, agentAttempt: this._attempt(r0), [API_SERVER_RUN]: run };
+    const session = `api-${rid}`;   // server/api-service-tools.js 의 메모리 연결 세션 이름(진행 기록이 이 이름으로 요청을 찾는다)
+    let result = null; let err = null; let apiTools;
+    try {
+      // 서버 선점에는 세션이 없어 brief 의 claim(mine:false)은 '남이 맡았다'로 읽힌다 — 실행기가 맡은 것이므로 뺀다
+      const { claim, ...brief } = await this.agentBrief(id, rid, actor, { session });
+      apiTools = await openServiceApiTools({ service: this, user: actor, agent: ai.agentName, docId: id, requestId: rid, attempt: actor.agentAttempt, surface: 'v2',
+        assertCurrent: async () => { const latest = this._req(this._meta(id), rid); this._assertRequestAttempt(latest, actor); this._assertResultClaim(latest, actor, 'api'); },
+        // 끝내는 호출(edit 의 done·finish) 뒤의 요청 상태 — 완료·실패면 고리가 멈춘다(server/api-mcp-tools.js)
+        requestStatus: async () => { const latest = this._req(this._meta(id), rid); this._assertRequestAttempt(latest, actor); return { status: latest.status, attempt: this._attempt(latest) }; } });
+      result = await ai.runV2({ brief, attachments: input?.attachments || [] }, { toolContext: apiTools.context });
+    } catch (e) { err = e; debugRecord('service.ai.error', debugError(e)); }
+    finally { await apiTools?.close(); }
+    const used = result || err;
+    const out = await this._tx(id, async () => {
+      const { doc, meta } = await this._load(id);
+      const r = this._req(meta, rid);
+      const handler = ai.agentName;
+      if (!run || r.claim?.server !== true || r.claim.run !== run || !['working', 'done', 'failed'].includes(r.status)) return { cancelled: true, request: this._reqView(meta, r, user), version: meta.version };
+      // 모델을 부른 실행만 사용량·실행 경로를 적는다(요청 내용을 만들다 실패했으면 비워 둔다)
+      if (validEditUsage(used?.usage)) { r.usage = { ...used.usage }; r.execution = 'tool-agent'; }
+      if (typeof used?.model === 'string' && used.model.trim()) r.model = used.model.slice(0, 200);
+      if (r.status === 'working') {
+        const at = nowIso(); const ctx = this._ctx(id, doc, meta, handler);
+        r.handledBy = handler; r.status = 'failed'; r.doneAt = at;
+        r.error = String(err?.message || err || 'AI가 요청을 끝내지 않았습니다').slice(0, 500);
+        r.log.push({ at, by: handler, action: 'failed', detail: '실패' });
+        ctx.reqs.add(rid);
+        this.store.log(meta, handler, 'ai.failed', `#${rid} ${r.error}`);
+        const version = await this._finish(ctx, `AI 작업 #${rid} 실패`);
+        debugRecord('service.request.failed', { error: err ? debugError(err) : null, request: { status: r.status, error: r.error, usage: r.usage }, version });
+        return { failed: true, closedHere: true, request: this._reqView(meta, r, user), version };
+      }
+      // 모델이 edit(done)·finish 로 이미 닫았다 — 사용량·모델만(완료 메모·이력·자동 반영은 그때 끝났다)
+      this.store.log(meta, handler, 'ai.run', `#${rid} 새 연결 ${r.status === 'done' ? '완료' : '실패'}, 토큰 ${r.usage?.input ?? 0}/${r.usage?.output ?? 0}${r.usage?.cacheRead || r.usage?.cacheWrite ? `(캐시 읽음 ${r.usage.cacheRead || 0}·씀 ${r.usage.cacheWrite || 0})` : ''}`);
+      this.store.saveMeta(meta);
+      if (r.status === 'failed') return { failed: true, request: this._reqView(meta, r, user), version: meta.version };
+      const memoList = this._memoItems(doc, meta, user);
+      return { request: this._reqView(meta, r, user), proposals: this._reqProposals(meta, r), comments: r.comments.map((mid) => memoList.find((m) => m.id === mid)).filter(Boolean),
+        skipped: [], usage: r.usage, model: r.model, version: meta.version };
+    });
+    const by = ai.agentName;
+    if (out.cancelled) return { queued: false, cancelled: true, request: out.request, proposals: [], comments: [] };
+    if (out.failed) {
+      // 여기서 실패로 닫았을 때만 알린다(모델이 finish(error)로 닫았으면 그때 알렸다)
+      if (out.closedHere) { this.hub.broadcast(id, { type: 'doc', action: 'changed', version: out.version, by }); this.hub.broadcast(id, { type: 'request', action: 'failed', rid, by, owner: out.request.by }); }
+      throw new ServiceError('AI_FAILED', `AI 처리에 실패했습니다: ${err?.message || out.request.error}`, 502, { request: out.request });
+    }
     return { queued: false, ...out };
   }
 
@@ -5902,7 +6014,11 @@ export class Service {
       }
       ctx.reqs.add(r.rid);
       const parts = [counts.applied ? `적용 ${counts.applied}` : '', counts.rejected ? `거절 ${counts.rejected}` : '', counts.adopted ? `수정본 반영 ${counts.adopted}` : ''].filter(Boolean);
-      this.store.log(meta, by, 'request.resolve', `#${r.rid} ${parts.join(' · ') || '바뀐 것 없음'}${counts.failed ? ` · 실패 ${counts.failed}` : ''}`);
+      // [hwpx-cowork] 실패 사유를 남긴다(2026-11-17 — [모두 반영]에서 쪽 구성 제안이 '실패 1'만 남고 서버 기록에 사유가 없었다): 그 제안의 기록(p.log)과 문서 활동 기록
+      const failedRows = results.filter((x) => !x.ok);
+      for (const x of failedRows) { const fp = propOf(x.pid); if (fp) fp.log.push({ at, by, action: `${x.action}-failed`, detail: `${x.code}: ${x.error}` }); }
+      const why = failedRows.length ? `(${failedRows.slice(0, 5).map((x) => `#${x.pid} ${x.code}: ${MT.clip(x.error, 80)}`).join(' / ')}${failedRows.length > 5 ? ' …' : ''})` : '';
+      this.store.log(meta, by, 'request.resolve', `#${r.rid} ${parts.join(' · ') || '바뀐 것 없음'}${counts.failed ? ` · 실패 ${counts.failed}${why}` : ''}`);
       const version = await this._finish(ctx, `AI 작업 #${r.rid} 정리${parts.length ? `(${parts.join(' · ')})` : ''}`);
       return {
         request: this._reqView(meta, r, user), results, counts, version, milestone: ctx.madeMilestone ? { ...ctx.madeMilestone } : null,

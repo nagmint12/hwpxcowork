@@ -185,19 +185,20 @@ function aiFlow() {
   return { h, body: b, title: '문서에서 요청하면 내 PC의 Codex나 Claude Code가 MCP로 받아 처리하고, 제안이 문서로 돌아와 사람이 반영합니다' };
 }
 
-/** ② 실시간 처리 켜기 — Codex 줄 · Claude Code 줄 */
+/** ② 실시간 처리 켜기 — Codex 줄 · Claude Code 줄.
+ *  2026-11-17: 실행기 bat(start-codex-agent·start-claude-worker)을 지웠다(사용자 결정) — Windows 앱 [AI → 실행기 관리…]가 대신한다(명령줄은 npm run worker, 설명서 본문) */
 function realtimeSteps() {
   const pad = 24; const labelW = 132; const gap = 30; const rowH = 128; const top = 22;
   const rows = [
     { name: 'Codex', plan: 'ChatGPT 구독', steps: [
       { icon: 'person', title: '로그인', sub: 'codex login' },
       { icon: 'key', title: '토큰 저장', sub: 'setx … (한 번)' },
-      { icon: 'terminal', title: '실행기 켜 두기', sub: 'start-codex-agent.bat' },
+      { icon: 'terminal', title: '실행기 켜 두기', sub: 'AI → 실행기 관리' },
       { icon: 'check', title: 'Codex로 보내기', sub: '문서 화면에 보임', tone: 'result' }] },
     { name: 'Claude Code', plan: 'Claude 구독', steps: [
       { icon: 'person', title: '로그인', sub: 'claude auth login' },
       { icon: 'key', title: '토큰 저장', sub: 'setx … (한 번)' },
-      { icon: 'terminal', title: '실행기 켜 두기', sub: 'start-claude-worker.bat' },
+      { icon: 'terminal', title: '실행기 켜 두기', sub: 'AI → 실행기 관리' },
       { icon: 'check', title: 'Claude Code로 보내기', sub: '문서 화면에 보임', tone: 'result' }] },
   ];
   const n = 4; const x0 = pad + labelW + 14;
@@ -219,8 +220,8 @@ function realtimeSteps() {
     });
   });
   const h = top + rows.length * (rowH + 16) + 26;
-  b += text(W / 2, h - 18, '창을 켜 두면 새 요청을 바로 처리 · 끄면 요청은 대기열에서 기다림', { size: 14, fill: C.muted, anchor: 'middle' });
-  return { h, body: b, title: 'Codex는 codex login, 토큰 저장, start-codex-agent.bat 실행. Claude Code는 claude auth login, 토큰 저장, start-claude-worker.bat 실행. 켜 두면 문서 화면에 보낼 곳이 보입니다' };
+  b += text(W / 2, h - 18, '실행기를 켜 두면 새 요청을 바로 처리 · 끄면 요청은 대기열에서 기다림', { size: 14, fill: C.muted, anchor: 'middle' });
+  return { h, body: b, title: 'Codex는 codex login, 토큰 저장, Windows 앱의 AI → 실행기 관리에서 실행기 켜기. Claude Code는 claude auth login, 토큰 저장, 같은 곳에서 실행기 켜기. 켜 두면 문서 화면에 보낼 곳이 보입니다' };
 }
 
 /** ③ VS Code 에서 붙여넣는 곳 — 터미널 · 설정 파일 · AI 대화창 */
@@ -247,7 +248,7 @@ function vscodePlaces() {
   b += text(ex + 14, ty + 22, '터미널', { size: 12.5, fill: '#9aa6b8' });
   b += text(ex + 14, ty + 50, 'PS> codex mcp add hwpx --url …', { size: 14, family: MONO, fill: '#e3e8f0' });
   b += text(ex + 14, ty + 76, 'PS> claude mcp add … hwpx …', { size: 14, family: MONO, fill: '#e3e8f0' });
-  b += text(ex + 14, ty + 102, 'PS> start-codex-agent.bat', { size: 14, family: MONO, fill: '#e3e8f0' });
+  b += text(ex + 14, ty + 102, 'PS> npm run worker -- --provider codex', { size: 14, family: MONO, fill: '#e3e8f0' });   // 2026-11-17 start-codex-agent.bat 을 지움
   // AI 대화창(오른쪽)
   const px = ex + ew; const pw = x + w - px; const py = y + 30; const ph = hh - 30;
   b += rect(px, py, pw, ph, { rx: 0, fill: '#232a36', stroke: null }) + line(px, py, px, py + ph, { stroke: '#3a4354', sw: 1.5 });

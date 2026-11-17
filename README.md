@@ -5,7 +5,7 @@ MCP 로 문서를 읽고 **제안·메모**를 남기는 도구입니다. 파일
 
 - 웹 편집기: [rhwp](https://github.com/edwardkim/rhwp)(Rust/WASM HWP·HWPX 엔진, MIT) v0.9.0 을 바탕으로 한/글 2022 동작에 맞춰 고친 엔진 + 협업 플러그인
 - 실시간 공동 편집·변경 추적(한/글 "변경 내용")·메모 스레드·변경 요청(승인 방식)·문서함 권한
-- AI 연결: 내 PC의 구독 Codex·Claude Code로 바로 처리(MCP), ChatGPT 앱 연결(선택·고급), API 키(사용료 별도). 서버가 곧 MCP 서버(`/mcp`, OAuth 2.1 지원)
+- AI 연결: 내 PC의 구독 Codex·Claude Code로 바로 처리(MCP), ChatGPT 앱 연결(선택·고급), API 키(사용료 별도). 서버가 곧 MCP 서버(`/mcp`, OAuth 2.1 지원) — 기본은 작업 도구 넷(`task`·`read`·`edit`·`finish`)의 새 연결(v2)이고, 예전 연결은 `/mcp?v=1`
 - 표·차트·그림·차례·쪽 구성 제안, 한/글로 복사·붙여넣기(설치 없이 문서 모델 전달), 튜토리얼
 
 ## 설치 — 두 가지 길
@@ -29,10 +29,18 @@ Windows 10·11(64비트)용입니다. 관리자 권한이 필요 없습니다.
    - **혼자 쓰기**: 이 PC의 한글 문서를 혼자 열고 고칩니다. 메뉴 **[파일 → 문서 폴더 연결]**로 PC 폴더를 연결합니다.
    - **여러 사람과 함께 쓰기**: 이 PC가 공동 작업 서버가 됩니다. 메뉴 **[함께 쓰기 → 참여자 관리]**에서 참여자를 추가합니다.
      다른 PC에서 들어오게 하려면 **[함께 쓰기 → 외부 접속 열기]**를 누릅니다(Cloudflare 무료 임시 주소, 계정 불필요, 앱을 켜 둔 동안만 열림).
-5. AI를 쓰려면 메뉴 **[AI → ChatGPT·Claude 연결]**에서 고른 뒤 브라우저에서 본인 계정으로 로그인합니다.
-   처음 한 번은 공식 연결 프로그램을 자동으로 받습니다(인터넷 필요).
+   - **AI 실행기만**: 이 PC에 서버를 두지 않고, 이미 있는 서버(공동 작업 서버 등)에 내 구독 AI만 연결합니다.
+     문서는 그 서버의 웹 화면에서 엽니다(기본 브라우저).
+5. AI를 쓰려면 메뉴 **[AI → 실행기 관리…]**에서 **실행기를 더합니다**(0.6.0부터 — 예전 [AI → ChatGPT·Claude 연결]을 대신합니다).
+   - **AI**: Codex(ChatGPT 구독)·Claude Code(Claude 구독)·Gemini CLI·Antigravity(Google 계정) 가운데 고릅니다.
+     Codex·Claude Code는 처음 한 번 공식 연결 프로그램을 자동으로 받고(인터넷 필요), 브라우저에서 본인 계정으로 로그인합니다.
+   - **서버**: '이 앱의 서버' 또는 '다른 서버'(서버 주소 + 내 토큰). 다른 서버의 토큰은 그 서버에 물어 확인하며(체험 계정은 받지 않음),
+     인터넷 주소는 `https://`만 받습니다. 토큰은 Windows 사용자 계정으로 암호화해 이 PC에만 둡니다.
+   - 실행기마다 켜기·끄기, 상태(준비·연결됨·처리 중·대기·오류·꺼짐), 최근 기록, 앱을 켤 때 자동 시작을 정합니다.
+     연결 방식은 새 연결(v2)이 기본이고, 고급 설정에서 예전 연결(v1)을 고를 수 있습니다.
+   - 실행기가 뜻하지 않게 꺼지면 앱이 간격을 늘려 가며(5초·15초·45초·2분·5분) 다시 띄웁니다.
 
-창을 닫으면 저장을 마친 뒤 함께 꺼집니다. 방식은 **[Hwpx Cowork → 운영 방식 바꾸기]**로 바꾸며, 두 방식의 문서·설정은 따로 보관됩니다.
+창을 닫으면 저장을 마친 뒤 함께 꺼집니다. 방식은 **[Hwpx Cowork → 운영 방식 바꾸기]**로 바꾸며, 방식마다 문서·설정은 따로 보관됩니다.
 지우려면 **설정 → 앱 → Hwpx Cowork → 제거**를 누릅니다. 문서 기록과 설정(`%APPDATA%\Hwpx Cowork`)은 남습니다.
 
 설치 파일 만들기(개발자): `node scripts/package-windows-desktop.mjs` → `artifacts/windows-desktop-<날짜>/installer/`.
@@ -92,11 +100,16 @@ node scripts/setup-personal.mjs --mode personal --ai codex --install-cli --start
 **알아 둘 점**
 - **"설치해 줘"만으로 로그인까지 끝나지는 않습니다.** CLI의 구독 로그인·동의는 본인이 직접 합니다. VS Code 확장에 로그인했다고 CLI까지 로그인된 것은 아닙니다.
 - 설치 점검은 모델을 부르지 않습니다. 구독·조직 권한·사용량 제한은 실제 요청 때 적용됩니다.
-- 공동 서버도 처음에는 이 PC에서만 열립니다. 관리자 화면에서 참여자를 추가하고, 외부 공유는 HTTPS·접속 정책을 따로 설정합니다(임시 주소는 `start-tunnel.bat`). 연결한 구독 AI는 관리자 본인 요청만 처리하고, 참여자는 각자 본인 토큰과 구독으로 실행기를 연결합니다.
+- 공동 서버도 처음에는 이 PC에서만 열립니다. 관리자 화면에서 참여자를 추가하고, 외부 공유는 HTTPS·접속 정책을 따로 설정합니다(임시 주소는 프로그램 폴더에서 `npm run tunnel`). 연결한 구독 AI는 관리자 본인 요청만 처리하고, 참여자는 각자 본인 토큰과 구독으로 실행기를 연결합니다(아래 '내 구독 AI 연결하기').
 
 ## 내 구독 AI 연결하기
 
-새로 설치한 경우에는 위 도우미가 서버 주소와 토큰을 실행기에 전달하므로 아래 수동 등록은 필요하지 않습니다. 아래 절은 **기존 공유 서버에 참여하는 경우**의 수동 연결입니다. 연결은 **① 내 PC의 구독 AI(기본) → ② ChatGPT 앱 연결(선택·고급) → ③ 내 AI 키(API, 사용료 별도)** 순서입니다. 먼저 서버를 켜고, VS Code 터미널(PowerShell)에서 개인 토큰을 한 번 저장합니다.
+새로 설치한 경우에는 위 도우미·앱이 서버 주소와 토큰을 실행기에 전달하므로 아래 수동 등록은 필요하지 않습니다. 아래 절은 **기존 공유 서버에 참여하는 경우**의 연결입니다. 연결은 **① 내 PC의 구독 AI(기본) → ② ChatGPT 앱 연결(선택·고급) → ③ 내 AI 키(API, 사용료 별도)** 순서입니다.
+
+**Windows 앱으로(권장)**: 설치 파일로 앱을 설치하고 처음 실행에서 **AI 실행기만**을 고릅니다(이미 다른 방식으로 쓰고 있으면 그대로 두어도 됩니다).
+메뉴 **[AI → 실행기 관리…]**에서 실행기를 더하고 서버를 **'다른 서버'**로 골라 공동 작업 서버 주소와 내 개인 토큰을 적은 뒤 켭니다.
+
+**명령줄로(Windows·macOS·Linux)**: 프로그램 폴더(`npm install` 을 마친 저장소)에서 개인 토큰을 한 번 저장합니다(Windows PowerShell 예).
 
 ```powershell
 setx HWPX_COWORK_TOKEN "내-개인-토큰"
@@ -107,18 +120,18 @@ VS Code와 터미널을 완전히 닫았다 다시 엽니다. 설치한 AI의 �
 ```powershell
 # Codex — ChatGPT 구독
 codex login
-.\start-codex-agent.bat --check
-.\start-codex-agent.bat
+npm run worker -- --provider codex --url 'https://서버주소/mcp' --check
+npm run worker -- --provider codex --url 'https://서버주소/mcp'
 ```
 
 ```powershell
 # Claude Code — Claude 구독(최신 CLI)
 claude auth login
-.\start-claude-worker.bat --check
-.\start-claude-worker.bat
+npm run worker -- --provider claude-code --url 'https://서버주소/mcp' --check
+npm run worker -- --provider claude-code --url 'https://서버주소/mcp'
 ```
 
-다른 PC의 서버면 시작 명령 끝에 `--url 'https://서버주소/mcp'`를 붙입니다. 구독 사용 한도 안에서 처리하고 별도 API 요금은 없습니다. 실행기가 MCP 연결을 준비하므로 대화창용 MCP 등록은 생략해도 됩니다. 웹에서 글을 골라 **AI에게 맡기기**로 보내면 제안이 돌아오고, 반영은 사람이 합니다.
+이 PC의 서버(`http://localhost:8787/mcp`)면 `--url` 을 뺍니다. Windows PowerShell 이 `npm` 실행을 막으면 `npm.cmd run worker …` 로 씁니다. macOS·Linux 는 `export HWPX_COWORK_TOKEN=…` 뒤 같은 명령입니다. 실행기는 새 MCP 연결(v2)이 기본이고, 아직 새 연결을 모르는 옛 서버에는 `--mcp 1`(예전 연결)을 붙입니다. 구독 사용 한도 안에서 처리하고 별도 API 요금은 없습니다. 실행기가 MCP 연결을 준비하므로 대화창용 MCP 등록은 생략해도 됩니다. 웹에서 글을 골라 **AI에게 맡기기**로 보내면 제안이 돌아오고, 반영은 사람이 합니다.
 
 사람이 보는 짧은 설명과 WebP 그림, **VS Code에 붙여넣을 내용** 복사 상자는 웹의 **사용 설명서 → 내 PC의 구독 AI**에 있습니다. 대화창에서도 쓰려면 그곳의 MCP 등록 명령·설정을 복사합니다. ChatGPT 웹의 URL·OAuth 안내는 접힌 고급 안내에서 펼쳐 봅니다. API 키는 구독과 별도 과금이므로 마지막에 고릅니다.
 
@@ -144,8 +157,8 @@ claude auth login
 | `studio/` | 편집기 빌드: rhwp-studio 에 덧대는 패치(`build/`)·협업 플러그인(`plugin/`)·**빌드 결과 `dist/`** |
 | `vendor/rhwp/` | 엔진·편집기 **원본**(rhwp fork 가운데 빌드에 필요한 것: `src/`·`crates/`·`vendor/`·`rhwp-studio/`·`rhwp-shared/`·`npm/`·`assets/fonts/`)과 **빌드 결과**(`pkg/` WASM), rhwp 라이선스 |
 | `deploy/portable/` | 설치형 묶음(서버·개인 AI 실행기·참여자 앱) 시작 파일 |
-| `deploy/desktop/` | Windows 앱(Electron 창 — 서버·편집기·AI 연결·외부 접속). 설치 파일은 `scripts/package-windows-desktop.mjs` |
-| `agent/` | Claude Code 채널 에이전트 작업 공간 본보기 |
+| `deploy/desktop/` | Windows 앱(Electron 창 — 서버·편집기·AI 실행기 관리·외부 접속). 설치 파일은 `scripts/package-windows-desktop.mjs` |
+| `agent/` | Claude Code 채널 에이전트 작업 공간 본보기(새 연결 지침 `CLAUDE.md`, 예전 연결 지침 `v1/CLAUDE.md`) |
 | `scripts/` | 빌드·묶음·실행기·점검 도구 |
 | `tests/` | 시험(`npm test`) |
 | `tutorial/`·`docs/manuals/` | 튜토리얼·설명서 문서(가상 자료) |

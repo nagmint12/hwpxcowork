@@ -60,8 +60,8 @@ const SERVER_FILES = [
   'scripts/ai-debug.mjs',
   // 웹에서 내려 주는 개인 실행기 ZIP·연결 점검·임시 터널·한글 클립보드 도우미·Claude Code 채널 준비
   'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs', 'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/setup-user.bat', 'scripts/setup-user.ps1', 'scripts/run-settings.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'scripts/native-clipboard.py',
-  // agent/v2/CLAUDE.md = 새 MCP 연결(setup-agent.mjs --v2)의 채널 에이전트 지침 — 없으면 --v2 로 준비해도 예전 지침이 남는다
-  'agent/CLAUDE.md', 'agent/v2/CLAUDE.md', 'agent/.claude/settings.json', 'agent/.claude/ai-debug-hook.mjs', 'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md',
+  // agent/CLAUDE.md = 새 MCP 연결(기본 — 2026-11-17)의 채널 에이전트 지침, agent/v1/CLAUDE.md = 예전 연결(setup-agent.mjs --v1)의 지침 — 없으면 --v1 로 준비할 때 지침을 쓰지 못한다
+  'agent/CLAUDE.md', 'agent/v1/CLAUDE.md', 'agent/.claude/settings.json', 'agent/.claude/ai-debug-hook.mjs', 'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md',
   // 편집기 엔진(서버 차례 새로 고침 + /vendor/rhwp-core)과 편집기 연결 모듈(/vendor/rhwp-editor)
   'vendor/rhwp/pkg/rhwp.js', 'vendor/rhwp/pkg/rhwp_bg.wasm', 'vendor/rhwp/pkg/cowork-engine.json',
   'vendor/rhwp/npm/editor/index.js', 'vendor/rhwp/npm/editor/transport.js', 'vendor/rhwp/npm/editor/document-agent-contract.js', 'vendor/rhwp/npm/editor/package.json',
@@ -73,7 +73,7 @@ const SERVER_FILES = [
 // 서버 app 의 시작 파일 — 여기서부터 상대 import 를 따라가 빠진 파일이 없는지 묶기 전에 확인한다(checkRelativeImports)
 const SERVER_ENTRIES = ['server/launcher.js', 'server/index.js', 'server/control-cli.js', 'server/mcp-stdio.js', 'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs',
   'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs'];
-const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/v2/CLAUDE.md', 'agent/.claude/settings.json',
+const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/v1/CLAUDE.md', 'agent/.claude/settings.json',
   'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md'];
 // 트리 안에서 빼는 것: 편집기 빌드의 rhwp 예제 문서·쓰지 않는 옛 사본, 파이썬 캐시
 // web/quick/ = 운영 주소에 올리는 조사 보고 페이지(2026-11-12 한/글 2022 기능 대조 등) — 제품 묶음에는 넣지 않는다.

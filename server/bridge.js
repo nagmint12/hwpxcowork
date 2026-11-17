@@ -1,5 +1,6 @@
 // MCP stdio 브리지(docs/V3_SPEC.md §2.3) — Claude Code 같은 로컬 MCP 클라이언트 ↔ hwpx-cowork 서버.
-//  · 도구: 원격 HTTP MCP(…/mcp)로 그대로 넘긴다(StreamableHTTPClientTransport, 머리글 Authorization·X-Hwpx-Agent-Session).
+//  · 도구: 원격 HTTP MCP(…/mcp)로 그대로 넘긴다(StreamableHTTPClientTransport, 머리글 Authorization·X-Hwpx-Agent-Session·X-Hwpx-Mcp).
+//    연결 종류는 2026-11-17 부터 기본이 새 연결(v2 — 작업 도구 넷)이고 예전 연결은 --v1(얇은 흐름은 --lean)로 고른다(bridgeSurface).
 //    원격이 안 될 때 tools/list 는 마지막 목록(없으면 빈 목록)으로 답하고, 다시 닿으면 notifications/tools/list_changed.
 //  · 채널(channel): initialized 뒤 서버 SSE(…/api/agent/events, 헤더 인증만)를 듣다가 '내가 맡긴 AI 작업'이 오면
 //    notifications/claude/channel 로 '초인종'을 울린다. 알림 글은 고정 문구 + 번호뿐 — 문서 글·지시 원문을 넣지 않는다.
@@ -83,7 +84,7 @@ export const CHANNEL_INSTRUCTIONS_LEAN = [
 ].join('\n');
 
 /**
- * 새 연결(--v2 또는 주소 ?v=2 — server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md) 채널 안내: task 하나로 맡으면서 요청 내용·문서 얼개를 받고,
+ * 새 연결(2026-11-17 부터 브리지 기본 — server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md) 채널 안내: task 하나로 맡으면서 요청 내용·문서 얼개를 받고,
  * edit 한 번에 ops 를 모아 내며 done 으로 완료한다. 기본 채널 안내보다 길지 않게 둔다(instructionsBudget — tests/channel_bridge.mjs 가 확인)
  */
 export const CHANNEL_INSTRUCTIONS_V2 = [
@@ -338,10 +339,68 @@ const defaultLog = (msg) => { try { process.stderr.write(`[hwpx 브리지] ${msg
 const errText = (e) => cleanText(e?.cause?.code || e?.cause?.errors?.[0]?.code || (e?.code ? `${e.code} ${e.message || ''}` : '') || e?.message || String(e), 160);
 
 /**
- * 브리지를 만든다(시작 전에 서버 instructions 를 2초 안에 받아 온다).
- * @returns {{ server, session, instructions, start(transport), stop(), stats() }}
+ * 브리지 명령줄(server/mcp-stdio.js) → 설정. surface: 'v1'(--v1·--mcp 1)|'v2'(--v2·--mcp 2)|null(정하지 않음 — 기본 새 연결, 주소 ?v=·?lean= 를 본다).
+ * 연결 종류 인자가 여럿이면 마지막 것. 잘못된 --mcp 값은 bad 에(브리지는 시작하지 않는다), 모르는 인자는 unknown 에
  */
-export async function createBridge({ url = DEFAULT_URL, token = null, agent = null, channel = false, tools = true, filesDir = null, lean: leanOpt = false, v2: v2Opt = false, toolset = null, session: suppliedSession = null, toolPolicy = null, instructionOverride = null, transformToolResult = null, forwardToolListChanges = false, fetchImpl = globalThis.fetch, log = defaultLog, timing: timingOpt = {} } = {}) {
+export function parseBridgeArgs(argv, env = {}) {
+  const o = { url: null, token: null, agent: null, channel: false, tools: true, filesDir: null, lean: false, surface: null, toolset: null, help: false, unknown: [], bad: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = String(argv[i]);
+    const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+    const key = eq > 0 ? a.slice(0, eq) : a;
+    const val = () => (eq > 0 ? a.slice(eq + 1) : argv[++i]);
+    switch (key) {
+      case '--url': o.url = val(); break;
+      case '--token': o.token = val(); break;
+      case '--agent': o.agent = val(); break;
+      case '--channel': o.channel = true; break;
+      case '--no-channel': o.channel = false; break;
+      case '--no-tools': o.tools = false; break;
+      case '--lean': o.lean = true; break;
+      case '--no-lean': o.lean = false; break;
+      case '--v1': o.surface = 'v1'; break;
+      case '--v2': o.surface = 'v2'; break;
+      case '--mcp': {
+        const v = String(val() ?? '').trim();
+        if (v === '1' || v === '2') o.surface = v === '2' ? 'v2' : 'v1';
+        else o.bad.push(`--mcp 는 1(예전 연결) 또는 2(새 연결)입니다: ${cleanText(v, 20) || '(값 없음)'}`);
+        break;
+      }
+      case '--tools': o.toolset = val(); break;
+      case '--files-dir': o.filesDir = val(); break;
+      case '-h': case '--help': o.help = true; break;
+      default: o.unknown.push(a);
+    }
+  }
+  o.url = o.url || env.HWPX_COWORK_URL || DEFAULT_URL;
+  o.token = o.token || env.HWPX_COWORK_TOKEN || null;
+  o.agent = o.agent || env.HWPX_COWORK_AGENT || null;
+  o.filesDir = o.filesDir || env.HWPX_COWORK_FILES_DIR || null;
+  return o;
+}
+
+/**
+ * 이 브리지가 쓸 연결 종류 → { surface: 'v2'|'v1', lean }. 2026-11-17 부터 기본은 새 연결(v2)이다(서버 기본과 같다 — server/mcp2.js mcpSurface).
+ * 앞이 이긴다: surface 'v1'|'v2'(--v1·--v2·--mcp 1|2) > v2 true|false(예전 인자) > lean(--lean = 예전 연결의 얇은 흐름) > 주소 ?v=1|2·?lean=1 > 새 연결.
+ * lean 은 예전 연결일 때만 뜻이 있다(새 연결은 응답이 이미 짧다)
+ */
+export function bridgeSurface({ surface = null, v2 = null, lean = false, url = null } = {}) {
+  if (surface != null && surface !== 'v1' && surface !== 'v2') throw new Error(`연결 종류는 v1 또는 v2 입니다: ${surface}`);
+  let q = null;
+  try { q = url ? new URL(url).searchParams : null; } catch { q = null; }
+  const urlLean = /^(1|true|yes|on)$/i.test(q?.get('lean') || '');
+  const urlV = String(q?.get('v') ?? '').trim();
+  const chosen = surface || (v2 === true ? 'v2' : v2 === false ? 'v1' : lean ? 'v1' : urlV === '2' ? 'v2' : urlV === '1' ? 'v1' : urlLean ? 'v1' : 'v2');
+  return { surface: chosen, lean: chosen === 'v1' && (!!lean || urlLean) };
+}
+
+/**
+ * 브리지를 만든다(시작 전에 서버 instructions 를 2초 안에 받아 온다).
+ * surface: 'v2'(기본 — 새 연결) | 'v1'(예전 연결). 서버에는 언제나 머리글 X-Hwpx-Mcp(2|1)로 밝힌다 — 이 브리지의 client 이름(hwpx-cowork-bridge)은
+ *   밝히지 않으면 새 서버가 옛 브리지로 보고 예전 연결로 연다(server/mcp2.js). 옛 서버는 모르는 머리글이라 예전 도구로 답한다
+ * @returns {{ server, session, instructions, surface, start(transport), stop(), stats() }}
+ */
+export async function createBridge({ url = DEFAULT_URL, token = null, agent = null, channel = false, tools = true, filesDir = null, lean: leanOpt = false, v2: v2Opt = null, surface: surfaceOpt = null, toolset = null, session: suppliedSession = null, toolPolicy = null, instructionOverride = null, transformToolResult = null, forwardToolListChanges = false, fetchImpl = globalThis.fetch, log = defaultLog, timing: timingOpt = {} } = {}) {
   const timing = { ...DEFAULT_TIMING, ...(timingOpt || {}) };
   const say = (msg) => { try { log(msg); } catch { /* 로그 실패는 무시 */ } };
   let base;
@@ -364,13 +423,13 @@ export async function createBridge({ url = DEFAULT_URL, token = null, agent = nu
   // 이 브리지 프로세스의 에이전트 세션 id(§2.2 선점): SSE ?session= 과 MCP 머리글 X-Hwpx-Agent-Session 에 같은 값
   if (suppliedSession != null && !/^[A-Za-z0-9_-]{1,64}$/.test(suppliedSession)) throw new Error('에이전트 세션 형식이 올바르지 않습니다');
   const session = suppliedSession || crypto.randomBytes(12).toString('base64url');
-  // 얇은 흐름(--lean 또는 주소 ?lean=1): 서버가 모델용 요약·영수증으로 답한다(머리글 X-Hwpx-Lean — 옛 서버는 모르는 머리글이라 예전 꼴 그대로 답한다)
-  const lean = !!leanOpt || /^(1|true|yes|on)$/i.test(base.searchParams.get('lean') || '');
-  // 새 연결(--v2 또는 주소 ?v=2 — server/mcp2.js): 작업 도구 넷(task·read·edit·finish). 머리글 X-Hwpx-Mcp: 2(옛 서버는 모르는 머리글이라 예전 도구로 답한다),
-  // 도구 범위(--tools core|all)는 X-Hwpx-Tools
-  const v2 = !!v2Opt || base.searchParams.get('v') === '2';
+  // 연결 종류(bridgeSurface — 기본 새 연결): 새 연결(server/mcp2.js)은 작업 도구 넷(task·read·edit·finish), 도구 범위(--tools core|all)는 X-Hwpx-Tools.
+  // 예전 연결의 얇은 흐름(--lean 또는 주소 ?lean=1)은 머리글 X-Hwpx-Lean 도 보낸다(서버가 모델용 요약·영수증으로 답한다)
+  const picked = bridgeSurface({ surface: surfaceOpt, v2: v2Opt, lean: leanOpt, url });
+  const v2 = picked.surface === 'v2';
+  const lean = picked.lean;
   const tools2 = ['core', 'all'].includes(toolset) ? toolset : (['core', 'all'].includes(base.searchParams.get('tools')) ? base.searchParams.get('tools') : null);
-  const authHeaders = () => ({ Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session, ...(lean ? { 'X-Hwpx-Lean': '1' } : {}), ...(v2 ? { 'X-Hwpx-Mcp': '2', ...(tools2 ? { 'X-Hwpx-Tools': tools2 } : {}) } : {}) });
+  const authHeaders = () => ({ Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session, 'X-Hwpx-Mcp': v2 ? '2' : '1', ...(lean ? { 'X-Hwpx-Lean': '1' } : {}), ...(v2 && tools2 ? { 'X-Hwpx-Tools': tools2 } : {}) });
   const transportOpts = () => ({ requestInit: { headers: authHeaders() }, fetch: fetchImpl });
   let stopped = false; let stopping = null;
   const counters = { notified: 0, dropped: 0, reminders: 0 };
@@ -933,7 +992,7 @@ export async function createBridge({ url = DEFAULT_URL, token = null, agent = nu
     tools: { stale: tl.stale, cached: tl.last ? tl.last.length : null }, filesDir: files,
   });
 
-  return { server, session, instructions, start, stop, stats };
+  return { server, session, instructions, surface: picked.surface, lean, start, stop, stats };
 }
 
 /**

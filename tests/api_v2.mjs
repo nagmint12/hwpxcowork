@@ -38,6 +38,8 @@ fs.writeFileSync(configPath, JSON.stringify({
   // v0.4: 기본 편집 방식은 실시간(V4 §1) — 이 시험은 v0.2 계약(변경 추적으로 적용·되돌리기·편집본 병합 마크업·자세한 작업 기록 메모)을 보므로
   // 문서 기본값을 승인 방식·자세한 메모로 둔다(실시간 문서는 tests/api_live.mjs)
   documents: { defaultEditMode: 'review', defaultAiMemo: 'detail' },
+  // MCP 기본 연결: 운영 기본은 새 연결(v2 — 2026-11-17)이지만 이 시험은 예전 연결 도구(read_document·propose_changes 등)의 계약을 잰다 — tests/helpers/server.mjs 와 같다
+  mcp: { defaultSurface: 'v1' },
 }, null, 1));
 const admin = users[0]; const A = users[1]; const B = users[2];
 

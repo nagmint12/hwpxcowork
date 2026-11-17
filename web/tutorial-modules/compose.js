@@ -8,7 +8,7 @@ import { buildAiConnections } from './ai-connections.js';
 import { buildAdvanced } from './advanced.js';
 import { buildReportFlow } from './report-flow.js';
 import { buildAiPlace, buildHangulExport, buildOwnAi } from './ai-work.js';
-import { stepHelpers, enableTutorialTools } from './common.js';
+import { stepHelpers } from './common.js';
 import { buildCustomAction } from './custom-actions.js';
 import { normalizeTutorialActionParams } from '../tutorial-action-definition.js';
 import { tutorialStepKey } from '../tutorial-step-id.js';
@@ -42,7 +42,6 @@ export function buildTutorialModule(moduleId, env) {
       const { q, pad, rectOf } = env;
       // 복사 모듈 없이 단독 배치해도 편집 메뉴부터 켤 수 있습니다.
       steps.push({ title: '편집 명령을 위한 도구 막대', text: '편집기 메뉴와 도구 막대를 켭니다. 위 [⋯] 메뉴에서 [편집 도구 막대]를 누르세요. 이미 켜져 있으면 바로 다음으로 갑니다.',
-        ...enableTutorialTools(env),
         ring: () => pad(rectOf(q('[data-testid="toggle-editor-tools"]') || q('[data-testid="bar-more-toggle"]')), 4),
         until: () => !!frameButton('글자모양', '문단모양', '복사하기') });
       indexes.unshift(steps.length - 1);
@@ -214,7 +213,7 @@ export function buildComposedTutorialSteps(course, env) {
         step.nextIndex = mapped.has(`${moduleId}:${targetIndex}`) ? remap(targetIndex) : end;
         delete step.nextTo;
       }
-      for (const name of ['enter', 'leave', 'until', 'motion', 'example', 'quick']) if (typeof original[name] === 'function') step[name] = invoke(original[name]);
+      for (const name of ['enter', 'leave', 'until', 'motion', 'example']) if (typeof original[name] === 'function') step[name] = invoke(original[name]);
       if (original.lost) step.lost = invoke(() => remap(original.lost(), true));
       if (original.action?.run) step.action = { ...original.action, run: invoke((...args) => {
         const value = original.action.run(...args); return value && typeof value.then === 'function' ? value.then(result => remap(result)) : remap(value);

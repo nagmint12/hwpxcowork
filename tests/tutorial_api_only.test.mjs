@@ -20,7 +20,8 @@ const payload = { kind: 'instruct', instruction: '검토해 주세요', target: 
 function setup(t) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-tutorial-api-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
-  const config = { root: tmp, configFile: path.join(tmp, 'config.json'), dataDir: path.join(tmp, 'data'), ai: { maxProposals: 10 }, agents: { othersCanTake: true }, tutorial: { users: demoNames, shareFrom: [admin.name], restrictUsers: false, examples: false } };
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다(가짜 모델이 최종 JSON 으로 답한다)
+  const config = { root: tmp, configFile: path.join(tmp, 'config.json'), dataDir: path.join(tmp, 'data'), ai: { maxProposals: 10, mcp: 'v1' }, agents: { othersCanTake: true }, tutorial: { users: demoNames, shareFrom: [admin.name], restrictUsers: false, examples: false } };
   const seen = []; const deliveries = []; const events = []; let rejectApi = false;
   const personal = createPersonalAi({ config, fetchImpl: async (url, init) => {
     seen.push({ url: String(url), auth: new Headers(init.headers).get('authorization') });

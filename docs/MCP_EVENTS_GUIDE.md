@@ -26,6 +26,8 @@ OpenAI 공식 문서에서 MCP Events는 Work 웹 채팅, 데스크톱 Work + Cl
 
 > HWPX의 ai_request.created 이벤트를 구독해 줘. 내 새 대기열 요청이 도착할 때마다 get_request로 최신 attempt를 읽고, start_request로 맡은 뒤 제안과 요약을 남기고 complete_request로 완료해 줘. 본문은 직접 반영하지 마. 지금 대기 중인 내 요청도 한 번 처리해 줘. events/subscribe가 성공했는지와 구독 ID를 알려 줘. 대기열 조회만 하고 자동 감시가 켜졌다고 말하지 마.
 
+> **2026-11-17 — 연결 종류.** 서버 `/mcp`의 기본이 새 연결(v2 — `task`·`read`·`edit`·`finish`)로 바뀌었다. 위 지시는 예전 연결 도구(`get_request`·`start_request`·`complete_request`)를 쓰므로 커넥터 주소를 `…/mcp?v=1`로 등록했을 때 그대로 쓴다. 기본(새 연결)으로 등록했다면 같은 뜻을 “요청이 도착할 때마다 `task(doc_id, request_id)`로 맡고, 필요하면 `read`로 읽은 뒤 `edit`의 ops로 결과를 내고 `done`으로 완료해 줘(쓸 것이 없으면 `finish`). 지금 대기 중인 내 요청은 인자 없는 `task`를 none까지 되풀이해 처리해 줘”로 바꾼다. 2026-07-28 규약의 경로·이벤트 설명도 연결 종류를 따른다. 이 이벤트 흐름을 새 연결로 실제 Work 계정에서 확인하지는 않았다.
+
 5. 서버에서 `events/subscribe`와 callback 검증이 성공해야 구독이 생긴다. HWPX에 로그인하고 **사용 설명서 → 내 ChatGPT 연결 → 내 이벤트 구독 상태**를 눌러 활성 구독이 1개 이상인지 확인한다.
 6. 같은 사용자로 HWPX 문서를 열고 새 AI 요청을 **대기열**로 보낸다. 이후 요청마다 ChatGPT에 메시지를 다시 보낼 필요가 없다. 새 요청 알림은 구독한 Work 채팅으로 전달되고 ChatGPT가 사용자의 구독 지시에 따라 작업한다.
 7. HWPX AI 작업 탭에서 실제 제안·요약을 확인한다. 제안의 본문 반영은 사람이 결정한다.

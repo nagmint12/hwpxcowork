@@ -91,14 +91,17 @@
         <div id="mcp" class="mcp-box">
           <p><strong>MCP 서버</strong>는 AI가 이 문서 서버에 들어와 문서를 읽고 제안·메모를 남기는 연결 창구입니다. 따로 설치하지 않습니다. AI는 내 토큰의 권한으로만 들어와 내 요청만 맡습니다.</p>
           <div class="address-card"><div><span>AI에 등록할 MCP 주소</span><code id="shared-mcp">확인 중…</code><button class="button" type="button" data-copy="shared-mcp">MCP 주소 복사</button></div><div><span>지금 브라우저로 접속한 주소</span><code id="current-web">확인 중…</code></div><p id="address-note" class="muted"></p></div>
+          <details class="more" id="mcp-other"><summary id="mcp-other-title">예전 연결 주소 · 고급</summary>
+            <p class="muted" id="mcp-other-note">위 주소는 작업 도구 넷(task·read·edit·finish)으로 연결됩니다. 예전 도구 이름(claim_next_request·propose_changes·complete_request 등)을 쓰는 스크립트·프롬프트만 이 주소를 씁니다.</p>
+            <div class="address-card"><div><span>예전 연결 MCP 주소</span><code id="other-mcp">확인 중…</code><button class="button" type="button" data-copy="other-mcp">주소 복사</button></div></div></details>
         </div>
       </section>
 
       <section id="agents"><div class="method-tag">① 기본 · 추가 비용 없음</div><h2>내 PC의 Codex·Claude Code로 바로 처리</h2>
-        <figure class="see"><a href="/help-assets/realtime-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/realtime-steps.webp" width="880" height="336" alt="Codex: 1 codex login, 2 토큰 저장(setx, 한 번), 3 start-codex-agent.bat 켜 두기, 그러면 문서 화면에 Codex로 보내기가 보임. Claude Code: 1 claude auth login, 2 토큰 저장, 3 start-claude-worker.bat 실행기 켜 두기, 그러면 Claude Code로 보내기가 보임. 창을 켜 두면 새 요청을 바로 처리하고, 끄면 요청은 대기열에서 기다림" loading="lazy" decoding="async"></a></figure>
+        <figure class="see"><a href="/help-assets/realtime-steps.webp" target="_blank" rel="noopener"><img src="/help-assets/realtime-steps.webp" width="880" height="336" alt="Codex: 1 codex login, 2 토큰 저장(setx, 한 번), 3 Windows 앱의 AI → 실행기 관리에서 실행기 켜 두기(명령줄은 npm run worker), 그러면 문서 화면에 Codex로 보내기가 보임. Claude Code: 1 claude auth login, 2 토큰 저장, 3 같은 곳에서 실행기 켜 두기, 그러면 Claude Code로 보내기가 보임. 실행기를 켜 두면 새 요청을 바로 처리하고, 끄면 요청은 대기열에서 기다림" loading="lazy" decoding="async"></a></figure>
         <ul class="points">
           <li>쓰는 구독(ChatGPT·Claude)의 사용 한도 안에서 처리합니다. 별도 API 요금은 없습니다.</li>
-          <li>실행기·채널 창을 켜 두면 새 요청을 바로 처리합니다.</li>
+          <li>실행기·채널을 켜 두면 새 요청을 바로 처리합니다. Windows 앱은 <strong>AI → 실행기 관리…</strong>에서 켜고 끕니다.</li>
           <li>VS Code의 Codex·Claude Code 대화창에서는 <strong>“대기열을 처리해 줘”</strong> 한마디로 처리합니다.</li>
         </ul>
         <figure class="see"><a href="/help-assets/vscode-places.webp" target="_blank" rel="noopener"><img src="/help-assets/vscode-places.webp" width="880" height="420" alt="VS Code에서 붙여넣는 곳: 1 터미널에 명령 붙여넣기, 2 설정 파일 config.toml은 직접 고칠 때만, 3 Codex·Claude Code 대화창에 대기열을 처리해 줘 입력" loading="lazy" decoding="async"></a></figure>
@@ -120,8 +123,9 @@ codex login</code></pre>
               <pre><code id="codex-mcp-config">연결 주소 확인 중…</code></pre><button class="button" type="button" data-copy="codex-mcp-config">설정 복사</button>
               <p class="muted">파일: <code>%USERPROFILE%\.codex\config.toml</code>. 토큰은 파일에 적지 않고 0번의 환경 변수에서 읽습니다.</p></details></div>
           <div class="paste-item" id="worker"><div class="paste-head"><i>3</i><b>실시간 처리 켜기</b><span class="where">프로그램 폴더의 터미널 · 켜 둠</span><button class="button" type="button" data-copy="codex-start" aria-label="Codex 실행기 시작 명령 복사">복사</button></div>
-            <pre><code id="codex-start">.\start-codex-agent.bat</code></pre>
-            <p>창을 켜 두면 새 요청을 바로 처리합니다. 끌 때는 <kbd>Ctrl</kbd>+<kbd>C</kbd>. PC를 다시 켜면 다시 실행합니다.</p>
+            <p><strong>Windows 앱</strong>: <strong>AI → 실행기 관리…</strong>에서 Codex를 추가하고 켭니다. 명령은 필요 없습니다. 자동 시작도 거기서 정합니다.</p>
+            <pre><code id="codex-start">npm.cmd run worker -- --provider codex</code></pre>
+            <p>앱 없이 켤 때는 위 명령을 실행하고 창을 켜 둡니다. 끝에 <code>--check</code>를 붙이면 연결만 점검합니다. 끌 때는 <kbd>Ctrl</kbd>+<kbd>C</kbd>. PC를 다시 켜면 다시 실행합니다.</p>
             <div class="alt"><b>프로그램 폴더가 없으면</b> 실행기 ZIP을 받아 풀고, 그 폴더에서 <code>npm.cmd install</code> 뒤 아래를 실행합니다.
               <div class="alt-actions"><button class="button primary" type="button" id="download-worker">실행기 ZIP 내려받기</button><span id="worker-download-status" class="muted" role="status">문서 화면에 내 토큰으로 로그인한 상태에서 내려받습니다.</span></div>
               <pre><code id="codex-command">실행 예제 준비 중…</code></pre><button class="button" type="button" data-copy="codex-command">실행 예제 복사</button></div></div>
@@ -134,11 +138,12 @@ codex login</code></pre>
             <pre><code id="claude-mcp-command">연결 주소 확인 중…</code></pre>
             <p>작은따옴표 그대로 붙여넣습니다. 토큰은 파일에 적히지 않고 연결할 때 0번의 환경 변수에서 읽습니다.</p></div>
           <div class="paste-item"><div class="paste-head"><i>3</i><b>실시간 처리 켜기</b><span class="where">프로그램 폴더의 터미널 · 켜 둠</span><button class="button" type="button" data-copy="claude-start" aria-label="Claude Code 실행기 시작 명령 복사">복사</button></div>
+            <p><strong>Windows 앱</strong>: <strong>AI → 실행기 관리…</strong>에서 Claude Code를 추가하고 켭니다. 앱 없이 켤 때는 아래 명령을 실행하고 창을 켜 둡니다.</p>
             <pre><code id="claude-start">연결 주소 확인 중…</code></pre>
             <p>실행기가 요청마다 Claude Code를 띄워 처리합니다. API 키·채널 설정 없이 구독 사용량 안에서 처리하며, MCP 연결도 실행기가 준비합니다. 끝에 <code>--check</code>를 붙이면 연결만 점검합니다.</p>
             <div class="alt"><b>실행기 ZIP을 쓰면</b> 위의 ZIP을 풀고 <code>npm.cmd install</code> 뒤 아래를 실행합니다.
               <pre><code id="claude-command">실행 예제 준비 중…</code></pre><button class="button" type="button" data-copy="claude-command">실행 예제 복사</button></div>
-            <details class="more"><summary>Claude Code 채널로 켜 두기</summary><pre><code id="channel-command">연결 주소 확인 중…</code></pre><button class="button" type="button" data-copy="channel-command">채널 명령 복사</button><p>대화형 터미널 세션에 알림을 보내는 다른 방법입니다. 조직 계정은 채널 허용이 필요할 수 있습니다. <a href="/manual-resources/AGENT_SETUP.md" target="_blank" rel="noopener">자세한 채널 안내</a></p></details></div>
+            <details class="more"><summary>Claude Code 채널로 켜 두기</summary><pre><code id="channel-command">연결 주소 확인 중…</code></pre><button class="button" type="button" data-copy="channel-command">채널 명령 복사</button><p>대화형 터미널 세션에 알림을 보내는 다른 방법입니다. 조직 계정은 채널 허용이 필요할 수 있습니다. 작업 공간은 작업 도구 넷(task·read·edit·finish)으로 연결됩니다. 예전 연결이 필요하면 <code>setup-agent.mjs</code>에 <code>--v1</code>을 붙입니다. <a href="/manual-resources/AGENT_SETUP.md" target="_blank" rel="noopener">자세한 채널 안내</a></p></details></div>
 
           <h3>대화창에 한마디 <span>Codex·Claude Code 공통</span></h3>
           <div class="paste-item"><div class="paste-head"><i>✦</i><b>쌓인 요청 처리</b><span class="where">VS Code의 Codex·Claude Code 대화창</span><button class="button" type="button" data-copy="queue-short" aria-label="대기열 처리 문장 복사">복사</button></div>
@@ -160,8 +165,9 @@ codex login</code></pre>
           <ol><li><a href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">ChatGPT 플러그인</a> → <strong>＋ → 사용자 지정 MCP 서버 추가</strong>.</li><li>이름 <strong>HWPX 공동 검토</strong>, 서버 URL은 위 주소, 인증 <strong>OAuth</strong>(등록 방식을 물으면 <strong>DCR</strong>, Client ID·Secret은 비움).</li><li><strong>연결</strong> → 이 서버의 확인 화면에서 내 토큰으로 허용.</li></ol>
           <div class="paste"><div class="paste-title"><b>ChatGPT에 붙여넣을 내용</b><span>짧게는 “대기열을 처리해 줘”, 자세히는 아래 프롬프트</span></div>
             <div class="paste-item"><div class="paste-head"><i>✦</i><b>대기열 처리 프롬프트</b><span class="where">HWPX를 연결한 채팅</span><button class="button" type="button" data-copy="queue-prompt">프롬프트 복사</button></div>
-              <pre><code id="queue-prompt">HWPX 공동 검토에서 내 대기 요청을 처리해 줘. claim_next_request로 가장 오래된 요청부터 하나씩 가져와 지시와 첨부를 읽고, 필요한 수정 제안과 의견을 남긴 뒤 complete_request에 짧은 요약을 적어 완료해 줘. 수정안은 기본 1개, 비교를 요청한 경우에만 여러 안을 만들어 줘. 본문에 직접 반영하지 마. CLAIMED·NOT_OWNER·REQUEST_CLOSED 오류가 나면 그 요청은 건너뛰어 줘. 더 가져올 요청이 없으면 몇 건을 처리했는지 알려 주고 끝내 줘.</code></pre></div></div>
+              <pre><code id="queue-prompt">HWPX 공동 검토에서 내 대기 요청을 처리해 줘. task를 인자 없이 불러 가장 오래된 요청부터 하나씩 맡고, 함께 온 지시·대상·주변 글을 보고 필요한 범위만 read로 읽어 줘. 수정 제안과 의견은 edit 한 번에 모아 남기고 done에 짧은 공유 요약을 적어 완료해 줘. 고칠 것이 없으면 finish에 확인한 범위와 사유를 적어 끝내 줘. 수정안은 기본 1개, 비교를 요청한 경우에만 여러 안을 만들어 줘. 본문에 직접 반영하지 마. CLAIMED·NOT_OWNER·REQUEST_CLOSED·ATTEMPT_CHANGED 오류가 나면 그 요청은 건너뛰어 줘. task가 none을 돌려주면 몇 건을 처리했는지 알려 주고 끝내 줘.</code></pre></div></div>
           <p class="muted">claude.ai 같은 다른 웹 AI도 사용자 지정 커넥터에 같은 주소를 넣고 내 토큰으로 허용하면 같습니다.</p>
+          <p class="muted" id="queue-prompt-note">이 주소는 작업 도구 넷(task·read·edit·finish)으로 연결됩니다. 예전 도구(claim_next_request·complete_request)를 쓰던 프롬프트는 위 MCP 서버의 예전 연결 주소로 연결합니다.</p>
           <details class="more"><summary>내 ChatGPT 연결 보기·끊기</summary><p>같은 서버에 내 토큰으로 로그인한 뒤 연결 목록을 보거나 끊습니다. 끊으면 그 연결은 바로 쓸 수 없습니다.</p><button class="button" type="button" id="oauth-list">내 연결 보기</button><div id="oauth-connections" role="status"></div></details>
         </details>
       </section>
@@ -183,7 +189,7 @@ codex login</code></pre>
       </section>
 
       <section id="troubleshooting"><h2>문제가 생겼을 때</h2>
-        <details><summary>요청이 계속 ‘대기열’·‘전달됨’에 있어요</summary><p>처리할 AI가 켜져 있지 않습니다. 내 PC의 Codex·Claude Code 실행기나 채널을 켜거나, 대화창에서 “대기열을 처리해 줘”라고 하세요(<a href="#agents">① 내 PC의 AI</a>). <a href="#automatic">내 연결 상태 확인</a>으로 볼 수 있습니다.</p></details>
+        <details><summary>요청이 계속 ‘대기열’·‘전달됨’에 있어요</summary><p>처리할 AI가 켜져 있지 않습니다. 내 PC의 Codex·Claude Code 실행기(Windows 앱은 <strong>AI → 실행기 관리…</strong>)나 채널을 켜거나, 대화창에서 “대기열을 처리해 줘”라고 하세요(<a href="#agents">① 내 PC의 AI</a>). <a href="#automatic">내 연결 상태 확인</a>으로 볼 수 있습니다.</p></details>
         <details><summary>토큰이 없다고 나와요</summary><p><code>setx</code>는 새로 연 창부터 보입니다. VS Code와 터미널을 완전히 닫았다 다시 엽니다.</p></details>
         <details><summary>MCP 등록에서 이미 있다고 나와요</summary><p>예전 설정이 남아 있습니다. <code>claude mcp remove hwpx -s user</code> 또는 <code>codex mcp remove hwpx</code> 뒤 다시 등록합니다.</p></details>
         <details><summary>AI가 완료했는데 문서 글은 그대로예요</summary><p>완료는 제안이 준비됐다는 뜻입니다. AI 작업 탭에서 <strong>반영</strong>을 눌러야 문서에 들어갑니다.</p></details>
@@ -226,7 +232,7 @@ npm start</code></pre>
         <button id="manual-retry" class="button" type="button" hidden>다시 불러오기</button>
         <article id="manual-content" class="manual-content" aria-label="상세 운영 매뉴얼 본문" aria-busy="true"></article>
       </section>
-      <footer>설명서 기준: 2026-11-13 · 계정과 서버 설정에 따라 쓸 수 있는 방법이 다를 수 있습니다.<br>공식 안내: <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a> · <a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code MCP</a> · <a href="https://code.claude.com/docs/en/channels" target="_blank" rel="noopener">Claude Code 채널</a> · <a href="https://learn.chatgpt.com/docs/extend/mcp" target="_blank" rel="noopener">ChatGPT MCP</a></footer>
+      <footer>설명서 기준: 2026-11-17 · 계정과 서버 설정에 따라 쓸 수 있는 방법이 다를 수 있습니다.<br>공식 안내: <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a> · <a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code MCP</a> · <a href="https://code.claude.com/docs/en/channels" target="_blank" rel="noopener">Claude Code 채널</a> · <a href="https://learn.chatgpt.com/docs/extend/mcp" target="_blank" rel="noopener">ChatGPT MCP</a></footer>
     </main>
   </div>
   <div id="copy-status" class="copy-status" role="status" aria-live="polite"></div>

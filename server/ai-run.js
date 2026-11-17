@@ -3,8 +3,10 @@
 //   - 실행기(server/worker.js — Codex·Gemini CLI·Antigravity·개인 API)는 요청마다 GET /api/me/ai-run 을 읽어 그 값으로 부른다(비워 두면
 //     실행할 때 준 --model·--effort, 그것도 없으면 그 AI 의 기본값). 쓸 수 있는 모델 목록은 실행기가 알려 준다(PUT /api/me/ai-run/catalog —
 //     Codex 는 `codex debug models`, 개인 API 는 제공자의 모델 목록 조회 — 둘 다 생성 호출·과금 없음).
-//   - Claude Code: 실행기(start-claude-worker.bat — server/claude-cli-ai.js, 2026-11-13)는 요청마다 읽고,
+//   - Claude Code: 실행기(ai-worker --provider claude-code — server/claude-cli-ai.js, 2026-11-13)는 요청마다 읽고,
 //     채널 에이전트는 띄울 때(start-agent.bat → scripts/run-settings.mjs) --model·--effort 로 넘긴다(다음 실행부터 — launchNote).
+//   - 실행기를 켜는 곳(RUN_KINDS[].start — 웹 '모델·추론 강도' 표의 마우스 올림 글): 2026-11-17 실행기 bat(start-codex-agent·start-claude-worker·
+//     start-gemini-agent·start-antigravity-agent)을 지웠다(사용자 결정). Windows 앱 [AI → 실행기 관리…] 또는 명령줄 npm run worker 가 대신한다.
 //   - ChatGPT·Claude 웹 대화, 직접 띄운 Claude Code·Codex 대화의 모델은 그 앱이 고른다 — MCP 서버가 바꿀 수 없다.
 //   - 관리자 Codex 자동 실행기는 modelSelection=auto가 기본이다. 기존 model/effort는 판단용·실패 시 값으로 보존한다.
 import fs from 'node:fs';
@@ -25,12 +27,16 @@ const CLAUDE_CODE_MODELS = Object.freeze([
 
 /** 연결 종류 — applies: 'request'(요청마다 적용) | 'launch'(다음 실행부터), launchNote: 같은 값을 띄울 때 쓰는 다른 연결(채널)의 안내.
  *  차례 = 웹 표의 차례: 구독 AI(Codex·Claude Code — 추가 비용 없음) 먼저, API 실행기(사용료 별도) 마지막(2026-11-13 운영 결정) */
+// start: 켜는 곳 — Windows 앱의 실행기 관리 창(deploy/desktop/runners.mjs RUNNER_AIS — Codex·Claude Code·Gemini CLI·Antigravity) · 명령줄.
+// API 실행기는 앱 창에 없다 — 명령줄 또는 실행기 ZIP 의 start-worker.bat(deploy/portable/worker)
+const APP_RUNNERS = 'Windows 앱 [AI → 실행기 관리…]';
+const workerCmd = (provider) => `npm run worker -- --provider ${provider}`;
 export const RUN_KINDS = Object.freeze([
-  { id: 'codex', label: 'Codex (ChatGPT 로그인)', efforts: CODEX_EFFORTS, applies: 'request', start: 'start-codex-agent.bat' },
-  { id: 'claude-code', label: 'Claude Code (Claude 로그인)', efforts: CLAUDE_CODE_EFFORTS, applies: 'request', start: 'start-claude-worker.bat', launchNote: '채널(start-agent.bat)은 다음에 띄울 때부터', models: CLAUDE_CODE_MODELS },
-  { id: 'gemini-cli', label: 'Gemini CLI', efforts: [], applies: 'request', start: 'start-gemini-agent.bat' },
-  { id: 'antigravity', label: 'Antigravity', efforts: [], applies: 'request', start: 'start-antigravity-agent.bat' },
-  { id: 'api', label: 'API 실행기 (사용료 별도)', efforts: AI_EFFORTS.filter((e) => e !== 'none' && e !== 'minimal'), applies: 'request', start: 'start-worker.bat' },
+  { id: 'codex', label: 'Codex (ChatGPT 로그인)', efforts: CODEX_EFFORTS, applies: 'request', start: `${APP_RUNNERS} · ${workerCmd('codex')}` },
+  { id: 'claude-code', label: 'Claude Code (Claude 로그인)', efforts: CLAUDE_CODE_EFFORTS, applies: 'request', start: `${APP_RUNNERS} · ${workerCmd('claude-code')}`, launchNote: '채널(start-agent.bat)은 다음에 띄울 때부터', models: CLAUDE_CODE_MODELS },
+  { id: 'gemini-cli', label: 'Gemini CLI', efforts: [], applies: 'request', start: `${APP_RUNNERS} · ${workerCmd('gemini-cli')}` },
+  { id: 'antigravity', label: 'Antigravity', efforts: [], applies: 'request', start: `${APP_RUNNERS} · ${workerCmd('antigravity')}` },
+  { id: 'api', label: 'API 실행기 (사용료 별도)', efforts: AI_EFFORTS.filter((e) => e !== 'none' && e !== 'minimal'), applies: 'request', start: `${workerCmd('openai|anthropic|gemini')} --model <모델 ID> · 실행기 ZIP 의 start-worker.bat` },
 ]);
 const KIND = new Map(RUN_KINDS.map((k) => [k.id, k]));
 // 모델 ID: 실행 파일 인자·배치 파일로 넘어가므로 영문·숫자와 . _ : / @ - 만

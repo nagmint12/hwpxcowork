@@ -19,7 +19,8 @@ test('설명서 파일: manifest 의 HWPX 5건이 있고 따라하기 영역·�
   assert.equal(manifest.documents.filter((d) => d.scenario === 'ai-requests').length, 1);
 });
 
-// 대학혁신센터 표준서식(2026-10-31): 앞부분 구역(표지·차례 — 바탕쪽 없음) + 본문 구역, 장·절은 표준 스타일, 차례 필드 항목은 차례 스타일
+// 표준서식의 앞부분+본문 구조를 유지한다. 2026-11-17 사용자 요청으로
+// 튜토리얼 앞부분에도 홀짝 바탕쪽을 연결하고 1~3쪽은 감추기로 저장한다.
 test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 차례 항목에 차례제목·차례1·차례2', async () => {
   const { HwpxDoc } = await import('../engine/doc.js');
   const { tocRegions, physicalParas } = await import('../engine/toc.js');
@@ -28,7 +29,9 @@ test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 
   for (const d of manifest.documents) {
     const doc = await HwpxDoc.load(fs.readFileSync(path.join(dir, d.file)));
     assert.equal(doc.sections.length, 2, d.file);
-    assert.match(doc.sections[0].xml, /masterPageCnt="0"/, `앞부분 구역은 바탕쪽 없음: ${d.file}`);
+    assert.match(doc.sections[0].xml, /masterPageCnt="2"/, `앞부분에도 홀짝 바탕쪽 연결: ${d.file}`);
+    assert.equal((doc.sections[0].xml.match(/<hp:masterPage\b/g) || []).length, 2, d.file);
+    assert.match(doc.sections[0].xml, /<hp:pageHiding\b[^>]*hideMasterPage="1"/, `앞쪽 바탕쪽 감추기: ${d.file}`);
     assert.ok(!/<hp:linesegarray>/.test(doc.sections.map((s) => s.xml).join('')), `줄 배치 캐시 없음(한/글이 다시 계산): ${d.file}`);
     const styleId = (name) => (new RegExp(`<hh:style\\b[^>]*\\bid="(\\d+)"[^>]*\\bname="${name.replace(/[.)]/g, '\\$&')}"`).exec(doc.header.xml) || [])[1];
     const chapter = styleId('&amp;본문 1.');
@@ -43,7 +46,7 @@ test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 
   }
 });
 
-// 편집기 엔진 고침(2026-10-31): masterPageCnt="0" 구역에 바탕쪽을 짐작해 붙이지 않는다 · 차례 새로 고침이 첫 차례 문단의 쪽 나누기를 남긴다
+// 차례 새로 고침이 기존 바탕쪽 연결·감추기와 첫 차례 문단의 쪽 나누기를 남긴다.
 test('편집기 엔진: 표준서식 설명서의 차례를 새로 고쳐도 차례가 새 쪽에서 시작하고 앞부분 구역은 바탕쪽이 없다', async () => {
   const { refreshTocInEngine } = await import('../server/toc-engine.js');
   const { HwpxDoc } = await import('../engine/doc.js');
@@ -54,7 +57,8 @@ test('편집기 엔진: 표준서식 설명서의 차례를 새로 고쳐도 차
   const reg = tocRegions(before)[0];
   const out = refreshTocInEngine(fs.readFileSync(file), { sec: reg.sec, para: reg.start });
   const after = new HwpxDoc(containerFromBytesSync(out.bytes));
-  assert.match(after.sections[0].xml, /masterPageCnt="0"/);
+  assert.match(after.sections[0].xml, /masterPageCnt="2"/);
+  assert.match(after.sections[0].xml, /<hp:pageHiding\b[^>]*hideMasterPage="1"/);
   const first = physicalParas(after.sections[0])[out.start];
   assert.match(after.sections[0].xml.slice(first.start, first.start + 200), /pageBreak="1"/);
 });

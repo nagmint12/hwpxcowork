@@ -13,9 +13,20 @@ const STOP_CODES = new Set(['ATTEMPT_CHANGED', 'REQUEST_CLOSED', 'CLAIMED', 'CLA
 const errorCode = result => /오류\(([A-Z_]+)\)/.exec((result.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n'))?.[1];
 const canonical = value => value && typeof value === 'object' ? Array.isArray(value) ? value.map(canonical) : Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
 
-// 실행기는 api 프로필 전체를 native 도구로 전달한다. 문서·요청·시도 바인딩과 실제 결과 기록을 담당한다.
-export async function createApiToolContext({ listTools, callTool, assertCurrent, uploadFile, docId, requestId, attempt, existingFigures = 0, profile = 'api' }) {
-  const allowed = profile === 'workspace' ? new Set(TOOL_PROFILES.workspace) : ALLOWED;
+// 새 연결(v2)의 끝내는 도구: edit 의 done(공유 요약) 또는 finish — 그 호출 뒤 요청이 완료·실패로 닫혔으면 실행이 끝난다(api-tool-loop)
+const finishing = (name, args) => name === 'finish' || (name === 'edit' && args?.done != null && String(args.done).trim() !== '' && args.dry_run !== true);
+const jsonOf = result => { try { return JSON.parse((result.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n')); } catch { return null; } };
+
+/**
+ * 실행기는 api 프로필 전체를 native 도구로 전달한다. 문서·요청·시도 바인딩과 실제 결과 기록을 담당한다.
+ * surface 'v2'(새 MCP 연결 — server/mcp2.js): 도구는 TOOL_PROFILES.apiV2(read·edit·finish + 그림·스킬 파일). 결과는 서버가 edit 에서 바로 제안·메모로 저장하고
+ * 모델이 edit 의 done·finish 로 요청을 끝낸다 — 그 호출 뒤 requestStatus()(요청 상태만 — { status })가 완료·실패면 finished 에 적는다(api-tool-loop 가 멈춘다).
+ * 같은 쓰기 되풀이 막기(receipts)·written 은 예전 연결(최종 JSON 의 중복 빼기)에만 쓴다 — 새 연결의 edit 는 서버가 한 호출을 다 저장하거나 하나도 저장하지 않는다
+ */
+export async function createApiToolContext({ listTools, callTool, assertCurrent, uploadFile, docId, requestId, attempt, existingFigures = 0, profile = 'api', surface = null, requestStatus = null }) {
+  const v2 = surface === 'v2';
+  if (v2 && typeof requestStatus !== 'function') throw fault('API_TOOL_UNSUPPORTED', '새 연결에는 요청 상태 확인(requestStatus)이 필요합니다.');
+  const allowed = v2 ? new Set(TOOL_PROFILES.apiV2) : profile === 'workspace' ? new Set(TOOL_PROFILES.workspace) : ALLOWED;
   const page = await listTools(), selected = (page.tools || page).filter(t => allowed.has(t.name));
   const tools = selected.map(t => {
     // 모델에 주는 스키마는 'null 허용' 가지·값 범위를 뺀다(server/lean.js — 받는 쪽 zod 검사는 그대로, 라운드마다 다시 보내는 글자 수를 줄인다)
@@ -26,13 +37,17 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
     parameters.additionalProperties = false;
     return { name: t.name, description: t.description || '', parameters };
   });
-  const names = new Set(tools.map(t => t.name)); const receipts = new Map(); const written = [], savedFiles = []; let figures = Math.max(0, Number(existingFigures) || 0), nativeCharts = 0, stageAdvanced = null;
+  const names = new Set(tools.map(t => t.name)); const receipts = new Map(); const written = [], savedFiles = []; let figures = Math.max(0, Number(existingFigures) || 0), nativeCharts = 0, stageAdvanced = null, finished = null;
   return {
     tools,
+    /** 'v2' = 새 MCP 연결(작업 도구) — 어댑터·반복문이 지침·끝 판정을 이것으로 고른다 */
+    surface: v2 ? 'v2' : null,
     get savedFiles() { return savedFiles; },
     get figures() { return figures; },
     get nativeCharts() { return nativeCharts; },
     get stageAdvanced() { return stageAdvanced; },
+    /** 새 연결: 모델의 edit(done)·finish 로 요청이 닫혔으면 { status: 'done'|'failed', tool } */
+    get finished() { return finished; },
     /** 이번 실행에서 도구로 남긴 결과(최종 JSON 의 같은 결과를 빼는 데 씀 — withoutToolDuplicates) */
     get written() { return written; },
     async call(name, args, signal) {
@@ -42,6 +57,7 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
         if (args[key] != null && String(args[key]) !== String(value)) throw fault('API_TOOL_SCOPE', '다른 문서·요청에는 API 도구를 사용할 수 없습니다.');
       }
       if ('image_base64' in args) throw fault('API_TOOL_SCOPE', '인코딩 문자열 대신 실제 파일이나 차트 자료를 전달하세요.');
+      if (finished) throw fault('REQUEST_CLOSED', '이 요청은 이미 끝났습니다.');
       await assertCurrent(signal);
       signal?.throwIfAborted();
       // 같은 실행 안에서 같은 쓰기를 다시 부르면(모델의 재시도 등) 처음 영수증을 돌려준다 — 제안·메모·그림이 두 번 생기지 않게
@@ -52,6 +68,17 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
       if (tool.inputSchema?.properties?.request_id) bound.request_id = requestId;
       if (tool.inputSchema?.properties?.expected_attempt) bound.expected_attempt = attempt;
       const result = await callTool(name, bound, signal);
+      if (v2) {
+        // 새 연결의 멈춤: 오류 글(isError)은 아래 공통 검사, edit 의 영수증 stopped(저장 중 취소·다시 요청·선점 바뀜 — server/mcp2/service.js agentEdit)는 여기서
+        const stopped = name === 'edit' && !result.isError ? jsonOf(result)?.stopped : null;
+        if (stopped && STOP_CODES.has(stopped)) throw fault(stopped, '요청이 취소·다시 요청되었거나 선점이 바뀌었습니다.');
+        if (!result.isError && finishing(name, args)) {
+          // 끝내는 호출 뒤에는 요청 상태를 직접 본다(영수증 꼴에 기대지 않는다): 완료·실패 = 끝, 취소 = 멈춤, 처리 중 = 완료가 막힘(영수증의 complete_note 를 모델이 보고 고친다)
+          const state = await requestStatus(signal);
+          if (state?.status === 'done' || state?.status === 'failed') finished = { status: state.status, tool: name };
+          else if (state?.status === 'cancelled') throw fault('REQUEST_CLOSED', '요청이 취소되었습니다.');
+        }
+      }
       if (profile === 'workspace' && name === 'edit_workspace' && !result.isError) {
         const value = JSON.parse(result.content.find(c => c.type === 'text').text);
         if (value.stageCompleted) stageAdvanced = value;

@@ -46,7 +46,7 @@ custom의 선택자는 앱 내부 요소를 가리킵니다. 예를 들어 AI �
 
 연결 우선순위(앱 전체 같은 결정)대로 단계를 줄였습니다. 단계 수는 예전 21개에서 12개입니다(Gemini 안내 9단계는 뺐고, 절차는 `web/tutorial-gemini.js`에 남겨 두었습니다).
 
-1. **내 PC의 구독 AI · 기본**(추가 비용 없이 바로 처리): 내 개인 토큰 저장 → VS Code 대화창용 MCP 등록(Codex `config.toml`, Claude Code 작업 폴더의 `.mcp.json`; 실행기만 쓰면 생략 가능) → Codex 실행기 `start-codex-agent.bat` → Claude Code 실행기 `start-claude-worker.bat` → 연결 확인. Claude Code 채널 `start-agent.bat`는 대안입니다.
+1. **내 PC의 구독 AI · 기본**(추가 비용 없이 바로 처리): 내 개인 토큰 저장 → VS Code 대화창용 MCP 등록(Codex `config.toml`, Claude Code 작업 폴더의 `.mcp.json`; 실행기만 쓰면 생략 가능) → Codex 실행기 → Claude Code 실행기 → 연결 확인. 실행기는 Windows 앱의 [AI → 실행기 관리…] 또는 명령줄 `npm.cmd run worker -- --provider codex|claude-code`로 켭니다(2026-11-17 `start-codex-agent.bat`·`start-claude-worker.bat`을 지운 뒤 — `web/tutorial-connect.js`). Claude Code 채널 `start-agent.bat`는 대안입니다.
 2. **선택(고급) — ChatGPT 웹 앱**: Plugins → Add custom MCP server → 주소와 OAuth → 대화에서 처리. 실제 계정 화면 `chatgpt-*.png` 두 장을 씁니다.
 3. **선택(유료) — API 키**: 문서함 [내 AI 키]. 일반 예시 그림 `api-*.png`를 씁니다.
 

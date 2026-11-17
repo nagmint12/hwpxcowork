@@ -1,4 +1,6 @@
 // 개인 서버의 기존 실행 경로를 앱 창에서 관리한다. 운영 설정·다른 설치의 프로세스는 다루지 않는다.
+// AI 실행기(2026-11-17)는 runners.mjs 의 RunnerManager 가 맡는다 — 이 파일은 공식 CLI 준비(설치·로그인 — desktop-ai.mjs)와
+// 실행기 프로세스 띄우기·앱 서버 주소를 넘겨준다. 운영 방식 'runner'(AI 실행기만)는 이 PC 에 서버를 두지 않는다.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -6,41 +8,64 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { desktopAiSupport } from './cli-versions.mjs';
 import { shareSupported, shareUrlFromLine } from './share.mjs';
+import { RunnerManager, RUNNER_AIS } from './runners.mjs';
 
 // 안내 글의 '내 Mac'·'이 PC'
 export const placeName = (platform = process.platform) => platform === 'darwin' ? '내 Mac' : '이 PC';
+const toolsDir = (userdata) => path.join(userdata, 'tools', process.platform === 'win32' ? '' : 'bin');
 
-export function desktopEnvironment(env, userdata, node, mode = 'personal') {
+/** 앱이 띄우는 프로세스의 환경. otherUserdata = 다른 운영 방식의 설정 폴더(그쪽에서 이미 받은 CLI 를 다시 받지 않게 PATH 에 더한다) */
+export function desktopEnvironment(env, userdata, node, mode = 'personal', otherUserdata = []) {
   const clean = Object.fromEntries(Object.entries(env).filter(([key]) => !/^(HWPX_|ANTHROPIC_|OPENAI_|GEMINI_API_KEY|GOOGLE_API_KEY|BAZE_API_KEY|ELECTRON_|NODE_OPTIONS|NODE_PATH|NPM_CONFIG_)/i.test(key)));
   const oldPath = Object.entries(clean).find(([key]) => key.toLowerCase() === 'path')?.[1] || '';
   for (const key of Object.keys(clean)) if (key.toLowerCase() === 'path') delete clean[key];
-  clean.PATH = [path.dirname(node), path.join(userdata, 'tools', process.platform === 'win32' ? '' : 'bin'), path.join(os.homedir(), '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', oldPath].join(path.delimiter);
-  // 공동 작업용(shared)은 PC 폴더 연결을 켜지 않는다
-  return { ...clean, HWPX_COWORK_USERDATA: userdata, HWPX_COWORK_CONFIG: path.join(userdata, 'config.json'), HWPX_COWORK_AI: 'off', ...(mode === 'shared' ? {} : { HWPX_COWORK_LOCAL: '1' }), HWPX_COWORK_DESKTOP_MANAGED: '1' };
+  clean.PATH = [path.dirname(node), toolsDir(userdata), ...otherUserdata.map(toolsDir), path.join(os.homedir(), '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', oldPath].join(path.delimiter);
+  // 공동 작업용(shared)·AI 실행기만(runner)은 PC 폴더 연결을 켜지 않는다
+  return { ...clean, HWPX_COWORK_USERDATA: userdata, HWPX_COWORK_CONFIG: path.join(userdata, 'config.json'), HWPX_COWORK_AI: 'off', ...(mode === 'personal' ? { HWPX_COWORK_LOCAL: '1' } : {}), HWPX_COWORK_DESKTOP_MANAGED: '1' };
 }
 
+/** 실행기 환경: 앱 서버 전용 값은 빼고, 토큰은 RunnerManager 가 HWPX_COWORK_TOKEN 으로만 더한다 */
+export function runnerEnvironment(env) {
+  const out = { ...env };
+  for (const key of ['HWPX_COWORK_CONFIG', 'HWPX_COWORK_USERDATA', 'HWPX_COWORK_LOCAL', 'HWPX_COWORK_AI', 'HWPX_COWORK_TOKEN']) delete out[key];
+  return { ...out, HWPX_COWORK_DESKTOP_MANAGED: '1' };
+}
+
+const halted = (message = '실행기 켜기를 취소했습니다.') => Object.assign(new Error(message), { code: 'CANCELLED' });
+
 export class DesktopHost extends EventEmitter {
-  constructor({ payload, node, userdata, mode = 'personal', env = process.env, spawnImpl = spawn, platform = process.platform }) {
-    super(); Object.assign(this, { payload, node, userdata, spawnImpl, mode: mode === 'shared' ? 'shared' : 'personal', place: placeName(platform) });
-    this.env = desktopEnvironment(env, userdata, node, this.mode);
-    this.server = null; this.worker = null; this.tunnel = null; this.operations = new Set(); this.stopping = false;
-    this.state = { phase: 'starting', message: `${this.place}의 편집기를 준비하고 있습니다.`, mode: this.mode, ai: 'none', aiPhase: 'off', share: 'off', shareUrl: null, shareSupported: this.mode === 'shared' && shareSupported(platform) };
+  constructor({ payload, node, userdata, mode = 'personal', env = process.env, spawnImpl = spawn, platform = process.platform, vault = null, otherUserdata = [], runnerOptions = {} }) {
+    super();
+    Object.assign(this, { payload, node, userdata, spawnImpl, mode: ['shared', 'runner'].includes(mode) ? mode : 'personal', place: placeName(platform) });
+    this.env = desktopEnvironment(env, userdata, node, this.mode, otherUserdata);
+    this.server = null; this.tunnel = null; this.operations = new Set(); this.cliOperations = new Map(); this.cliLocks = new Map(); this.stopping = false;
+    this.state = { phase: 'starting', message: this.mode === 'runner' ? `${this.place}의 AI 실행기를 준비하고 있습니다.` : `${this.place}의 편집기를 준비하고 있습니다.`,
+      mode: this.mode, share: 'off', shareUrl: null, shareSupported: this.mode === 'shared' && shareSupported(platform) };
     const support = desktopAiSupport(process.platform, os.release());
     this.state.aiSupported = support.available;
     this.state.aiSupportMessage = support.message;
     fs.mkdirSync(userdata, { recursive: true, mode: 0o700 });
+    this.runners = new RunnerManager({
+      dir: userdata, vault, localSupported: this.mode !== 'runner',
+      launch: (args, runEnv) => this.launch('scripts/setup-worker.mjs', args, { env: runEnv, ipc: true }),
+      prepare: (ai, options) => this.prepareCli(ai, options),
+      cancelPrepare: (ai) => this.cancelCli(ai),
+      local: () => this.localTarget(),
+      env: () => runnerEnvironment(this.env),
+      support: () => ({ available: this.state.aiSupported, message: this.state.aiSupportMessage }),
+      ...runnerOptions,
+    });
   }
   publish(update) { Object.assign(this.state, update); this.emit('state', this.snapshot()); }
   snapshot() { return { ...this.state }; }
-  preferences() {
-    try { const p = JSON.parse(fs.readFileSync(path.join(this.userdata, 'desktop.json'))); return ['codex', 'claude-code'].includes(p.ai) ? p : { ai: 'none' }; }
-    catch { return { ai: 'none' }; }
-  }
-  savePreferences(ai) { fs.writeFileSync(path.join(this.userdata, 'desktop.json'), JSON.stringify({ ai }) + '\n', { mode: 0o600 }); }
   launch(script, args = [], { env = this.env, input = false, ipc = false } = {}) {
     return this.spawnImpl(this.node, [path.join(this.payload, script), ...args], { cwd: this.payload, env, shell: false, windowsHide: true, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(ipc ? ['ipc'] : [])] });
   }
   async start() {
+    if (this.mode === 'runner') {   // AI 실행기만: 이 PC 에 서버를 두지 않는다
+      this.publish({ phase: 'ready', message: `${this.place}에서 AI 실행기를 관리합니다.` });
+      return null;
+    }
     const script = fs.existsSync(path.join(this.payload, 'portable/personal.mjs')) ? 'portable/personal.mjs' : 'deploy/portable/personal.mjs';
     const child = this.launch(script, ['--no-window', '--ai', '', ...(this.mode === 'shared' ? ['--shared'] : [])], { input: true, ipc: true });
     this.server = child;
@@ -73,60 +98,84 @@ export class DesktopHost extends EventEmitter {
     try { const t = JSON.parse(fs.readFileSync(path.join(this.userdata, 'config.json'), 'utf8')).users?.find(u => u.role === 'admin')?.token; if (t) this.token = t; } catch { /* 읽지 못하면 이전 값 */ }
     return this.token;
   }
+  /** '이 앱의 서버'에 붙는 실행기의 주소·토큰(관리자) — 서버가 준비되기 전·AI 실행기만 방식에서는 없음 */
+  localTarget() {
+    if (this.mode === 'runner' || this.stopping || this.state.phase !== 'ready' || !this.port) return null;
+    const token = this.freshToken();
+    return token ? { mcpUrl: `http://127.0.0.1:${this.port}/mcp`, token } : null;
+  }
   async api(endpoint, { method = 'GET', body } = {}) {
     const r = await fetch(`http://127.0.0.1:${this.port}${endpoint}`, { method, headers: { Authorization: `Bearer ${this.freshToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
     const result = await r.json(); if (!r.ok) throw new Error(result.message || '요청을 처리하지 못했습니다.'); return result;
   }
   async linkFolder(folder) { return this.api('/api/local/links', { method: 'POST', body: { path: folder } }); }
-  async run(script, args, { timeout = 60000, env = this.env } = {}) {
+  /** 짧게 도는 도우미(desktop-ai.mjs 등). provider 를 주면 그 AI 의 CLI 준비 작업으로 묶어 끌 수 있다(cancelCli) */
+  async run(script, args, { timeout = 60000, env = this.env, provider = null, timeoutMessage = '시간이 지나 멈췄습니다. 다시 시도해 주세요.' } = {}) {
     const child = this.launch(script, args, { env, ipc: true }); this.operations.add(child);
+    const group = provider ? (this.cliOperations.get(provider) || this.cliOperations.set(provider, new Set()).get(provider)) : null;
+    group?.add(child);
     return new Promise((resolve, reject) => {
       let stdout = ''; let stderr = ''; let timeoutError = false;
       const timer = setTimeout(() => { timeoutError = true; if (child.connected) child.send('stop'); else child.kill(); }, timeout);
-      const finish = () => { clearTimeout(timer); this.operations.delete(child); };
+      const finish = () => { clearTimeout(timer); this.operations.delete(child); group?.delete(child); };
       child.stdout.on('data', b => { stdout = (stdout + b.toString()).slice(-64000); });
       child.stderr.on('data', b => { stderr = (stderr + b.toString()).slice(-64000); });
       child.once('error', e => { finish(); reject(e); });
-      child.once('exit', code => { finish(); if (code || timeoutError) reject(new Error(timeoutError ? '로그인 시간이 지났습니다. 다시 로그인해 주세요.' : (stderr.slice(-1000) || 'AI 연결을 마치지 못했습니다.'))); else resolve(stdout); });
+      child.once('exit', code => { finish(); if (code || timeoutError) reject(new Error(timeoutError ? timeoutMessage : (stderr.trim().slice(-1000) || 'AI 연결을 마치지 못했습니다.'))); else resolve(stdout); });
     });
   }
+  /** desktop-ai.mjs 자리: 묶음(payload/app/scripts) 또는 개발 폴더(deploy/desktop) */
+  get aiScript() { return fs.existsSync(path.join(this.payload, 'scripts/desktop-ai.mjs')) ? 'scripts/desktop-ai.mjs' : 'deploy/desktop/desktop-ai.mjs'; }
   async auth(provider) {
-    const out = await this.run('scripts/desktop-ai.mjs', ['--provider', provider, '--action', 'status']);
+    const out = await this.run(this.aiScript, ['--provider', provider, '--action', 'status'], { provider, timeout: 90000 });
     return JSON.parse(out);
   }
-  async prepareAi(provider) {
-    if (!['codex', 'claude-code'].includes(provider)) throw new Error('ChatGPT 또는 Claude를 선택해 주세요.');
+  /**
+   * 실행기를 띄우기 전 공식 CLI 준비(모델 호출 없음). Codex·Claude Code: 없으면 설치(사용자 설정 폴더 tools), 로그인 안 됐으면 브라우저 로그인.
+   * Gemini CLI·Antigravity: 설치만 확인한다(로그인 유효성은 첫 요청에서 확인된다 — server/google-cli-ai.js check). 없으면 안내 글로 오류.
+   * interactive=false(앱 시작 때 자동 시작)는 설치·로그인을 띄우지 않고 오류로 돌려준다. 같은 AI 의 준비는 한 번에 하나씩(설치가 겹치지 않게).
+   */
+  async prepareCli(provider, { interactive = true, active = () => {}, note = () => {} } = {}) {
+    const kind = RUNNER_AIS[provider];
+    if (!kind) throw new Error('지원하지 않는 AI입니다.');
     if (!this.state.aiSupported) throw new Error(this.state.aiSupportMessage);
-    if (this.state.aiPhase === 'preparing' || this.state.aiPhase === 'login') throw new Error('AI 연결을 진행하고 있습니다. 잠시 기다려 주세요.');
-    if (this.stopping) throw new Error('앱을 종료하고 있습니다.');
-    const generation = this.aiGeneration = (this.aiGeneration || 0) + 1;
-    const active = () => { if (this.stopping || generation !== this.aiGeneration) throw new Error('AI 연결을 취소했습니다.'); };
-    await this.stopWorker(); active();
-    this.publish({ ai: provider, aiPhase: 'preparing', message: 'AI 연결을 준비하고 있습니다.' });
+    const check = () => { if (this.stopping) throw halted('앱을 종료하고 있습니다.'); active(); };
+    check();
+    const previous = this.cliLocks.get(provider) || Promise.resolve();
+    let release; const mine = new Promise((resolve) => { release = resolve; });
+    const chain = previous.then(() => mine);
+    this.cliLocks.set(provider, chain);
+    await previous;
     try {
-      let auth = await this.auth(provider); active();
-      if (!auth.installed) {
-        this.publish({ message: '공식 AI 연결 프로그램을 준비하고 있습니다. 처음 한 번만 필요합니다.' });
-        await this.run('scripts/desktop-ai.mjs', ['--provider', provider, '--action', 'install', '--prefix', path.join(this.userdata, 'tools')], { timeout: 10 * 60000 });
-        active(); auth = await this.auth(provider); active();
+      check();
+      let auth = await this.auth(provider); check();
+      if (!kind.managed) {
+        if (!auth.installed) throw new Error(auth.reason || `${kind.label}를 찾지 못했습니다. 설치한 뒤 명령 창에서 ${kind.command}를 한 번 실행해 Google 계정으로 로그인해 주세요.`);
+        if (!auth.ready) throw new Error(auth.reason || `${kind.label}를 업데이트해 주세요.`);
+        return auth;
       }
-      if (!auth.ready) {
-        this.publish({ aiPhase: 'login', message: '브라우저에서 본인 AI 계정에 로그인해 주세요.' });
-        await this.run('scripts/desktop-ai.mjs', ['--provider', provider, '--action', 'login'], { timeout: 10 * 60000 });
-        active(); auth = await this.auth(provider); active();
+      if (!auth.installed) {
+        if (!interactive) throw new Error(`${kind.label} 연결 프로그램이 없습니다. [켜기]를 누르면 설치합니다.`);
+        note('연결 프로그램을 설치하고 있습니다(처음 한 번)');
+        await this.run(this.aiScript, ['--provider', provider, '--action', 'install', '--prefix', path.join(this.userdata, 'tools')], { provider, timeout: 10 * 60000, timeoutMessage: '설치 시간이 지났습니다. 인터넷 연결을 확인하고 다시 켜 주세요.' });
+        check(); auth = await this.auth(provider); check();
+      }
+      if (!auth.ready && auth.installed) {
+        if (!interactive) throw new Error(`${kind.account} 로그인이 필요합니다. [켜기]를 누르면 브라우저에서 로그인합니다.`);
+        note('브라우저에서 본인 계정으로 로그인해 주세요');
+        await this.run(this.aiScript, ['--provider', provider, '--action', 'login'], { provider, timeout: 10 * 60000, timeoutMessage: '로그인 시간이 지났습니다. 다시 켜서 로그인해 주세요.' });
+        check(); auth = await this.auth(provider); check();
       }
       if (!auth.ready) throw new Error(auth.reason || 'AI 로그인을 확인하지 못했습니다.');
-      const env = { ...this.env, HWPX_COWORK_TOKEN: this.freshToken() };
-      await this.run('scripts/ai-worker.mjs', ['--provider', provider, '--url', `http://127.0.0.1:${this.port}/mcp`, '--check'], { env });
-      active();
-      const child = this.launch('scripts/setup-worker.mjs', ['--provider', provider, '--url', `http://127.0.0.1:${this.port}/mcp`], { env, ipc: true });
-      this.worker = child;
-      child.stdout.resume(); child.stderr.resume();
-      child.once('error', () => { if (this.worker === child) { this.worker = null; this.publish({ aiPhase: 'error', message: 'AI 실행기를 켜지 못했습니다. 다시 연결해 주세요.' }); } });
-      child.once('exit', () => { if (this.worker === child) { this.worker = null; if (!this.stopping) this.publish({ aiPhase: 'error', message: 'AI 연결이 종료되었습니다. 다시 연결해 주세요.' }); } });
-      this.savePreferences(provider);
-      this.publish({ aiPhase: 'connected', message: '내 AI가 연결되었습니다. 편집기에서 작업을 맡기실 수 있습니다.' });
-    } catch (e) { if (!this.stopping && generation === this.aiGeneration) this.publish({ aiPhase: 'error', message: e.message }); throw e; }
+      return auth;
+    } finally {
+      release();
+      if (this.cliLocks.get(provider) === chain) this.cliLocks.delete(provider);
+    }
+  }
+  /** 그 AI 의 설치·로그인 도우미를 멈춘다(실행기 [끄기]를 준비 중에 눌렀을 때) */
+  cancelCli(provider) {
+    for (const child of this.cliOperations.get(provider) || []) void this.stopChild(child).catch(() => {});
   }
   async stopChild(child) {
     if (!child || child.exitCode !== null) return;
@@ -135,13 +184,6 @@ export class DesktopHost extends EventEmitter {
       child.once('exit', () => { clearTimeout(timer); resolve(); });
       if (child.connected) child.send('stop'); else if (child.stdin?.writable) child.stdin.write('quit\n'); else child.kill();
     });
-  }
-  async stopWorker() { const child = this.worker; this.worker = null; await this.stopChild(child); }
-  async disconnectAi() {
-    this.aiGeneration = (this.aiGeneration || 0) + 1;
-    for (const operation of this.operations) await this.stopChild(operation);
-    await this.stopWorker(); this.savePreferences('none');
-    this.publish({ ai: 'none', aiPhase: 'off', message: 'AI 없이 문서 편집을 사용합니다.' });
   }
   // ── 외부 접속(공동 작업용, Windows) ── scripts/quick-tunnel.mjs 를 띄워 임시 https 주소를 받는다.
   // 주소를 서버 공유 주소로 저장하고 서버를 다시 시작하는 일·끌 때 되돌리는 일은 quick-tunnel 이 한다(IPC 'stop' 으로 정상 종료).
@@ -183,9 +225,9 @@ export class DesktopHost extends EventEmitter {
   }
   async stop() {
     this.stopping = true;
-    this.aiGeneration = (this.aiGeneration || 0) + 1;
+    await this.runners.shutdown();   // 실행기가 앱 서버와의 작업을 먼저 마치게 — 새로 켜지 않고 모두 정상 종료
     const tunnel = this.tunnel; this.tunnel = null; await this.stopChild(tunnel);   // 공유 주소를 되돌린 뒤 서버를 끈다
     for (const operation of this.operations) await this.stopChild(operation);
-    await this.stopWorker(); await this.stopChild(this.server); this.server = null;
+    await this.stopChild(this.server); this.server = null;
   }
 }

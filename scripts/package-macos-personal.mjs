@@ -15,6 +15,7 @@ import { mergeMacApps } from './macos-universal.mjs';
 import { auditDesktopProduct } from './desktop-product-audit.mjs';
 import { findNpmCli } from '../deploy/portable/common/npm-location.mjs';
 import { assertFontDistributionTree, assertFontDistributionZip } from './rhwp-original-font-policy.mjs';
+import { RUNNER_PAYLOAD_FILES } from '../deploy/desktop/runners.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stamp = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).replaceAll('-', '');
 const value = (flag, fallback) => { const i = process.argv.indexOf(flag); return i < 0 ? fallback : process.argv[i + 1]; };
@@ -129,6 +130,8 @@ fs.copyFileSync(path.join(root, 'deploy/portable/personal.mjs'), path.join(paylo
 put(path.join(payloadDir, 'app/scripts/desktop-ai.mjs'), fs.readFileSync(path.join(root, 'deploy/desktop/desktop-ai.mjs'), 'utf8').replaceAll("'../../server/", "'../server/"));
 fs.copyFileSync(path.join(root, 'deploy/desktop/cli-versions.mjs'), path.join(payloadDir, 'app/scripts/cli-versions.mjs'));
 for (const name of ['release-downloads.js', 'download-page.js', 'download-page.css']) fs.copyFileSync(path.join(root, 'server', name), path.join(payloadDir, 'app/server', name));
+// AI 실행기 창(deploy/desktop/runners.mjs — Windows 앱과 같은 main.mjs)이 띄우는 실행기 파일
+for (const need of RUNNER_PAYLOAD_FILES) if (!fs.existsSync(path.join(payloadDir, 'app', need))) throw new Error('앱 묶음에 실행기 파일이 없습니다: ' + need);
 const productAudit = auditDesktopProduct({ payload: path.join(payloadDir, 'app'), studioDir, enginePkg, root });
 await assertFontDistributionTree(path.join(payloadDir, 'app'));
 put(path.join(payloadDir, 'desktop-product.json'), JSON.stringify(productAudit, null, 2) + '\n');
@@ -196,7 +199,7 @@ for (const arch of requested) {
   const file = `hwpx-cowork-server-${version}-${stamp}-macos-${arch}-app.zip`;
   const wasmSha256 = sha(fs.readFileSync(path.join(payloadDir, 'app/vendor/rhwp/pkg/rhwp_bg.wasm')));
   const info = { product: 'Hwpx Cowork 개인용 서버 앱', version, revision: `${stamp}-full-cowork-universal`, platform: 'darwin', arch, minimumMacos, targetMacos: MACOS_COMPAT.target, binaryAuditCount: binaryAudit.binaries.length, electron: ELECTRON, node: NODE, nodeArchiveSha256: arch === 'universal' ? runtimeHashes : runtimeHashes[arch], architectures: arch === 'universal' ? ['x64', 'arm64'] : [arch], coworkPlugin: true, webPatchCount: productAudit.editorPatches.length, frontend: 'full-web-product', wasmSha256, signing: 'ad-hoc (not Developer ID, not notarized)', signer: 'apple-codesign 0.29.0', builtAt: new Date().toISOString(), realMacTested: false };
-  const readme = `Hwpx Cowork 개인용 앱\r\n\r\n1. ZIP을 풉니다.\r\n2. Hwpx Cowork.app을 더블클릭합니다. 개인 서버와 편집기가 함께 열립니다.\r\n\r\n별도 Node 설치·터미널 명령·서버 주소·로그인 토큰 입력이 필요 없습니다.\r\n문서 폴더 연결: 앱 메뉴 [파일 → 문서 폴더 연결].\r\nmacOS 12에서는 문서 편집과 개인 서버를 사용할 수 있습니다. 구독 AI 연결은 macOS 13 이상에서 지원하며, 해당 OS의 [AI → ChatGPT·Claude 연결]에서 본인 계정으로 로그인합니다(인터넷 필요).\r\n앱을 종료하면 이 앱의 개인 서버도 저장을 마친 뒤 종료합니다.\r\n설정·문서 기록은 사용자 Library/Application Support/Hwpx Cowork/personal에 보존됩니다.\r\n\r\nmacOS 12.1 이상(13·14 포함), ${arch === 'universal' ? 'Intel·Apple Silicon 공용' : arch === 'arm64' ? 'Apple Silicon(M1 이후)' : 'Intel'}용입니다.\r\n이 배포본은 개발자 ID 서명·Apple 공증을 받지 않았습니다. macOS가 실행을 막으면 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 ‘확인 없이 열기’를 확인하세요. 보안 기능을 끄거나 터미널 명령으로 우회할 필요는 없습니다.\r\n실제 Mac 실행·Gatekeeper 통과는 아직 검증하지 못했습니다.\r\n`;
+  const readme = `Hwpx Cowork 개인용 앱\r\n\r\n1. ZIP을 풉니다.\r\n2. Hwpx Cowork.app을 더블클릭합니다. 개인 서버와 편집기가 함께 열립니다.\r\n\r\n별도 Node 설치·터미널 명령·서버 주소·로그인 토큰 입력이 필요 없습니다.\r\n문서 폴더 연결: 앱 메뉴 [파일 → 문서 폴더 연결].\r\nmacOS 12에서는 문서 편집과 개인 서버를 사용할 수 있습니다. 구독 AI 연결은 macOS 13 이상에서 지원하며, 해당 OS의 [AI → 실행기 관리]에서 실행기를 추가하고 켜면 본인 계정으로 로그인합니다(인터넷 필요).\r\n앱을 종료하면 이 앱의 개인 서버도 저장을 마친 뒤 종료합니다.\r\n설정·문서 기록은 사용자 Library/Application Support/Hwpx Cowork/personal에 보존됩니다.\r\n\r\nmacOS 12.1 이상(13·14 포함), ${arch === 'universal' ? 'Intel·Apple Silicon 공용' : arch === 'arm64' ? 'Apple Silicon(M1 이후)' : 'Intel'}용입니다.\r\n이 배포본은 개발자 ID 서명·Apple 공증을 받지 않았습니다. macOS가 실행을 막으면 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 ‘확인 없이 열기’를 확인하세요. 보안 기능을 끄거나 터미널 명령으로 우회할 필요는 없습니다.\r\n실제 Mac 실행·Gatekeeper 통과는 아직 검증하지 못했습니다.\r\n`;
   const archived = await archiveApp(appDir, path.join(out, file), readme, info);
   result.push({ target: `personal-macos-${arch}`, file, ...archived, title: `Mac 개인용 서버 앱 · ${arch === 'universal' ? 'Intel·Apple Silicon 공용' : arch === 'arm64' ? 'Apple Silicon(M1 이후)' : 'Intel'} · macOS 12.1 이상`, downloadUrl: `https://cowork.example.com/download/${file}`, ...info });
   fs.writeFileSync(path.join(out, 'macos-apps.json'), JSON.stringify({ version, packages: result }, null, 2) + '\n');

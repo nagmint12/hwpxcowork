@@ -6,14 +6,14 @@
 
 ## 서버 주소만 바꾸려면
 
-1. 서버 PC에서 `start-server.bat` 또는 `npm start`로 실행한다.
+1. 서버 PC의 프로그램 폴더에서 `npm start`로 실행한다(클릭으로 쓰는 PC는 Windows 앱의 '여러 사람과 함께 쓰기').
 2. **관리자 토큰으로 로그인 → 상단 관리자**를 연다. 일반 사용자에게는 이 버튼이 보이지 않는다.
 3. **접속 범위**, **포트**, 필요한 경우 **외부 공유 주소**를 입력하고 **저장하고 재시작 → 확인하고 재시작**을 누른다. 설정만 미리 저장할 수도 있다.
 4. 같은 주소이면 새 서버의 응답을 확인하고, 포트 등이 바뀌면 표시된 새 주소에서 다시 로그인한다. 접속 토큰을 새 주소로 자동 전달하지 않는다.
 
-진행 중인 저장·서버 AI 작업을 마친 뒤 재시작한다. 사용할 수 없는 포트는 재시작 전에 거절하며, 새 서버가 시작에 실패하면 이전 연결 설정으로 한 번 복구한다. 환경 변수로 고정한 항목은 웹에서 잠긴 상태로 표시된다. `node server/index.js` 직접 실행은 웹 재시작을 지원하지 않으므로 운영할 때는 시작 파일 또는 `npm start`를 사용한다.
+진행 중인 저장·서버 AI 작업을 마친 뒤 재시작한다. 사용할 수 없는 포트는 재시작 전에 거절하며, 새 서버가 시작에 실패하면 이전 연결 설정으로 한 번 복구한다. 환경 변수로 고정한 항목은 웹에서 잠긴 상태로 표시된다. `node server/index.js` 직접 실행은 웹 재시작을 지원하지 않으므로 운영할 때는 `npm start`(= `node server/launcher.js`)를 사용한다.
 
-Windows에서 `stop-server.bat`로 종료하면 자동 복구도 멈추므로 다시 켤 때는 `start-server.bat`을 실행한다. 시작 창에 `Starting hwpx-cowork` 뒤 실제 서버 주소가 출력돼야 시작된 것이다. 이미 실행 중이면 `Already running`을 표시하고 기존 서버를 유지한다. 시작 파일은 CMD가 UTF-8 한글 문장을 명령으로 잘못 나누지 않도록 ASCII로 유지한다(2026-11-07).
+`npm start`를 띄운 창에서 Ctrl+C로 끄면 자동 복구도 멈추므로 다시 켤 때는 `npm start`를 다시 실행한다. 예전 `start-server.bat`·`stop-server.bat`·`start-https.bat`은 2026-11-17에 지웠다 — 서버 감시 작업은 bat 이 아니라 `node server/launcher.js`(HTTPS 앞단은 `node https/run-https.mjs`)를 직접 부른다.
 
 **외부 공유 주소는 이미 준비한 주소를 안내하는 설정이다.** 인터넷에서 접속하려면 도메인·HTTPS 프록시나 터널과 방화벽을 별도로 준비한다(§4). 준비가 끝나면 관리자 화면의 LAN 주소 후보나 외부 공유 주소를 참여자에게 전달한다.
 
@@ -22,7 +22,7 @@ Windows에서 `stop-server.bat`로 종료하면 자동 복구도 멈추므로 �
 | 하고 싶은 일 | 중앙 서버 PC | 참여자 PC |
 |---|---|---|
 | 문서 열기·공동 편집·메모·AI 요청 | 프로그램·Node.js 실행 | 브라우저만 필요 |
-| ① 내 구독 AI로 바로 처리(기본) | 요청 알림과 `/mcp` 제공(이미 있음) | Codex·Claude Code 실행기 또는 Claude Code 채널, 토큰 환경 변수 |
+| ① 내 구독 AI로 바로 처리(기본) | 요청 알림과 `/mcp` 제공(이미 있음) | Windows 앱('AI 실행기만' 방식 + [AI → 실행기 관리…] → '다른 서버'), 또는 Codex·Claude Code 실행기(`npm run worker`)·Claude Code 채널 + 토큰 환경 변수 |
 | ① VS Code·CLI 대화창에서 처리 | 같은 `/mcp` | `codex mcp add`·`claude mcp add`로 한 번 등록 |
 | ② ChatGPT 웹에서 처리(고급) | 공개 HTTPS 주소와 OAuth | 브라우저(ChatGPT 계정)만 |
 | ③ API 키로 처리(선택·유료) | 내 AI 키 보관 또는 공용 서버 AI | 브라우저만, 또는 개인 API 실행기·API 키 |
@@ -33,7 +33,7 @@ Windows에서 `stop-server.bat`로 종료하면 자동 복구도 멈추므로 �
 flowchart LR
   B[참여자들의 브라우저] --> S[중앙 PC의 hwpx-cowork 서버]
   S --> D[중앙 문서·요청·결과]
-  S -->|요청 알림| W[참여자 PC의 Codex 실행기·Claude Code 채널]
+  S -->|요청 알림| W[참여자 PC의 실행기·Claude Code 채널]
   W -->|구독 로그인| AI[ChatGPT·Claude 구독]
   AI --> W
   W -->|MCP: 제안·의견·요약| S
@@ -60,7 +60,7 @@ npm run connections
 
 ## 3. 중앙 서버 운영자가 준비할 것
 
-1. Node.js 22 이상을 권장한다. 프로그램 폴더에서 아래 명령을 실행하거나 `start-server.bat`를 사용한다.
+1. Node.js 22 이상을 권장한다. 프로그램 폴더에서 아래 명령을 실행한다(클릭 설치를 원하면 Windows 앱의 '여러 사람과 함께 쓰기').
 2. `config.json`의 `users`에 참여자마다 다른 이름·토큰·역할을 등록한다(웹 **관리자 → 사용자**에서도 됨). 예시 파일의 `change-me-*` 토큰은 실제 배포에 사용하지 않는다.
 3. 참여자에게 **웹 주소와 본인의 토큰을 따로** 전달한다. 관리자 토큰을 공동 사용하지 않는다.
 4. 서버 PC와 서버 프로세스는 사용 시간 동안 켜 둔다. 절전·종료·네트워크 변경 시 접속이 끊긴다.
@@ -117,7 +117,7 @@ tailscale funnel --bg 8787
 
 도메인과 서버를 운영한다면 Caddy 같은 HTTPS 역방향 프록시도 사용할 수 있다. [deploy/Caddyfile.example](../deploy/Caddyfile.example)은 고정 도메인용 예제다. DNS와 인증서·라우팅 조건을 준비해야 하며, 예제 도메인은 실제 접속 주소가 아니다. WebSocket과 실시간 알림 스트리밍을 전달해야 공동 편집·자동 AI 알림이 작동한다. [Caddy 프록시 공식 문서](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
 
-**임시 주소: Cloudflare Quick Tunnel (`start-tunnel.bat`)** — 계정·도메인 없이 `https://…trycloudflare.com` 주소를 연다. 처음 한 번 `winget install --id Cloudflare.cloudflared -e`로 설치하고 `start-tunnel.bat`을 두 번 클릭한다(= `npm run tunnel`). 서버가 꺼져 있으면 먼저 켜고, 발급 주소를 공유 주소(`publicUrl`)로 저장한 뒤 서버를 다시 시작한다. 창을 닫거나 Ctrl+C를 누르거나 터널이 끊기면 공유 주소를 비워 로컬로 되돌린다.
+**임시 주소: Cloudflare Quick Tunnel (`npm run tunnel`)** — 계정·도메인 없이 `https://…trycloudflare.com` 주소를 연다. 처음 한 번 `winget install --id Cloudflare.cloudflared -e`로 설치하고 프로그램 폴더에서 `npm run tunnel`(= `scripts/quick-tunnel.mjs`)을 실행한다(예전 `start-tunnel.bat`은 2026-11-17에 지웠다. Windows 앱은 [함께 쓰기 → 외부 접속 열기]). 서버가 꺼져 있으면 먼저 켜고, 발급 주소를 공유 주소(`publicUrl`)로 저장한 뒤 서버를 다시 시작한다. 창을 닫거나 Ctrl+C를 누르거나 터널이 끊기면 공유 주소를 비워 로컬로 되돌린다.
 
 **Quick Tunnel 제한(Cloudflare 공식):** 켤 때마다 주소가 바뀌고(ChatGPT 연결은 새 주소로 다시 만든다), 동시 요청 200개, 오래 열어 두는 스트리밍 미지원, 가동 보장 없음. 그래서 원격 참여자의 Claude 채널 알림·실행기 알림 스트림은 쓰지 못한다(서버 PC의 실행기·채널은 `localhost`로 붙으므로 영향 없음). 고정 주소와 스트리밍이 필요하면 도메인을 연결한 정식 Tunnel로 옮긴다. [공식 제한](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).
 
@@ -145,8 +145,8 @@ npm start
 
 | 순서 · 연결 | 한 번 설정 | 새 요청 처리 | 비용 |
 |---|---|---|---|
-| ① Codex 실행기 | `codex login`, 토큰 환경 변수, `start-codex-agent.bat` 또는 `npm.cmd run worker -- --provider codex` | 실행 중 알림으로 바로 | ChatGPT 구독 사용량 |
-| ① Claude Code 실행기 | `claude auth login`, 토큰 환경 변수, `start-claude-worker.bat` 또는 `npm.cmd run worker -- --provider claude-code` | 실행 중 알림으로 바로 | Claude 구독 사용량 |
+| ① Codex 실행기 | `codex login`, Windows 앱 [AI → 실행기 관리…] 또는 토큰 환경 변수 + `npm.cmd run worker -- --provider codex` | 실행 중 알림으로 바로 | ChatGPT 구독 사용량 |
+| ① Claude Code 실행기 | `claude auth login`, Windows 앱 [AI → 실행기 관리…] 또는 토큰 환경 변수 + `npm.cmd run worker -- --provider claude-code` | 실행 중 알림으로 바로 | Claude 구독 사용량 |
 | ① Claude Code 채널 | `claude` 로그인, 토큰 환경 변수, `start-agent.bat` | 채널 세션 실행 중 바로 | Claude 구독 사용량 |
 | ① Codex·Claude Code 대화(VS Code·CLI) | `codex mcp add` · `claude mcp add`(아래) | “대기열을 처리해 줘”라고 할 때 | 구독 사용량 |
 | ② ChatGPT 웹 | OAuth 연결(§9) | 대화에서 말할 때 | 구독 사용량 |
@@ -176,6 +176,8 @@ bearer_token_env_var = "HWPX_COWORK_TOKEN"
 
 Claude Code는 작은따옴표 안의 `${HWPX_COWORK_TOKEN}`을 글자 그대로 저장하고 연결할 때 환경 변수 값으로 바꾼다(2026-11-13 Claude Code 2.1.322, 격리 설정에서 맞는 토큰은 연결·틀린 토큰은 401 확인). `?agent=Codex`는 메모 작성자 표기용이다(Claude Code는 클라이언트 이름으로 자동 표기). 표준 초기화를 하는 MCP 클라이언트는 `Mcp-Session-Id`로 대화별 선점을 나눈다.
 
+**연결 종류(2026-11-17부터).** 위 주소를 그대로 등록하면 새 연결(v2) — `task`·`read`·`edit`·`finish`와 문서 목록·새 문서·반영·메모·변경 요청 도구(36개)다. “대기열을 처리해 줘”는 인자 없는 `task`를 none까지 되풀이하고 요청마다 `edit`(done)·`finish`로 끝낸다. 요청 없이 직접 시키면 `list_documents` → `read` → `edit`(request_id 없이). 예전 도구(`claim_next_request`·`propose_*` 등)가 필요하면 주소에 `?v=1`을 붙인다(Codex는 `…/mcp?agent=Codex&v=1`). 서버 전체를 예전 연결로 되돌리려면 `config.json`에 `"mcp": { "defaultSurface": "v1" }`을 넣고 재시작한다 — 이미 배포된 옛 실행기·브리지(이름이 `hwpx-`로 시작)는 이 설정 없이도 예전 연결로 열린다. 지금 서버의 기본은 `/api/config`의 `features.mcpDefault`로 본다.
+
 ## 7. 소형 개인 실행기(ZIP) — 구독 Codex·Claude Code 먼저, API는 유료
 
 웹 설명서 ① 절의 **실행기 ZIP 내려받기**로 소형 ZIP을 받는다(문서 화면에 로그인한 상태). ZIP에는 실행 코드와 의존성 목록만 들어 있고 중앙 문서·설정·토큰은 포함하지 않는다. 서버 관리자는 `npm run package:worker`로 같은 ZIP을 만들 수 있다. 압축을 푼 폴더에서 Node.js를 준비하고 `npm.cmd install`을 실행한다. 서버 프로그램을 다시 시작할 필요는 없다.
@@ -194,11 +196,11 @@ npm.cmd run worker -- --provider codex --check
 npm.cmd run worker -- --provider codex
 ```
 
-`codex login`으로 ChatGPT 계정에 로그인한 상태여야 한다. 프로그램 폴더가 있으면 `start-codex-agent.bat`(다른 PC의 서버면 `--url`)이 같은 일을 한다. 자세한 동작·모델 선택·복구는 [자동 처리 안내](/manual-resources/AUTOMATIC_AI_GUIDE.md).
+`codex login`으로 ChatGPT 계정에 로그인한 상태여야 한다. Windows 앱(0.6.0부터)이면 [AI → 실행기 관리…]에서 Codex 실행기를 더해 켠다(다른 PC의 서버면 '다른 서버' — 주소 + 내 토큰. 이 PC에 서버가 필요 없으면 앱 처음 실행에서 'AI 실행기만'). 예전 `start-codex-agent.bat`은 2026-11-17에 지웠다. 실행기는 새 MCP 연결(v2)이 기본이고 `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다 — 옛 중앙 서버(새 연결을 모름)면 시작 점검에서 멈추고 `--mcp 1`을 알린다. 자세한 동작·모델 선택·복구는 [자동 처리 안내](/manual-resources/AUTOMATIC_AI_GUIDE.md).
 
 ### Claude Code 실행기 — 바로 처리(기본)
 
-최신 Claude Code에서 `claude auth login`으로 구독 로그인하고 토큰 환경 변수를 저장한다. 프로그램 폴더에서는 `start-claude-worker.bat`(원격 서버면 `--url`)을 쓴다. 실행기 ZIP에서는 `npm.cmd install` 뒤 다음 명령을 쓴다.
+최신 Claude Code에서 `claude auth login`으로 구독 로그인한다. Windows 앱이면 [AI → 실행기 관리…]에서 Claude Code 실행기를 켠다. 명령줄은 토큰 환경 변수를 저장하고 프로그램 폴더(실행기 ZIP이면 `npm.cmd install` 뒤)에서 다음 명령을 쓴다(예전 `start-claude-worker.bat`은 2026-11-17에 지웠다).
 
 ```powershell
 $env:HWPX_COWORK_URL = 'https://cowork.example.com/mcp'
@@ -228,6 +230,8 @@ npm.cmd run worker -- --provider gemini --model '계정에서-사용할-Gemini-�
 ```
 
 OpenAI는 Responses API, Gemini는 `generateContent` REST를 쓴다. 구조화 JSON 출력과 필요한 첨부 입력을 지원하는 모델을 고른다. [OpenAI 구조화 출력](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [Gemini 생성 API](https://ai.google.dev/api/generate-content).
+
+**MCP 연결(2026-11-17부터 새 연결이 기본).** API 실행기는 `--mcp 2`(기본)이면 요청을 맡아 요청 내용(brief)을 첫 입력에 싣고, 모델에게 도구 7개(`read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`)만 준다. 모델이 `edit`로 결과를 저장하고 `edit`의 `done`이나 `finish`로 끝내면 그 자리에서 멈춘다. 도구 없이 글로만 답하면 두 번 재촉하고, 그래도 끝내지 않으면 `API_MCP_INCOMPLETE`로 실패로 알린다(그때까지 저장한 제안·메모는 남는다). 토큰 사용량은 요청 기록에 남는다. 예전 길(도구 26개 + 최종 JSON — 위의 구조화 출력이 필요한 쪽)은 `--mcp 1`(또는 `HWPX_COWORK_MCP=1`). 서버 AI·서버에 등록한 개인 키·체험 공유 키는 `config.ai.mcp`(기본 `"v2"`, `"v1"`이면 예전 길 — 서버 재시작 필요)를 따른다. 새 연결에는 선택 서식 자동 보충·`instructionSummary`·`ai.documentContext`·표준서식 지침을 시스템 글에 싣기(필요하면 모델이 `read view='guide'`)·`maxProposals`가 없다. **실제 유료 API로는 아직 확인하지 않았다**(가짜 fetch 시험 `tests/api_mcp_v2.test.mjs`). 새 연결은 도구 정의(36개 13,616 → 7개 3,279토큰, o200k 추정)와 지침(3,468 → 1,096)이 작아, 호출마다 다시 보내는 고정 글이 약 1만 7천 → 4천 4백 토큰이 된다(모델 없이 잰 값).
 
 ### API 게이트웨이 경유(`--gateway baze`)
 
@@ -280,18 +284,18 @@ Gemini CLI 설정의 예:
 }
 ```
 
-대화에서 “hwpx의 내 대기 요청을 claim_next_request로 처리해 줘”라고 요청한다. MCP 설정 자체는 자동 수신 기능이 아니다. [Gemini CLI MCP 공식 문서](https://geminicli.com/docs/tools/mcp-server/).
+대화에서 “hwpx의 내 대기 요청을 task로 하나씩 맡아 처리해 줘”라고 요청한다(2026-11-17부터 `/mcp` 기본은 새 연결 — 주소를 `…/mcp?v=1`로 넣었으면 “claim_next_request로 처리해 줘”). MCP 설정 자체는 자동 수신 기능이 아니다. [Gemini CLI MCP 공식 문서](https://geminicli.com/docs/tools/mcp-server/).
 
 ## 9. ChatGPT 웹 연결(고급 · OAuth)
 
-공개 HTTPS 주소가 있을 때만 쓰는 고급 방법이다. 연결한 Work 채팅에서 “대기열을 처리해 줘”라고 하거나 사용 설명서 ②의 처리 프롬프트(`claim_next_request`로 오래된 요청부터 none까지)를 붙여 넣을 때 처리된다. 새 요청을 매번 말하지 않고 처리하려면 ①의 Codex 실행기를 켠다. [OpenAI MCP 연결](https://learn.chatgpt.com/docs/extend/mcp), [플러그인 인증](https://developers.openai.com/plugins/build/auth).
+공개 HTTPS 주소가 있을 때만 쓰는 고급 방법이다. 연결한 Work 채팅에서 “대기열을 처리해 줘”라고 하거나 사용 설명서 ②의 처리 프롬프트(인자 없는 `task`로 오래된 요청부터 none까지 — 예전 연결 `?v=1`이면 `claim_next_request`)를 붙여 넣을 때 처리된다. 새 요청을 매번 말하지 않고 처리하려면 ①의 Codex 실행기를 켠다. [OpenAI MCP 연결](https://learn.chatgpt.com/docs/extend/mcp), [플러그인 인증](https://developers.openai.com/plugins/build/auth).
 
 **참여자 PC에는 설치가 필요 없다.** 브라우저에서 자기 ChatGPT 계정과 HWPX 개인 토큰으로 연결한다. OAuth는 HWPX 계정의 접근 권한을 ChatGPT에 허용하는 절차다. HWPX 서버에 ChatGPT 비밀번호·OpenAI API 키를 입력하지 않는다.
 
 **운영자: 공개 HTTPS 경로 준비**
 
 1. 서버를 켠 채 고정 도메인의 HTTPS 프록시 또는 HTTPS 터널을 준비한다(§4). `/mcp`뿐 아니라 `/.well-known/*`, `/authorize`, `/register`, `/token`, `/revoke`, `/oauth/approve`, `/oauth.css`도 같은 공개 호스트에서 서버로 전달해야 한다. HWPX 웹도 같은 HTTPS 주소를 사용한다.
-2. 관리자 화면의 **외부 공유 주소**를 실제 HTTPS 기본 주소로 저장하고 재시작한다(또는 `HWPX_COWORK_PUBLIC_URL`). `start-tunnel.bat`은 이 저장·재시작까지 한다. `/mcp`나 토큰은 기본 주소에 넣지 않는다.
+2. 관리자 화면의 **외부 공유 주소**를 실제 HTTPS 기본 주소로 저장하고 재시작한다(또는 `HWPX_COWORK_PUBLIC_URL`). `npm run tunnel`(임시 주소)은 이 저장·재시작까지 한다. `/mcp`나 토큰은 기본 주소에 넣지 않는다.
 3. 다른 PowerShell에서 점검한다.
 
 ```powershell
@@ -363,6 +367,8 @@ HWPX에 본인 토큰으로 로그인하고 **사용 설명서 → ② ChatGPT �
 
 `HWPX_COWORK_AI=off`는 공용 서버 AI를 끈다. `HWPX_COWORK_AI_MOCK=1`은 실제 API를 쓰지 않는 시험·체험용이다. 관리자 공용 키를 UI나 참여자에게 전달하지 않는다.
 
+**MCP 연결 `ai.mcp`(2026-11-17):** 공용 서버 AI·서버에 등록한 내 AI 키·체험 공유 키는 적지 않으면 새 연결(`"v2"`)로 돈다 — §7 'MCP 연결'과 같은 도구 7개·끝 판정이다. 예전 길(도구 26개 + 최종 JSON, 선택 서식 자동 보충·`documentContext`·`maxProposals` 포함)이 필요하면 `"ai": { …, "mcp": "v1" }` 뒤 서버를 재시작한다. 모르는 값을 적으면 서버 AI를 켜지 않고 그 까닭을 알린다. 모의 AI·튜토리얼 예시 답변은 이 값과 관계없이 예전 길이다. 실제 유료 API로는 아직 확인하지 않았다.
+
 ### AI 수신 원문과 오류 판정 기록(2026-11-14)
 
 AI 작업은 성공·실패 여부와 관계없이 수신 원문을 파일로 남긴다. JSON 해석이나 도구 입력 검사 **이전**에 저장하며, 기록 실패 시 `AI_DEBUG_WRITE_FAILED`로 처리를 중단한다. 기존 작업 메모의 짧은 오류 문구와 별도로, 아래 비공개 폴더에서 원문과 상세 판정을 확인한다. 파일을 자동으로 자르거나 회전·삭제하지 않는다.
@@ -401,6 +407,7 @@ Claude hook 필드는 [Claude Code 공식 hook 문서](https://code.claude.com/d
 | 구현 | Codex(ChatGPT 구독)·Claude Code(Claude 구독) 실행기·Claude Code 채널, OpenAI·Anthropic·Gemini API 실행기, 공용 서버 AI 제공자 선택 |
 | 구현 | 요청 선점·직렬 처리·갱신·연결 복구·취소·실패 기록·부분 결과 중복 비교 |
 | 구현 | ChatGPT 웹용 OAuth 2.1(DCR·PKCE), 개인 토큰 인증·동의 화면, 갱신·연결 해제 |
+| 구현(2026-11-17, 로컬 검증 — 운영 반영 전) | MCP 기본 연결 = 새 연결(v2), 실행기·브리지·서버 AI·API 실행기 v2 기본, Windows 앱 0.6.0 실행기 관리 — API v2 의 실제 유료 호출과 앱 실제 창은 미검증 |
 | 운영자 준비 필요 | 실제 공개 도메인/VPN/터널·접근 권한·방화벽·DNS·실제 API 키와 모델 |
 | 별도 개발 범위 | 브라우저 AI 대화창 강제 주입, 사용자 가입/초대 |
 

@@ -2,20 +2,25 @@ import crypto from 'node:crypto';
 import { validateImage } from './image-integrity.js';
 import { imageInfo } from '../engine/picture.js';
 import { mcpOutput } from './api-mcp-tools.js';
-import { runToolLoop, toolRules, fail, responseFailure } from './api-tool-loop.js';
+import { runToolLoop, toolRules, fail, responseFailure, V2_CONTINUE } from './api-tool-loop.js';
 
 const MAX_BYTES = 10 * 1048576;
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value);
+const replayItem = o => (o.type === 'image_generation_call' && o.id ? { type: o.type, id: o.id } : o);
 
-/** OpenAI Responses 어댑터: function calling + provider 생성 파일 회수(hosted 작업공간). BAZE도 같은 API 규격을 지원할 때 사용한다. */
+/**
+ * OpenAI Responses 어댑터: function calling + provider 생성 파일 회수(hosted 작업공간). BAZE도 같은 API 규격을 지원할 때 사용한다.
+ * 새 MCP 연결(toolContext.surface 'v2'): 도구 규칙은 시스템 지시(server/ai.js runV2)에 이미 있고 최종 JSON 형식이 없다. 만든 파일은 edit 의 figure op(attachment_id)로 넣게 알린다.
+ */
 export async function runResponsesAgent(ai, input, body, { signal, toolContext, parse, allowHosted = true, imageGeneration = false, singleTurn = false, fileOnly = false }) {
+  const v2 = toolContext?.surface === 'v2';
   const tools = (toolContext?.tools || []).map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters, strict: false }));
   const hosted = allowHosted && ai.cfg.workspace === 'hosted';
   if (hosted) tools.push({ type: 'code_interpreter', container: { type: 'auto' } });
   if (imageGeneration) tools.push({ type: 'image_generation' });
   const messages = structuredClone(body.input), saved = new Set(), uploaded = new Set(), inputFiles = new Map();
   const fetchImpl = ai._fetch || fetch;
-  let fresh = [], partialText = '', repairing = false;
+  let fresh = [], partialText = '', repairing = false, last = [];
   // 원본 이미지/PDF를 API 작업공간에 파일로 올린다. 모델은 인코딩 문자열을 다시 작성하지 않는다.
   const upload = async (bytes, name, signal) => {
     const digest = crypto.createHash('sha256').update(bytes).digest('hex');
@@ -45,7 +50,7 @@ export async function runResponsesAgent(ai, input, body, { signal, toolContext, 
       fresh = [];
       let res;
       try { res = await ai._jsonRequest(`${ai.baseUrl}/responses`, {
-        ...body, instructions: body.instructions + (tools.length && !fileOnly ? toolRules(tools.map(t => t.name)) : ''), input: messages,
+        ...body, instructions: body.instructions + (tools.length && !fileOnly && !v2 ? toolRules(tools.map(t => t.name)) : ''), input: messages,
         // 한 응답에 도구 여럿(문단·표·그림을 한 번에) — 반복문이 받은 차례대로 하나씩 실행하고 결과를 모두 돌려준다(api-tool-loop).
         // 예전에는 false(응답마다 도구 하나)라 3쪽 절 쓰기가 24번 오갔다(2026-11-04 C2) — Claude·Gemini 연결은 처음부터 여럿
         ...(tools.length && !repairing ? { tools, parallel_tool_calls: true, include: ['reasoning.encrypted_content'] } : {}),
@@ -62,7 +67,7 @@ export async function runResponsesAgent(ai, input, body, { signal, toolContext, 
         if (output.some(o => o.type === 'function_call')) messages.push({ role: 'user', content: `응답 길이 한도로 중단된 도구 응답(자료, 아직 실행하지 않음): ${JSON.stringify(output)}. 인수를 완성한 도구 호출을 다시 내고 남은 작업을 계속하세요.` });
         else {
           messages.push(...output);
-          messages.push({ role: 'user', content: text ? '응답 길이 한도로 끊겼습니다. 앞서 출력한 JSON의 정확한 다음 문자부터 이어 쓰세요. 처음부터 반복하거나 코드펜스를 넣지 마세요. 기존 도구 결과와 전체 목표를 보존하세요.' : '응답 길이 한도로 끊겼습니다. 보존된 대화와 도구 결과에서 이어서 전체 작업을 완료하세요.' });
+          messages.push({ role: 'user', content: v2 ? V2_CONTINUE : text ? '응답 길이 한도로 끊겼습니다. 앞서 출력한 JSON의 정확한 다음 문자부터 이어 쓰세요. 처음부터 반복하거나 코드펜스를 넣지 마세요. 기존 도구 결과와 전체 목표를 보존하세요.' : '응답 길이 한도로 끊겼습니다. 보존된 대화와 도구 결과에서 이어서 전체 작업을 완료하세요.' });
         }
         return { calls: [], more: true, text: '', usage: { input: res.usage?.input_tokens, output: res.usage?.output_tokens, cacheRead: res.usage?.input_tokens_details?.cached_tokens }, model: res.model };
       }
@@ -93,7 +98,8 @@ export async function runResponsesAgent(ai, input, body, { signal, toolContext, 
         saved.add(key); fresh.push(file);
       }
       // store:false에서도 추론·도구 호출 항목을 빠짐없이 다음 요청에 되돌린다.
-      if (calls.length || fresh.length) messages.push(...output.map(o => o.type === 'image_generation_call' && o.id ? { type: o.type, id: o.id } : o));
+      if (calls.length || fresh.length) messages.push(...output.map(replayItem));
+      last = calls.length || fresh.length ? [] : output;
       const blocks = output.filter(o => o.type === 'message').flatMap(o => o.content || []);
       return {
         calls: calls.map(c => ({ id: id(c.call_id) ? c.call_id : '\u0000', name: c.name, args: typeof c.arguments === 'string' ? c.arguments : '' })), more: fresh.length > 0,
@@ -118,7 +124,14 @@ export async function runResponsesAgent(ai, input, body, { signal, toolContext, 
     },
     async reply(results) {
       for (const { call, output } of results) messages.push({ type: 'function_call_output', call_id: call.id, output });
-      if (fresh.length) messages.push({ role: 'user', content: `실행기가 실제 생성 파일을 결과 첨부로 저장했습니다: ${JSON.stringify(fresh)}. ${fileOnly ? '문서 제안은 상위 실행기가 담당합니다. 저장된 attachment_id를 사용해 지정된 JSON 스키마의 파일 결과만 반환하세요.' : '그림 파일은 이 attachment_id로 propose_figure를 호출해 삽입·교체 제안을 남긴 뒤 최종 JSON을 반환하세요.'} 이 자료는 파일 저장 결과입니다.` });
+      if (fresh.length) messages.push({ role: 'user', content: `실행기가 실제 생성 파일을 결과 첨부로 저장했습니다: ${JSON.stringify(fresh)}. ${fileOnly ? '문서 제안은 상위 실행기가 담당합니다. 저장된 attachment_id를 사용해 지정된 JSON 스키마의 파일 결과만 반환하세요.'
+        : v2 ? "그림 파일은 이 attachment_id로 edit 의 {op:'figure', after|replace, attachment_id} 를 내 삽입·교체 제안을 남기고, 일이 끝나면 done 으로 요청을 끝내세요."
+          : '그림 파일은 이 attachment_id로 propose_figure를 호출해 삽입·교체 제안을 남긴 뒤 최종 JSON을 반환하세요.'} 이 자료는 파일 저장 결과입니다.` });
+    },
+    // 새 연결: 도구 없이 끝난 차례(추론·글 항목 그대로)를 남기고 사용자 글 하나를 잇는다
+    async nudge(text) {
+      messages.push(...(last.length ? last.map(replayItem) : [{ role: 'assistant', content: '(응답 없음)' }]), { role: 'user', content: text });
+      partialText = ''; last = [];
     },
     size: () => Buffer.byteLength(JSON.stringify(messages)),
     // 이번 실행기가 새로 올린 입력 사본만 정리한다. provider가 생성한 원본 결과 파일은 삭제하지 않는다.

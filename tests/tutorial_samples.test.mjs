@@ -30,7 +30,8 @@ test('실제 요청 경로도 4장의 본문을 AI에 전달하고 정상 제안
   const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'hwpx-live-tutorial-'));
   t.after(()=>{assert.ok(temporary.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:50});});
   const admin={name:'검증 관리자',role:'admin',token:'fake-admin'}; const user={name:'검증 사용자',role:'editor',token:'fake-user'};
-  const config={root,dataDir:path.join(temporary,'data'),configFile:path.join(temporary,'config.json'),users:[admin,user],ai:{maxProposals:10},agents:{othersCanTake:false},tutorial:{users:[user.name],shareFrom:[admin.name],restrictUsers:false,examples:false}};
+  // 예전 연결(v1) 시험 — 서버 AI 기본이 새 연결(v2)이 된 뒤(2026-11-17) config.ai.mcp 로 예전 연결을 고른다(가짜 모델이 최종 JSON 으로 답한다)
+  const config={root,dataDir:path.join(temporary,'data'),configFile:path.join(temporary,'config.json'),users:[admin,user],ai:{maxProposals:10,mcp:'v1'},agents:{othersCanTake:false},tutorial:{users:[user.name],shareFrom:[admin.name],restrictUsers:false,examples:false}};
   const store=new TutorialStore(config.dataDir); let received=''; let targetRef;
   const personal=createPersonalAi({config,fetchImpl:async (url,init)=>{
     received=String(init.body);

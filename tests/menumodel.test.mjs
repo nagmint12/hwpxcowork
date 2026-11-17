@@ -527,10 +527,18 @@ test('agentPrompt: 문서·작업 식별, 선점 충돌 중단, 권장안 1개 �
     const text = agentPrompt(d, r, UTIL_KINDS);
     assert.equal(text, agentPrompt(d, r), `#${r.rid} 종류 기본`);
     assert.equal(text, agentPrompt({ id: d.id, title: '시험 문서' }, r), `#${r.rid} { id, title }`);
-    assert.match(text, /start_request\(CLAIMED·NOT_OWNER면 중단\)/);
+    // 2026-11-17: MCP 기본 연결이 새 연결(작업 도구 넷 — server/mcp2.js mcpSurface)이라 기본 글은 task → read → edit(done)/finish 순서.
+    // 예전 연결(옛 브리지·실행기, 또는 config.mcp.defaultSurface 'v1' 서버)의 도구 순서는 한 줄로 남긴다
+    assert.match(text, new RegExp(`task\\(doc_id="${d.id}", request_id=${r.rid}\\)로 맡기\\(CLAIMED·NOT_OWNER·REQUEST_CLOSED면 중단`));
+    assert.match(text, /edit\(doc_id=.*done=공유용 1~2문장 요약/); assert.match(text, /finish\(doc_id=.*no_changes_reason/);
+    assert.match(text, /예전 연결이면: get_request → start_request → .* → complete_request/);
     assert.match(text, /기본은 권장 수정안 1개/);
     assert.match(text, /여러 안을 요청한 경우에만 options.count/);
     assert.ok(text.includes(`request_id=${r.rid}`));
+    const old = agentPrompt(d, r, UTIL_KINDS, { surface: 'v1' });
+    assert.match(old, /start_request\(CLAIMED·NOT_OWNER면 중단\)/, '예전 연결 서버(features.mcpDefault v1)');
+    assert.doesNotMatch(old, /\btask\(|\bedit\(/);
+    assert.ok(old.startsWith(text.split('\n')[0] + '\n'), '첫 줄(문서·작업 식별)은 같다');
   }
   const custom = [{ id: 'review', label: '검토해 줘' }];
   assert.match(agentPrompt(d, reqs[4], custom), /AI 작업 #7\(검토해 줘\)/);

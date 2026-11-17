@@ -4,6 +4,7 @@
 //   · 얼개(map)·제목(outline)
 // 모두 문서(engine HwpxDoc)만 읽는 순수 함수다. 길이는 줄 단위로 자르고 이어 읽을 자리(줄 번호)를 돌려준다.
 import { analyzeLayout, layoutHosts } from '../../engine/layout.js';
+import { pageBackgroundCount } from '../../engine/flow.js';
 
 const n = (v) => Number(v).toLocaleString('ko-KR');
 const oneLine = (s) => String(s ?? '').replace(/\s*\n\s*/g, ' ⏎ ');
@@ -34,6 +35,22 @@ export function rangePicker(at) {
 function styleNames(doc) { return new Map(doc.formattingCatalog().styles.map((s) => [String(s.id), s.name])); }
 function styleIdOf(doc, ref) {
   try { const { sec, p } = doc.resolve(ref); return (/\sstyleIDRef="(\d+)"/.exec(sec.xml.slice(p.start, p.start + 400)) || [])[1] ?? null; } catch { return null; }
+}
+
+/**
+ * 본문 문단이 직접 가진 그림의 놓임 표지(글자처럼 취급이 아닌 그림만) — [{ bin(그림 파일), mark('글 앞'|'글 뒤'|null) }] (문서 차례).
+ * 2026-11-17: 개체 → 본문 미리 보기(dry_run 의 after)에서 쪽 배경 그림이 '▣ 그림 210×297mm' 로만 보여, 글 앞에 남아 글을 덮는지 알 수 없었다
+ */
+function pictureMarks(doc, ref) {
+  try {
+    const { sec, p } = doc.resolve(ref);
+    return doc._ownObjectAnchors(p).filter((a) => a.name === 'hp:pic').map((a) => {
+      const xml = sec.xml.slice(a.start, a.end);
+      const wrap = (/^<[^>]*\stextWrap="([^"]*)"/.exec(xml) || [])[1];
+      const tac = /treatAsChar="1"/.test((/<hp:pos\b[^>]*>/.exec(xml) || [''])[0]);
+      return { bin: (/binaryItemIDRef="([^"]+)"/.exec(xml) || [])[1] ?? null, mark: tac ? null : wrap === 'IN_FRONT_OF_TEXT' ? '글 앞' : wrap === 'BEHIND_TEXT' ? '글 뒤' : null };
+    });
+  } catch { return []; }
 }
 
 /** 문단이 가진 개체를 이름별로 센 글('글상자 207 · 사각형 52') */
@@ -123,7 +140,12 @@ export function textLines(doc, { pick = null, styles = true, boxLimit = 12 } = {
     if (names) { const sid = styleIdOf(doc, p.ref); const name = sid != null ? names.get(sid) || sid : null; if (name && name !== lastStyle) { mark = ` 〔${name}〕`; lastStyle = name; } }
     out.push({ text: `[${p.ref}]${mark} ${oneLine(p.text)}`.trimEnd(), body, ref: p.ref });
     for (const t of ownTables) pushTable(t, ' ', body);
-    for (const f of ownFigures) out.push({ text: ` ▣ 그림${f.n > 1 ? `#${f.n}` : ''}${f.caption?.text ? ` 「${clip(oneLine(f.caption.text), 80)}」` : ''} ${Math.round(f.width / 283.46)}×${Math.round(f.height / 283.46)}mm`, body });
+    // 글 앞·글 뒤 그림은 표지를 단다(같은 그림 파일이 여럿이면 차례로 짝짓는다)
+    const marks = ownFigures.length ? pictureMarks(doc, p.ref) : [];
+    for (const f of ownFigures) {
+      const k = marks.findIndex((m) => m.bin === f.binId); const mark = k >= 0 ? marks.splice(k, 1)[0].mark : null;
+      out.push({ text: ` ▣ 그림${f.n > 1 ? `#${f.n}` : ''}${f.caption?.text ? ` 「${clip(oneLine(f.caption.text), 80)}」` : ''} ${Math.round(f.width / 283.46)}×${Math.round(f.height / 283.46)}mm${mark ? `(${mark})` : ''}`, body });
+    }
     if (boxes.length > boxLimit) {
       const chars = boxes.reduce((s, q) => s + [...q.text].length, 0);
       out.push({ text: ` ◰ 떠 있는 개체: ${objectTally(doc, p.ref)} — 글 조각 ${n(boxes.length)}개(${n(chars)}자)는 read view='layout' at='${p.ref}' 로 줄·표로 묶어 본다`, body });
@@ -183,9 +205,16 @@ export function layoutLines(doc, { refs = null, detail = false, options = {} } =
   const why = [...new Set(plan.dropped.map((d) => d.why))].join('·');
   // 옮긴 글상자·선은 objects_to_body 가 지운다 — 그 수와, 옮기지 못해 남는 개체 수를 미리 알려 모델이 개체 지우기를 따로 내지 않게 한다
   const moving = plan.hosts.filter((h) => h.used.size);
-  const gone = moving.reduce((s, h) => s + h.used.size, 0); const stay = moving.reduce((s, h) => s + h.kept, 0);
+  // 쪽 배경 그림(engine/flow.js — 2026-11-17): 기본(background 'remove')으로 무늬 없는 바탕은 지우고 내용으로 보이는 것은 글 뒤로 — 남는 개체 수에서 지울 것을 뺀다
+  const bg = options.background === 'behind' ? { plain: 0, content: 0, behind: pageBackgroundCount(doc, moving) } : pageBackgroundCount(doc, moving);
+  const gone = moving.reduce((s, h) => s + h.used.size, 0); const stay = moving.reduce((s, h) => s + h.kept, 0) - bg.plain;
+  const bgNote = bg.behind ? (bg.behind.plain + bg.behind.content ? ` · 쪽 배경 그림 ${n(bg.behind.plain + bg.behind.content)}장은 글 뒤로` : '')
+    : `${bg.plain ? ` · 쪽 배경 그림 ${n(bg.plain)}장은 지움(남기려면 background:'behind')` : ''}${bg.content ? ` · 내용으로 보이는 쪽 그림 ${n(bg.content)}장은 글 뒤로` : ''}`;
+  // 쪽을 넘어 이은 표(join_pages 기본 true — engine/layout.js): 되풀이 머리행은 버릴 줄(why '되풀이 머리행')에 든다
+  const joined = plan.tables.filter((t) => t.hosts.length > 1).length;
   out.push({ text: `objects_to_body 로 옮기면: 표 ${plan.tables.length}개${tables.length ? ` — ${tables.slice(0, 10).join(' / ')}${tables.length > 10 ? ' …' : ''}` : ''} · 문단 ${paras}개${plan.dropped.length ? ` · 버릴 줄 ${plan.dropped.length}개(${why})` : ''}`
-    + ` · 옮긴 글상자·선 ${n(gone)}개는 함께 지워짐 · ${stay ? `남는 개체 ${n(stay)}개(그림·표·회전한 도형 등 — 지우려면 remove_rest)` : '남는 개체 없음'}` });
+    + ` · 옮긴 글상자·선 ${n(gone)}개는 함께 지워짐${bgNote} · ${stay ? `남는 개체 ${n(stay)}개(그림·표·회전한 도형 등 — 지우려면 remove_rest)` : '남는 개체 없음'}`
+    + `${joined ? ` · 쪽을 넘는 표 ${joined}개는 한 표로 이음(쪽마다 따로는 join_pages:false)` : ''}` });
   return { lines: out, plan };
 }
 

@@ -175,7 +175,8 @@ export function createPersonalAi({ config, fetchImpl = null, secretFile = null, 
         if (entry.noAuth) headers.delete('Authorization');
         return (fetchImpl || fetch)(url, { ...init, headers, redirect: 'error' });
       } : fetchImpl;
-      const ai = new AiProposer({ ai: { provider: entry.provider, gateway: local ? 'direct' : entry.gateway, ...(local ? { baseUrl } : {}), model: entry.model, effort: entry.effort, workspace: entry.workspace || 'mcp', ...(entry.anthropicWorkspaceId ? { anthropicWorkspaceId: entry.anthropicWorkspaceId } : {}), enabled: true, timeoutMs: config.ai?.timeoutMs } }, { key, fetch: localFetch, label });
+      // MCP 연결(ai.mcp — server/ai.js normalizeMcp)은 서버 설정을 따른다: config.ai.mcp 가 없으면 정하지 않음 → 서버가 새 연결(v2)로 돌린다(service._serverAiV2)
+      const ai = new AiProposer({ ai: { provider: entry.provider, gateway: local ? 'direct' : entry.gateway, ...(local ? { baseUrl } : {}), model: entry.model, effort: entry.effort, workspace: entry.workspace || 'mcp', ...(entry.anthropicWorkspaceId ? { anthropicWorkspaceId: entry.anthropicWorkspaceId } : {}), enabled: true, timeoutMs: config.ai?.timeoutMs, mcp: config.ai?.mcp } }, { key, fetch: localFetch, label });
       cache.set(name, { updatedAt: entry.updatedAt, ai });
       return ai;
     },

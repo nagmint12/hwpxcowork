@@ -35,7 +35,8 @@ export async function aiScenario({ api, base, token, docId, log = () => {}, tool
   const request = async (p, instruction) => (await api(`/api/docs/${docId}/requests`, { method: 'POST', body: { kind: 'instruct', instruction, route: 'queue', target: target(p) } })).request.rid;
 
   const mcp = localTool ? null : new Client({ name: 'hwpx-manual-seed', version: '1.0.0' });
-  if (mcp) await mcp.connect(new StreamableHTTPClientTransport(new URL(`/mcp?agent=${encodeURIComponent(SEED_AGENT)}`, base), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  // 예전 연결 도구(start_request·propose_changes·complete_request)를 쓴다 — 서버 기본이 새 연결로 바뀐 뒤(2026-11-17)에도 예전 연결을 밝힌다
+  if (mcp) await mcp.connect(new StreamableHTTPClientTransport(new URL(`/mcp?agent=${encodeURIComponent(SEED_AGENT)}`, base), { requestInit: { headers: { Authorization: `Bearer ${token}`, 'X-Hwpx-Mcp': '1' } } }));
   const tool = localTool || (async (name, args) => {
     const r = await mcp.callTool({ name, arguments: args });
     if (r.isError) throw new Error(`${name}: ${(r.content || []).map((c) => c.text).join(' ').slice(0, 300)}`);

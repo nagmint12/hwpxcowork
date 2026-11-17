@@ -20,6 +20,7 @@ import { MACOS_COMPAT } from '../deploy/macos-compat.mjs';
 import { auditDesktopProduct } from './desktop-product-audit.mjs';
 import { findNpmCli } from '../deploy/portable/common/npm-location.mjs';
 import { assertFontDistributionTree } from './rhwp-original-font-policy.mjs';
+import { RUNNER_PAYLOAD_FILES } from '../deploy/desktop/runners.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stamp = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).replaceAll('-', '');
@@ -74,6 +75,10 @@ const builder = requireTools('electron-builder');
 // ── 2. 앱 코드(deploy/desktop)를 한 번 고정해 쓴다 ──
 const desktopSource = path.join(out, 'desktop-source');
 fs.cpSync(path.join(root, 'deploy/desktop'), desktopSource, { recursive: true, errorOnExist: true, force: false });
+// AI 실행기 창(2026-11-17 — 실행기 bat 을 대신한다): 창·관리 코드가 빠지면 메뉴 [AI → 실행기 관리]가 빈 창이 된다
+for (const need of ['main.mjs', 'host.mjs', 'runners.mjs', 'runners.html', 'runners.js', 'runners.css', 'preload.cjs', 'mode.mjs', 'desktop-ai.mjs', 'cli-versions.mjs']) {
+  if (!fs.existsSync(path.join(desktopSource, need))) throw new Error('앱 코드에 빠진 파일: deploy/desktop/' + need);
+}
 
 // ── 3. 서버·편집기 묶음(personal-lite) — 허용 목록·비밀 검사는 package-portable 이 한다 ──
 const stage = path.join(out, 'payload-source');
@@ -90,6 +95,8 @@ fs.copyFileSync(path.join(root, 'scripts/quick-tunnel.mjs'), path.join(payloadDi
 put(path.join(payloadDir, 'app/scripts/desktop-ai.mjs'), fs.readFileSync(path.join(root, 'deploy/desktop/desktop-ai.mjs'), 'utf8').replaceAll("'../../server/", "'../server/"));
 fs.copyFileSync(path.join(root, 'deploy/desktop/cli-versions.mjs'), path.join(payloadDir, 'app/scripts/cli-versions.mjs'));
 for (const name of ['release-downloads.js', 'download-page.js', 'download-page.css']) fs.copyFileSync(path.join(root, 'server', name), path.join(payloadDir, 'app/server', name));
+// AI 실행기(setup-worker → ai-worker → server/*·engine/*)가 도는 데 필요한 파일 — 없으면 실행기가 켜지자마자 끝난다
+for (const need of RUNNER_PAYLOAD_FILES) if (!fs.existsSync(path.join(payloadDir, 'app', need))) throw new Error('앱 묶음에 실행기 파일이 없습니다: ' + need);
 const productAudit = auditDesktopProduct({ payload: path.join(payloadDir, 'app'), studioDir, enginePkg, root });
 await assertFontDistributionTree(path.join(payloadDir, 'app'));
 put(path.join(payloadDir, 'desktop-product.json'), JSON.stringify({ ...productAudit, realMacTested: undefined, platform: 'win32' }, null, 2) + '\n');
@@ -158,8 +165,10 @@ put(path.join(installerDir, '설치 안내.txt'), '﻿' + [
   '2. "Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행]을 누릅니다.',
   '   (이 설치 파일은 아직 코드 서명 인증서가 없어 Windows가 처음 보는 프로그램으로 알립니다.)',
   '3. 설치 마법사에서 [다음] → [설치] → [마침]을 누릅니다. 관리자 권한은 필요 없습니다.',
-  '4. 처음 실행하면 "혼자 쓰기" 또는 "여러 사람과 함께 쓰기"를 고릅니다.',
-  '5. AI를 쓰려면 메뉴 [AI → ChatGPT·Claude 연결]에서 본인 구독 계정으로 로그인합니다(인터넷 필요, API 키 아님).',
+  '4. 처음 실행하면 "혼자 쓰기", "여러 사람과 함께 쓰기", "AI 실행기만"(이미 있는 서버에 내 AI만 연결) 가운데 하나를 고릅니다.',
+  '5. AI를 쓰려면 메뉴 [AI → 실행기 관리]에서 실행기(Codex·Claude Code·Gemini CLI·Antigravity)를 추가하고 켭니다.',
+  '   Codex·Claude Code는 처음 켤 때 연결 프로그램을 준비하고 브라우저에서 본인 구독 계정으로 로그인합니다(인터넷 필요, API 키 아님).',
+  '   다른 서버(운영·공동 작업 서버)에 붙일 때는 그 서버 주소와 내 토큰을 적습니다. 토큰은 이 PC에 암호화해 보관합니다.',
   '',
   '바탕화면·시작 메뉴의 "Hwpx Cowork" 아이콘으로 다시 엽니다. 창을 닫으면 저장을 마친 뒤 함께 꺼집니다.',
   '지우기: 설정 → 앱 → Hwpx Cowork → 제거. 문서 기록·설정(%APPDATA%\\Hwpx Cowork)은 남습니다.',

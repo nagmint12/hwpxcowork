@@ -1,7 +1,5 @@
-/* 체험 따라 하기(web/tutorial.js) — 어두운 덮개 4장 + 금빛 테두리 + 말풍선. 색은 소개 영상과 같은 UIC 발표양식(#001A70 · #F5A800) */
+/* 체험 따라 하기(web/tutorial.js) — 금빛 테두리 + 하나의 안내 영역. 색은 소개 영상과 같은 UIC 발표양식(#001A70 · #F5A800) */
 .tour { position: fixed; inset: 0; z-index: 9000; pointer-events: none; font-family: var(--font, 'Pretendard', 'Malgun Gothic', sans-serif); }
-.tour-shade { position: fixed; background: rgba(0, 26, 112, 0.0); pointer-events: auto; transition: background .2s; }
-.tour.tour-dim .tour-shade { background: rgba(0, 18, 64, 0.42); }
 .tour-ring { position: fixed; border: 3px solid #F5A800; border-radius: 10px; box-shadow: 0 0 0 4px rgba(245, 168, 0, .25), 0 0 22px rgba(245, 168, 0, .55);
   pointer-events: none; animation: tour-pulse 1.4s ease-in-out infinite; transition: left .18s, top .18s, width .18s, height .18s; }
 @keyframes tour-pulse { 0%, 100% { box-shadow: 0 0 0 4px rgba(245, 168, 0, .25), 0 0 18px rgba(245, 168, 0, .45); } 50% { box-shadow: 0 0 0 9px rgba(245, 168, 0, .12), 0 0 28px rgba(245, 168, 0, .7); } }
@@ -13,20 +11,28 @@
 .tour-press-btn:not(:disabled) { box-shadow: 0 0 0 3px #1E9E5A; }
 .tour .tour-bubble { transition: opacity .25s; }
 .tour.tour-body-shown .tour-bubble { opacity: 0; pointer-events: none; }
-.tour.tour-body-shown .tour-shade { pointer-events: auto; }
-.tour-bubble { position: fixed; width: min(360px, calc(100vw - 16px)); background: #fff; color: #1b1f2a; border-radius: 12px; padding: 12px 14px 10px;
+.tour-bubble { position: fixed; width: min(520px, calc(100vw - 24px)); background: #fff; color: #1b1f2a; border-radius: 12px; padding: 12px 14px 10px;
   box-shadow: 0 10px 34px rgba(0, 18, 64, .35); border-top: 4px solid #001A70; pointer-events: auto; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+.tour-bubble.tour-inline { position: relative; width: 100%; max-height: none; margin-bottom: 12px; padding: 10px; box-shadow: none; border: 0; border-bottom: 1px solid #dbe3ef; border-radius: 0; background: #f4f7fc; flex: none; }
+.tour-inline .tour-content { overflow: visible; }
+.tour-inline .tour-head b { font-size: 14px; }
+.tour-row .tour-act:focus-visible { outline: 3px solid #7c3aed; outline-offset: 3px; }
+.tour-input-example { margin: 0 0 10px; padding: 10px 12px; border: 2px solid #F5A800; border-radius: 8px; background: #fffaf0; color: #7a5200; }
+.tour-input-example > b { font-size: 12px; }
+.tour-input-example > p { margin: 5px 0 9px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tour-input-example .tour-example-fill { min-height: 34px; padding: 6px 10px; border: 2px solid #F5A800; border-radius: 6px; background: #fff; color: #7a5200; font-weight: 700; white-space: normal; }
+.tour-input-example .tour-example-fill:hover:not(:disabled) { background: #fff0b3; border-color: #d99300; }
+.tour-input-example .tour-example-fill:focus-visible { outline: 3px solid #F5A800; outline-offset: 3px; }
 .tour-head, .tour-row { flex-shrink: 0; }
 .tour-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.tour-bubble.nudge { animation: tour-nudge .35s; }
-@keyframes tour-nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
 .tour-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .tour-head b { font-size: 15px; color: #001A70; }
 .tour-count { margin-left: auto; font-size: 12px; color: #8a8f9c; }
 .tour-text { margin: 0 0 10px; font-size: 13.5px; line-height: 1.55; white-space: pre-line; }
 .tour-text .spin { margin-right: 6px; vertical-align: -2px; }
-.tour-row { display: flex; align-items: center; gap: 6px; }
-.tour-row { flex-wrap: wrap; }
+.tour-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 글자를 두 줄로 압축하지 않고, 공간이 부족하면 단추 전체를 다음 줄로 보냅니다. */
+.tour-row button, .tour-recovery button { flex: 0 0 auto; white-space: nowrap; min-height: 32px; }
 .tour-close { padding: 0 4px; border: 0; background: transparent; color: #6b7280; font-size: 23px; line-height: 1; }
 .tour-close:hover { background: #f1f5f9; color: #1b1f2a; }
 /* 그림 장면(web/tutorial-scenes.js) — 촬영 영상 대신 웹 요소로 그린 흐름. 단계 클래스 ts-b1…가 차례로 붙으며 움직인다(2026-11-12) */
@@ -137,12 +143,9 @@
 .tour-recovery { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; margin-top: 9px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
 .tour-recovery p { flex-basis: 100%; margin: 0 0 4px; font-size: 12px; line-height: 1.5; color: #475569; }
 .tour-recovery button { font-size: 12px; }
-.tour-recovery details { width: 100%; font-size: 12px; }
-.tour-recovery summary { cursor: pointer; }
-.tour-recovery select { box-sizing: border-box; max-width: calc(100% - 74px); margin: 6px 6px 0 0; }
-.tour-row { flex-wrap: wrap; }
-.tour-row .tour-quit, .tour-row .tour-skip { color: #6b7280; }
-.tour-row .tour-act { border-color: #F5A800; color: #7a5200; }
+.tour-row .tour-quit { color: #6b7280; }
+.tour-row .tour-act { border-color: #c4b5fd; background: #f3edff; color: #6d28d9; font-weight: 600; }
+.tour-row .tour-act:hover:not(:disabled) { background: #e9ddff; border-color: #a78bfa; }
 /* 문서함의 체험 띠 */
 .tour-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 12px 16px; border-radius: 12px; background: linear-gradient(90deg, #001A70, #1d3a9a); color: #fff; }
 .tour-banner b { font-size: 15px; }

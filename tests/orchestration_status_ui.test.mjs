@@ -71,6 +71,7 @@ test('처리 중 작업은 시작·경과·임대 시각을 표시하고 시각 
 
 test('실행 도움말은 일반 AI 큐와 구별하고 프로필 문자열을 실행 명령에 무방비로 삽입하지 않음', () => {
   assert.match(ui.orchestrationAgentHelp({ id: 'codex', kind: 'codex', model: '' }).command, /npm run orchestrator -- --agent-id codex --provider codex$/);
+  assert.match(ui.orchestrationAgentHelp({ id: 'codex', kind: 'codex', model: '' }).note, /HWPX_COWORK_ORCHESTRATION=1.*기본 꺼짐/, 'Codex 실행기의 협업 큐는 기본 끔(2026-11-17)');
   const api = ui.orchestrationAgentHelp({ id: 'api-worker', kind: 'api', model: 'allowed-model' });
   assert.match(api.command, /--gateway baze --model allowed-model/); assert.match(api.note, /BAZE_API_KEY/);
   const claude = ui.orchestrationAgentHelp({ id: 'claude-code', kind: 'claude-code' });
@@ -99,7 +100,9 @@ test('실제 Vue 화면은 지휘자 미연결과 작업 대기 원인을 표시
   assert.match(html, /data-testid="orchestration-conductor-offline"/);
   assert.match(html, /지휘자 Codex 지휘자의 협업 실행기가 연결되지 않아/);
   assert.match(html, /배정된 협업 실행기 미연결로 대기/);
-  assert.match(html, /start-codex-agent\.bat 하나로 일반 요청과 Codex 협업을 함께 처리/);
+  // 2026-11-17: start-codex-agent.bat 을 지웠고 일반 요청 실행기(앱 [AI → 실행기 관리…]·npm run worker)는 협업 큐를 처리하지 않는다(Codex 실행기도 HWPX_COWORK_ORCHESTRATION=1 일 때만)
+  assert.match(html, /일반 요청 실행기\(Windows 앱 \[AI → 실행기 관리…\]·npm run worker\)는 협업 작업을 처리하지 않습니다/);
+  assert.doesNotMatch(html, /start-codex-agent\.bat/, '지운 bat 을 안내하지 않는다');
   assert.match(html, /협업 실행 방법/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>alert/);

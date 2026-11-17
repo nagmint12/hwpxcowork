@@ -1,6 +1,6 @@
 # 기존 공개 주소를 이 컴퓨터로 이전하기
 
-> 2026-10-30: ngrok 한도가 소진되어 ngrok 주소는 쓰지 않습니다. 개발은 로컬(`http://localhost:8787`)로 하고, 인터넷 임시 주소는 `start-tunnel.bat`(Cloudflare Quick Tunnel)으로 엽니다 — [운영 매뉴얼 §4.B](DEPLOYMENT_AND_AI_GUIDE.md). 아래 ngrok 절차는 기록으로 남깁니다.
+> 2026-10-30: ngrok 한도가 소진되어 ngrok 주소는 쓰지 않습니다. 개발은 로컬(`http://localhost:8787`)로 하고, 인터넷 임시 주소는 `npm run tunnel`(Cloudflare Quick Tunnel — 예전 `start-tunnel.bat`은 2026-11-17에 지웠습니다)으로 엽니다 — [운영 매뉴얼 §4.B](DEPLOYMENT_AND_AI_GUIDE.md). 아래 ngrok 절차는 기록으로 남깁니다.
 
 2026-10-26 기준입니다. 이 컴퓨터의 공유기 외부 IP는 `203.0.113.10`입니다. 기존 환경의 `147.47.*` 주소는 사용하지 않습니다.
 
@@ -31,7 +31,7 @@
 
 ```powershell
 cd <repo>
-.\start-server.bat
+npm start
 ```
 
 `http://localhost:8787`에서 기존 `config.json`의 관리자 토큰으로 로그인합니다. 서버 창을 계속 켜 둡니다.

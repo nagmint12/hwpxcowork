@@ -128,6 +128,7 @@ Android 1.0.8(코드11)도 쓰기 가능한 열린 원본 저장을 지원한다
 `deploy/desktop/`의 Electron 창이 기존 `portable/personal.mjs --no-window`를 내장 Node로 시작하며, 처음 실행하면 무작위 관리자 토큰·빈 포트·127.0.0.1 전용 서버를 자동 준비하고 문서함을 연다.
 사용자가 Node·npm·Rust를 설치하거나 명령·서버 주소·토큰을 입력할 필요가 없다. 앱의 [파일 → 문서 폴더 연결]에서 폴더를 고른다.
 기본은 AI 없이 편집·저장이고 [AI → ChatGPT·Claude 연결]에서 선택한 공식 CLI를 사용자 설정 폴더에 자동 준비하고 브라우저로 구독 로그인을 진행한다. 앱 시작이나 연결 점검만으로 모델을 호출하지 않는다.
+(2026-11-17 덧붙임: 같은 `deploy/desktop` 의 Windows 앱 0.6.0 부터 이 메뉴는 **[AI → 실행기 관리…]**로 바뀌었다 — 실행기 목록(Codex·Claude Code·Gemini CLI·Antigravity × '이 앱의 서버'/'다른 서버'), 켜기·끄기·상태·기록·자동 시작, 첫 실행 방식 'AI 실행기만'. 근거 `docs/MCP_REDESIGN_2026-11-16.md` §13.5. Mac 앱에서의 동작은 확인하지 않았다. 위 문장은 11-13 배포 때의 기록이다.)
 
 - 배포 형식: Apple Silicon과 Intel 각각의 ZIP 안에 `Hwpx Cowork.app`, 짧은 안내, 빌드 정보. Electron 45.3.1·Node 22.23.5·npm·서버 운영 의존성·미리 빌드한 엔진·편집기·허용 글꼴과 원문 라이선스를 포함한다.
 - 최소 실행 대상: 공식 Electron 45의 Info.plist와 Mach-O 기준 macOS 13.0(14 포함). Node 22의 11.0 대상과 구분한다. Mac 앱의 최소값을 11로 소개하지 않는다.

@@ -30,7 +30,9 @@ export async function main(argv = process.argv.slice(2)) {
     if (!name || !argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error('관리자 MCP 실행 옵션을 확인하세요.');
     options[name] = argv[++i];
   }
-  const bridge = await createBridge({ ...adminConnection(options), channel: false, forwardToolListChanges: true,
+  // 관리자 실험 경로(/mcp/admin-test)는 자기 도구·안내를 쓴다(X-Hwpx-Mcp 를 보지 않는다). 브리지 기본이 새 연결로 바뀐 뒤(2026-11-17)에도
+  // 서버에 닿지 못했을 때의 내장 안내가 예전 그대로이게 예전 연결을 밝힌다
+  const bridge = await createBridge({ ...adminConnection(options), channel: false, forwardToolListChanges: true, surface: 'v1',
     log: () => {} }); // Do not echo configuration, credentials or document content.
   installShutdown(bridge);
   await bridge.start(createDebugStdioTransport(StdioServerTransport, { context: { route: 'admin-mcp-wire', session: bridge.session } }));

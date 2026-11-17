@@ -12,7 +12,7 @@
 | ② 고급 | ChatGPT 웹(OAuth, 공개 https 주소 필요) | ChatGPT에 사용자 지정 MCP 서버 추가 | 대화에서 “대기열을 처리해 줘”라고 말할 때 | 구독 사용량 안 |
 | ③ 선택 | API 키(문서 목록 **내 AI 키**) | 키 저장·연결 확인 | 서버가 요청자 키로 바로 처리. 설치 없음 | **유료** — 쓴 만큼 API 요금 |
 
-Claude Code는 `claude auth login`으로 구독 로그인한 뒤 `start-claude-worker.bat` 또는 `npm.cmd run worker -- --provider claude-code`로 바로 처리한다(`--check`로 모델 호출 없이 점검). 실행기가 임시 MCP 연결을 준비하므로 사용자 MCP 등록·채널 설정은 필요하지 않다. [Claude Code 실행기·채널 안내](AGENT_SETUP.md)를 참고한다. 이 문서의 아래 절은 Codex 실행기를 다룬다. 관리자 전용 경로(공용 서버 AI, 개인 API 실행기의 제공업체 직접 설정)는 운영 매뉴얼에 있다. ChatGPT 이벤트 구독(MCP Events)·Work 예약 점검은 반응이 느리고 조직 권한상 막아 두어 안내하지 않는다(서버 기능은 남아 있음 — [MCP Events 안내](MCP_EVENTS_GUIDE.md)).
+Claude Code는 `claude auth login`으로 구독 로그인한 뒤 Windows 앱의 [AI → 실행기 관리…] 또는 `npm.cmd run worker -- --provider claude-code`로 바로 처리한다(`--check`로 모델 호출 없이 점검). 실행기가 임시 MCP 연결을 준비하므로 사용자 MCP 등록·채널 설정은 필요하지 않다. [Claude Code 실행기·채널 안내](AGENT_SETUP.md)를 참고한다. 이 문서의 아래 절은 Codex 실행기를 다룬다. 관리자 전용 경로(공용 서버 AI, 개인 API 실행기의 제공업체 직접 설정)는 운영 매뉴얼에 있다. ChatGPT 이벤트 구독(MCP Events)·Work 예약 점검은 반응이 느리고 조직 권한상 막아 두어 안내하지 않는다(서버 기능은 남아 있음 — [MCP Events 안내](MCP_EVENTS_GUIDE.md)).
 
 ## Codex 실행기 — 한 번 설정
 
@@ -29,18 +29,13 @@ setx HWPX_COWORK_TOKEN "내-토큰"
 codex mcp add hwpx --url "https://cowork.example.com/mcp?agent=Codex" --bearer-token-env-var HWPX_COWORK_TOKEN
 ```
 
-주소는 웹 설명서에 이 서버의 실제 주소로 채워져 나온다. 등록한 뒤 Codex 대화창에서 “대기열을 처리해 줘”라고 하면 `claim_next_request`로 쌓인 요청을 오래된 순서로 처리한다(연결만으로 자동 실행되지는 않는다).
+주소는 웹 설명서에 이 서버의 실제 주소로 채워져 나온다. 등록한 뒤 Codex 대화창에서 “대기열을 처리해 줘”라고 하면 인자 없는 `task`로 쌓인 요청을 오래된 순서로 처리한다(연결만으로 자동 실행되지는 않는다). 2026-11-17부터 `/mcp`의 기본은 새 연결(v2 — `task`·`read`·`edit`·`finish`)이다. 예전 도구(`claim_next_request` 등)가 필요하면 주소에 `&v=1`을 붙인다(`…/mcp?agent=Codex&v=1`).
 
 ## 실행기 켜기 — 실시간 처리
 
-프로그램 폴더가 있으면 그 폴더의 터미널에서 실행하고 창을 켜 둔다. 이 PC의 서버(localhost)에 붙고, 서버가 꺼져 있으면 먼저 켠다. 다른 PC의 서버면 `--url`로 주소를 준다.
+**Windows 앱(0.6.0부터, 권장).** 메뉴 **[AI → 실행기 관리…]**에서 실행기를 더한다. AI는 Codex, 서버는 '이 앱의 서버' 또는 '다른 서버'(주소 + 내 토큰 — 그 서버에 물어 확인하고, 인터넷 주소는 https 만 받는다)를 고르고 켠다. 상태(준비·연결됨·처리 중·대기·오류·꺼짐)와 최근 기록이 창에 보이고, 앱을 켤 때 자동 시작할 수 있다. 실행기가 뜻하지 않게 꺼지면 앱이 간격을 늘려 가며(5초·15초·45초·2분·5분) 다시 띄운다. 이 PC에 서버가 필요 없으면 앱 처음 실행에서 **AI 실행기만**을 고른다(문서는 그 서버의 웹 화면에서 연다). 다른 서버의 토큰은 Windows 사용자 계정으로 암호화해 이 PC에만 둔다.
 
-```powershell
-.\start-codex-agent.bat
-.\start-codex-agent.bat --url "https://cowork.example.com/mcp"
-```
-
-프로그램 폴더가 없으면 웹 설명서에서 **실행기 ZIP**을 받아 풀고, 그 폴더에서 `npm.cmd install` 뒤 실행한다.
+**명령줄.** 프로그램 폴더(또는 웹 설명서에서 받은 **실행기 ZIP**을 풀고 `npm.cmd install` 한 폴더)의 터미널에서 실행하고 창을 켜 둔다. 이 PC의 서버(`http://localhost:8787/mcp`)면 `HWPX_COWORK_URL` 줄을 뺀다.
 
 ```powershell
 $env:HWPX_COWORK_URL = "https://cowork.example.com/mcp"
@@ -48,13 +43,15 @@ npm.cmd run worker -- --provider codex --check
 npm.cmd run worker -- --provider codex
 ```
 
+예전 `start-codex-agent.bat`은 2026-11-17에 지웠다(앱의 실행기 관리 또는 위 명령이 대신한다). 프로그램 폴더에서는 `npm.cmd run agent:codex`(= `scripts/codex-agent.mjs`)도 같은 Codex 실행기를 띄운다 — AI 협업(멀티에이전트) 큐까지 처리하려면 `HWPX_COWORK_ORCHESTRATION=1`(기본 꺼짐). 실행기는 새 MCP 연결(v2)이 기본이고, `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다. 아직 새 연결을 모르는 옛 중앙 서버에 붙으면 시작 점검에서 멈추고 `--mcp 1`을 알린다.
+
 - `--check`는 로그인·서버 계정·필수 도구·재시도 보호만 점검한다. 모델을 부르거나 문서를 읽거나 요청을 선점하지 않는다. `ready: true`, `connected: true`, `toolsReady: true`를 확인한다.
 - 켜 두면 문서 화면의 보낼 곳에 **Codex로 보내기**가 보인다. 시작할 때 기존 대기 요청과 선점이 만료된 작업도 확인하고, 새 요청은 알림으로 바로 받는다(연결이 빠지면 30초 점검·재연결로 복구). 한 번에 한 요청씩, 본인 요청만 맡는다.
 - 끌 때는 Ctrl+C. 그 뒤 요청은 대기열에서 기다린다. PC를 다시 켜면 실행기도 다시 켠다(시작 프로그램에 자동 등록하지 않는다). 한 사람은 실행기 하나만 켠다.
 
 ## 어떻게 처리하나
 
-실행기는 새 요청 감지·선점·임대 갱신을 맡고, Codex가 MCP 도구로 직접 일한다: `get_request`·`list_memos`·`read_document`·`get_formatting`·`get_writing_guide`로 읽고, 글은 제안, 표는 `propose_table_edit`, 서식은 `propose_format`, 그림 교체는 `list_figures → export_figure → download_attachment_file → 작업 → upload_result_file → propose_figure`로 등록한 뒤 `complete_request`로 끝낸다. 본문 반영은 사람이 한다.
+실행기는 새 요청 감지·선점·임대 갱신을 맡고, Codex가 MCP 도구로 직접 일한다. 새 연결(기본)이면 `task`로 받은 요청 내용(지시·대상·문서 얼개·주변 글)으로 충분할 때 바로, 모자라면 `read`로 필요한 범위만 읽고, 글·표·서식·그림 결과를 `edit`의 ops로 한 번에 내며 `done`(공유 요약)으로 끝낸다(쓰기 없이 끝내면 `finish`). 예전 연결(`--mcp 1`)이면 `get_request`·`list_memos`·`read_document`·`get_formatting`·`get_writing_guide`로 읽고, 글은 제안, 표는 `propose_table_edit`, 서식은 `propose_format`, 그림 교체는 `list_figures → export_figure → download_attachment_file → 작업 → upload_result_file → propose_figure`로 등록한 뒤 `complete_request`로 끝낸다. 본문 반영은 사람이 한다.
 
 - 요청마다 현재 사용자 토큰과 선점 세션으로 MCP를 연결하고, 다른 문서·요청·시도의 변경과 본문 반영 도구는 막는다. 토큰은 환경 변수로만 MCP에 넘기며 명령줄·프롬프트·설정 파일에 쓰지 않는다. 사용자 `config.toml`의 다른 MCP 연결 대신 이 요청의 연결을 명시해 계정·선점이 섞이지 않게 한다.
 - 그림·파일 작업은 임시 `work/in`·`work/out`에서 하고 끝나면 정리한다. ChatGPT 웹 대화창을 조작하거나 기존 대화의 문맥·메모리를 이어받지 않는다. ChatGPT 로그인 토큰은 HWPX 서버로 보내지 않는다.
@@ -81,11 +78,11 @@ node scripts/local-chatgpt.mjs status --user "내 이름"
 node scripts/local-chatgpt.mjs stop --user "내 이름"
 ```
 
-`start`는 숨은 실행기를 시작하고(이미 있으면 다시 띄우지 않음), `stop`은 그 실행기만 멈춘다. 상태와 진단 로그는 `artifacts/local-chatgpt-worker/`에 남고 토큰은 저장하지 않는다. CLI 경로가 필요하면 `check`·`start`에 `--codex-command`를 더한다.
+`start`는 숨은 실행기를 시작하고(이미 있으면 다시 띄우지 않음), `stop`은 그 실행기만 멈춘다. 상태와 진단 로그는 `artifacts/local-chatgpt-worker/`에 남고 토큰은 저장하지 않는다. CLI 경로가 필요하면 `check`·`start`에 `--codex-command`를 더한다. 이 실행기도 2026-11-17부터 새 MCP 연결(v2)이 기본이며, 예전 연결은 `HWPX_COWORK_MCP=1`을 정한 창에서 `start`한다.
 
 ## 대화로 처리하기(설치 없이)
 
-HWPX를 연결한 Codex·Claude Code 대화창, 또는 ② ChatGPT 웹 대화에서 “대기열을 처리해 줘”라고 하거나 설명서의 처리 프롬프트를 붙여 넣는다. `claim_next_request`가 none을 돌려줄 때까지 오래된 순서로 처리한다. 말할 때만 처리하므로, 바로 처리가 필요하면 실행기나 채널을 켜 둔다.
+HWPX를 연결한 Codex·Claude Code 대화창, 또는 ② ChatGPT 웹 대화에서 “대기열을 처리해 줘”라고 하거나 설명서의 처리 프롬프트를 붙여 넣는다. 인자 없는 `task`(예전 연결 `?v=1`이면 `claim_next_request`)가 none을 돌려줄 때까지 오래된 순서로 처리한다. 말할 때만 처리하므로, 바로 처리가 필요하면 실행기나 채널을 켜 둔다.
 
 ## 연결 상태 읽기
 

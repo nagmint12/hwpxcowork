@@ -156,7 +156,8 @@ test('브리지 로컬 파일 도구: 작업 폴더로 내려받기·작업 폴�
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-files-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-outside-'));
   const open = async (opts) => {
-    const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, log: () => {}, ...opts });
+    // 예전 연결 도구(propose_figure·get_attachment_file 등)를 재는 시험 — 브리지 기본이 새 연결로 바뀐 뒤(2026-11-17)에는 예전 연결을 밝힌다
+    const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, log: () => {}, surface: 'v1', ...opts });
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await bridge.start(serverT);
     const client = new Client({ name: 'claude-code', version: '2.1.999-test' });

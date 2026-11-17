@@ -3,6 +3,7 @@
 // stream-json 으로 init·assistant(tool_use)·result 줄을 낸다. 로그인 상태는 auth 파일 글('ready'·'logout')로 바꾼다.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export async function fakeClaude(base, { mode = 'inspect', auth = '-', receipt = path.join(base, 'claude-receipt.json'), model = 'claude-opus-5-5' } = {}) {
   const script = path.join(base, 'fake-claude.mjs');
@@ -56,6 +57,43 @@ if (mode === 'workspace') {
  } finally {await c.close();await transport.close()}
  say({type:'result',subtype:'success',is_error:false,result:'stage completed',usage:{input_tokens:200,output_tokens:20,cache_read_input_tokens:40}});process.exit(0);
 }
+if (mode === 'v2') {
+  // 새 MCP 연결(server/mcp2.js — 작업 도구 넷): 첫 입력의 요청 내용(brief)만으로 일하고 edit 한 번(done)으로 끝낸다.
+  // 진짜 claude 의 stream-json 처럼 응답마다 assistant(tool_use·usage)와 user(tool_result) 줄을 낸다(scripts/agent-run-once.mjs 집계 예행연습용)
+  const c = new Client({ name: 'claude-code-test', version: 'test' });
+  const transport = new StdioClientTransport({ command: server.command, args: server.args, env: process.env, stderr: 'pipe' });
+  transport.stderr?.on('data', () => {});
+  try {
+    await c.connect(transport);
+    state.tools = (await c.listTools()).tools.map((t) => t.name).sort();
+    init('connected', state.tools);
+    const brief = state.requestContext;
+    assert.ok(brief && brief.request_id, '첫 입력에 요청 내용(brief)이 있어야 한다');
+    let n = 0;
+    const call = async (name, a = {}, { expectError = false } = {}) => {
+      const id = 'toolu_' + (++n);
+      say({ type: 'assistant', message: { id: 'msg_' + n, content: [{ type: 'tool_use', id, name: 'mcp__hwpx__' + name, input: a }], usage: { input_tokens: 10, cache_read_input_tokens: 1000 * n, cache_creation_input_tokens: 200, output_tokens: 20 } } });
+      const r = await c.callTool({ name, arguments: a });
+      const text = (r.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\\n');
+      say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }], is_error: !!r.isError }] } });
+      if (expectError) { assert.ok(r.isError, name + ' 은 거절돼야 한다'); return null; }
+      assert.ok(!r.isError, text);
+      return text;
+    };
+    await call('read_document', {}, { expectError: true });   // 예전 도구는 새 연결에 없다
+    assert.ok((await c.callTool({ name: 'edit', arguments: { doc_id: 'another-document', ops: [{ op: 'memo', at: 's0/p0', text: 'x' }] } })).isError, '다른 문서는 거절');
+    state.map = await call('read', { view: 'map' });
+    const ops = String(brief.map || '').includes('⚠') ? [{ op: 'objects_to_body' }]
+      : brief.target?.ref ? [{ op: 'replace', at: brief.target.ref, whole: true, with: '자동 검토한 문장' }]
+      : [{ op: 'memo', at: 's0/p0', text: 'Claude 새 연결 검토 의견입니다.' }];
+    state.receipt = JSON.parse(await call('edit', { ops, done: 'Claude 새 연결로 처리했습니다.' }));
+    say({ type: 'assistant', message: { id: 'msg_end', content: [{ type: 'text', text: '처리했습니다.' }], usage: { input_tokens: 5, cache_read_input_tokens: 4000, cache_creation_input_tokens: 0, output_tokens: 8 } } });
+    state.toolCount = n; fs.writeFileSync(receipt, JSON.stringify(state));
+  } finally { await c.close(); }
+  say({ type: 'result', subtype: 'success', is_error: false, result: '처리했습니다.', num_turns: 5, duration_ms: 4321, duration_api_ms: 3210, total_cost_usd: 0.0123,
+    usage: { input_tokens: 35, cache_read_input_tokens: 10000, cache_creation_input_tokens: 600, output_tokens: 68 } });
+  process.exit(0);
+}
 if (mode === 'mcp') {
   const c = new Client({ name: 'claude-code-test', version: 'test' });
   // 진짜 claude 처럼 설정의 env 없이 자기 환경 변수를 그대로 물려준다(토큰·작업은 환경 변수로만 전달된다)
@@ -94,4 +132,22 @@ say({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text:
 say({ type: 'result', subtype: 'success', is_error: false, result: '확인했습니다.', usage: { input_tokens: 200, output_tokens: 20, cache_read_input_tokens: 40 } });
 `, 'utf8');
   return { file: process.execPath, args: [script, mode, receipt, auth] };
+}
+
+/**
+ * 같은 가짜 CLI 를 npm 설치 꼴(<dir>/claude.cmd + node_modules/@anthropic-ai/claude-code)로 둔다 → 그 claude.cmd 경로.
+ * 실행 파일 경로만 받는 곳(scripts/ai-worker.mjs --cli-command · scripts/agent-run-once.mjs --cli-command)에서 모델 없이 예행연습할 때 쓴다.
+ * server/claude-cli-ai.js resolveClaudeCommand 는 claude.cmd 를 shell 로 띄우지 않고 같은 설치의 cli.mjs 를 node 로 띄운다.
+ */
+export async function fakeClaudeInstall(dir, options = {}) {
+  await fs.mkdir(dir, { recursive: true });
+  const launch = await fakeClaude(dir, options);
+  const [script, ...fixed] = launch.args;
+  const pkg = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+  await fs.mkdir(pkg, { recursive: true });
+  await fs.writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.999', bin: { claude: 'cli.mjs' } }));
+  await fs.writeFile(path.join(pkg, 'cli.mjs'), `process.argv.splice(2, 0, ...${JSON.stringify(fixed)});\nawait import(${JSON.stringify(pathToFileURL(script).href)});\n`, 'utf8');
+  const cmd = path.join(dir, 'claude.cmd');
+  await fs.writeFile(cmd, '@echo off\r\nrem 시험용 가짜 claude — server/claude-cli-ai.js 는 이 파일을 실행하지 않고 같은 설치의 cli.mjs 를 띄운다\r\nexit /b 9\r\n', 'utf8');
+  return cmd;
 }

@@ -72,16 +72,19 @@ test('AI 연결은 내 PC의 Codex·Claude Code 먼저 — 고른 연결의 안�
   const vscode = guide.find(step => step.id === 'vscode').blocks;
   assert.equal(vscode[0].value, '[mcp_servers.hwpx]\nurl = "https://document.example/mcp?agent=Codex"\nbearer_token_env_var = "HWPX_COWORK_TOKEN"');
   assert.deepEqual(JSON.parse(vscode[1].value).mcpServers.hwpx, { type: 'http', url: 'https://document.example/mcp?agent=Claude%20Code', headers: { Authorization: 'Bearer ${HWPX_COWORK_TOKEN}' } });
-  assert.match(guide.find(step => step.id === 'codex').blocks.at(-1).value, /start-codex-agent\.bat --url 'https:\/\/document\.example\/mcp'/);
+  // 2026-11-17: 실행기 bat(start-codex-agent·start-claude-worker)을 지웠다(사용자 결정) — Windows 앱 [AI → 실행기 관리…] 또는 명령줄 npm run worker
+  assert.equal(guide.find(step => step.id === 'codex').blocks.at(-1).value, "npm.cmd run worker -- --provider codex --url 'https://document.example/mcp'");
+  assert.match(guide.find(step => step.id === 'codex').text, /\[AI → 실행기 관리…\]/);
   assert.match(guide.find(step => step.id === 'claude').text, /start-agent\.bat/);
-  assert.match(guide.find(step => step.id === 'claude').blocks.at(-1).value, /npm\.cmd run worker -- --provider claude-code --check\nnpm\.cmd run worker -- --provider claude-code$/);
-  assert.match(guide.find(step => step.id === 'claude').blocks[1].value, /start-claude-worker\.bat --url 'https:\/\/document\.example\/mcp'/);
+  assert.match(guide.find(step => step.id === 'claude').text, /\[AI → 실행기 관리…\]/);
+  assert.equal(guide.find(step => step.id === 'claude').blocks.at(-1).value, "npm.cmd run worker -- --provider claude-code --url 'https://document.example/mcp'");
+  assert.ok(!blocks.some(block => /start-(codex-agent|claude-worker)/.test(block.value)), '지운 실행기 bat 을 안내하지 않는다');
   assert.match(guide.find(step => step.id === 'claude').text, /MCP 연결은 실행기가 준비/);
   assert.match(guide.find(step => step.id === 'api').text, /사용료가 따로/);
   assert.ok(!blocks.some(block => /Bearer (?!\$\{HWPX_COWORK_TOKEN\})|sk-|--trust/.test(block.value)), '복사 상자에 실제 토큰·키나 확인 생략 옵션을 넣지 않는다');
 });
 
-test('복사 실습은 선택을 도와도 직접 만든 새 복사 데이터를 확인한다', async () => {
+test('복사 실습은 직접 선택하고 새로 복사한 데이터를 확인한다', async () => {
   const env = environment();
   const commands = [];
   env.fdoc = () => ({ defaultView: { rhwpStudio: { automation: { execute: command => commands.push(command) } } } });
@@ -89,15 +92,16 @@ test('복사 실습은 선택을 도와도 직접 만든 새 복사 데이터를
   const select = steps.find(s => s.title === '복사할 내용을 직접 선택하기');
   const copy = steps.find(s => s.title === '선택한 내용을 실제로 복사하기');
   assert.equal(copy.quick, undefined);
-  await select.quick(); await copy.action.run();
-  assert.deepEqual(commands, ['edit:select-all', 'edit:select-all']);
+  assert.equal(select.quick, undefined); await copy.action.run();
+  assert.deepEqual(commands, ['edit:select-all']);
   env.s.selection = { collapsed: true, text: '영역 시작 ... 영역 끝' }; assert.equal(select.until(), false);
   env.s.selection = { collapsed: false, text: '일부 글만' }; assert.equal(select.until(), false);
   env.s.selection.text = '영역 시작 ... 영역 끝'; assert.equal(select.until(), true);
-  copy.enter();
+  copy.enter?.();
   Object.assign(env.clipboard, { seq: 1, type: 'copy', text: '영역 시작 ... 영역 끝', tables: 0, images: 1 }); assert.equal(copy.until(), false);
   env.clipboard.tables = 1; assert.equal(copy.until(), true);
-  copy.enter(); assert.equal(copy.until(), false, '이전 복사 이벤트로 새 연습을 통과시키지 않는다');
+  const reopened = buildTutorialSteps('clipboard', env).find(s => s.title === '선택한 내용을 실제로 복사하기');
+  assert.equal(reopened.until(), false, '이전 실행의 복사 이벤트로 새 연습을 통과시키지 않는다');
 });
 
 test('휴대폰 복사 실습은 도구 막대 안내 후 직접 실습과 붙여넣기 그림을 제공한다', () => {
@@ -110,32 +114,34 @@ test('휴대폰 복사 실습은 도구 막대 안내 후 직접 실습과 붙�
   assert.ok(!buildTutorialSteps('clipboard', environment()).some(s => s.title === '편집 도구 막대 켜기'), 'PC 는 그대로');
 });
 
-test('AI 검토는 실제 제안 단추와 같은 일을 수행하는 빠른 완료를 제공한다', async () => {
+test('AI 검토는 직접 반영·거절·되돌린 결과를 따라 진행한다', async () => {
   const env = environment(); const calls = [];
   env.s.requests = [{ rid: 1, example: true, status: 'done' }];
   env.s.proposals = [{ pid: 11, rid: 1, status: 'pending' }, { pid: 12, rid: 1, status: 'pending' }];
   env.d.applyProposal = async p => { p.status = 'applied'; calls.push(['apply', p.pid]); };
   env.d.rejectProposal = async p => { p.status = 'rejected'; calls.push(['reject', p.pid]); };
-  env.d.undoProposal = async p => { p.status = 'pending'; calls.push(['undo', p.pid]); };
+  env.d.undoProposal = async p => { p.status = 'undone'; calls.push(['undo', p.pid]); };
   env.d.createRequest = () => { throw new Error('예시 검토에서는 외부 AI 작업을 보내면 안 됨'); };
   const steps = buildTutorialSteps('ai-requests', env);
   const apply = steps.find(s => s.title === '제안 하나 반영하기'); const reject = steps.find(s => s.title === '마음에 들지 않는 제안 거절');
   assert.equal(apply.action, undefined); assert.equal(reject.action, undefined);
   assert.equal(typeof apply.click, 'function'); assert.equal(typeof reject.click, 'function');
-  assert.equal(apply.until(), false); await apply.quick(); assert.equal(apply.until(), true);
-  assert.equal(reject.until(), false); await reject.quick(); assert.equal(reject.until(), true);
-  const undo = steps.find(s => s.action?.label === '첫 제안 반영 되돌리기'); await undo.action.run(); assert.equal(undo.until(), true);
+  assert.equal(apply.until(), false); await env.d.applyProposal(env.s.proposals[0]); assert.equal(apply.until(), true);
+  assert.equal(reject.until(), false); await env.d.rejectProposal(env.s.proposals[1]); assert.equal(reject.until(), true);
+  const undo = steps.find(s => s.title === '반영한 제안 되돌리기'); assert.equal(undo.action, undefined); await env.d.undoProposal(env.s.proposals[0]); assert.equal(undo.until(), true);
   assert.deepEqual(calls, [['apply', 11], ['reject', 12], ['undo', 11]]);
 });
 
-test('실제 AI 요청은 예시 제목 대신 문단 본문 전체를 선택한다', async () => {
+test('실제 AI 요청은 예시 본문 일부를 직접 골라도 진행하며 다른 문단은 인정하지 않는다', async () => {
   const env = environment(); const text = '2025년 10월 참여 대상 500명 중 420명이 응답했다. 응답률은 84%다.';
   env.s.paragraphs = [{ ref: 's1/p2/n1', text: '4장의 ‘예시 문단 A’. [하나씩 보기]로 원문·수정문을 비교하세요.' }, { ref: 's1/p10', text: `예시 문단 A — ${text}` }];
   let chosen; let opened;
   env.selectFor = async phrase => { chosen = phrase; return { ref: 's1/p10', text: phrase, start: 11, end: 11 + phrase.length }; };
   env.d.openComposer = (target, kind, options) => { opened = { target, kind, options }; };
   const step = buildTutorialSteps('ai-requests', env).find(s => s.title === '글을 골라 요청 준비하기');
-  await step.action.run(); assert.equal(chosen, text); assert.equal(opened.target.text, text); assert.ok(opened.options.instruction.includes('문단 전체'));
+  assert.equal(step.action, undefined); assert.equal(chosen, undefined); assert.equal(opened, undefined);
+  env.s.composer = { kind: 'instruct', target: { ref: 's1/p2/n1', text } }; assert.equal(step.until(), false);
+  env.s.composer.target = { ref: 's1/p10', text: text.slice(0, 10) }; assert.equal(step.until(), true);
 });
 
 test('모양 열기를 건너뛴 확인 단계도 예시를 선택하며, 이동 후 지연된 창은 열지 않는다', async () => {
@@ -169,7 +175,9 @@ test('사용자 연결 HWPX는 Codex·Claude Code 먼저, ChatGPT 웹(고급)·A
   assert.equal(bytes.readUInt16LE(8),0,'mimetype는 무압축');
   const doc=await HwpxDoc.load(bytes);
   const text=doc.paragraphs({nested:true}).map(p=>p.text).join('\n');
-  for(const expected of ['사용자 가이드','Codex','Claude Code','config.toml','.mcp.json','bearer_token_env_var','start-codex-agent.bat','start-claude-worker.bat','start-agent.bat','claude auth login','npm.cmd run worker -- --provider claude-code','ChatGPT','Create as a plugin','API 키 생성','내 AI 키','제공업체마다','사용료','2026-11-13']) assert.ok(text.includes(expected),expected);
+  // 2026-11-17: 실행기 bat 대신 Windows 앱 [AI → 실행기 관리…]·npm run worker(web/tutorial-connect.js → scripts/build-tutorial-connection.mjs 로 다시 만듦)
+  for(const expected of ['사용자 가이드','Codex','Claude Code','config.toml','.mcp.json','bearer_token_env_var','실행기 관리','npm.cmd run worker -- --provider codex','start-agent.bat','claude auth login','npm.cmd run worker -- --provider claude-code','ChatGPT','Create as a plugin','API 키 생성','내 AI 키','제공업체마다','사용료','2026-11-13']) assert.ok(text.includes(expected),expected);
+  assert.ok(!/start-(codex-agent|claude-worker)/.test(text), '지운 실행기 bat 을 안내하지 않는다');
   assert.ok(!text.includes('관리자 앱에서 서버'));
   const order = ['1. 내 PC의 구독 AI · 기본 · 추가 비용 없음', '2. ChatGPT 앱 연결 · 선택', '3. 내 AI 키 · 선택 · 사용료 별도'].map(head => doc.paragraphs().findIndex(p => p.text === head));
   assert.ok(order.every(i => i > 0) && order[0] < order[1] && order[1] < order[2], `장 차례: ${order}`);

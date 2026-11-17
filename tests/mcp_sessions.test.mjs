@@ -178,7 +178,8 @@ test('브리지(Claude Code 채널): 서버가 MCP 세션을 잊어도(30분 유
   const srv = await startServer({ ai: 'off' });
   let sid = null;
   const fetchImpl = async (url, init) => { const res = await fetch(url, init); sid = res.headers.get('mcp-session-id') || sid; return res; };
-  const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, channel: false, fetchImpl, log: () => {} });
+  // 예전 연결 도구(start_request·get_request·complete_request)로 재는 시험 — 브리지 기본이 새 연결(2026-11-17)이라 예전 연결을 밝힌다
+  const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, channel: false, surface: 'v1', fetchImpl, log: () => {} });
   const client = new Client({ name: 'claude-code', version: 'expiry-test' });
   try {
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -213,7 +214,8 @@ test('브리지: 새 세션으로 다시 붙은 뒤(서버 재시작) 도구 목
     const headers = new Headers(res.headers); headers.delete('content-length');
     return new Response(body, { status: res.status, headers });
   };
-  const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, channel: false, fetchImpl, log: () => {} });
+  // 예전 연결 도구(start_request·get_request·complete_request)로 재는 시험 — 브리지 기본이 새 연결(2026-11-17)이라 예전 연결을 밝힌다
+  const bridge = await createBridge({ url: `${srv.base}/mcp`, token: srv.tokens.a, channel: false, surface: 'v1', fetchImpl, log: () => {} });
   const client = new Client({ name: 'claude-code', version: 'list-changed-test' });
   let notices = 0;
   const until = async (fn, what) => { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > 5000) throw new Error(`${what} — 5초 안에 안 됨`); await new Promise((r) => setTimeout(r, 50)); } };

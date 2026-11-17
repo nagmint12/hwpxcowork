@@ -9,11 +9,17 @@ import { DesktopHost, desktopEnvironment } from '../deploy/desktop/host.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const payload = process.env.HWPX_DESKTOP_TEST_PAYLOAD || root;
 const node = process.env.HWPX_DESKTOP_TEST_NODE || process.execPath;
+// 2026-11-17: 한 AI 만 고르던 '내 AI 연결'(prepareAi·disconnectAi·desktop.json)은 AI 실행기 목록(host.runners — deploy/desktop/runners.mjs)이 대신한다.
 test('unsupported Mac AI mode rejects before any CLI or worker starts', async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hwpx-desktop-ai-gate-'));
   const host=new DesktopHost({payload,node,userdata:dir,spawnImpl:()=>{throw Error('CLI must not start');}});
   host.state.aiSupported=false;host.state.aiSupportMessage='macOS 13 required';
-  try{await assert.rejects(host.prepareAi('codex'),/macOS 13 required/);assert.equal(host.operations.size,0);assert.equal(host.worker,null);}
+  try{
+    const runner=host.runners.addRunner({ai:'codex',server:'local'});
+    await assert.rejects(host.runners.start(runner.id),/macOS 13 required/);
+    await assert.rejects(host.prepareCli('codex'),/macOS 13 required/);
+    assert.equal(host.operations.size,0);assert.equal(host.runners.running(),0);
+  }
   finally{assert.equal(path.dirname(dir),os.tmpdir());fs.rmSync(dir,{recursive:true,force:true});}
 });
 function temporary() { return fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-desktop-test-')); }
@@ -29,16 +35,18 @@ test('데스크톱 환경은 운영 설정·API 키를 물려받지 않고 전�
 
 test('AI 취소 중 인증 점검이 완료되어도 실행기·로그인을 새로 시작하지 않는다', async () => {
   const dir = temporary(); const host = new DesktopHost({ payload, node, userdata: dir });
+  host.state.aiSupported = true; host.state.phase = 'ready'; host.port = 47123; host.token = 'local-admin-token-for-test';
   let finishAuth; let launched = false;
   host.auth = () => new Promise(resolve => { finishAuth = resolve; });
   host.launch = () => { launched = true; throw new Error('취소 뒤 실행되면 안 됩니다'); };
   try {
-    const connecting = host.prepareAi('codex');
+    const runner = host.runners.addRunner({ ai: 'codex', server: 'local' });
+    const connecting = host.runners.start(runner.id);
     await new Promise(resolve => setImmediate(resolve));
-    await host.disconnectAi(); finishAuth({ installed: false, ready: false });
-    await assert.rejects(connecting, /취소/);
-    assert.equal(launched, false); assert.equal(host.state.aiPhase, 'off');
-    assert.equal(host.preferences().ai, 'none');
+    await host.runners.stop(runner.id); finishAuth({ installed: false, ready: false });
+    assert.equal((await connecting).state, 'off', '[끄기]로 취소');
+    assert.equal(launched, false, '설치·로그인·실행기를 띄우지 않는다');
+    assert.equal(host.runners.running(), 0);
   } finally { cleanup(dir); }
 });
 
@@ -69,13 +77,13 @@ test('앱 시작→개인 서버·편집기·PC 폴더→종료→재실행 시 
     const cfg = JSON.parse(fs.readFileSync(path.join(userdata, 'config.json')));
     assert.equal(cfg.host, '127.0.0.1'); assert.equal(cfg.users.length, 1); assert.ok(cfg.users[0].token.length >= 24);
     assert.equal(cfg.ai.enabled, false); assert.equal(cfg.tutorial.enabled, false);
-    assert.equal(host.preferences().ai, 'none');
+    assert.deepEqual(host.runners.snapshot().runners, [], '예전 AI 설정이 없으면 실행기도 없다');
     const web = await fetch(url.origin + '/'); assert.equal(web.status, 200); assert.match(await web.text(), /<html/);
     const studio = await fetch(url.origin + '/studio/'); assert.equal(studio.status, 200);
     await host.linkFolder(docs);
     const library = await host.api('/api/library');
     assert.equal(library.local.canLink, true); assert.ok(library.docs.some(d => d.fileName === '보고서.hwpx'));
-    assert.equal(host.worker, null, '실행만으로 AI 요청을 시작하지 않는다');
+    assert.equal(host.runners.running(), 0, '실행만으로 AI 실행기를 켜지 않는다');
     await host.stop();
     await assert.rejects(fetch(url.origin + '/api/config', { signal: AbortSignal.timeout(2000) }));
     assert.deepEqual(fs.readFileSync(path.join(docs, '보고서.hwpx')), before);

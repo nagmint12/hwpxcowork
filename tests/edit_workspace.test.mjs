@@ -347,10 +347,18 @@ test('실험이 꺼져 있으면(기본) 그 방식을 받지 않는다: 선택 
   const closed = await api(`${D}/requests/${left.rid}`);
   assert.deepEqual([closed.status, closed.log.at(-1).action, closed.log.at(-1).detail], ['failed', 'failed', '실험 방식 끝냄']);
   assert.match(closed.error, /^내용·형식 나눠 처리\(실험\)는 더 쓰지 않아/);
-  // 사본 도구는 받지 않는다
+  // 사본 도구는 받지 않는다. 보통 요청에는 '이 도구만 꺼져 있다 — 보통 도구로 계속'(2026-11-17: 일반 요청을 맡은 Claude 가 첫 호출로 get_edit_workspace 를
+  // 불렀다가 '이 요청은 그만두세요'를 받았다 — 요청을 버릴 까닭이 없다). 오류 코드는 그대로
   for (const [name, args] of [['get_edit_workspace', {}], ['edit_workspace', { stage: 'content', revision: 0, operations: [] }]]) {
-    assert.match((await tool(name, { doc_id: doc.id, request_id: plain.rid, expected_attempt: 1, ...args })).error, /EDIT_WORKFLOW_OFF/, name);
+    const err = (await tool(name, { doc_id: doc.id, request_id: plain.rid, expected_attempt: 1, ...args })).error;
+    assert.match(err, /EDIT_WORKFLOW_OFF/, name);
+    assert.doesNotMatch(err, /그만두세요/, name);
+    assert.match(err, /꺼져 있습니다.*계속 처리하세요/, name);
   }
+  // 실험 방식으로 맡긴 요청(실패로 닫힌 것)은 예전 뜻 그대로. 끝난 요청이라도 사본을 새로 만들지 않는다(예전에는 처리 중이 아닌 요청이면 실험이 꺼져도 사본을 만들어 읽어 줬다)
+  const leftErr = (await tool('get_edit_workspace', { doc_id: doc.id, request_id: left.rid, expected_attempt: 1 })).error;
+  assert.match(leftErr, /EDIT_WORKFLOW_OFF/);
+  assert.match(leftErr, /이 요청은 그만두세요/);
   // 사람이 다시 요청하면 보통 방식으로 돈다
   await api(`${D}/requests/${left.rid}/retry`, { method: 'POST', body: {} });
   const again = await api(`${D}/requests/${left.rid}`);

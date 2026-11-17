@@ -87,9 +87,11 @@ export function orchestrationAgentHelp(agent) {
   const id = /^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/.test(agent?.id || '') ? agent.id : '<실행기 ID>';
   const model = /^[A-Za-z0-9][A-Za-z0-9_.:/-]*$/.test(agent?.model || '') ? agent.model : '<모델 ID>';
   const prefix = `npm run orchestrator -- --agent-id ${id}`;
-  if (agent?.kind === 'codex') return { command: `${prefix} --provider codex${agent.model ? ` --model ${model}` : ''}`, note: '이 PC에서는 start-codex-agent.bat 하나로 일반 요청과 Codex 협업을 함께 처리합니다. 아래 명령은 개별 실행용입니다. 본인 HWPX_COWORK_TOKEN과 codex login이 필요합니다.' };
+  // 2026-11-17: start-codex-agent.bat 을 지웠고, 일반 요청 실행기(Windows 앱 [AI → 실행기 관리…]·npm run worker)는 협업 큐를 처리하지 않는다.
+  // Codex 실행기(scripts/codex-agent.mjs = npm run agent:codex)도 협업 큐는 기본 끔 — HWPX_COWORK_ORCHESTRATION=1 일 때만(사용자 결정)
+  if (agent?.kind === 'codex') return { command: `${prefix} --provider codex${agent.model ? ` --model ${model}` : ''}`, note: '아래 명령으로 협업 작업을 처리합니다. 일반 요청과 함께 처리하려면 HWPX_COWORK_ORCHESTRATION=1로 npm run agent:codex를 실행합니다(기본 꺼짐). 본인 HWPX_COWORK_TOKEN과 codex login이 필요합니다.' };
   if (agent?.kind === 'api') return { command: `${prefix} --provider openai --gateway baze --model ${model}`, note: 'API는 BAZE_API_KEY와 본인 HWPX_COWORK_TOKEN을 실행기 환경에 설정하세요. 다른 API는 제공자·게이트웨이 옵션을 맞추세요.' };
-  return { command: `claim_orchestration_task({"agent_id":"${id}"})`, note: '연결한 에이전트가 이 협업 도구를 주기적으로 호출하고, heartbeat로 임대를 연장한 뒤 결과를 제출하도록 지시하세요. 일반 AI 요청의 claim_next_request와 별도 대기열입니다.' };
+  return { command: `claim_orchestration_task({"agent_id":"${id}"})`, note: '연결한 에이전트가 이 협업 도구를 주기적으로 호출하고, heartbeat로 임대를 연장한 뒤 결과를 제출하도록 지시하세요. 일반 AI 요청(task, 예전 연결은 claim_next_request)과 별도 대기열입니다.' };
 }
 
 export const OrchestrationPanel = {
@@ -98,7 +100,7 @@ export const OrchestrationPanel = {
     <summary>AI 협업 <span class="muted">· {{ summary }}</span></summary>
     <p>지휘자가 작업을 나누고, 연결한 AI가 초안 작성과 검토를 분담합니다. 결과를 통합한 뒤 기존 문서의 제안으로 남깁니다.</p>
     <p class="muted">사용자 PC의 실행기나 Claude Code 채널·MCP 실행기를 켜두어야 자동 진행됩니다. MCP 연결만으로 다른 AI가 실행되지는 않습니다.</p>
-    <p class="muted">일반 AI 큐와 협업 큐는 다릅니다. start-codex-agent.bat 하나로 일반 요청과 Codex 협업을 함께 처리합니다. Claude Code 등 분담 작업자도 연결해 두세요.</p>
+    <p class="muted">일반 AI 큐와 협업 큐는 다릅니다. 일반 요청 실행기(Windows 앱 [AI → 실행기 관리…]·npm run worker)는 협업 작업을 처리하지 않습니다. 아래 실행 방법으로 협업 실행기를 켜고, Claude Code 등 분담 작업자도 연결해 두세요.</p>
     <section aria-label="협업 실행기 연결 상태" aria-live="polite" data-testid="orchestration-runtime">
       <p class="muted" v-if="runtimeUnsupported">이 서버는 협업 실행기 상태 조회를 지원하지 않습니다. 서버를 업데이트하거나 각 실행기 터미널에서 작업 선점 여부를 확인하세요. 협업 작업은 계속 사용할 수 있습니다.</p>
       <p class="muted" v-else-if="runtimeError">{{ runtimeError }} 실행기 연결 상태를 확인할 수 없습니다.</p>

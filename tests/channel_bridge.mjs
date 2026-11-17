@@ -101,7 +101,7 @@ async function startStub({ token = TOKEN, user = USER, instructions = STUB_INSTR
     if (st.mcpMode === 'down') { req.resume(); return json(res, 503, { error: 'down' }); }
     if (st.mcpMode === 'hang') { req.resume(); st.hung.push(res); return undefined; }
     if (!authed(req)) { req.resume(); return json(res, 401, { jsonrpc: '2.0', error: { code: -32001, message: 'unauthorized' }, id: null }); }
-    const info = { session: req.headers['x-hwpx-agent-session'] || null, auth: req.headers.authorization || null, agent: u.searchParams.get('agent') };
+    const info = { session: req.headers['x-hwpx-agent-session'] || null, auth: req.headers.authorization || null, agent: u.searchParams.get('agent'), mcp: req.headers['x-hwpx-mcp'] || null, lean: req.headers['x-hwpx-lean'] || null };
     st.mcpReqs.push(info);
     const server = new McpServer({ name: 'stub-hwpx', version: '0.0.1' }, { instructions: st.instructions });
     server.registerTool('list_documents', { description: '문서 목록(가짜)', inputSchema: {} }, async () => ({ content: [{ type: 'text', text: '[]' }] }));
@@ -344,11 +344,12 @@ try {
     ok(!('claude/channel/permission' in (caps?.experimental || {})), "능력: 'claude/channel/permission' 은 선언하지 않음");
     ok(caps?.tools?.listChanged === true, '능력: tools.listChanged');
     const ins = A.client.getInstructions() || '';
-    ok(ins.length <= 2048 && ins.startsWith(B.CHANNEL_INSTRUCTIONS) && ins.includes('STUB-안내'), `instructions ${ins.length}자: 채널 안내(맨 앞) + 서버 안내(원격에서 받음)`);
+    ok(ins.length <= 2048 && ins.startsWith(B.CHANNEL_INSTRUCTIONS_V2) && ins.includes('STUB-안내'), `instructions ${ins.length}자: 채널 안내(맨 앞 — 기본 새 연결) + 서버 안내(원격에서 받음)`);
     const tools = await A.client.listTools();
     ok(tools.tools.map((t) => t.name).sort().join(',') === 'list_documents,whoami', 'tools/list 를 원격 MCP 로 중계');
     const who = JSON.parse((await A.client.callTool({ name: 'whoami', arguments: { echo: '안녕' } })).content[0].text);
     ok(who.session === sessionA && who.auth === `Bearer ${TOKEN}` && who.agent === 'Claude Code' && who.echo === '안녕', 'tools/call 중계: X-Hwpx-Agent-Session·Authorization 머리글, ?agent=Claude Code(clientInfo claude-code)');
+    ok(A.bridge.surface === 'v2' && who.mcp === '2' && who.lean === null, '기본 연결 = 새 연결: 서버에 X-Hwpx-Mcp: 2 를 밝힌다(2026-11-17 — 밝히지 않으면 새 서버가 옛 브리지로 보고 예전 연결로 연다)');
     ok(stub.st.mcpReqs.length >= 4 && stub.st.mcpReqs.every((r) => r.session === sessionA && r.auth === `Bearer ${TOKEN}`), `원격 MCP 요청 ${stub.st.mcpReqs.length}건(안내 받기 포함) 모두 같은 세션 머리글`);
     let unknownOk = false;
     try { const r = await A.client.callTool({ name: 'no_such_tool', arguments: {} }); unknownOk = r.isError === true; } catch (e) { unknownOk = e.code === -32602; }
@@ -373,9 +374,43 @@ try {
     let err = null; try { await NT.client.listTools(); } catch (e) { err = e; }
     ok(err?.code === -32601, '--no-tools: tools/list → Method not found');
     const ins = NT.client.getInstructions() || '';
-    ok(ins.includes(B.CHANNEL_INSTRUCTIONS) && !ins.includes('STUB-안내') && stub.st.mcpReqs.length === mcpBefore, '--no-tools: 채널 안내만, 원격 MCP 에 요청하지 않음');
+    ok(ins.includes(B.CHANNEL_INSTRUCTIONS_V2) && !ins.includes('STUB-안내') && stub.st.mcpReqs.length === mcpBefore, '--no-tools: 채널 안내만, 원격 MCP 에 요청하지 않음');
     await until(() => NT.bridge.stats().sse.connected, '--no-tools 브리지의 SSE 연결');
     await NT.close();
+  }
+  {
+    // 예전 연결(2026-11-17 부터 밝힐 때만): surface v1(= 명령줄 --v1·--mcp 1) → X-Hwpx-Mcp: 1, 예전 채널 안내·알림 글.
+    // --lean(예전 연결의 얇은 흐름) → X-Hwpx-Mcp: 1 + X-Hwpx-Lean: 1, 얇은 흐름 안내·알림 글
+    const say = async (P, rid) => {
+      const c = await until(() => stub.st.conns.find((x) => x.query.session === P.bridge.session && !x.closed), 'SSE 연결');
+      c.send('ai_request', reqEv('docV1', rid));
+      await until(() => P.ch().length >= 1, '알림');
+      return P.ch()[0].params.content;
+    };
+    const V1 = await inProcess(stub, { surface: 'v1' });
+    const w1 = JSON.parse((await V1.client.callTool({ name: 'whoami', arguments: {} })).content[0].text);
+    ok(V1.bridge.surface === 'v1' && !V1.bridge.lean && (V1.client.getInstructions() || '').startsWith(B.CHANNEL_INSTRUCTIONS) && w1.mcp === '1' && w1.lean === null
+      && (await say(V1, 41)) === '웹 편집기에서 맡긴 AI 작업 #41(AI 검토)이 대기 중입니다. get_request 로 내용을 읽고 start_request 로 맡은 뒤 처리하세요.',
+    '예전 연결(surface v1 = --v1): X-Hwpx-Mcp: 1 · 예전 채널 안내 · 예전 알림 글(get_request → start_request)');
+    await V1.close();
+    const L = await inProcess(stub, { lean: true });
+    const wl = JSON.parse((await L.client.callTool({ name: 'whoami', arguments: {} })).content[0].text);
+    ok(L.bridge.surface === 'v1' && L.bridge.lean && (L.client.getInstructions() || '').startsWith(B.CHANNEL_INSTRUCTIONS_LEAN) && wl.mcp === '1' && wl.lean === '1'
+      && /start_request 로 맡으면 요청 내용이 함께 옵니다/.test(await say(L, 42)),
+    '--lean = 예전 연결의 얇은 흐름: X-Hwpx-Mcp: 1 + X-Hwpx-Lean: 1 · 얇은 흐름 채널 안내·알림 글');
+    await L.close();
+    // 연결 종류 고르기(bridgeSurface): 명시(surface) > 예전 인자 v2 true|false > --lean > 주소 ?v=·?lean= > 기본 새 연결
+    const pick = (o) => { const p = B.bridgeSurface(o); return `${p.surface}${p.lean ? '+lean' : ''}`; };
+    ok(pick({}) === 'v2' && pick({ v2: true }) === 'v2' && pick({ v2: false }) === 'v1' && pick({ lean: true }) === 'v1+lean' && pick({ surface: 'v2', lean: true }) === 'v2'
+      && pick({ surface: 'v1', lean: true }) === 'v1+lean' && pick({ url: 'http://h/mcp?v=1' }) === 'v1' && pick({ url: 'http://h/mcp?v=2' }) === 'v2' && pick({ url: 'http://h/mcp?lean=1' }) === 'v1+lean'
+      && pick({ surface: 'v1', url: 'http://h/mcp?v=2' }) === 'v1' && pick({ surface: 'v2', url: 'http://h/mcp?lean=1' }) === 'v2',
+    'bridgeSurface: 기본 새 연결 · v1 은 밝힐 때(surface·v2:false·--lean·?v=1·?lean=1) · 인자가 주소보다 먼저');
+    let bad = null; try { B.bridgeSurface({ surface: 'v3' }); } catch (e) { bad = e; }
+    ok(/v1 또는 v2/.test(bad?.message || ''), '모르는 연결 종류는 거절');
+    const P = (argv) => B.parseBridgeArgs(argv, {});
+    ok(P([]).surface === null && P(['--v1']).surface === 'v1' && P(['--v2']).surface === 'v2' && P(['--mcp', '1']).surface === 'v1' && P(['--mcp=2']).surface === 'v2'
+      && P(['--v2', '--v1']).surface === 'v1' && P(['--lean']).lean === true && P(['--lean']).surface === null && P(['--mcp', '3']).bad.length === 1 && P(['--channel', '--x']).unknown[0] === '--x',
+    '브리지 명령줄: --v1·--v2·--mcp 1|2(마지막 것), --lean 은 따로, 잘못된 --mcp 는 bad');
   }
 
   {
@@ -400,7 +435,9 @@ try {
     stub2.st.mcpMode = 'down';
     const D = await inProcess(stub2);
     const ins = D.client.getInstructions() || '';
-    ok(ins.includes('브리지에 내장된 안내') && ins.startsWith(B.CHANNEL_INSTRUCTIONS) && ins.length <= 2048, '시작 때 원격이 꺼져 있으면 채널 안내 + 내장 안내');
+    ok(ins === `${B.CHANNEL_INSTRUCTIONS_V2}
+
+${B.FALLBACK_INSTRUCTIONS_V2}` && ins.includes('브리지에 내장된 안내') && ins.length <= 2048, '시작 때 원격이 꺼져 있으면 채널 안내 + 내장 안내(새 연결용)');
     ok((await D.client.listTools()).tools.length === 0, '원격이 꺼져 있으면 tools/list = 빈 목록');
     const down = await D.client.callTool({ name: 'whoami', arguments: {} });
     ok(down.isError === true && /hwpx 서버 도구를 부르지 못했습니다/.test(down.content?.[0]?.text || ''), '원격이 꺼져 있으면 도구 호출 = 오류 결과(안내 글)');
@@ -460,7 +497,7 @@ try {
     await sleep(QUIET);
     ok(A.ch().length === 1, 'ai_request 하나 → 알림 정확히 1번');
     const n = A.ch()[0];
-    ok(n.params.content === '웹 편집기에서 맡긴 AI 작업 #3(AI 검토)이 대기 중입니다. get_request 로 내용을 읽고 start_request 로 맡은 뒤 처리하세요.', '알림 본문 = 고정 문구(번호·종류만)');
+    ok(n.params.content === '웹 편집기에서 맡긴 AI 작업 #3(AI 검토)이 대기 중입니다. task(doc_id, request_id) 로 맡으면 요청 내용이 함께 옵니다 — 그 내용대로 처리하세요.', '알림 본문 = 고정 문구(번호·종류만 — 기본 새 연결)');
     ok(same(n.params.meta, { event: 'ai_request', doc_id: 'docA1', request_id: '3', kind: 'review', kind_label: 'AI 검토', attempt: '1', event_id: 'docA1_3_1', doc_title: '분석 보고서' }), `meta = ${JSON.stringify(n.params.meta)}`);
     ok(!/SECRET|DOCTEXT/.test(JSON.stringify(n)), '알림에 지시 원문·문서 글이 없음(모르는 필드는 버림)');
     ok(Object.entries(n.params.meta).every(([k, v]) => /^[A-Za-z0-9_]+$/.test(k) && typeof v === 'string'), 'meta 키는 [A-Za-z0-9_], 값은 문자열');
@@ -506,7 +543,7 @@ try {
     await until(() => A.ch().length >= 9, '악성 제목 요청 알림');
     const nh = A.ch()[8]; const t = nh.params.meta.doc_title;
     ok(!/[<>"\r\n]/.test(t) && ![0x202e, 7, 0xff1c].some((c) => t.includes(cp(c))) && [...t].length <= B.TITLE_MAX, `악성 제목 정리: ${JSON.stringify(t)}`);
-    ok(nh.params.content === '웹 편집기에서 맡긴 AI 작업 #7(AI 검토)이 대기 중입니다. get_request 로 내용을 읽고 start_request 로 맡은 뒤 처리하세요.' && nh.params.meta.kind_label === 'AI 검토',
+    ok(nh.params.content === '웹 편집기에서 맡긴 AI 작업 #7(AI 검토)이 대기 중입니다. task(doc_id, request_id) 로 맡으면 요청 내용이 함께 옵니다 — 그 내용대로 처리하세요.' && nh.params.meta.kind_label === 'AI 검토',
       `알림 본문은 고정 낱말만 — 이상한 label 은 종류 기본 이름으로: ${nh.params.content}`);
     const dropped0 = A.bridge.stats().dropped;
     c1.send('ai_request', { docId: '../etc', rid: 1 });
@@ -688,12 +725,12 @@ try {
       const caps = P.client.getServerCapabilities();
       ok(same(caps?.experimental?.['claude/channel'], {}) && !('claude/channel/permission' in caps.experimental) && caps.tools?.listChanged === true, '프로세스: 능력(claude/channel, tools.listChanged, permission 없음)');
       const ins = P.client.getInstructions() || '';
-      ok(ins.length <= 2048 && ins.startsWith(B.CHANNEL_INSTRUCTIONS) && ins.includes('STUB-안내'), `프로세스: instructions ${ins.length}자(채널 안내 + 서버 안내)`);
+      ok(ins.length <= 2048 && ins.startsWith(B.CHANNEL_INSTRUCTIONS_V2) && ins.includes('STUB-안내'), `프로세스: instructions ${ins.length}자(채널 안내 + 서버 안내 — 인자 없으면 새 연결)`);
       const pc = await until(() => stub.st.conns.slice(n0).find((c) => !c.closed), '프로세스 브리지의 SSE 연결', 8000);
       ok(pc.query.agent === 'Claude Code' && pc.query.channel === '1' && pc.headers.authorization === `Bearer ${TOKEN}`, '프로세스: url 은 인자로, 토큰은 env(HWPX_COWORK_TOKEN)로 — SSE 헤더 인증');
       ok((await P.client.listTools()).tools.length === 2, '프로세스: tools/list 중계');
       const who = JSON.parse((await P.client.callTool({ name: 'whoami', arguments: {} })).content[0].text);
-      ok(who.session === pc.query.session && who.agent === 'Claude Code', '프로세스: MCP 머리글 세션 = SSE 세션(선점에 같은 id)');
+      ok(who.session === pc.query.session && who.agent === 'Claude Code' && who.mcp === '2', '프로세스: MCP 머리글 세션 = SSE 세션(선점에 같은 id), 연결 종류 머리글 X-Hwpx-Mcp: 2(기본)');
       await until(() => /알림 연결됨/.test(P.out.stderr), 'hello 처리(stderr 로그)', 5000);
       // (d) 에서 남긴 snapshot(대기 5건) — 새 프로세스에는 처음 보는 요청이라 요약 1번으로 알린다.
       // 기본 startupHoldMs(5초): Claude Code 가 채널 처리기를 달 때까지 모았다가 보낸다
@@ -718,12 +755,12 @@ try {
   }
   {
     const n0 = stub.st.conns.length;
-    const V = await spawnBridge(['--url', stub.mcpUrl, '--token', TOKEN], {});
+    const V = await spawnBridge(['--url', stub.mcpUrl, '--token', TOKEN, '--v1'], {});
     try {
       const caps = V.client.getServerCapabilities();
       ok(!caps.experimental && caps.tools && !(V.client.getInstructions() || '').includes('<channel'), 'v0.2 식(--token, 채널 없음): 도구만, 채널 안내 없음');
       const who = JSON.parse((await V.client.callTool({ name: 'whoami', arguments: { echo: 'v02' } })).content[0].text);
-      ok(who.auth === `Bearer ${TOKEN}` && who.agent === 'Claude Code' && who.echo === 'v02' && typeof who.session === 'string' && who.session.length > 8, 'v0.2 식: 도구 중계(인자 토큰·에이전트 이름·세션 머리글)');
+      ok(who.auth === `Bearer ${TOKEN}` && who.agent === 'Claude Code' && who.echo === 'v02' && typeof who.session === 'string' && who.session.length > 8 && who.mcp === '1', 'v0.2 식: 도구 중계(인자 토큰·에이전트 이름·세션 머리글), --v1 은 X-Hwpx-Mcp: 1');
       await sleep(400);
       ok(stub.st.conns.length === n0, 'v0.2 식: SSE 에 붙지 않음');
       V.out.child.stdin.end();
@@ -735,6 +772,8 @@ try {
     }
     const r = await runNode([BRIDGE_CLI, '--channel', '--url', stub.mcpUrl], envBase, { timeoutMs: 15000 });
     ok(r.code === 2 && r.stdout === '' && /토큰이 필요합니다/.test(r.stderr), '토큰이 없으면 코드 2, stdout 은 비어 있고 stderr 에 안내');
+    const rb = await runNode([BRIDGE_CLI, '--channel', '--mcp', '3', '--url', stub.mcpUrl], { ...envBase, HWPX_COWORK_TOKEN: TOKEN }, { timeoutMs: 15000 });
+    ok(rb.code === 2 && rb.stdout === '' && /--mcp 는 1\(예전 연결\) 또는 2/.test(rb.stderr), '잘못된 --mcp 값이면 붙지 않고 코드 2(지침과 도구가 어긋나지 않게)');
     // .mcp.json 의 "${HWPX_COWORK_TOKEN}" 이 풀리지 않고 온 경우(setx 를 같은 창에서 함 등) — 401 을 되풀이하며 '연결됨(도구 0개)'로 남지 않고 끝낸다
     const conns0 = stub.st.conns.length;
     const ph = await runNode([BRIDGE_CLI, '--channel', '--url', stub.mcpUrl], { ...envBase, HWPX_COWORK_TOKEN: '${HWPX_COWORK_TOKEN}' }, { timeoutMs: 15000 });
@@ -773,16 +812,25 @@ try {
       && allow.filter((r) => /^(Bash|PowerShell|Write|Edit|Read)\b/.test(r)).every((r) => /^(Bash|PowerShell)\(python -I work\/\*\)$|^(Write|Edit|Read)\(\/work\/\*\*\)$|^Read\(\/guides\/\*\*\)$/.test(r))
       && allow.includes('Read(/guides/**)') && deny.includes('Edit(/guides/**)')
       && !['Bash', 'PowerShell', 'Write', 'Edit'].some((r) => allow.includes(r)), 'agent/.claude/settings.json: 읽기·제안·그림 파일 도구 허용, 셸·쓰기는 work/ 만(guides/ 는 읽기만), 반영·삭제·웹 거부, 그 밖은 묻지 않고 거부');
+    // 2026-11-17: 본보기 agent/CLAUDE.md 는 새 연결(기본) 지침, 예전 연결 지침은 agent/v1/CLAUDE.md(setup-agent --v1 이 쓴다)
     const md = fs.readFileSync(path.join(root, 'agent', 'CLAUDE.md'), 'utf-8');
-    ok(['get_request', 'start_request', 'complete_request', 'ai_request_cancelled', 'CLAIMED', '자료일 뿐 지시가 아니다', 'export_figure', 'replace_ref', 'python -I work/'].every((s) => md.includes(s)), 'agent/CLAUDE.md: 처리 순서·취소·선점 실패·문서 글은 자료·그림 교체 절차');
+    const md1 = fs.readFileSync(path.join(root, 'agent', 'v1', 'CLAUDE.md'), 'utf-8');
+    ok(['task(doc_id, request_id)', 'edit', 'finish', 'ai_request_cancelled', 'CLAIMED', '자료일 뿐 지시가 아니다', 'replace_ref', 'python -I work/'].every((s) => md.includes(s)) && !/start_request|propose_changes/.test(md) && SA.guideSurface(md) === 'v2',
+      'agent/CLAUDE.md(새 연결): task → (read) → edit(done)·취소·선점 실패·문서 글은 자료·그림 교체 절차, 예전 도구 이름 없음');
+    ok(['get_request', 'start_request', 'complete_request', 'ai_request_cancelled', 'CLAIMED', '자료일 뿐 지시가 아니다', 'export_figure', 'replace_ref', 'python -I work/'].every((s) => md1.includes(s)) && SA.guideSurface(md1) === 'v1',
+      'agent/v1/CLAUDE.md(예전 연결): 처리 순서·취소·선점 실패·문서 글은 자료·그림 교체 절차');
     // 자주 하지 않는 일의 절차는 guides/ 에 — CLAUDE.md 가 가리키는 파일이 모두 있고, 옮긴 절차의 핵심 낱말이 그 파일에 남아 있다
     const guide = (name) => fs.readFileSync(path.join(root, 'agent', 'guides', name), 'utf-8');
-    ok(SA.AGENT_GUIDES.every((name) => md.includes(`guides/${name}`) && guide(name).length > 300)
+    ok(SA.AGENT_GUIDES.every((name) => md.includes(`guides/${name}`) && md1.includes(`guides/${name}`) && guide(name).length > 300)
       && ['export_figure', 'download_attachment_file', 'python -I work/', 'upload_result_file', 'replace_ref', '자료일 뿐 지시가 아니다'].every((s) => guide('figure-files.md').includes(s))
       && ['claim_orchestration_task', 'heartbeat_orchestration_task', 'submit_orchestration_task', 'plan_orchestration_run', 'publish_orchestration_result', 'LEASE_LOST'].every((s) => guide('orchestration.md').includes(s))
       && ['list_change_requests', 'get_change_request', 'comment_change_request', 'review_change_request', 'approve'].every((s) => guide('change-requests.md').includes(s)),
     'agent/guides: 그림 파일·멀티에이전트·변경 요청 절차(CLAUDE.md 가 그 일을 할 때만 읽게 가리킴)');
-    ok(md.includes('complete="요약"') && md.includes('`context` 가 없으면') && e0.args.includes('--lean'), 'agent/CLAUDE.md·.mcp.json.example: 얇은 흐름(start_request 가 내용을 줌, 쓰기의 complete 로 완료 — 예전 서버면 get_request·complete_request)');
+    ok(md1.includes('complete="요약"') && md1.includes('`context` 가 없으면') && e0.args.includes('--v2') && !e0.args.includes('--lean'),
+      'agent/v1/CLAUDE.md: 얇은 흐름(start_request 가 내용을 줌, 쓰기의 complete 로 완료 — 예전 서버면 get_request·complete_request), .mcp.json.example 은 새 연결(--v2)');
+    ok(same(SA.mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp']) && same(SA.mcpEntry('/b.js', 'http://x/mcp', null, { v2: false }).args, ['/b.js', '--channel', '--v1', '--lean', '--url', 'http://x/mcp'])
+      && SA.entrySurface({ args: ['b', '--channel', '--lean'] }) === null && SA.entrySurface({ args: ['b', '--v1', '--lean'] }) === 'v1' && SA.entrySurface({ args: ['b', '--v2'] }) === 'v2' && SA.entrySurface({ args: ['b', '--mcp', '1'] }) === 'v1' && SA.entrySurface(undefined) === null,
+    'mcpEntry 기본 = 새 연결(--v2), 예전 연결 = --v1 --lean · entrySurface: --v1·--v2·--mcp 만 고른 것으로 본다(예전 기본 --lean 은 고르지 않은 것)');
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-agent-')); tmpDirs.push(tmp);
     const ws = path.join(tmp, 'ws');

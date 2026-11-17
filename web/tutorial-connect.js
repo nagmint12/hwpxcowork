@@ -43,19 +43,20 @@ export function connectGuide(mcpUrl = EXAMPLE_MCP_URL) {
         { label: 'VS Code에 붙여넣을 내용 — Codex 설정 파일 config.toml', value: `[mcp_servers.hwpx]\nurl = "${codexUrl}"\nbearer_token_env_var = "HWPX_COWORK_TOKEN"` },
         { label: 'VS Code에 붙여넣을 내용 — Claude Code 작업 폴더의 .mcp.json', value: claudeJson },
       ] },
+    // 2026-11-17: 실행기 bat(start-codex-agent·start-claude-worker)을 지웠다(사용자 결정) — Windows 앱 [AI → 실행기 관리…] 또는 명령줄 npm run worker
+    //   (scripts/ai-worker.mjs — 기본 새 MCP 연결 --mcp 2). 개인 실행기 ZIP 도 같은 npm run worker 로 켠다
     { id: 'codex', tier: 'agent', title: 'Codex — 요청 바로 처리',
-      text: 'ChatGPT 요금제 계정으로 Codex에 한 번 로그인합니다(VS Code 확장 또는 터미널).\n그다음 프로그램 폴더의 start-codex-agent.bat를 켜 두면, 웹에서 보낸 요청을 바로 가져가 처리합니다. 끝에 --check를 붙이면 연결만 점검합니다. 창을 닫으면 멈춥니다.',
+      text: 'ChatGPT 요금제 계정으로 Codex에 한 번 로그인합니다(VS Code 확장 또는 터미널).\nWindows 앱은 [AI → 실행기 관리…]에서 Codex 실행기를 켭니다. 앱 없이 켤 때는 프로그램 폴더에서 아래 명령을 실행해 창을 켜 두면, 웹에서 보낸 요청을 바로 가져가 처리합니다. 끝에 --check를 붙이면 연결만 점검합니다. 창을 닫으면 멈춥니다.',
       blocks: [
         { label: '터미널에 붙여넣을 내용 — 처음 한 번 로그인', value: 'codex login' },
-        { label: '프로그램 폴더의 PowerShell에 붙여넣을 내용 — 실행기 켜기', value: `.\\start-codex-agent.bat --url ${psQuote(mcpUrl)}` },
+        { label: '프로그램 폴더의 PowerShell에 붙여넣을 내용 — 앱 없이 실행기 켜기', value: `npm.cmd run worker -- --provider codex --url ${psQuote(mcpUrl)}` },
       ] },
-    // 2026-11-13: 채널 없는 Claude Code 실행기(start-claude-worker.bat = ai-worker --provider claude-code) — 요청마다 claude 를 띄워 처리, 채널은 다른 길
+    // 2026-11-13: 채널 없는 Claude Code 실행기(ai-worker --provider claude-code) — 요청마다 claude 를 띄워 처리, 채널은 다른 길
     { id: 'claude', tier: 'agent', title: 'Claude Code — 요청 바로 처리',
-      text: '최신 Claude Code를 설치하고 Claude 구독 계정으로 한 번 로그인합니다.\n프로그램 폴더의 start-claude-worker.bat를 켜 두면, 웹에서 보낸 요청마다 Claude Code가 처리합니다. API 키·채널 설정 없이 구독 사용 한도 안에서 처리하고, MCP 연결은 실행기가 준비합니다. 끝에 --check를 붙이면 연결만 점검합니다. 창을 닫으면 멈춥니다.\n개인 실행기 ZIP을 풀고 npm.cmd install을 한 뒤에는 아래 npm run worker 명령으로 켭니다. 채널(start-agent.bat)로 띄워 두는 방법도 됩니다.',
+      text: '최신 Claude Code를 설치하고 Claude 구독 계정으로 한 번 로그인합니다.\nWindows 앱은 [AI → 실행기 관리…]에서 Claude Code 실행기를 켭니다. 앱 없이 켤 때는 프로그램 폴더에서 아래 명령을 실행해 창을 켜 두면, 웹에서 보낸 요청마다 Claude Code가 처리합니다. API 키·채널 설정 없이 구독 사용 한도 안에서 처리하고, MCP 연결은 실행기가 준비합니다. 끝에 --check를 붙이면 연결만 점검합니다. 창을 닫으면 멈춥니다.\n개인 실행기 ZIP을 풀고 npm.cmd install을 한 뒤에도 같은 명령으로 켭니다. 채널(start-agent.bat)로 띄워 두는 방법도 됩니다.',
       blocks: [
         { label: '터미널에 붙여넣을 내용 — 처음 한 번 로그인', value: 'claude auth login' },
-        { label: '프로그램 폴더의 PowerShell에 붙여넣을 내용 — 실행기 켜기', value: `.\\start-claude-worker.bat --url ${psQuote(mcpUrl)}` },
-        { label: '개인 실행기 폴더의 PowerShell에 붙여넣을 내용 — 다른 곳에서 켜기', value: `$env:HWPX_COWORK_URL = ${psQuote(mcpUrl)}\nnpm.cmd run worker -- --provider claude-code --check\nnpm.cmd run worker -- --provider claude-code` },
+        { label: '프로그램 폴더의 PowerShell에 붙여넣을 내용 — 앱 없이 실행기 켜기', value: `npm.cmd run worker -- --provider claude-code --url ${psQuote(mcpUrl)}` },
       ] },
     { id: 'check', tier: 'agent', title: '연결 확인과 사용',
       text: '문서 화면 위에 ● Codex나 ● Claude Code가 보이면 연결된 것입니다. 글을 골라 [AI에게 맡기기]로 보내면 내 AI가 처리하고, 결과는 제안으로 돌아옵니다. 반영은 내가 정합니다.\n실행기를 켜지 않았다면 AI 대화에 아래 문장을 붙여 넣습니다. 더 자세한 안내는 앱의 사용 설명서에 있습니다.',

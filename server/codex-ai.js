@@ -325,7 +325,7 @@ export class CodexProposer {
 // 자료 JSON 의 태그 문자(< >)를 JSON 유니코드 이스케이프(역슬래시 + u003c·u003e)로 바꾼다 — 자료 안의 닫는 태그가 document_context 경계를 바꾸지 못하게.
 // 역슬래시를 글자 번호(92)로 만든다(소스에 역슬래시-u 꼴을 그대로 적지 않으려고)
 const BACKSLASH = String.fromCharCode(92);
-const tagSafe = (json) => json.replace(/[<>]/g, (ch) => `${BACKSLASH}u00${ch.charCodeAt(0).toString(16)}`);
+export const tagSafe = (json) => json.replace(/[<>]/g, (ch) => `${BACKSLASH}u00${ch.charCodeAt(0).toString(16)}`);
 
 /**
  * 2026-11-17(작업 M): Codex CLI 0.166 은 MCP 도구를 코드 모드 exec 안에서 부르는데, exec 설명에는 MCP 도구 선언이 빠져 있다
