@@ -38,26 +38,28 @@
   <script type="module">
     import { mount } from './player.js';
     const el = document.getElementById('teaser');
-    // 첫 접속·다시 보기: 이 영상이 끝나면 기능 소개 영상을 이어 재생한다. 건너뛰기·Esc/Enter/스페이스는 바로 next 로,
+    // 영상 순서(2026-11-17 사용자 지시): teaser → teaser3. 첫 접속 소개(?intro=1&next=/…)에서는 teaser 다음에 이 영상이 나오고,
+    // 끝나면 맞춤 시작 안내로 간다(건너뛰기·Esc/Enter/스페이스도 같은 안내로). 단독으로 열면 teaser 로 돌아가 번갈아 되풀이한다(?loop=0 이면 끝에서 멈춤).
     // 클릭·키·휠이 2초 안에 3번 이상(조급하게 누름)이어도 바로 넘어간다. next 는 같은 사이트 경로만 받는다.
     const q = new URLSearchParams(location.search);
     const intro = q.get('intro') === '1';
     const raw = q.get('next') || '/';
-    const next = raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\') ? raw : '/';
+    const next = raw.startsWith('/') && !/[\\\u0000-\u0020]/.test(raw) && new URL(raw, location.origin).origin === location.origin ? raw : '/';
+    const welcome = new URL('/onboarding.html', location.origin);
+    welcome.searchParams.set('next', next);
     let left = false;
-    const go = () => { if (!left) { left = true; location.replace(next); } };
-    const continueIntro = () => {
-      if (left) return;
-      left = true;
-      const following = new URL('/teaser/', location.origin);
-      following.searchParams.set('intro', '1');
-      following.searchParams.set('next', next);
-      location.replace(`${following.pathname}${following.search}`);
+    const leave = (url) => { if (!left) { left = true; location.replace(url); } };
+    const go = () => leave(`${welcome.pathname}${welcome.search}`);
+    const following = () => {
+      const url = new URL('/teaser/', location.origin);
+      for (const [key, value] of q) if (!['t', 'intro', 'next'].includes(key)) url.searchParams.set(key, value);
+      return `${url.pathname}${url.search}`;
     };
     // 단독으로 열면 PC 화면에서 여백을 둔 틀로, 다른 화면 안(iframe)에서는 상자를 가득 채운다
     let opts = { frame: window.self === window.top };
+    if (!intro && q.get('loop') !== '0') Object.assign(opts, { loop: false, onEnd: () => setTimeout(() => leave(following()), 600) });
     if (intro) {
-      Object.assign(opts, { loop: false, autoplay: true, clickToggle: false, onEnd: () => setTimeout(continueIntro, 600) });
+      Object.assign(opts, { loop: false, autoplay: true, clickToggle: false, onEnd: () => setTimeout(go, 600) });
       const skip = document.querySelector('.tz-skip');
       skip.hidden = false;
       skip.addEventListener('click', (e) => { e.stopPropagation(); go(); });

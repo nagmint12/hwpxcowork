@@ -74,7 +74,7 @@ export const AdminUsersPanel = {
           <td>{{ u.name }}<span v-if="u.me" class="muted"> (나)</span></td>
           <td><select :value="u.role" :disabled="busy" :aria-label="u.name + ' 역할'" @change="setRole(u, $event.target.value)"><option v-for="r in data.roles" :key="r" :value="r">{{ roleLabel(r) }}</option></select></td>
           <td><input type="checkbox" :checked="u.serverAi" :disabled="busy" :aria-label="u.name + ' 관리자 AI 허용'" data-testid="admin-user-server-ai" @change="setServerAi(u, $event.target.checked)"/></td>
-          <td><code>{{ u.tokenHint }}</code></td>
+          <td><code>{{ u.tokenHint }}</code><button v-if="u.me && state.token" type="button" class="small" title="이 브라우저에 저장된 내 토큰을 복사합니다" data-testid="admin-user-copy-mine" @click="copy(state.token)">복사</button></td>
           <td class="admin-user-actions">
             <template v-if="editing === u.name && reissuing === u.name"><span class="admin-confirm-text" role="alert" data-testid="admin-user-token-review">{{ editToken.trim() ? '새 토큰으로 바꿀까요?' : '빈 칸이라 무작위 토큰으로 바꿉니다.' }} 이전 토큰은 바로 끊깁니다.</span>
               <button type="button" class="small danger" :disabled="busy" data-testid="admin-user-token-confirm" @click="reissue(u)">바꾸기 확인</button><button type="button" class="small" :disabled="busy" @click="reissuing = ''">취소</button></template>
@@ -141,6 +141,6 @@ export const AdminUsersPanel = {
     });
     async function copy(value) { notice.value = await copyText(value) ? '토큰을 복사했습니다.' : '토큰을 선택해 복사해 주세요.'; }
     onMounted(load);
-    return { data, loading, busy, error, notice, name, role, token, editing, editToken, reissuing, secret, confirming, roleLabel, allowedCount, serverAiState, load, add, setRole, setServerAi, setKeyOwner, reissue, remove, copy, randomToken, TOKEN_TITLE };
+    return { data, loading, busy, error, notice, name, role, token, editing, editToken, reissuing, secret, confirming, roleLabel, allowedCount, serverAiState, load, add, setRole, setServerAi, setKeyOwner, reissue, remove, copy, randomToken, TOKEN_TITLE, state };
   },
 };

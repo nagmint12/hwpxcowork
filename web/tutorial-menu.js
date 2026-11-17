@@ -56,6 +56,7 @@ export const TutorialMenu = {
       finally { busy.value = ''; }
     }
     function resume(session) {
+      state.tutorialResumeDocId = session.docId;
       location.hash = `#/doc/${session.docId}`;
     }
     async function discard(session) {

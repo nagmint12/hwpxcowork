@@ -33,7 +33,7 @@ test('현재 단계로 복귀하면 다른 창을 닫고 필요한 창과 대상
 test('순차 진행 저장은 서버 revision을 다음 요청에 사용하며 입력 중인 ctx를 응답으로 덮지 않는다', async () => {
   const calls = []; let revision = 3;
   const progress = createTutorialProgress({ request: async (url, options) => {
-    if (!options) return { docId: 'one', i: 2, ctx: {}, revision, checkpointId: 'cp2' };
+    if (options?.method !== 'PUT') return { docId: 'one', i: 2, ctx: {}, revision, checkpointId: 'cp2' };
     calls.push(options.body);
     assert.equal(options.body.revision, revision);
     return { ...options.body, ctx: { obsolete: true }, revision: ++revision, checkpointId: `cp${options.body.i}`, checkpoints: [] };
@@ -45,6 +45,29 @@ test('순차 진행 저장은 서버 revision을 다음 요청에 사용하며 �
   assert.deepEqual(calls.map(c => c.revision), [3, 4]);
   assert.equal(value.ctx.input, 'b'); assert.equal(value.ctx.obsolete, undefined);
   assert.equal(value.revision, 5); assert.equal(value.checkpointId, 'cp3');
+});
+
+test('다른 탭과 충돌하면 대기 중인 저장도 멈추고 서버 진행을 다시 읽은 뒤 이어간다', async () => {
+  let revision = 3;
+  const calls = [];
+  const progress = createTutorialProgress({ request: async (_url, options) => {
+    if (options?.method !== 'PUT') return { docId: 'one', i: 2, ctx: {}, revision };
+    calls.push(options.body.revision);
+    if (options.body.revision !== revision) throw Object.assign(new Error('다른 탭에서 변경'), { code: 'TUTORIAL_PROGRESS_CHANGED', status: 409 });
+    return { revision: ++revision };
+  } });
+  const first = await progress.load('one');
+  revision++;
+  progress.save(first, { force: true });
+  progress.save({ ...first, i: 3 });
+  await assert.rejects(progress.flush('one', { strict: true }), { code: 'TUTORIAL_PROGRESS_CHANGED' });
+  progress.save(first, { force: true });
+  assert.deepEqual(calls, [3]);
+  const latest = await progress.load('one');
+  assert.equal(progress.failure('one'), undefined);
+  progress.save({ ...latest, i: 3 });
+  await progress.flush('one', { strict: true });
+  assert.deepEqual(calls, [3, 4]);
 });
 
 test('복구 응답 채택 후 이전 대기 저장은 취소되고 checkpoint와 복구된 진행을 유지한다', async () => {

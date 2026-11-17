@@ -10,6 +10,7 @@ import { tutorialDock, clippedRect } from './tutorial-layout.js';
 import { createAppliedReview, appliedReviewRange } from './tutorial-apply-review.js';
 import { createTutorialMotion, tutorialMotionSpec, typeTutorialInput } from './tutorial-motion.js';
 import { createTutorialTimeline, tutorialViewSnapshot, tutorialStoredView, restoreTutorialView } from './tutorial-recovery.js';
+import { tutorialStepKey } from './tutorial-step-id.js';
 
 const progress = createTutorialProgress({ request: api, token: () => state.token, onError: e => toastError(e, '안내 진행을 서버에 저장하지 못했습니다: ') });
 export const tourState = progress.state;
@@ -27,7 +28,7 @@ const visible = (el) => { if (!el || !el.isConnected) return false; const r = el
  * 따라 하기 시작 → { stop() }.
  * @param o { d(문서 store), docId, me, onEnd(끝·그만 — 저장 상태는 여기서 정리) }
  */
-export function runTour({ d, docId, me, config = {}, showIntro = false, onComplete = async () => true, onRestore = async () => {}, onNext = null, onEnd = () => {} }) {
+export function runTour({ d, docId, me, config = {}, showIntro = false, onComplete = async () => true, onRestore = async () => {}, onReload = () => location.reload(), onNext = null, onEnd = () => {} }) {
   const s = d.s;
   const st = tourState(docId) || { docId, i: 0 };
   if (st.docId !== docId) { st.docId = docId; st.i = 0; }
@@ -48,6 +49,8 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
   const timeline = createTutorialTimeline();
   let viewSnapshot = null; let reviewView = null; let recoveryNote = ''; let recoveryBusy = false; let exitChoice = false; let leaveResolve = null;
   let entryPending = false; let entryReady = false; let finishing = false;
+  let progressChanged = false; let restoreOperation = null; let stepCrashed = false;
+  let pickerOpen = false; let selectedCheckpoint = '';
   let internalControl = null;
   function activate(control) {
     if (!control?.isConnected || control.disabled) throw new Error('실행할 버튼이 아직 준비되지 않았습니다.');
@@ -141,8 +144,15 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
     ? buildComposedTutorialSteps({ sourceId: course, modules: s.info.tutorialModules, title: s.info.tutorialTitle || s.info.title, description: s.info.tutorialDescription }, env)
     : buildTutorialSteps(course, env);
   ({ index: i, resumeAfterIntro } = resolveTutorialPosition(STEPS, st, showIntro));
+  const resumeIndex = resumeAfterIntro ?? i;
+  if (ctx.tourView?.i === st.i && ctx.currentStepId && tutorialStepKey(ctx.currentStepId) === tutorialStepKey(STEPS[resumeIndex]?.id)) ctx.tourView.i = resumeIndex;
+  const checkpointAt = index => {
+    const key = tutorialStepKey(STEPS[index]?.id);
+    return st.checkpoints?.find(point => key && point.stepId === key)
+      || st.checkpoints?.find(point => point.i === index && (point.stepId === undefined || !key && point.stepId === null));
+  };
   motionStep = STEPS[i];
-  const navigation = tutorialNavigation(i, Math.max(i, Math.min(STEPS.length - 1, ctx.tourHigh || 0)));
+  const navigation = tutorialNavigation(i, resumeIndex);
   const appliedReview = createAppliedReview(ctx, s.proposals || [], { once: true });   // AI 요청 하나 = 확인 한 번(2026-11-04)
   // 반영 뒤 본문 보여 주기(2026-11-04 사용자 요청): '본문 확인 완료'를 누르게 하지 않고, 반영을 감지하면 뒤에서 바뀐 본문으로 이동해
   // 잠깐 깜빡여 보여 준다. 그동안(약 2.5초) 자동 다음 단계를 늦춰 다음 단계가 화면을 곧바로 옮기지 않게 한다.
@@ -191,11 +201,11 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
   const quickOf = step => step.quickWhen?.() !== false && step.lost?.() == null && (step.quick === true ? step.action?.run : step.quick);
   const signature = step => JSON.stringify([
     i, typeof step.text === 'function' ? step.text() : step.text, actionOf(step)?.label, !!quickOf(step), step.lost?.(),
-    st.checkpointId, actionError, navigation.reviewing, appliedReview.active, ctx.motionEnabled, motionReduced(),
+    st.checkpointId, progressChanged, actionError, navigation.reviewing, appliedReview.active, ctx.motionEnabled, motionReduced(),
     recoveryNote, exitChoice, !!leaveResolve, recoveryBusy, entryReady, actionBusy, finishing,
   ]);
 
-  const canInteract = () => !stopped && entryReady && !actionBusy && !recoveryBusy && !exitChoice && !finishing && !s.busy && !appliedReview.active && performance.now() >= holdUntil;
+  const canInteract = () => !stopped && entryReady && !progressChanged && !actionBusy && !recoveryBusy && !exitChoice && !finishing && !s.busy && !appliedReview.active && performance.now() >= holdUntil;
   async function runAction(run, quick = false) {
     if (!canInteract() || navigation.reviewing) return;
     const step = STEPS[i];
@@ -290,21 +300,40 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
       const note = document.createElement('p'); note.textContent = leaveResolve ? '문서를 나가도 현재 단계와 복구 지점은 보관됩니다.' : '잠시 중단해도 현재 단계와 복구 지점은 보관됩니다.'; recovery.append(note);
       if (recoveryNote) { const error = document.createElement('p'); error.setAttribute('role', 'status'); error.textContent = recoveryNote; recovery.append(error); }
       recoveryButton('안내 계속하기', 'primary tour-continue', () => { exitChoice = false; leaveResolve?.(false); leaveResolve = null; });
+      if (progressChanged) recoveryButton('저장된 진행 다시 열기', 'tour-reload', reloadProgress);
       recoveryButton(leaveResolve ? '진행 보관하고 나가기' : '잠시 중단하기', 'tour-pause', async () => {
         if (await finish(false)) { leaveResolve?.(true); leaveResolve = null; }
       });
     } else {
       if (recoveryNote) { const note = document.createElement('p'); note.setAttribute('role', 'status'); note.textContent = recoveryNote; recovery.append(note); }
-      if (navigation.reviewing) recoveryButton('진행하던 단계로 돌아가기', 'tour-return', () => go(navigation.high));
+      if (progressChanged) recoveryButton('저장된 진행 다시 열기', 'primary tour-reload', reloadProgress);
+      else if (navigation.reviewing) recoveryButton('진행하던 단계로 돌아가기', 'tour-return', () => go(navigation.high));
       else recoveryButton('현재 단계로 돌아가기', 'tour-return', returnToStep);
-      if (s.info?.tutorialSession && !s.info?.tutorialCompletedAt && Number.isInteger(st.revision)) {
-        if (st.checkpoints?.some(cp => cp.i === i)) recoveryButton(recoveryBusy ? '복구 중…' : '이 단계 다시하기', 'tour-retry', () => restartStep(i));
+      if (!progressChanged && s.info?.tutorialSession && !s.info?.tutorialCompletedAt && Number.isInteger(st.revision)) {
+        if (checkpointAt(i)) recoveryButton(recoveryBusy ? '복구 중…' : '이 단계 다시하기', 'tour-retry', () => restartStep(i));
         const prepareIndex = step.lost?.();
-        if (!navigation.reviewing && Number.isInteger(prepareIndex) && prepareIndex !== i && st.checkpoints?.some(cp => cp.i === prepareIndex)) recoveryButton('준비 단계부터 다시하기', 'tour-retry-prepare', () => restartStep(prepareIndex));
+        if (!navigation.reviewing && Number.isInteger(prepareIndex) && prepareIndex !== i && checkpointAt(prepareIndex)) recoveryButton('준비 단계부터 다시하기', 'tour-retry-prepare', () => restartStep(prepareIndex));
+        const points = STEPS.map((item, index) => ({ item, index, point: checkpointAt(index) })).filter(x => x.point?.resumable !== false && x.point);
+        if (points.length > 1) {
+          const picker = document.createElement('details'); picker.open = pickerOpen;
+          const label = document.createElement('summary'); label.textContent = '저장 지점 불러오기'; picker.append(label);
+          const select = document.createElement('select'); select.setAttribute('aria-label', '복구할 단계');
+          select.disabled = recoveryBusy || actionBusy || finishing;
+          select.add(new Option('단계 선택', ''));
+          for (const { item, index, point } of points) select.add(new Option(`${index + 1}. ${item.title}`, point.checkpointId));
+          select.value = points.some(x => x.point.checkpointId === selectedCheckpoint) ? selectedCheckpoint : '';
+          const load = recoveryButton('불러오기', 'tour-load-checkpoint', () => {
+            const target = points.find(x => x.point.checkpointId === select.value);
+            if (target) restartStep(target.index);
+          });
+          select.addEventListener('change', () => { selectedCheckpoint = select.value; load.disabled = !select.value; });
+          picker.addEventListener('toggle', () => { if (picker.isConnected) pickerOpen = picker.open; });
+          picker.append(select, load); recovery.append(picker);
+        }
       }
     }
     close.disabled = recoveryBusy || actionBusy || finishing;
-    for (const b of recovery.querySelectorAll('button')) b.disabled = recoveryBusy || actionBusy || finishing;
+    for (const b of recovery.querySelectorAll('button')) b.disabled = recoveryBusy || actionBusy || finishing || (b.classList.contains('tour-load-checkpoint') && !b.previousElementSibling?.value);
     bubble.append(recovery);
     if (changedStep) content.scrollTop = 0;
     bubble.dataset.step = stepKey;
@@ -325,7 +354,7 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
     const W = innerWidth; const H = innerHeight;
     const viewport = { x: 0, y: 0, w: W, h: H };
     // 반영한 본문을 보여 주는 동안은 덮개·테두리를 걷어 본문이 그대로 보이게 한다
-    const interactionBlocked = exitChoice || navigation.reviewing || recoveryBusy || actionBusy || finishing || !entryReady;
+    const interactionBlocked = exitChoice || navigation.reviewing || progressChanged || recoveryBusy || actionBusy || finishing || !entryReady;
     const bodyShown = !interactionBlocked && performance.now() < holdUntil;
     const open = interactionBlocked || step.center || bodyShown ? null : clippedRect(step.open?.(), viewport);
     const target = exitChoice || step.center || bodyShown ? null : clippedRect(step.ring?.(), viewport);
@@ -410,28 +439,42 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
     if (viewSnapshot) restoreTutorialView(viewSnapshot, s, kind => d.closeWindow(kind));
     else for (const kind of ['composer', 'popover', 'reply']) d.closeWindow(kind);
     entered = -1; entryReady = false; clickedAt = 0; actionError = '';
+    stepCrashed = false;
     recoveryNote = '현재 단계로 돌아왔습니다. 문서 내용도 되돌리려면 [이 단계 다시하기]를 선택하세요.';
   }
+  function progressConflict(error) {
+    if (error.code !== 'TUTORIAL_PROGRESS_CHANGED') return false;
+    progressChanged = true;
+    entryReady = false;
+    recoveryNote = '다른 창에서 진행을 바꿨습니다. [저장된 진행 다시 열기]를 눌러 이어가세요.';
+    return true;
+  }
+  function reloadProgress() { stop(false); onReload(); }
   async function restartStep(targetIndex = null) {
     if (stopped || recoveryBusy || actionBusy || entryPending || finishing || !s.info?.tutorialSession || s.info?.tutorialCompletedAt) return;
     // 서버 복구는 임시 연습 문서에만 사용하며 실행 중인 저장과 겹치지 않습니다.
     if (s.draft?.saving || s.busy) { nudge('진행 중인 작업이 끝난 뒤 [이 단계 다시하기]를 눌러 주세요.'); return; }
-    if (!confirm('이 단계 시작 지점으로 연습 문서와 검토 기록을 되돌릴까요? 이 단계에서 한 수정은 되돌려집니다.')) return;
+    const target = targetIndex ?? st.i;
+    const checkpoint = checkpointAt(target);
+    if (!checkpoint) { nudge('이 단계에서 사용할 수 있는 복구 지점을 찾지 못했습니다.'); return; }
+    if (!confirm(`‘${STEPS[target].title}’ 시작 지점으로 돌아갈까요? 문서와 검토 기록이 그때 상태로 돌아갑니다.`)) return;
     recoveryBusy = true; timeline.renew(); enterCleanup?.(); enterCleanup = null;
     try {
-      await d.saveDraftNow?.();
-      if (s.draft?.dirty || s.draft?.saving) throw new Error('아직 저장 중인 글이 있습니다. 저장 상태를 확인하고 다시 눌러 주세요.');
-      await progress.flush(docId, { strict: true });
-      const target = targetIndex ?? st.i;
-      const checkpoint = st.checkpoints?.find(cp => cp.i === target)?.checkpointId;
-      if (!checkpoint) throw new Error('이 단계에서 사용할 수 있는 복구 지점을 찾지 못했습니다.');
-      const value = await api(`/api/tutorial/${docId}/restore`, { method: 'POST', body: { checkpointId: checkpoint, i: target, revision: st.revision || 0, operationId: crypto.randomUUID() } });
+      // 이미 저장 중인 작업은 위에서 기다리게 합니다. 저장에 실패한 현재 편집도 복구할 수 있어야 합니다.
+      await progress.flush(docId);
+      if (restoreOperation?.checkpointId !== checkpoint.checkpointId || restoreOperation.revision !== st.revision) {
+        const operationId = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+        restoreOperation = { checkpointId: checkpoint.checkpointId, i: checkpoint.i, revision: st.revision, operationId };
+      }
+      const value = await api(`/api/tutorial/${docId}/restore`, { method: 'POST', body: restoreOperation, signal: AbortSignal.timeout(30000) });
       if (stopped) return;
       progress.adopt(value); stopped = true; timeline.stop(); root.remove(); detach();
       await onRestore(value);
     } catch (e) {
-      recoveryNote = `${e.message || '복구하지 못했습니다.'} 잠시 중단하거나 현재 단계로 돌아갈 수 있습니다.`;
-      entryReady = false; entered = -1;
+      if (!progressConflict(e)) {
+        if (e.status) restoreOperation = null;
+        recoveryNote = `${e.message || '복구하지 못했습니다.'} [이 단계 다시하기]로 다시 시도할 수 있습니다.`;
+      }
     } finally { recoveryBusy = false; }
   }
   async function finish(done, nextCourse = false) {
@@ -444,8 +487,8 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
       finally { finishing = false; buttons.forEach(b => { b.disabled = false; }); }
     } else {
       collectApplied(); appliedReview.pause(); ctx.guidePaused = true;
-      try { saveTour(st); await progress.flush(docId, { strict: true }); }
-      catch (e) { ctx.guidePaused = false; recoveryNote = `진행을 보관하지 못했습니다. ${e.message || '다시 시도해 주세요.'}`; return false; }
+      try { if (!progressChanged) { saveTour(st); await progress.flush(docId, { strict: true }); } }
+      catch (e) { ctx.guidePaused = false; if (!progressConflict(e)) recoveryNote = `진행을 보관하지 못했습니다. ${e.message || '다시 시도해 주세요.'}`; return false; }
       finally { finishing = false; }
     }
     stopped = true; timeline.stop(); root.remove();
@@ -480,7 +523,7 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
       event.preventDefault(); event.stopImmediatePropagation(); nudge(); return;
     }
     if ((canInteract() && !navigation.reviewing) || event.key !== 'Tab') return;
-    const buttons = [...bubble.querySelectorAll('button:not(:disabled)')];
+    const buttons = [...bubble.querySelectorAll('button:not(:disabled), summary, select:not(:disabled)')].filter(el => el.getClientRects().length);
     if (!buttons.length) return;
     event.preventDefault();
     const at = buttons.indexOf(document.activeElement);
@@ -499,9 +542,9 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
     if (control === internalControl) return;
     // 저장 API가 받은 HWPX를 브라우저에 건네는 임시 링크입니다.
     if (!event.isTrusted && control.matches('a[download][href^="blob:"]')) return;
-    const step = STEPS[i]; const clickedTarget = step.click?.();
+    const step = STEPS[i]; const clickedTarget = canInteract() ? step.click?.() : null;
     if (canInteract() && !navigation.reviewing && (clickedTarget?.contains(event.target) || step.allowControl?.(control))) return;
-    const target = step.ring?.();
+    const target = canInteract() ? step.ring?.() : null;
     const controlRect = event.target.ownerDocument === document ? rectOf(control) : inFrame(control);
     const precise = target && controlRect && target.w <= controlRect.w + 24 && target.h <= controlRect.h + 24;
     if (canInteract() && !navigation.reviewing && precise &&
@@ -567,17 +610,25 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
       viewSnapshot = tutorialViewSnapshot(s); entryReady = true; entered = i;
       if (s.info?.tutorialSession && !s.info?.tutorialCompletedAt) ctx.tourView = { i, view: tutorialStoredView(s) };
     } catch (e) {
-      if (timeline.current(ticket)) { entered = i; recoveryNote = `이 단계를 준비하지 못했습니다: ${e.message || '연결 상태를 확인해 주세요.'} [현재 단계로 돌아가기]로 다시 시도하거나 잠시 중단할 수 있습니다.`; }
+      if (timeline.current(ticket)) { entered = i; if (!progressConflict(e)) recoveryNote = `이 단계를 준비하지 못했습니다: ${e.message || '연결 상태를 확인해 주세요.'} [현재 단계로 돌아가기]로 다시 시도하거나 잠시 중단할 수 있습니다.`; }
     } finally { if (timeline.current(ticket)) entryPending = false; }
   }
-  function frameLoop(t) {
+  function updateFrame(t) {
     if (stopped) return;
+    if (stepCrashed) {
+      const recovery = { title: STEPS[i].title, text: '이 단계 화면에서 오류가 발생했습니다. 복구 지점에서 다시 시작할 수 있습니다.', center: true };
+      if (bubble.dataset.sig !== signature(recovery)) render(recovery);
+      place(recovery);
+      return;
+    }
     attachFrame();
     if (!exitChoice && !recoveryBusy && !actionBusy && entryReady && !navigation.reviewing) collectApplied();
     const step = displayStep();
     if (entered !== i && !entryPending && !exitChoice && !recoveryBusy) enterStep(step);
     if (t - lastTick > 200) {
       lastTick = t;
+      const writeError = progress.failure(docId);
+      if (writeError && !progressChanged) progressConflict(writeError);
       if (viewSnapshot && entryReady && !navigation.reviewing && !exitChoice && !recoveryBusy) {
         const currentView = tutorialViewSnapshot(s);
         for (const kind of ['composer', 'popover', 'reply']) {
@@ -587,27 +638,36 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
         const view = tutorialStoredView({ ...s, ...viewSnapshot.windows, tab: viewSnapshot.tab, active: viewSnapshot.active, activeRid: viewSnapshot.activeRid });
         ctx.tourView = { i, view };
       }
-      if (entryReady && !navigation.reviewing && !recoveryBusy && resumeAfterIntro == null) saveTour(st); // 단계 진입 checkpoint 뒤에 바뀐 문맥을 보관합니다.
-      try {
-        const complete = () => step.until ? step.until() : step.click && clickedAt && t - clickedAt >= 400;
-        if (canInteract() && !navigation.reviewing && complete()) { go(i + 1); requestAnimationFrame(frameLoop); return; }
-        const back = entryReady && !exitChoice && !step.review && !navigation.reviewing && step.lost?.();
-        if (typeof back === 'number') nudge(step.lostText || (back === i ? '이 단계의 연습 상태가 바뀌었습니다. [이 단계 다시하기]를 눌러 복구하세요.' : '필요한 연습 상태가 없습니다. [현재 단계로 돌아가기]로 창을 다시 열거나 [준비 단계부터 다시하기]를 눌러 복구하세요.'));
-      } catch (e) { console.warn('[체험]', e); }
+      if (entryReady && !navigation.reviewing && !recoveryBusy && resumeAfterIntro == null) {
+        if (!writeError) saveTour(st);
+        else nudge('진행을 보관하지 못했습니다. [현재 단계로 돌아가기]를 눌러 다시 시도할 수 있습니다.');
+      }
+      const complete = () => step.until ? step.until() : step.click && clickedAt && t - clickedAt >= 400;
+      if (canInteract() && !navigation.reviewing && complete()) { go(i + 1); return; }
+      const back = entryReady && !exitChoice && !step.review && !navigation.reviewing && step.lost?.();
+      if (typeof back === 'number') nudge(step.lostText || (back === i ? '이 단계의 연습 상태가 바뀌었습니다. [이 단계 다시하기]를 눌러 복구하세요.' : '필요한 연습 상태가 없습니다. [현재 단계로 돌아가기]로 창을 다시 열거나 [준비 단계부터 다시하기]를 눌러 복구하세요.'));
       if (bubble.dataset.sig !== signature(step)) render(step);
       revealTarget(step, t);
     }
     place(step);
-    requestAnimationFrame(frameLoop);
   }
-  collectApplied();
-  render(displayStep());
-  place(displayStep());
+  function frameLoop(t) {
+    try { updateFrame(t); }
+    catch (e) {
+      if (!stepCrashed) console.warn('[체험] 단계 표시 오류', e);
+      stepCrashed = true; entryReady = false;
+    } finally { if (!stopped) requestAnimationFrame(frameLoop); }
+  }
   requestAnimationFrame(frameLoop);
   // 첫 저장은 enterStep에서 창 문맥을 채운 뒤 실행합니다.
   // 완료한 연습은 진행을 다시 저장하지 않는다(save: false — 완료 뒤 409 응답을 남기지 않게)
+  function stop(save) {
+    if (stopped) return;
+    if (save && !progressChanged) saveTour(st);
+    stopped = true; timeline.stop(); root.remove(); detach(); leaveResolve?.(false); leaveResolve = null;
+  }
   return {
-    stop({ save = true } = {}) { if (!stopped) { if (save) saveTour(st); stopped = true; timeline.stop(); root.remove(); detach(); leaveResolve?.(false); leaveResolve = null; } },
+    stop({ save = true } = {}) { stop(save); },
     requestLeave() { if (stopped) return Promise.resolve(true); exitChoice = true; return new Promise(resolve => { leaveResolve = resolve; }); },
     go: (k) => go(k), get step() { return i; },
   };

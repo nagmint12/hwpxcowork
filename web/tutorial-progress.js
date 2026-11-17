@@ -7,15 +7,16 @@ export function createTutorialProgress({ request, token = () => '', onError = ()
     if (!value) { current = null; return; }
     current = value; values.set(value.docId, value);
     const copy = JSON.stringify(snapshot(value));
-    if (!force && sent.get(value.docId) === copy) return;
+    if (failures.get(value.docId)?.code === 'TUTORIAL_PROGRESS_CHANGED' || (!force && sent.get(value.docId) === copy)) return;
     sent.set(value.docId, copy);
     const auth = token();
     const epoch = epochs.get(value.docId) || 0;
     const pending = (writes.get(value.docId) || Promise.resolve()).then(async () => {
       if ((epochs.get(value.docId) || 0) !== epoch) return;
+      if (failures.get(value.docId)?.code === 'TUTORIAL_PROGRESS_CHANGED') return;
       const cached = values.get(value.docId);
       const result = await request(`/api/tutorial/${value.docId}/progress`, {
-        method: 'PUT', body: { ...JSON.parse(copy), ...(Number.isInteger(cached?.revision) ? { revision: cached.revision } : {}) }, headers: { Authorization: `Bearer ${auth}` }, keepalive: true,
+        method: 'PUT', body: { ...JSON.parse(copy), ...(Number.isInteger(cached?.revision) ? { revision: cached.revision } : {}) }, headers: { Authorization: `Bearer ${auth}` }, keepalive: true, signal: AbortSignal.timeout(15000),
       });
       failures.delete(value.docId);
       if ((epochs.get(value.docId) || 0) !== epoch) return;
@@ -35,15 +36,16 @@ export function createTutorialProgress({ request, token = () => '', onError = ()
   }
   async function load(docId) {
     await writes.get(docId);
-    const value = await request(`/api/tutorial/${docId}/progress`);
+    const value = await request(`/api/tutorial/${docId}/progress`, { signal: AbortSignal.timeout(15000) });
     values.set(docId, value); current = value;
     sent.set(docId, JSON.stringify(snapshot(value)));
+    failures.delete(docId);
     return value;
   }
   function clear(docId) {
     epochs.set(docId, (epochs.get(docId) || 0) + 1);
     if (current?.docId === docId) current = null;
-    values.delete(docId); sent.delete(docId);
+    values.delete(docId); sent.delete(docId); failures.delete(docId);
   }
   function adopt(value) {
     epochs.set(value.docId, (epochs.get(value.docId) || 0) + 1);
@@ -57,5 +59,5 @@ export function createTutorialProgress({ request, token = () => '', onError = ()
     await writes.get(docId);
     if (strict && failures.has(docId)) throw failures.get(docId);
   }
-  return { state: (docId = null) => docId ? values.get(docId) || null : current, save, load, clear, adopt, flush };
+  return { state: (docId = null) => docId ? values.get(docId) || null : current, failure: docId => failures.get(docId), save, load, clear, adopt, flush };
 }

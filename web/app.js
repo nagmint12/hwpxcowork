@@ -29,6 +29,7 @@ import { SettingsDialog } from './settings.js';
 import { liveChip, exportTip, READONLY_TIP, VIEW_LABEL, PANEL, readPanel, writePanel, clampPanelW, clampPanelH, panelHeightFrom, panelWidthFrom, marginBox, railVisible, readMemoPos, writeMemoPos, readTools, writeTools } from './view.js';
 import { connectionUrls } from './connections.js';
 import { HelpDialog } from './help-dialog.js';
+import { AdminTokenNotice, shouldShowTokenNotice } from './admin-token-notice.js';
 import { AdminServerPanel } from './admin.js';
 import { PersonalAiPanel, AiRunPanel } from './personal-ai.js';
 import { OrchestrationPanel } from './orchestration.js';
@@ -67,10 +68,11 @@ window.addEventListener('hashchange', async () => {
   }
   state.route = location.hash || '#/';
 });
-// #/t/<토큰>[/doc/<id>] : 토큰을 저장하고 이동(관리자가 링크로 나눠 줄 때)
+// #/t/<토큰>[/doc/<id>] : 토큰을 저장하고 이동(관리자가 링크로 나눠 줄 때 · 시작 파일·앱이 이 PC 설정의 관리자 토큰으로 열 때)
+let viaTokenLink = false;   // 이번에 토큰 주소로 들어왔는가 — 관리자 토큰 안내(admin-token-notice.js)를 띄울지 정한다
 (function tokenRoute() {
   const m = /^#\/t\/([^/]+)(\/.*)?$/.exec(location.hash || '');
-  if (m) { const t = decodeURIComponent(m[1]); try { localStorage.setItem('hwpx.token', t); } catch { /* 저장 불가 */ } state.token = t; location.hash = m[2] ? `#${m[2]}` : '#/'; state.route = location.hash; }
+  if (m) { viaTokenLink = true; const t = decodeURIComponent(m[1]); try { localStorage.setItem('hwpx.token', t); } catch { /* 저장 불가 */ } state.token = t; location.hash = m[2] ? `#${m[2]}` : '#/'; state.route = location.hash; }
 })();
 
 const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '');
@@ -91,6 +93,7 @@ async function enterApp(me, requested = state.route) {
 const Login = {
   template: `<div class="login"><h1>HWPX 공동 검토</h1>
     <p class="muted">관리자에게 받은 접속 토큰을 넣으세요.</p>
+    <p class="muted" v-if="localHost" data-testid="login-local-hint">이 PC의 관리자는 시작 아이콘(시작 파일)으로 다시 열면 바로 들어갑니다.</p>
     <p class="muted" v-if="tryHint" data-testid="login-tutorial-hint">체험용 접속 토큰: <strong>{{ tryHint }}</strong>{{ tryHint.includes('~') ? ' 중 하나를' : '을' }} 입력하세요.</p>
     <input v-model="token" placeholder="토큰" @keyup.enter="go" aria-label="접속 토큰"/>
     <p class="err" v-if="err">{{ err }}</p>
@@ -108,7 +111,9 @@ const Login = {
       catch (e) { err.value = e.status === 401 ? '토큰이 올바르지 않습니다' : `화면을 열지 못했습니다: ${e.message}`; }
       finally { busy.value = false; }
     }
-    return { token, err, busy, go, tryHint };
+    // 이 PC 에서 연 화면(localhost): 시작 파일·앱은 설정 파일의 관리자 토큰으로 자동 로그인한다는 것을 알린다
+    const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    return { token, err, busy, go, tryHint, localHost };
   },
 };
 
@@ -1204,7 +1209,8 @@ const DocView = {
       e.preventDefault();
       if (e.target.closest?.('.panel')) d.uploadFiles([...e.dataTransfer.files]);
     }
-    function onBeforeUnload(e) { if (s.draft.dirty || s.draft.saving) { e.preventDefault(); e.returnValue = ''; } }
+    let reloadingTutorialRestore = false;
+    function onBeforeUnload(e) { if (!reloadingTutorialRestore && (s.draft.dirty || s.draft.saving)) { e.preventDefault(); e.returnValue = ''; } }
 
     async function serverRestarting(msg) {
       if (msg.type !== 'server' || msg.action !== 'restarting') return;
@@ -1242,8 +1248,10 @@ const DocView = {
         try {
           await loadTour(props.id);
           const showIntro = state.tutorialIntroDocId === props.id;
+          const resume = state.tutorialResumeDocId === props.id;
+          if (resume) state.tutorialResumeDocId = null;
           state.tutorialIntroDocId = null;
-          startTourHere({ showIntro });
+          await startTourHere({ showIntro, resume });
         } catch (e) { toastError(e, '안내 진행 정보를 읽지 못했습니다: '); }
       }
     });
@@ -1308,6 +1316,7 @@ const DocView = {
             try { sessionStorage.setItem(`hwpx.tutorial-recovery-notice:${props.id}`, 'AI_IN_FLIGHT'); } catch { /* 알림만 생략 */ }
           }
           // 편집기의 undo·자동 저장·지연 응답을 함께 버리고 서버 복구본으로 새 실행을 시작합니다.
+          reloadingTutorialRestore = true;
           location.reload();
         },
         onNext: nextCourse.value ? startNextTutorial : null, onEnd: ({ done }) => {
@@ -1353,7 +1362,7 @@ const DocView = {
 };
 
 const App = {
-  components: { Login, DocList, DocView, HelpDialog, AdminServerPanel, TutorialMenu },
+  components: { Login, DocList, DocView, HelpDialog, AdminServerPanel, TutorialMenu, AdminTokenNotice },
   template: `<div class="app">
     <Login v-if="!state.me && ready"/>
     <DocView v-else-if="state.me && docId" :id="docId" :key="docId"/>
@@ -1363,12 +1372,13 @@ const App = {
     <DocList v-else-if="state.me"/>
     <AdminServerPanel v-if="adminOpen && state.me?.role==='admin'" modal :prepare-restart="adminContext?.prepareRestart" @close="adminOpen = false"/>
     <HelpDialog/>
+    <AdminTokenNotice v-if="tokenNotice && state.me" @close="tokenNotice = false"/>
     <div class="toasts" aria-live="polite"><div class="toast" v-for="t in toasts" :key="t.id" :class="t.kind">{{ t.msg }}</div></div></div>`,
   setup() {
     const ready = ref(false);
     const adminRoute = computed(() => /^#\/admin(?:[/?]|$)/.test(state.route));
     const tutorialRoute = computed(() => /^#\/tutorial(?:[/?]|$)/.test(state.route));
-    const adminOpen = ref(false); const adminContext = ref(null);
+    const adminOpen = ref(false); const adminContext = ref(null); const tokenNotice = ref(false);
     provide('openAdmin', (context) => { if (state.me?.role !== 'admin') return; adminContext.value = context; adminOpen.value = true; });
     // #/tutorial은 원본 목록만 연다. 시작 버튼을 눌렀을 때 임시 문서를 만든다.
     // #/doc/<id>[?…] — 옛 주소 #/doc/<id>?legacy=1(v0.2 검토 보기)도 같은 편집기 화면을 연다
@@ -1376,9 +1386,10 @@ const App = {
     onMounted(async () => {
       try { state.config = await (await fetch('/api/config')).json(); } catch { state.config = {}; }
       if (state.token) { try { await enterApp(await api('/api/me')); } catch (e) { if (e.status !== 401) toastError(e, '화면을 열지 못했습니다: '); state.token = ''; } }
+      tokenNotice.value = shouldShowTokenNotice({ me: state.me, viaLink: viaTokenLink, storage: localStorage });
       ready.value = true;
     });
-    return { state, docId, toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext };
+    return { state, docId, toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice };
   },
 };
 createApp(App).mount('#app');

@@ -68,8 +68,13 @@ export class DesktopHost extends EventEmitter {
     this.publish({ phase: 'ready', message: `${this.place}에서 편집기가 실행 중입니다.` });
     return `http://localhost:${this.port}/?teaser=0#/t/${encodeURIComponent(this.token)}`;
   }
+  // 관리자가 화면(관리자 접속 토큰 안내·사용자 탭)에서 토큰을 바꾸면 서버가 설정 파일에 쓴다 — 앱도 그 값을 따라간다(2026-11-17)
+  freshToken() {
+    try { const t = JSON.parse(fs.readFileSync(path.join(this.userdata, 'config.json'), 'utf8')).users?.find(u => u.role === 'admin')?.token; if (t) this.token = t; } catch { /* 읽지 못하면 이전 값 */ }
+    return this.token;
+  }
   async api(endpoint, { method = 'GET', body } = {}) {
-    const r = await fetch(`http://127.0.0.1:${this.port}${endpoint}`, { method, headers: { Authorization: `Bearer ${this.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
+    const r = await fetch(`http://127.0.0.1:${this.port}${endpoint}`, { method, headers: { Authorization: `Bearer ${this.freshToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
     const result = await r.json(); if (!r.ok) throw new Error(result.message || '요청을 처리하지 못했습니다.'); return result;
   }
   async linkFolder(folder) { return this.api('/api/local/links', { method: 'POST', body: { path: folder } }); }
@@ -111,7 +116,7 @@ export class DesktopHost extends EventEmitter {
         active(); auth = await this.auth(provider); active();
       }
       if (!auth.ready) throw new Error(auth.reason || 'AI 로그인을 확인하지 못했습니다.');
-      const env = { ...this.env, HWPX_COWORK_TOKEN: this.token };
+      const env = { ...this.env, HWPX_COWORK_TOKEN: this.freshToken() };
       await this.run('scripts/ai-worker.mjs', ['--provider', provider, '--url', `http://127.0.0.1:${this.port}/mcp`, '--check'], { env });
       active();
       const child = this.launch('scripts/setup-worker.mjs', ['--provider', provider, '--url', `http://127.0.0.1:${this.port}/mcp`], { env, ipc: true });

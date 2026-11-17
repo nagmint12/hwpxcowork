@@ -83,6 +83,31 @@ test('복구 API: 소유 토큰·완료본·일반문서 보호, CAS·동시중�
   } finally { await srv.stop(); }
 });
 
+test('모바일과 PC에서 단계 번호가 겹쳐도 행동별 문서 상태를 복구한다', async () => {
+  const srv = await startServer();
+  try {
+    const A = srv.api('a'); const { docId: id } = await A('/api/tutorial/start', { method: 'POST', body: { tutorialId: 'clipboard' } });
+    const tools = await put(A, id, 1, { currentStepId: 'copy/2/tools' }, 0);
+    const memo = await A(`/api/docs/${id}/memos`, { method: 'POST', body: { ref: 's0/p0', text: '선택 전에 달린 연습 메모' } });
+    const select = await put(A, id, 2, { currentStepId: 'copy/2/select', memoId: memo.id }, tools.revision);
+    // 이전 버전의 목록에는 행동 ID가 없고, 불변 사본에만 들어 있습니다.
+    const old = metaOf(srv, id);
+    for (const point of old.tutorialCheckpoints) delete point.stepId;
+    writeMeta(srv, id, old);
+    const desktop = await put(A, id, 1, { currentStepId: 'copy/3/select', memoId: memo.id }, select.revision);
+    assert.equal(desktop.checkpointId, select.checkpointId);
+    assert.notEqual(desktop.checkpointId, tools.checkpointId);
+    const later = await put(A, id, 2, { currentStepId: 'copy/3/execute' }, desktop.revision);
+    assert.notEqual(later.checkpointId, select.checkpointId);
+    await A(`/api/docs/${id}/memos`, { method: 'POST', body: { ref: 's0/p0', text: '나중에 달린 연습 메모' } });
+    const value = await restore(A, id, { i: 2, checkpointId: select.checkpointId, revision: later.revision, operationId: 'restore-desktop-step' });
+    assert.equal(value.ctx.currentStepId, 'copy/2/select');
+    assert.deepEqual(value.checkpoints.map(point => point.stepId), ['copy/tools', 'copy/select']);
+    const memos = await A(`/api/docs/${id}/memos`);
+    assert.deepEqual(memos.map(m => m.id), [memo.id]);
+  } finally { await srv.stop(); }
+});
+
 test('실행 중 단계는 요청 전 안전 단계로 복구하고 기준 요청의 attempt와 새 ID 상한을 지킨다', { timeout: 90000 }, async () => {
   const srv = await startServer();
   try {
@@ -179,5 +204,17 @@ test('누락 checkpoint asset은 내용 무변경 거절, commit 실패는 기�
     const archive = path.join(store._docDir(meta.id), 'tutorial-recovery', archives[0]);
     assert.equal(fs.readFileSync(path.join(archive, 'undo', 'p1.hwpx'), 'utf8'), 'failed-state-undo');
     assert.equal(JSON.parse(fs.readFileSync(path.join(archive, 'restore-failed.json'))).committed, false);
+
+    const currentFile = path.join(store._docDir(meta.id), 'current.hwpx');
+    const beforeFailedRestore = Buffer.concat([bytes, Buffer.from('current-before-restore')]);
+    fs.writeFileSync(currentFile, beforeFailedRestore);
+    const saveMeta = store.saveMeta;
+    store.saveMeta = () => { throw Object.assign(new Error('simulated metadata lock'), { code: 'EPERM' }); };
+    await assert.rejects(() => recovery.restore(store.readMeta(meta.id), body, { name: '시험' }), e =>
+      e.code === 'TUTORIAL_RESTORE_IO' && !e.extra.recoveryRequired);
+    store.saveMeta = saveMeta;
+    assert.deepEqual(store.currentBytes(meta.id), beforeFailedRestore, 'meta 쓰기 실패 시 현재 HWPX도 복구 전 바이트로 되돌린다');
+    assert.equal(fs.readFileSync(asset, 'utf8'), 'failed-state-undo');
+    assert.equal(store.readMeta(meta.id).tutorialProgress.revision, baseline.revision);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });

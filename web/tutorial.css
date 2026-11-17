@@ -137,6 +137,9 @@
 .tour-recovery { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; margin-top: 9px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
 .tour-recovery p { flex-basis: 100%; margin: 0 0 4px; font-size: 12px; line-height: 1.5; color: #475569; }
 .tour-recovery button { font-size: 12px; }
+.tour-recovery details { width: 100%; font-size: 12px; }
+.tour-recovery summary { cursor: pointer; }
+.tour-recovery select { box-sizing: border-box; max-width: calc(100% - 74px); margin: 6px 6px 0 0; }
 .tour-row { flex-wrap: wrap; }
 .tour-row .tour-quit, .tour-row .tour-skip { color: #6b7280; }
 .tour-row .tour-act { border-color: #F5A800; color: #7a5200; }

@@ -348,7 +348,7 @@ const ProposalBody = {
   template: `<div class="rc-in">
     <div class="rc-head"><span class="ic rc-prop" v-html="ICON.suggest"></span><b>{{ head }}</b><span class="pill k rc-rtag" v-if="first.rid != null" :title="'AI 작업 #' + first.rid + '의 제안'">AI 작업 #{{ first.rid }}</span>
       <span class="muted">{{ clip(first.by, 14) }}</span><span class="spacer"></span><span class="muted">{{ fmtShort(first.at) }}</span></div>
-    <div class="rc-opt" v-for="(p, i) in list" :key="p.pid" :data-pid="p.pid">
+    <div class="rc-opt" v-for="(p, i) in list" :key="p.pid" :data-pid="p.pid" :data-rid="p.rid">
       <div class="rc-opt-h muted" v-if="list.length > 1">안 {{ p.option || i + 1 }} <span>#{{ p.pid }}</span></div>
       <template v-if="p.type==='table'"><div class="muted">이 문단 뒤에 표 {{ p.table?.rows?.length || 0 }}×{{ p.table?.rows?.[0]?.length || 0 }}</div><TablePreview v-if="open" :table="p.table"/></template>
       <div v-else-if="p.type==='toc'" class="difftext" :class="{clamp: !open}"><span class="muted">차례 새로 고침</span>{{ tocNote(p) }}</div>

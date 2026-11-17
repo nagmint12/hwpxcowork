@@ -60,17 +60,24 @@ function playIntro(folder, search) {
   return { options, redirects, timers, events };
 }
 
-test('첫 소개는 teaser → 맞춤 시작 안내 순서이고 원래 토큰 링크를 보존한다', () => {
+test('첫 소개는 teaser → teaser3 → 맞춤 시작 안내 순서이고 원래 토큰 링크를 보존한다(2026-11-17)', () => {
   const next = '/?mode=user#/t/demo-token/doc/demo-doc';
   const first = playIntro('teaser', `?intro=1&next=${encodeURIComponent(next)}`);
   assert.equal(first.options.loop, false);
   first.options.onEnd(); first.timers.shift()();
-  const following = new URL(first.redirects[0], 'https://example.test');
+  const second = new URL(first.redirects[0], 'https://example.test');
+  assert.equal(second.pathname, '/teaser3/');
+  assert.equal(second.searchParams.get('intro'), '1');
+  assert.equal(second.searchParams.get('next'), next);
+  const after = playIntro('teaser3', second.search);
+  assert.equal(after.options.loop, false);
+  after.options.onEnd(); after.timers.shift()();
+  const following = new URL(after.redirects[0], 'https://example.test');
   assert.equal(following.pathname, '/onboarding.html');
   assert.equal(following.searchParams.get('next'), next);
 });
 
-test('다시 보기도 teaser와 시작 안내를 열며 teaser3를 먼저 재생하지 않는다', () => {
+test('다시 보기도 teaser 부터 열고 teaser3 를 이어 튼다', () => {
   const app = fs.readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
   const href = app.match(/href="([^"]+)" data-testid="intro-replay"/)[1];
   const replay = new URL(href, 'https://example.test');
@@ -78,8 +85,23 @@ test('다시 보기도 teaser와 시작 안내를 열며 teaser3를 먼저 재�
   const first = playIntro('teaser', replay.search);
   first.options.onEnd(); first.timers.shift()();
   const following = new URL(first.redirects[0], replay.origin);
-  assert.equal(following.pathname, '/onboarding.html');
+  assert.equal(following.pathname, '/teaser3/');
   assert.equal(following.searchParams.get('next'), '/?teaser=0');
+});
+
+test('단독으로 열면 teaser → teaser3 → teaser 로 번갈아 되풀이하고(주소 옵션 유지·시작 시각은 뺀다), ?loop=0 이면 끝에서 멈춘다', () => {
+  const a = playIntro('teaser', '?controls=0&t=7.5');
+  assert.equal(a.options.loop, false);
+  a.options.onEnd(); a.timers.shift()();
+  assert.deepEqual(a.redirects, ['/teaser3/?controls=0']);
+  const b = playIntro('teaser3', '?controls=0');
+  b.options.onEnd(); b.timers.shift()();
+  assert.deepEqual(b.redirects, ['/teaser/?controls=0']);
+  for (const folder of ['teaser', 'teaser3']) {
+    const still = playIntro(folder, '?loop=0');
+    assert.equal(still.options.onEnd, undefined, `${folder}: 끝에서 멈춤`);
+    assert.equal(still.options.loop, undefined, '재생기의 주소 옵션(loop=0)을 그대로 따른다');
+  }
 });
 
 test('이전 티저 방문기록은 그대로 존중하며 새 방문기록 키를 쓴다', () => {
@@ -104,13 +126,13 @@ test('teaser 건너뛰기와 불러오기 실패도 시작 안내로 이어진�
   }
 });
 
-test('건너뛰기와 영상 종료가 겹쳐도 다음 영상으로 재이동하지 않는다', () => {
+test('건너뛰기와 영상 종료가 겹쳐도 다시 이동하지 않고, teaser3 의 건너뛰기도 시작 안내로 간다', () => {
   const first = playIntro('teaser3', '?intro=1&next=%2F%3Fteaser%3D0');
   first.options.onEnd();
   first.events.click({ stopPropagation() {} });
   first.timers.shift()();
-  assert.deepEqual(first.redirects, ['/?teaser=0']);
+  assert.deepEqual(first.redirects, ['/onboarding.html?next=%2F%3Fteaser%3D0']);
   const unsafe = playIntro('teaser3', '?intro=1&next=https://other.test/');
   unsafe.events.click({ stopPropagation() {} });
-  assert.deepEqual(unsafe.redirects, ['/']);
+  assert.deepEqual(unsafe.redirects, ['/onboarding.html?next=%2F']);
 });

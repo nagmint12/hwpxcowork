@@ -8,7 +8,7 @@ export function shapeDialog(doc, kind) {
 export function proposalControl(doc, pid, action, rid) {
   if (!/^\d+$/.test(String(pid)) || !/^\d+$/.test(String(rid))) return null;
   const variants = action === 'apply' ? [['rs-live','rs-adopt','rs-apply'], ['rc-live','rc-adopt','rc-apply']] : action === 'undo' ? [['rs-undo'], ['rc-undo']] : [['rs-reject'], ['rc-reject']];
-  const roots = [`[data-testid="panel"] .result[data-rid="${rid}"] [data-pid="${pid}"]`, `.rcard[data-kind="proposal"][data-rid="${rid}"] [data-pid="${pid}"]`];
+  const roots = [`[data-testid="panel"] .result[data-rid="${rid}"] [data-pid="${pid}"]`, `.rcard[data-kind="proposal"] [data-rid="${rid}"][data-pid="${pid}"]`];
   for (let index = 0; index < roots.length; index++) for (const cls of variants[index]) {
     const found = [...(doc?.querySelectorAll(`${roots[index]} button.${cls}:not(:disabled)`) || [])].find(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
     if (found) return found;

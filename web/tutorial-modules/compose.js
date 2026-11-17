@@ -11,6 +11,7 @@ import { buildAiPlace, buildHangulExport, buildOwnAi } from './ai-work.js';
 import { stepHelpers, enableTutorialTools } from './common.js';
 import { buildCustomAction } from './custom-actions.js';
 import { normalizeTutorialActionParams } from '../tutorial-action-definition.js';
+import { tutorialStepKey } from '../tutorial-step-id.js';
 
 // AI 작업 모듈 → 작업 번호(web/tutorial-advanced-tasks.js). R1·X1·K1 = 'AI로 보고서 만들기' 코스의 AI 작업 카드(2026-11-12)
 const advancedIds = { 'image-create': 'S1', 'image-replace': 'S2', 'table-format': 'S3', 'document-proofread': 'S4', conclusion: 'S5', 'topic-research': 'R1', 'excel-report': 'X1', 'skill-conclusion': 'K1' };
@@ -227,14 +228,8 @@ export function buildComposedTutorialSteps(course, env) {
 }
 
 export function resolveTutorialPosition(steps, progress, showIntro = false) {
-  const id = progress.ctx?.currentStepId;
-  let found = id ? steps.findIndex(step => step.id === id) : -1;
-  // 모듈 버전이 올라가도 같은 명시적 행동 ID가 남아 있으면 그 자리에서 이어합니다.
-  const previous = typeof id === 'string' ? /^([^/]+)\/\d+\/([^/]+)$/.exec(id) : null;
-  if (found < 0 && previous) found = steps.findIndex(step => {
-    const current = /^([^/]+)\/\d+\/([^/]+)$/.exec(step.id || '');
-    return current && current[1] === previous[1] && current[2] === previous[2];
-  });
+  const key = tutorialStepKey(progress.ctx?.currentStepId);
+  const found = key ? steps.findIndex(step => tutorialStepKey(step.id) === key) : -1;
   const saved = found >= 0 ? found : Math.max(0, Math.min(steps.length - 1, Number(progress.i) || 0));
   return { index: showIntro ? 0 : saved, resumeAfterIntro: showIntro && saved > 0 ? saved : null };
 }

@@ -53,6 +53,11 @@ tr:hover .lib-acts button.icon, .lib-acts button.icon:focus-visible { opacity: 1
 /* 이름·권한·옮기기 창 */
 .libdlg .ld-body { display: flex; flex-direction: column; gap: 10px; }
 .libdlg .ld-body > input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+/* 관리자 접속 토큰 안내(admin-token-notice.js) */
+.tokendlg .ld-body p { margin: 0; }
+.tokendlg .tokendlg-value { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.tokendlg .row { display: flex; gap: 6px; align-items: center; }
+.tokendlg summary { cursor: pointer; margin-bottom: 6px; }
 .accessdlg .acc-mode { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .acc-table th, .acc-table td { padding: 5px 6px; text-align: center; }
 .acc-table th:first-child, .acc-table td:first-child { text-align: left; }

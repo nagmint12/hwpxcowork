@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { HwpxDoc } from '../engine/doc.js';
 import { writeFileAtomic } from './store.js';
 import { ServiceError } from './service.js';
+import { tutorialStepKey } from '../web/tutorial-step-id.js';
 
 const RESTORE_FIELDS = ['title', 'fileName', 'settings', 'proposals', 'requests', 'attachments',
   'changeRequests', 'memoThreads', 'memoTrash', 'seq', 'breakView', 'legacyProposalMemos'];
@@ -37,6 +38,16 @@ export function createTutorialRecovery({ service }) {
     if (!SAFE_ID.test(String(key || ''))) fail('BAD_TUTORIAL_CHECKPOINT', '단계 복구 번호가 올바르지 않습니다', 400);
     return path.join(recoveryDir(id), key);
   };
+
+  function identifyCheckpoints(meta) {
+    for (const point of meta.tutorialCheckpoints || []) {
+      if (Object.hasOwn(point, 'stepId')) continue;
+      try {
+        const file = path.join(snapshotDir(meta.id, point.checkpointId), 'snapshot.json');
+        point.stepId = tutorialStepKey(JSON.parse(fs.readFileSync(file, 'utf8'))?.ctx?.currentStepId);
+      } catch { point.stepId = null; } // 옛 기준은 번호로 복구 요청할 때 무결성을 검사합니다.
+    }
+  }
 
   // 문서별 큐 안에서 호출한다. 메타 참조와 실제 첨부/수정본/되돌리기 파일을 함께 보관한다.
   function capture(meta, progress, kind) {
@@ -94,11 +105,14 @@ export function createTutorialRecovery({ service }) {
 
   function save(meta, input) {
     assertRevision(meta, input.revision, { optional: true });
-    let checkpoint = (meta.tutorialCheckpoints || []).find(x => x.i === input.i);
+    identifyCheckpoints(meta);
+    const stepId = tutorialStepKey(input.ctx.currentStepId);
+    const points = meta.tutorialCheckpoints || (meta.tutorialCheckpoints = []);
+    let checkpoint = stepId ? points.find(x => x.stepId === stepId) : points.find(x => x.i === input.i);
     if (!checkpoint) {
       const captured = capture(meta, input, 'step');
-      checkpoint = { checkpointId: captured.checkpointId, i: input.i, at: captured.at, version: captured.version, resumable: !inFlight(meta) };
-      (meta.tutorialCheckpoints ||= []).push(checkpoint);
+      checkpoint = { checkpointId: captured.checkpointId, i: input.i, stepId, at: captured.at, version: captured.version, resumable: !inFlight(meta) };
+      points.push(checkpoint);
     }
     meta.tutorialProgress = { docId: meta.id, i: input.i, ctx: clone(input.ctx),
       revision: revisionOf(meta) + 1, checkpointId: checkpoint.checkpointId };
@@ -117,6 +131,8 @@ export function createTutorialRecovery({ service }) {
       return { ...tutorialProgress(meta), version: meta.version, restored: true, duplicate: true };
     }
     assertRevision(meta, input.revision);
+    identifyCheckpoints(meta);
+    const points = meta.tutorialCheckpoints || [];
     let selected = input.checkpointId
       ? meta.tutorialCheckpoints?.find(x => x.checkpointId === input.checkpointId)
       : meta.tutorialCheckpoints?.find(x => x.i === (input.i ?? meta.tutorialProgress?.i ?? 0));
@@ -125,7 +141,7 @@ export function createTutorialRecovery({ service }) {
     let recoveryFallback = null;
     if (selected.resumable === false) {
       const requestedI = selected.i;
-      selected = [...(meta.tutorialCheckpoints || [])].filter(x => x.i < requestedI && x.resumable !== false).sort((a, b) => b.i - a.i)[0];
+      selected = points.slice(0, points.indexOf(selected)).findLast(x => x.resumable !== false);
       if (!selected) fail('TUTORIAL_BUSY', '이 단계의 작업 전 복구 기준이 없습니다. 작업을 마친 뒤 다시 실행해 주세요');
       recoveryFallback = { requestedI, reason: 'AI_IN_FLIGHT' };
     }
@@ -154,7 +170,7 @@ export function createTutorialRecovery({ service }) {
     next.tutorialProgress = { docId: meta.id, i: checkpoint.i, ctx: clone(checkpoint.ctx),
       revision: revisionOf(meta) + 1, checkpointId: selected.checkpointId };
     // 복구 뒤 새 시도에서 만든 rid·memoId를 다음 단계 기준으로 다시 잡는다. 옛 기준 파일은 archive와 함께 보존된다.
-    next.tutorialCheckpoints = (next.tutorialCheckpoints || []).filter(x => x.i <= checkpoint.i);
+    next.tutorialCheckpoints = next.tutorialCheckpoints.slice(0, points.indexOf(selected) + 1);
     next.tutorialRestoreVersion = meta.version + 1;
     const record = { operationId: input.operationId, fingerprint, checkpointId: selected.checkpointId,
       archiveId: archive.checkpointId, at: new Date().toISOString(), version: next.tutorialRestoreVersion };
@@ -168,29 +184,36 @@ export function createTutorialRecovery({ service }) {
     writeFileAtomic(path.join(operationDir, 'restore-prepared.json'), JSON.stringify(record));
     store.log(next, user.name, 'tutorial.restore', `안내 ${checkpoint.i + 1}단계 다시 실행 (${archive.checkpointId})`);
     // _finish의 요청 메모 재작성은 불변 HWPX 기준을 바꾸므로, 원본 바이트를 새 기록으로 직접 저장한다.
-    let committed = false;
+    const currentFile = path.join(store._docDir(meta.id), 'current.hwpx');
+    let documentWriteStarted = false;
     try {
       for (const asset of assets) {
         const file = path.join(store._docDir(meta.id), asset.path);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         writeFileAtomic(file, asset.data);
       }
+      documentWriteStarted = true;
       await store.commit(meta.id, doc, { by: user.name, note: '튜토리얼 단계 다시 실행', meta: next,
         bytes, milestone: { kind: 'tutorial-restore', note: `안내 ${checkpoint.i + 1}단계 다시 실행` } });
-      committed = true;
       next.formatVersion = next.version;
       store.saveMeta(next);
     } catch (error) {
       const rollbackFailures = [];
-      if (!committed) for (const previous of previousAssets) {
+      if (documentWriteStarted) {
+        try { writeFileAtomic(currentFile, fs.readFileSync(path.join(operationDir, 'document.hwpx'))); }
+        catch { rollbackFailures.push('current.hwpx'); }
+        store.cache.delete(meta.id);
+        if (service._wc?.id === meta.id) service._wc = null;
+      }
+      for (const previous of previousAssets) {
         if (previous.bytes == null) continue; // 새로 생긴 참조 없는 파일은 지우지 않는다.
         try { writeFileAtomic(previous.file, previous.bytes); }
         catch { rollbackFailures.push(path.basename(previous.file)); }
       }
       try { writeFileAtomic(path.join(operationDir, 'restore-failed.json'), JSON.stringify({ ...record,
-        committed, rollbackFailures, code: error.code || 'IO_ERROR', at: new Date().toISOString() })); } catch { /* prepared 기록과 불변 archive는 남아 있다 */ }
+        committed: false, rollbackFailures, code: error.code || 'IO_ERROR', at: new Date().toISOString() })); } catch { /* prepared 기록과 불변 archive는 남아 있다 */ }
       throw new ServiceError('TUTORIAL_RESTORE_IO', '단계 복구를 저장하지 못했습니다. 복구 전 사본을 보존했습니다', 500,
-        { archiveId: archive.checkpointId, committed, recoveryRequired: committed || rollbackFailures.length > 0 });
+        { archiveId: archive.checkpointId, committed: false, recoveryRequired: rollbackFailures.length > 0 });
     }
     if (service._wc?.id === meta.id) service._wc = null;
     service.hub.broadcast(meta.id, { type: 'doc', action: 'changed', version: next.version,
