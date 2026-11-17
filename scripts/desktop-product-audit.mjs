@@ -14,7 +14,8 @@ export function auditDesktopProduct({ payload, studioDir, enginePkg, root }) {
     for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
       const from = path.join(source, entry.name), name = relative + '/' + entry.name;
       // package-portable과 같은 배포 범위: 철회된 HFT 실험 보고서는 제품 자산이 아니다.
-      if (/^web\/(quick|tutorial-media|reports\/hft-native-20261106)(\/|$)/.test(name) || /^studio\/dist\/samples(\/|$)/.test(name) || /(^|\/)__pycache__(\/|$)/.test(name)) continue;
+      // web/teaser·teaser3(체험 소개 화면)도 2026-11-16 부터 package-portable 이 묶지 않는다(TREE_EXCLUDE)
+      if (/^web\/(quick|tutorial-media|teaser3?|reports\/hft-native-20261106)(\/|$)/.test(name) || /^studio\/dist\/samples(\/|$)/.test(name) || /(^|\/)__pycache__(\/|$)/.test(name)) continue;
       if (entry.isDirectory()) { visit(from, name); continue; }
       if (/\.(map|pyc)$/.test(name) || /(^|\/)\.DS_Store$/.test(name) || /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/.test(name)) continue;
       const to = path.join(payload, name);

@@ -168,6 +168,11 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     return stopping;
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sig, () => { out('\n터널을 끕니다...'); finish(0); });
+  // 데스크톱 앱이 띄운 경우: Windows 에서는 신호로 끌 수 없어(강제 종료 → 공유 주소가 남는다) IPC 'stop'·부모 끊김으로 정상 종료한다
+  if (process.connected) {
+    process.on('message', (m) => { if (m === 'stop') finish(0); });
+    process.once('disconnect', () => finish(0));
+  }
   child.on('error', (e) => { err(`cloudflared 를 실행하지 못했습니다: ${e.message}`); finish(1); });
   child.on('exit', (code) => { if (!stopping) { err(`터널이 끊겼습니다(cloudflared 종료 코드 ${code}). 다시 켜면 새 주소가 나옵니다.`); finish(1); } });
 

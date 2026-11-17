@@ -42,7 +42,7 @@ const clock = () => new Date().toLocaleTimeString('ko-KR', { hour12: false });
 const say = (text) => console.log(`${clock()}  ${text}`);
 
 export function parseArgs(argv) {
-  const o = { folders: [], port: null, name: null, ai: null, noWindow: process.env.HWPX_COWORK_PERSONAL_NO_WINDOW === '1', keep: process.env.HWPX_COWORK_PERSONAL_KEEP === '1', help: false };
+  const o = { folders: [], port: null, name: null, ai: null, shared: false, noWindow: process.env.HWPX_COWORK_PERSONAL_NO_WINDOW === '1', keep: process.env.HWPX_COWORK_PERSONAL_KEEP === '1', help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     // --ai 의 값은 실행기 인자 묶음이라 '--provider …' 로 시작한다
@@ -54,6 +54,7 @@ export function parseArgs(argv) {
     else if (a === '--ai') o.ai = value(true);
     else if (a === '--no-window') o.noWindow = true;
     else if (a === '--keep') o.keep = true;
+    else if (a === '--shared') o.shared = true;   // 데스크톱 앱의 '여러 사람과 함께 쓰기'(공동 작업용) — 처음 설정을 공동 서버로 만든다
     else if (a.startsWith('--')) throw new Error(`모르는 인자: ${a}`);
     else o.folders.push(a);   // 배치 파일에 끌어다 놓은 폴더
   }
@@ -85,6 +86,12 @@ export function personalConfig(example, { name, port, token }) {
   delete cfg.studioUrl;   // 늘 묶인 편집기(/studio/)
   delete cfg.publicUrl;
   return cfg;
+}
+
+/** 공동 작업용 첫 설정(2026-11-17 데스크톱 앱): 개인용과 같되 PC 폴더 연결을 끄고 변경 요청 승인 규칙은 예제대로 —
+ *  scripts/setup-personal.mjs --mode shared 와 같은 차이. 참여자는 관리자 화면에서 더하고 외부 접속은 터널로 연다 */
+export function sharedConfig(example, options) {
+  return { ...personalConfig(example, options), local: { enabled: false }, changeRequests: example.changeRequests, personal: { app: false } };
 }
 
 function readConfig() {
@@ -166,7 +173,7 @@ async function main() {
   if (first) {
     const example = JSON.parse(fs.readFileSync(path.join(appDir, 'config.example.json'), 'utf8'));
     const port = o.port || (await listening(DEFAULT_PORT) ? await freePort(DEFAULT_PORT + 1) : DEFAULT_PORT);
-    writeConfig(personalConfig(example, { name: authorName(o.name), port, token: randomToken() }));
+    writeConfig((o.shared ? sharedConfig : personalConfig)(example, { name: authorName(o.name), port, token: randomToken() }));
   }
   let cfg = readConfig();
   const admin = adminOf(cfg);
@@ -227,7 +234,8 @@ async function main() {
   startingServer = true;
   controller = await launcher.startManagedServer({
     root: appDir, stdio: 'pipe', handleSignals: false,
-    env: { ...process.env, HWPX_COWORK_CONFIG: configFile, HWPX_COWORK_USERDATA: userDir, HWPX_COWORK_LOCAL: '1' },
+    // 공동 작업용은 PC 폴더 연결을 켜지 않는다(설정의 local.enabled 를 따름)
+    env: { ...process.env, HWPX_COWORK_CONFIG: configFile, HWPX_COWORK_USERDATA: userDir, ...(o.shared ? {} : { HWPX_COWORK_LOCAL: '1' }) },
     onSpawn: capture,
     onExit(code) { if (!stopping) { say(`서버가 멈췄습니다(종료 코드 ${code}).`); process.exit(code || 1); } },
   });

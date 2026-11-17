@@ -8,33 +8,91 @@ MCP 로 문서를 읽고 **제안·메모**를 남기는 도구입니다. 파일
 - AI 연결: 내 PC의 구독 Codex·Claude Code로 바로 처리(MCP), ChatGPT 앱 연결(선택·고급), API 키(사용료 별도). 서버가 곧 MCP 서버(`/mcp`, OAuth 2.1 지원)
 - 표·차트·그림·차례·쪽 구성 제안, 한/글로 복사·붙여넣기(설치 없이 문서 모델 전달), 튜토리얼
 
-## 빠른 시작
+## 설치 — 두 가지 길
 
-먼저 **개인 서버 / 공동 서버**와 **ChatGPT 구독 / Claude 구독 / AI 없이 사용**을 고릅니다. 프로그램 ZIP을 새 폴더에 풀거나, 접근 권한이 있는 저장소를 복제해 VS Code에서 여세요. 비공개 저장소는 주소만으로 다른 사람이 내려받을 수 없습니다.
+| 이런 분 | 설치 방법 |
+|---|---|
+| 프로그램을 처음 쓰고, 클릭만으로 설치하고 싶은 분 | **[1. Windows 앱 설치 파일](#1-windows-앱-설치-파일--클릭해서-설치)** — 설치 마법사 → 바탕화면 아이콘 |
+| VS Code에서 Codex(ChatGPT)·Claude Code를 쓰는 분 | **[2. VS Code 에이전트에게 맡기기](#2-vs-code-에이전트에게-맡기기--codex--claude-code)** — 문장 하나를 붙여넣으면 에이전트가 설치 |
 
-VS Code의 Codex·Claude Code에 다음 내용을 붙여넣습니다(두 선택만 바꾸세요).
+두 길 모두 AI는 **본인 구독(ChatGPT·Claude) 로그인**으로 연결합니다. API 키나 별도 요금이 필요 없고, 로그인·동의는 본인이 직접 합니다.
+
+### 1. Windows 앱 설치 파일 — 클릭해서 설치
+
+Windows 10·11(64비트)용입니다. 관리자 권한이 필요 없습니다.
+
+1. 이 저장소의 **Releases**에서 `HwpxCowork-Setup-<판>.exe`를 받습니다.
+2. 받은 파일을 두 번 누릅니다. **"Windows의 PC 보호"** 창이 뜨면 **[추가 정보] → [실행]**을 누릅니다.
+   이 설치 파일에는 아직 코드 서명 인증서가 없어서 Windows가 처음 보는 프로그램으로 알리는 것입니다.
+3. 설치 마법사에서 **[다음] → [설치] → [마침]**을 누릅니다. 바탕화면과 시작 메뉴에 **Hwpx Cowork** 아이콘이 생깁니다.
+4. 처음 실행하면 사용 방식을 고릅니다.
+   - **혼자 쓰기**: 이 PC의 한글 문서를 혼자 열고 고칩니다. 메뉴 **[파일 → 문서 폴더 연결]**로 PC 폴더를 연결합니다.
+   - **여러 사람과 함께 쓰기**: 이 PC가 공동 작업 서버가 됩니다. 메뉴 **[함께 쓰기 → 참여자 관리]**에서 참여자를 추가합니다.
+     다른 PC에서 들어오게 하려면 **[함께 쓰기 → 외부 접속 열기]**를 누릅니다(Cloudflare 무료 임시 주소, 계정 불필요, 앱을 켜 둔 동안만 열림).
+5. AI를 쓰려면 메뉴 **[AI → ChatGPT·Claude 연결]**에서 고른 뒤 브라우저에서 본인 계정으로 로그인합니다.
+   처음 한 번은 공식 연결 프로그램을 자동으로 받습니다(인터넷 필요).
+
+창을 닫으면 저장을 마친 뒤 함께 꺼집니다. 방식은 **[Hwpx Cowork → 운영 방식 바꾸기]**로 바꾸며, 두 방식의 문서·설정은 따로 보관됩니다.
+지우려면 **설정 → 앱 → Hwpx Cowork → 제거**를 누릅니다. 문서 기록과 설정(`%APPDATA%\Hwpx Cowork`)은 남습니다.
+
+설치 파일 만들기(개발자): `node scripts/package-windows-desktop.mjs` → `artifacts/windows-desktop-<날짜>/installer/`.
+
+### 2. VS Code 에이전트에게 맡기기 — Codex · Claude Code
+
+명령어를 직접 칠 필요가 없습니다. 에이전트가 이 저장소의 `AGENTS.md`(8절)를 읽고 설치 도우미를 실행합니다.
+Windows·macOS·Linux 모두 됩니다. Node.js가 없으면 Windows에서는 도우미가 공식 Node를 설치 폴더 안에 받습니다.
+
+**준비**: VS Code에 Codex 또는 Claude Code 확장을 설치하고 로그인합니다. 이 저장소를 볼 권한이 있는 GitHub 계정으로 VS Code가 로그인되어 있어야 합니다(비공개 저장소).
+
+**설치**: 비어 있는 새 폴더를 VS Code로 열고(**파일 → 폴더 열기**), Codex나 Claude Code 대화창에 아래 문장을 붙여넣습니다.
+`[ ]` 안의 두 선택만 바꾸세요.
 
 ```text
-이 폴더에 hwpx-cowork를 설치해 줘. 운영 방식은 개인 서버, AI는 ChatGPT 구독이야.
-AGENTS.md와 설치 안내를 읽고 Windows에서는 scripts/setup-user.bat --mode personal --ai codex --install-cli --start 를 실행해 줘.
-기존 config.json·data·전역 CLI 설정·환경 변수는 건드리지 말고 설치 폴더 안에만 준비해 줘.
-구독 로그인·동의가 필요하면 정확한 로그인 명령을 알려 주고 내가 완료한 뒤 같은 설치 명령으로 연결을 확인해 줘.
-API 키로 전환하거나 모델을 시험 호출하지 마. 서버와 실행기 연결 여부를 구분해서 알려 줘.
+https://github.com/nagmint12/hwpxcowork 저장소를 이 폴더에 받아서 hwpx-cowork를 설치하고 켜 줘.
+운영 방식은 [개인 서버 / 공동 서버], AI는 [ChatGPT 구독(Codex) / Claude 구독(Claude Code) / AI 없음]이야.
+AGENTS.md 8절의 설치 도우미를 그대로 써 줘. 이 폴더 밖의 설정·전역 CLI 설정·환경 변수는 바꾸지 마.
+구독 로그인이 필요하면 내가 직접 할 명령만 알려 주고, 내가 로그인한 뒤 같은 설치 명령으로 연결을 확인해 줘.
+API 키로 바꾸거나 모델을 시험 호출하지 마. 끝나면 열 주소와, 서버·AI 연결이 각각 됐는지 알려 줘.
 ```
 
-직접 실행하는 Windows 명령도 같습니다. 공동 서버는 `--mode shared`, Claude 구독은 `--ai claude-code`, AI 없이 쓰려면 `--ai none`으로 바꿉니다.
+이미 저장소를 받아 둔 폴더라면 첫 줄을 `이 폴더에 hwpx-cowork를 설치하고 켜 줘.`로 바꿉니다.
+
+**설치한 뒤에는 이렇게 말하면 됩니다.**
+
+| 하고 싶은 일 | 에이전트에게 |
+|---|---|
+| 켜기 | `hwpx-cowork 켜 줘` |
+| 끄기 | `hwpx-cowork 꺼 줘` |
+| 상태 보기 | `hwpx-cowork 상태 알려 줘` |
+| AI 바꾸기 | `hwpx-cowork AI를 Claude 구독으로 바꿔 줘` |
+| 최신 판으로 | `hwpx-cowork를 GitHub 최신 판으로 업데이트하고 다시 켜 줘` |
+| 안 켜질 때 | `hwpx-cowork가 안 켜져. 로그를 보고 원인을 찾아 줘` |
+
+<details>
+<summary>에이전트가 실제로 실행하는 명령(직접 하고 싶을 때)</summary>
 
 ```powershell
-.\scripts\setup-user.bat --mode personal --ai codex --install-cli --start
+# Windows — 프로그램 폴더에서
+.\scripts\setup-user.bat --mode personal --ai codex --install-cli --start   # 설치·켜기
+.\scripts\setup-user.bat --mode personal --status                           # 상태
+.\scripts\setup-user.bat --mode personal --stop                             # 끄기
 ```
 
-Node.js 22 이상이 없으면 Windows 도우미가 공식 Node 24.22.2를 `runtime/`에 준비하고 SHA-256을 확인합니다. npm 의존성, 선택한 공식 CLI가 없으면 `.hwpx-tools/`, 무작위 관리자 토큰, 설정·기록을 자동 준비합니다. 시스템 PATH와 기존 CLI 설정을 바꾸지 않습니다. macOS·Linux는 Node.js 22 이상을 준비한 뒤 `node scripts/setup-personal.mjs --mode personal --ai codex --install-cli --start`를 씁니다.
+```bash
+# macOS·Linux — Node.js 22 이상
+node scripts/setup-personal.mjs --mode personal --ai codex --install-cli --start
+```
 
-기본 주소는 `http://localhost:8790`이며 충돌하면 빈 포트를 고릅니다. 설정·기록은 개인 모드 `userdata-personal/`, 공동 모드 `userdata-shared/`에 있습니다. 같은 명령을 다시 실행하면 켜진 서버·실행기를 재사용하며, 최초 로그인 뒤에도 재실행으로 연결합니다. `--status`는 상태, `--stop`은 이 도우미에서 켠 서버·실행기의 정상 종료입니다. 명령 끝에 `--no-window`를 붙이면 브라우저를 열지 않습니다.
+공동 서버는 `--mode shared`, Claude 구독은 `--ai claude-code`, AI 없이는 `--ai none`(이때 `--install-cli` 생략)입니다.
+도우미는 npm 의존성, 선택한 공식 CLI(`.hwpx-tools/`), 무작위 관리자 토큰, 설정·기록을 설치 폴더 안에만 준비합니다. 시스템 PATH와 기존 CLI 설정은 바꾸지 않습니다.
+업데이트(`git pull`) 뒤 같은 명령을 다시 실행하면 바뀐 의존성을 다시 설치합니다. 내용이 0으로 채워지는 식으로 손상된 라이브러리도 찾아 다시 설치합니다.
+기본 주소는 `http://localhost:8790`(충돌하면 빈 포트)이고, 설정·기록은 `userdata-personal/`·`userdata-shared/`에 있습니다. `--no-window`를 붙이면 브라우저를 열지 않습니다.
+</details>
 
-**“설치해 줘”만으로 로그인까지 저절로 완료되지는 않습니다.** CLI가 요구하는 본인 구독 로그인·OAuth 동의는 사용자가 직접 합니다. VS Code 확장 로그인만으로 CLI도 로그인됐다고 단정하지 않습니다. 설치 점검은 모델을 호출하지 않으며 구독·조직 권한·사용량 제한은 실제 요청 때 적용됩니다. API 키로 자동 전환하지 않습니다.
-
-공동 서버도 처음에는 이 PC에서만 엽니다. 관리자 화면에서 참여자를 추가하고 외부 공유는 HTTPS·접속 정책을 따로 설정합니다. 연결한 구독 AI는 관리자 본인 요청만 처리합니다. 참여자는 각자 본인 토큰과 구독으로 실행기를 연결합니다.
+**알아 둘 점**
+- **"설치해 줘"만으로 로그인까지 끝나지는 않습니다.** CLI의 구독 로그인·동의는 본인이 직접 합니다. VS Code 확장에 로그인했다고 CLI까지 로그인된 것은 아닙니다.
+- 설치 점검은 모델을 부르지 않습니다. 구독·조직 권한·사용량 제한은 실제 요청 때 적용됩니다.
+- 공동 서버도 처음에는 이 PC에서만 열립니다. 관리자 화면에서 참여자를 추가하고, 외부 공유는 HTTPS·접속 정책을 따로 설정합니다(임시 주소는 `start-tunnel.bat`). 연결한 구독 AI는 관리자 본인 요청만 처리하고, 참여자는 각자 본인 토큰과 구독으로 실행기를 연결합니다.
 
 ## 내 구독 AI 연결하기
 
@@ -86,6 +144,7 @@ claude auth login
 | `studio/` | 편집기 빌드: rhwp-studio 에 덧대는 패치(`build/`)·협업 플러그인(`plugin/`)·**빌드 결과 `dist/`** |
 | `vendor/rhwp/` | 엔진·편집기 **원본**(rhwp fork 가운데 빌드에 필요한 것: `src/`·`crates/`·`vendor/`·`rhwp-studio/`·`rhwp-shared/`·`npm/`·`assets/fonts/`)과 **빌드 결과**(`pkg/` WASM), rhwp 라이선스 |
 | `deploy/portable/` | 설치형 묶음(서버·개인 AI 실행기·참여자 앱) 시작 파일 |
+| `deploy/desktop/` | Windows 앱(Electron 창 — 서버·편집기·AI 연결·외부 접속). 설치 파일은 `scripts/package-windows-desktop.mjs` |
 | `agent/` | Claude Code 채널 에이전트 작업 공간 본보기 |
 | `scripts/` | 빌드·묶음·실행기·점검 도구 |
 | `tests/` | 시험(`npm test`) |
@@ -127,7 +186,7 @@ npm test            # 단위·API·MCP 시험(임시 data 폴더·빈 포트, �
 ## 내 저장소로 가져가 고치기(VS Code)
 
 1. GitHub 에서 이 저장소를 **Fork** 합니다.
-2. VS Code → `Git: Clone` → 내 fork 주소. 위 '빠른 시작'대로 실행합니다.
+2. VS Code → `Git: Clone` → 내 fork 주소. 위 '2. VS Code 에이전트에게 맡기기'대로 에이전트에게 설치를 맡깁니다.
 3. 원래 저장소의 새 변경을 받으려면 GitHub 의 **Sync fork** 를 누르거나:
    ```bash
    git remote add upstream https://github.com/nagmint12/hwpxcowork.git

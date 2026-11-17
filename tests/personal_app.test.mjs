@@ -47,7 +47,8 @@ function run(args, env) {
 
 test('인자·첫 설정·AI 실행기 명령', () => {
   assert.deepEqual(parseArgs(['C:\\문서', '--folder', 'D:\\b', '--port', '8801', '--name', '홍길동', '--ai', '--provider codex', '--no-window', '--keep']),
-    { folders: ['C:\\문서', 'D:\\b'], port: 8801, name: '홍길동', ai: '--provider codex', noWindow: true, keep: true, help: false });
+    { folders: ['C:\\문서', 'D:\\b'], port: 8801, name: '홍길동', ai: '--provider codex', shared: false, noWindow: true, keep: true, help: false });
+  assert.equal(parseArgs(['--shared', '--no-window']).shared, true, '데스크톱 앱의 공동 작업용(2026-11-17)');
   assert.throws(() => parseArgs(['--port', 'abc']), /--port/);
   assert.throws(() => parseArgs(['--what']), /모르는 인자/);
   assert.equal(authorName('  홍\u0000길동  '), '홍 길동');

@@ -52,9 +52,42 @@ async function request(port, token, endpoint = '/api/me') {
     return response.ok ? await response.json() : null;
   } catch { return null; }
 }
+// node_modules 안 모든 꾸러미(중첩·@범위 포함)의 package.json 이 읽히는지 본다 → 못 읽는 꾸러미 이름.
+// 설치 직후 PC 가 갑자기 꺼지면 내용이 0으로 채워진 파일이 남아 서버가 켜자마자 죽는다(2026-11-17 사용자 보고: pako/package.json).
+// 같은 검사가 deploy/portable/common/install-dependencies.mjs 에도 있다(설치 묶음에서 그 파일은 혼자 돈다).
+function damagedModules(root) {
+  const top = path.join(root, 'node_modules'); const bad = [];
+  const readable = (file) => { try { const text = fs.readFileSync(file, 'utf8'); return !!text.trim() && text.charCodeAt(0) !== 0 && !!JSON.parse(text); } catch { return false; } };
+  (function walk(dir) {
+    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || !(e.isDirectory() || e.isSymbolicLink())) continue;
+      const p = path.join(dir, e.name);
+      if (e.name.startsWith('@')) { walk(p); continue; }
+      if (!readable(path.join(p, 'package.json'))) bad.push(path.relative(top, p).replaceAll('\\', '/'));
+      if (fs.existsSync(path.join(p, 'node_modules'))) walk(path.join(p, 'node_modules'));
+    }
+  })(top);
+  return bad;
+}
+// 잠금 파일(package-lock.json)과 설치된 판(npm 이 남긴 node_modules/.package-lock.json)이 다른 꾸러미 → 이름 목록.
+// 'GitHub 최신으로 업데이트해 줘'(git pull) 뒤 같은 설치 명령을 다시 실행하면 바뀐 의존성을 다시 설치하게 한다(2026-11-17).
+// 설치 목록이 없으면(의존성을 함께 묶은 묶음) 알 수 없으므로 빈 목록. 개발용·선택(다른 OS용) 꾸러미는 보지 않는다.
+function outdatedModules(root) {
+  let wanted; let installed;
+  try { wanted = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')).packages || {}; } catch { return []; }
+  try { installed = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '.package-lock.json'), 'utf8')).packages || {}; } catch { return []; }
+  return Object.entries(wanted).filter(([p, v]) => p.startsWith('node_modules/') && !v.dev && !v.optional && !v.link && installed[p]?.version !== v.version).map(([p]) => p.slice('node_modules/'.length));
+}
 async function dependencies() {
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Node.js 22 이상을 먼저 설치하세요.');
-  if (fs.existsSync(path.join(ROOT, 'node_modules', 'express', 'package.json')) && fs.existsSync(path.join(ROOT, 'node_modules', '@modelcontextprotocol', 'sdk', 'package.json'))) return;
+  if (fs.existsSync(path.join(ROOT, 'node_modules', 'express', 'package.json')) && fs.existsSync(path.join(ROOT, 'node_modules', '@modelcontextprotocol', 'sdk', 'package.json'))) {
+    const damaged = damagedModules(ROOT);
+    const outdated = damaged.length ? [] : outdatedModules(ROOT);
+    if (!damaged.length && !outdated.length) return;
+    if (damaged.length) console.log(`손상된 라이브러리 파일이 있어 다시 설치합니다: ${damaged.slice(0, 3).join(', ')}${damaged.length > 3 ? ` 외 ${damaged.length - 3}개` : ''}\n(설치 직후 PC 가 갑자기 꺼지면 생길 수 있습니다.)`);
+    else console.log(`프로그램이 바뀌어 라이브러리를 다시 설치합니다: ${outdated.slice(0, 3).join(', ')}${outdated.length > 3 ? ` 외 ${outdated.length - 3}개` : ''}`);
+  }
   console.log('이 설치 폴더의 의존성을 설치합니다(npm ci).');
   await npmRun(['ci', '--no-audit', '--no-fund'], process.env);
 }
