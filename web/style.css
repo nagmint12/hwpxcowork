@@ -123,18 +123,48 @@ button.icon .ic, button.icon svg { width: 14px; height: 14px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* 로그인·목록 */
-.login { max-width: 420px; margin: 12vh auto; background: var(--panel); padding: 28px; border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--shadow); }
-.login h1 { margin-top: 0; font-size: 20px; }
+.entry-page, .listpage { --entry-bg: #f6f8fa; --entry-accent: #6429c8; --entry-hover: #5021a1; --entry-tint: #f6f0fe; }
+.entry-page { min-height: 100%; display: flex; flex-direction: column; background: var(--entry-bg); }
+.entry-shell { width: min(calc(100% - 64px), 1100px); margin-inline: auto; }
+.entry-header { background: var(--panel); border-bottom: 1px solid var(--line); }
+.entry-header-inner { min-height: 68px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.entry-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--text); font-size: 19px; font-weight: 750; letter-spacing: -.045em; white-space: nowrap; }
+.entry-brand img { border-radius: 8px; flex: none; }
+.entry-brand .brand-dot { color: var(--entry-accent); }
+.entry-header nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 19px; }
+.entry-header nav a, .entry-video { color: var(--muted); font-size: 13px; font-weight: 650; }
+.entry-header nav a:hover, .entry-video:hover { color: var(--entry-accent); text-decoration: underline; }
+.entry-main { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 480px; gap: clamp(18px, 4vh, 28px); padding-block: clamp(28px, 6vh, 62px); }
+.entry-intro { text-align: center; word-break: keep-all; }
+.entry-intro h1 { margin: 0; font-size: clamp(34px, 5vw, 53px); letter-spacing: -.06em; line-height: 1.16; }
+.entry-intro p { margin: 12px 0 18px; color: var(--muted); font-size: 16px; line-height: 1.65; }
+.entry-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 16px; }
+.entry-start { min-height: 42px; gap: 8px; padding: 8px 13px; color: var(--entry-accent); font-weight: 700; }
+.entry-start:hover { background: var(--entry-tint); border-color: var(--entry-accent); }
+.login { background: var(--panel); padding: 26px; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 2px 4px #20263108; min-width: 0; }
+.login h2 { margin: 0; font-size: 23px; letter-spacing: -.04em; }
+.login-lead { margin: 6px 0 16px; color: var(--muted); }
+.login form { display: grid; gap: 7px; }
+.login label { font-size: 13px; font-weight: 650; }
+.login input { min-height: 42px; }
+.login input:focus { border-color: var(--entry-accent); box-shadow: 0 0 0 3px var(--entry-tint); }
+.login .err { margin: 0; font-size: 13px; }
+.login .primary { justify-content: center; min-height: 42px; margin-top: 3px; background: var(--entry-accent); border-color: var(--entry-accent); font-weight: 700; }
+.login .primary:hover:not(:disabled) { background: var(--entry-hover); border-color: var(--entry-hover); }
+.login-hint { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.entry-footer { margin-top: auto; padding-block: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+@media (max-width: 520px) {
+  .entry-shell { width: calc(100% - 36px); }
+  .entry-header-inner { min-height: 60px; }
+  .entry-header nav { gap: 7px 12px; }
+  .entry-brand { font-size: 17px; }
+  .entry-intro p { font-size: 14px; }
+  .login { padding: 19px; }
+  .login input { font-size: 16px; }
+}
 .listpage { height: 100%; overflow: auto; }
 .doclist { max-width: 960px; margin: 22px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; box-shadow: var(--shadow); }
 .help-link { font-size: 12.5px; }
-.login-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.login-actions a { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; box-sizing: border-box; padding: 8px 14px; border: 1px solid; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; }
-.login-actions .login-guide { background: #e8f3ed; border-color: #b3d6c1; color: #205b3a; }
-.login-actions .login-guide:hover { background: #d8ebdf; }
-.login-actions .login-video { background: #fff3d6; border-color: #e5bf63; color: #765000; }
-.login-actions .login-video:hover { background: #ffe8b2; }
-.login-actions a:focus-visible { outline: 2px solid #001a70; outline-offset: 3px; }
 .v3bar .help-link { padding: 3px 8px; }
 .list-connections { margin: 10px 0 16px; font-size: 12.5px; }
 .list-connections summary { cursor: pointer; color: var(--accent); }

@@ -47,7 +47,7 @@ export function buildAiReview(env) {
       { title: '완료된 요청과 제안', text: '완료된 요청에는 원문·수정문·이유가 있는 제안이 있습니다. 요청이 완료되어도 본문에 자동으로 들어간 것은 아닙니다. 사람이 반영 여부를 정합니다.', enter: () => showRequest(done()), ring: top('.panel'), next: '제안 반영 연습' },
       { title: '제안 하나 반영하기', press: '반영', text: '첫 번째 예시 제안의 초록 테두리 [반영]을 직접 누르세요.', enter: () => showControl(0, 'apply'),
          lost: firstLost,
-        lostText: '거절할 제안이 없어져 두 제안이 대기 중이던 준비 상태를 다시 불러옵니다.',
+        lostText: '[모두 반영] 등으로 거절해 볼 제안이 없어졌어요. 두 제안이 대기 중이던 상태로 돌아가 이어서 할 수 있습니다.',
         reviewApplied: () => [proposal(0)].filter(Boolean),
         ring: () => pad(rectOf(control(0, 'apply')), 4), open: () => pad(rectOf(control(0, 'apply')?.closest('[data-pid]')), 6), click: () => control(0, 'apply'), until: () => !firstLost() && applied() },
       { title: '마음에 들지 않는 제안 거절', press: '거절', text: '이번에는 두 번째 예시 제안의 초록 테두리 [거절]을 직접 누르세요. 해당 제안의 원문은 그대로 남고 검토 기록에 판단이 남습니다.', enter: () => showControl(1, 'reject'),

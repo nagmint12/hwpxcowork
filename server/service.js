@@ -5248,6 +5248,9 @@ export class Service {
 
   /** 맡을 수 있는 사람: 요청자·관리자(config.agents.othersCanTake 면 누구나) */
   _mayTake(r, user, session = null) {
+    // 튜토리얼 예시 요청(r.example — 예시 답변·예시 기록)은 서버의 예시 답변 실행만 처리한다. 학습자 본인·관리자의 실행기도 맡지 않는다(2026-11-18 점검:
+    // 'AI 작업 맡기기'의 대기 예시가 학습자 본인 실행기의 대기열 처리에 실제 AI 로 맡겨졌다)
+    if (r?.example && !user?.[API_SERVER_RUN]) return false;
     if (this._ownAi(r)) return !!user && r.by === user.name;   // 튜토리얼 6 — 본인 연결만(관리자·다른 사람의 세션이 맡지 않는다)
     if (this._tutorialApiOnly(r.by, r) && !user?.[API_SERVER_RUN]) return this._tutorialAgentTakes(user, r, session);
     return !!user && (r.by === user.name || user.role === 'admin' || this.cfg?.agents?.othersCanTake === true || this._sharesWith(user.name, r.by, r));
@@ -5301,6 +5304,7 @@ export class Service {
       throw new ServiceError('REQUEST_CLOSED', `${josa(`AI 작업 #${r.rid}`, '은/는')} 이미 ${r.status === 'done' ? '완료' : '취소'}된 요청입니다(새 제안·의견을 붙일 수 없음)`, 409);
     }
     const session = this._sessionOf(user, agent);
+    if (r.example && agent && !user?.[API_SERVER_RUN]) throw this._exampleRequestClosed(r);
     this._assertResultClaim(r, user, session);
     if (r.status === 'pending') { r.status = 'working'; r.handledBy = r.handledBy || agent || user?.name || null; }
     if (r.status !== 'working' || !session) return;
@@ -5321,6 +5325,11 @@ export class Service {
   }
 
   _isServerRunActor(user) { return !!user?.[API_SERVER_RUN]; }
+
+  /** 튜토리얼 예시 요청을 실행기가 맡거나 결과를 붙이려 할 때 — 실제 AI 를 부르지 않게 그만두게 한다 */
+  _exampleRequestClosed(r) {
+    return new ServiceError('REQUEST_CLOSED', `${josa(`AI 작업 #${r.rid}`, '은/는')} 튜토리얼 예시 요청입니다(준비된 예시 답변으로만 처리) — 이 요청은 그만두세요`, 409);
+  }
 
   _assertRequestAttempt(r, user) {
     if (user?.agentAttempt != null && Number(user.agentAttempt) !== this._attempt(r)) throw new ServiceError('ATTEMPT_CHANGED', '다시 요청한 뒤 이전 시도의 결과입니다 — 이 실행은 멈추세요', 409);
@@ -6226,6 +6235,7 @@ export class Service {
         }
       }
       this._assertRequestAttempt(r, user);
+      if (r.example && !user?.[API_SERVER_RUN]) throw this._exampleRequestClosed(r);
       if (!this._mayTake(r, user, sess)) throw new ServiceError('NOT_OWNER', `${josa(`AI 작업 #${r.rid}`, '은/는')} ${r.by} 님의 요청입니다(요청자·관리자만 맡을 수 있음) — 이 요청은 그만두세요`, 403);
       if (r.status === 'cancelled' || r.status === 'done') throw new ServiceError('REQUEST_CLOSED', `${josa(`AI 작업 #${r.rid}`, '은/는')} 이미 ${r.status === 'done' ? '완료' : '취소'}된 요청입니다`, 409);
       if (r.status !== 'pending' && r.status !== 'working') throw new ServiceError('STATE', `대기 중인 요청만 시작할 수 있습니다(지금: ${r.status})`, 409);
@@ -6297,7 +6307,8 @@ export class Service {
       ? this._tutorialAgentTakes(user, r, sess) : r.by === user.name || this._sharesWith(user.name, r.by, r));
     // 실험 방식(content_format) 요청은 그 방식을 안다고 밝힌 연결(workflows)만 맡는다. 실험이 꺼져 있으면 누구에게나 후보로 올려 startRequest 가 실패로 닫게 한다(남아 있지 않게)
     const experimentOff = !this._contentFormatOn();
-    for (const m of metas) for (const r of m.requests) if ((r.options?.workflow !== 'content_format' || experimentOff || workflows.includes('content_format')) && (!tutorialOnly || (m.tutorialSession === true && m.tutorial === true && !r.example)) && takes(m, r) && (r.status === 'pending' || (r.status === 'working' && this._claimExpired(r.claim, now)))) cands.push({ id: m.id, rid: r.rid, at: String(r.at || '') });
+    // 튜토리얼 예시 요청(r.example)은 어느 실행기의 후보도 아니다 — 서버의 예시 답변만 처리한다(_mayTake)
+    for (const m of metas) for (const r of m.requests) if (!r.example && (r.options?.workflow !== 'content_format' || experimentOff || workflows.includes('content_format')) && (!tutorialOnly || (m.tutorialSession === true && m.tutorial === true && !r.example)) && takes(m, r) && (r.status === 'pending' || (r.status === 'working' && this._claimExpired(r.claim, now)))) cands.push({ id: m.id, rid: r.rid, at: String(r.at || '') });
     cands.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id) || a.rid - b.rid);
     for (const c of cands) {
       try { await this.startRequest(c.id, c.rid, user, agent, { session: sess, expectAvailable: true }); } catch (e) {

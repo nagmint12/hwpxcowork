@@ -67,7 +67,11 @@ def main():
         central = start('central', {'users': [{'name': '관리자', 'role': 'admin', 'token': secrets.token_hex(20)}, {'name': '홍길동', 'role': 'editor', 'token': central_token}]})
         with sync_playwright() as p:
             br = p.chromium.launch(executable_path=CHROME)
+            # 관리자 첫 진입 토큰 안내 창(web/admin-token-notice.js, 2026-11-17 — 시험은 tests/ui_admin_token_notice.py)은 이 시험 대상이 아니다.
+            # 본 것으로 두지 않으면 창이 문서함 단추를 가린다
+            SEEN_NOTICE = "try { localStorage.setItem('hwpx.adminTokenNotice', '2026-11-18T00:00:00Z'); } catch {}"
             ctx = br.new_context(viewport={'width': 1360, 'height': 900})
+            ctx.add_init_script(SEEN_NOTICE)
             page = ctx.new_page()
             page.on('pageerror', lambda e: errors.append('pageerror: ' + str(e)))
             # 일부러 낸 오류 응답(없는 폴더 404·틀린 토큰 400)은 브라우저가 'Failed to load resource' 로 적는다 — 화면 오류(pageerror)·Vue 경고·그 밖의 console 오류만 모은다
@@ -174,7 +178,9 @@ def main():
             ok((pc / '하위' / '보고서.hwpx').exists() and page.locator('.libtree .lt-pc').count() == 0, '연결을 끊어도 PC 파일은 그대로, 문서함에서만 빠진다')
 
             # ── 보통 서버(PC 폴더 연결 꺼짐)의 문서함은 예전 그대로: 새 단추·꼬리표가 없다 ──
-            other = br.new_context(viewport={'width': 1360, 'height': 900}).new_page()
+            other_ctx = br.new_context(viewport={'width': 1360, 'height': 900})
+            other_ctx.add_init_script(SEEN_NOTICE)
+            other = other_ctx.new_page()
             other.on('pageerror', lambda e: errors.append('pageerror(중앙): ' + str(e)))
             other.on('console', lambda m: errors.append('console(중앙): ' + m.text) if (m.type == 'error' or '[Vue warn]' in m.text) and 'Failed to load resource' not in m.text else None)
             other.goto(f'{central}/?teaser=0#/t/{central_token}')

@@ -1,12 +1,12 @@
 // 시작 안내의 선택은 안내에만 쓴다. 사용자·서버 설정과 로그인 토큰은 바꾸지 않는다.
 export const DEPLOYMENTS = [
-  { id: 'personal', title: '개인 서버 운영', detail: '내 문서를 중심으로, 나만의 작업 공간을 만듭니다.', icon: 'personal' },
-  { id: 'shared', title: '공동 서버 운영', detail: '동료와 함께 쓸 서버를 PC나 클라우드에 준비합니다.', icon: 'shared' },
+  { id: 'personal', title: '개인용', detail: '내 PC의 HWPX 문서를 열고 편집합니다.', icon: 'personal' },
+  { id: 'shared', title: '공동 작업용', detail: '서버를 열어 동료와 문서를 함께 편집합니다.', icon: 'shared' },
 ];
 export const SUBSCRIPTIONS = [
-  { id: 'chatgpt', title: '개인 ChatGPT 구독', detail: 'ChatGPT 계정으로 Codex에 로그인합니다.', icon: 'chatgpt' },
-  { id: 'claude', title: '개인 Claude 구독', detail: 'Claude 계정으로 Claude Code에 로그인합니다.', icon: 'claude' },
-  { id: 'none', title: '구독 없음 · 연결 안 함', detail: 'AI 연결 없이 문서 편집과 공동 검토부터 시작합니다.', icon: 'none' },
+  { id: 'chatgpt', title: 'ChatGPT 구독', detail: 'Codex를 연결합니다.', icon: 'chatgpt' },
+  { id: 'claude', title: 'Claude 구독', detail: 'Claude Code를 연결합니다.', icon: 'claude' },
+  { id: 'none', title: '나중에 연결', detail: '문서 편집부터 시작합니다.', icon: 'none' },
 ];
 export const CLI_AI = { chatgpt: 'codex', claude: 'claude-code', none: 'none' };
 

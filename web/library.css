@@ -1,40 +1,69 @@
 /* 문서함(web/library.js · app.js DocList — docs/LIBRARY_SPEC.md §4): 왼쪽 나무 | 오른쪽 목록 */
-.libpage { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; max-width: 1240px; margin: 18px auto; padding: 0 16px; align-items: start; }
-.libpage .doclist { max-width: none; margin: 0; }
+.listpage { background: var(--entry-bg); }
+.listbar-inner { width: min(100%, 1208px); margin-inline: auto; display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; min-height: 64px; padding-block: 8px; }
+.listbar-identity, .listbar-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.listbar-identity .me-role { border-radius: 6px; background: var(--entry-bg); padding: 4px 8px; overflow-wrap: anywhere; }
+.listbar-nav { gap: 5px; }
+.listbar-nav :is(a, button) { min-height: 34px; padding-inline: 9px; border-color: transparent; color: var(--text); }
+.listbar-nav :is(a, button):hover { background: var(--entry-tint); color: var(--entry-accent); }
+.listbar-nav .tutorial-nav { color: var(--entry-accent); background: var(--entry-tint); font-weight: 700; }
+.listbar-nav button { border-color: var(--line); }
+.libpage { display: grid; grid-template-columns: min(var(--lib-side-w, 240px), 50%) minmax(0, 1fr); gap: 16px; max-width: 1240px; margin: 18px auto; padding: 0 16px; align-items: start; }
+.libpage .doclist { min-width: 0; max-width: none; margin: 0; }
+/* 나무 폭 조절 경계선(web/side-splitter.js, 2026-11-18): 나무와 같은 칸에 겹쳐 두고 칸 사이(16px)로 내민다 — 칸 자리를 명시해 경계선이 없어도 배치가 같다 */
+.libpage > .libside { grid-column: 1; grid-row: 1; }
+.libpage > .doclist { grid-column: 2; grid-row: 1; }
+.libpage > .lib-splitter { grid-column: 1; grid-row: 1; justify-self: end; align-self: stretch; width: 16px; margin-right: -16px; }
+/* 경계선 공통(문서함·드라이브): 마우스를 올리거나 끄는 동안 파란 세로선 */
+.side-splitter { position: relative; z-index: 3; cursor: col-resize; touch-action: none; outline: none; user-select: none; -webkit-user-select: none; }
+.side-splitter::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--accent, #2367d1); opacity: 0; transition: opacity .12s; pointer-events: none; }
+.side-splitter:hover::after, .side-splitter:focus-visible::after, .side-splitter.dragging::after { opacity: .45; }
+html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; }
 .libside { position: sticky; top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 6px; box-shadow: var(--shadow); max-height: calc(100vh - 90px); overflow: auto; }
 .libtree ul { list-style: none; margin: 0; padding: 0; }
 .lt-sec + .lt-sec { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .lt-head { font-size: 11.5px; padding: 2px 8px 4px; }
 .lt-row { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 13.5px; min-height: 28px; }
 .lt-row:hover { background: #f1f4f8; }
-.lt-row.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.lt-row.on { background: var(--entry-tint); color: var(--entry-accent); font-weight: 600; }
 .lt-row.nav { color: var(--muted); }
 .lt-root { font-weight: 600; }
 .libtree .lt-drive { width: 100%; border: 0; box-shadow: none; background: transparent; text-align: left; font: inherit; font-weight: 600; }
 .libtree .lt-drive:hover { background: #f1f4f8; }
-.libtree .lt-drive.on { background: var(--accent-soft); color: var(--accent); }
+.libtree .lt-drive.on { background: var(--entry-tint); color: var(--entry-accent); }
 .lt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lt-count { font-size: 11.5px; font-weight: 400; }
 .lt-ic { display: inline-flex; color: var(--muted); }
-.lt-row.on .lt-ic { color: var(--accent); }
+.lt-row.on .lt-ic { color: var(--entry-accent); }
 .lt-ic svg { width: 15px; height: 15px; }
 .lt-tog { width: 18px; height: 18px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .lt-tog.sp { display: inline-block; }
 .lt-tog svg { width: 12px; height: 12px; }
 
-.lib-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
+.lib-title { margin: 0 0 9px; font-size: 25px; letter-spacing: -.04em; }
+.lib-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 9px; }
 .lib-crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; }
 .lib-crumbs a { color: var(--muted); text-decoration: none; }
 .lib-crumbs a:hover { color: var(--accent); }
 .lib-crumbs a.cur { color: var(--text); font-weight: 700; }
-.lib-find { width: 180px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; }
-.lib-sort { width: auto; flex: none; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; background: #fff; }
+.lib-find { width: 180px; min-height: 34px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; }
+.lib-sort { width: auto; flex: none; min-height: 34px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; background: #fff; }
+.lib-table-wrap { overflow-x: auto; }
 .libtable th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .libtable th.sortable:hover { text-decoration: underline; }
 .libtable th .sort-ic { margin-left: 3px; font-size: 10px; color: var(--accent); }
-.lib-tools { gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.lib-tools { gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.lib-tools :is(button, label) { min-height: 32px; }
+.lib-tools .primary { background: var(--entry-accent); border-color: var(--entry-accent); }
+.lib-tools .primary:hover { background: var(--entry-hover); border-color: var(--entry-hover); }
 .lib-tools .ic svg { width: 14px; height: 14px; }
 .lib-note { font-size: 12px; cursor: help; }
+.libtable .lib-empty td { padding-block: 17px; }
+.lib-ai { margin-top: 15px; padding-top: 11px; border-top: 1px solid var(--line); }
+.lib-ai h2 { margin: 0 0 5px; font-size: 14px; }
+.lib-ai > details { margin: 0; padding: 4px 0; }
+.lib-ai > details > summary { color: var(--entry-accent); }
+.lib-ai .ai-ways { margin: 6px 0; padding-left: 20px; }
 .btnlike.disabled { opacity: .45; cursor: default; pointer-events: none; }
 .btnlike.busy { opacity: 1; cursor: progress; pointer-events: none; }
 .btnlike.small { padding: 3px 9px; font-size: 12.5px; }
@@ -98,9 +127,28 @@ tr:hover .lib-acts button.icon, .lib-acts button.icon:focus-visible { opacity: 1
 .reviewdlg .rv-send select { flex: 1; min-width: 120px; }
 
 @media (max-width: 760px) {
-  .libpage { grid-template-columns: minmax(0, 1fr); margin: 10px auto; }
+  .listbar-inner { min-height: 60px; }
+  .listbar-nav :is(a, button) { min-height: 36px; }
+  .libpage { grid-template-columns: minmax(0, 1fr); margin: 10px auto; padding: 0 10px; }
+  .libpage > .libside, .libpage > .doclist { grid-column: auto; grid-row: auto; }
+  .libpage > .lib-splitter { display: none; }
+  .libpage .doclist { padding: 12px; }
   .libside { position: static; max-height: 40vh; }
   .lib-find { width: 100%; }
-  .libtable th:nth-child(3), .libtable td:nth-child(3), .libtable th:nth-child(4), .libtable td:nth-child(4) { display: none; }
-  .lib-acts button.icon { opacity: 1; }
+  /* 문서 목록 = 줄마다 두세 줄 카드(2026-11-18): 한 줄에 이름·마지막 수정·단추를 늘어놓으면 이름이 몇 글자만 남았다.
+     ① 이름(줄 전체, 길면 줄바꿈) ② 파일 이름·올린 사람 ③ 버전·수정 시각 | 단추(자리가 모자라면 다음 줄 오른쪽). 정렬은 위 고르기 상자 */
+  .libtable, .libtable tbody { display: block; width: 100%; }
+  .libtable thead { display: none; }
+  .libtable tr { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 3px; padding: 9px 4px; border-bottom: 1px solid var(--line-soft); }
+  .libtable td { display: block; padding: 0; border: 0; min-width: 0; }
+  .libtable td:first-child { flex: 1 0 100%; overflow-wrap: anywhere; word-break: normal; }
+  .libtable .lib-name b { font-size: 14.5px; line-height: 1.4; }
+  .libtable .lib-name .muted { font-size: 12px; margin-top: 2px; }
+  .libtable .doc-props, .libtable .doc-reqs { display: none; }
+  .libtable .doc-ver, .libtable .doc-updated, .libtable .folder-by { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .libtable .doc-ver:empty, .libtable .folder-by:empty { display: none; }
+  .libtable .doc-ver:not(:empty)::after { content: '·'; margin-left: 7px; }
+  .libtable .doc-updated::before { content: '수정 '; }
+  .libtable .lib-acts { width: auto; margin-left: auto; }
+  .lib-acts button.icon { opacity: 1; padding: 5px 6px; }
 }

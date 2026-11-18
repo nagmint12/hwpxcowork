@@ -53,7 +53,7 @@ export function buildReportFlow(env) {
   const replyInput = () => { const box = replyBox(); return box && q('.memoedit textarea', box); };
   const replyTarget = () => { const ta = replyInput(); return ta && String(ta.value || '').trim() ? q('.me-ask', replyBox()) : ta; };
   const examples = () => s.info?.tutorialOwnAi === true;
-  const targetFor = phrase => { const at = locate(phrase); if (!at) throw new Error('연습 문장을 찾지 못했습니다. 준비 단계부터 다시해 주세요.'); return { ...at, endRef: at.ref, text: phrase, refs: [at.ref] }; };
+  const targetFor = phrase => { const at = locate(phrase); if (!at) throw new Error('연습 문장을 찾지 못했습니다. [다시 하기]를 눌러 주세요.'); return { ...at, endRef: at.ref, text: phrase, refs: [at.ref] }; };
   const newFirst = () => (s.requests || []).find(r => !(ctx.firstRequests || []).includes(r.rid) && (exactTarget(r.target, P1) || String(r.target?.text || '').includes(P1)));
   const firstRid = () => ctx.rid1 ?? (exactTarget(s.composer?.target, P1) ? s.composer?.rid : null) ?? newFirst()?.rid;
   const firstSent = () => firstRid() != null && !!reqOf(firstRid());
@@ -64,7 +64,7 @@ export function buildReportFlow(env) {
   const retryable = rid => terminal(rid) && !pendingOf(rid).length;
   const tocTarget = () => {
     const matches = (s.paragraphs || []).filter(p => ctx.tocOriginal != null && p.text === ctx.tocOriginal);
-    if (matches.length !== 1) throw new Error('차례 문단을 찾지 못했습니다. [이 단계 다시하기]로 복구해 주세요.');
+    if (matches.length !== 1) throw new Error('차례 문단을 찾지 못했습니다. [다시 하기]로 복구해 주세요.');
     const p = matches[0]; ctx.tocRef = p.ref;
     return { ref: p.ref, start: 0, end: [...p.text].length, endRef: p.ref, refs: [p.ref], text: p.text };
   };
@@ -73,7 +73,7 @@ export function buildReportFlow(env) {
   const waitLine = (r) => (r?.status === 'failed' ? `AI 처리에 실패했습니다: ${r.error || ''}`
     // 실제 AI 가 의견만 남기고 제안을 만들지 않은 경우 — 계속 '찾는 중'으로 보이던 문제
     : r?.status === 'cancelled' ? '요청이 취소되었습니다. [다시 요청]을 눌러 주세요.'
-    : r?.status === 'done' ? 'AI 작업은 끝났습니다. 결과가 없으면 다시 요청하거나 요청 단계부터 다시해 주세요.'
+    : r?.status === 'done' ? 'AI 작업은 끝났지만 제안이 없습니다. [다시 하기]로 요청부터 다시 할 수 있습니다.'
     : tutorialWaitText(r, env.docEnv?.() || {}));
   const idle = terminal;
   // 문장 수정 실습에서 빈 지시를 보내면 일반 검토가 되어 의견만 남을 수 있다.
@@ -95,7 +95,7 @@ export function buildReportFlow(env) {
   const tocPicked = () => toolbarShown() && selHas('차례');
   return [
     // AI 처리 안내는 서버가 정한 이 문서의 작업 환경대로 — 연습 문서는 예시 답변(2026-11-12, 서버 _exampleDoc), 예시를 끈 설정이면 관리자 API
-    { title: '튜토리얼을 시작합니다', text: () => `임시 「결과보고서」에서 연습합니다. 완료할 때만 내 문서함에 저장됩니다. ${env.docEnv?.()?.ownAi ? 'AI 답변은 미리 준비한 예시로 보여 줍니다 — AI 연결이나 사용료가 필요 없습니다.' : 'AI 요청은 관리자가 공유한 API로 처리합니다.'} 금빛 테두리가 다음 행동을 안내합니다. 다른 버튼도 자유롭게 눌러 보세요 — 3~5분.`, center: true, next: '시작하기' },
+    { title: '튜토리얼을 시작합니다', text: () => `임시 「결과보고서」에서 연습합니다. 완료할 때만 내 문서함에 저장됩니다. ${env.docEnv?.()?.ownAi ? 'AI 답변은 미리 준비한 예시로 보여 줍니다 — AI 연결이나 사용료가 필요 없습니다.' : 'AI 요청은 관리자가 공유한 API로 처리합니다.'} 금빛 테두리가 다음 행동을 안내합니다. 다른 버튼도 자유롭게 눌러 보세요 — 잘못 눌러도 [↻ 다시 하기]로 그 단계를 처음부터 다시 할 수 있습니다. 3~5분.`, center: true, next: '시작하기' },
     // 1) 첫 문장: AI 요청
     { title: '1. 고칠 글 고르기', text: `‘${P1}’ 주변을 ${dragHow} 고르세요. 문구가 포함되거나 작은 검토 도구 막대가 나타나면 됩니다. 앞뒤 글자가 함께 골라져도 괜찮습니다.`,
       ring: () => phraseRect(P1), open: () => frameRect(), enter: () => { const at = locate(P1); if (at) focusIn(d, at, { quiet: true }); },

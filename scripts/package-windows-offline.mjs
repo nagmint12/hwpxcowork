@@ -34,6 +34,9 @@ for(const [file,url] of [['CODEX-LICENSE.txt','https://raw.githubusercontent.com
 zip.file(`${top}/NOTICES/AI-CLI-SOURCES.txt`,'Unmodified official CLI binaries installed from npm registry.\n@openai/codex 0.169.0: https://github.com/openai/codex/tree/rust-v0.169.0\n@anthropic-ai/claude-code 2.1.323: https://www.npmjs.com/package/@anthropic-ai/claude-code/v/2.1.323\nClaude Code terms: https://code.claude.com/docs/en/legal-and-compliance\nEach user signs into the official CLI with their own account. No account, token or paid API key is included.\n');
 const changed=['web/onboarding.js','web/onboarding-model.js','web/onboarding.css','server/download-page.js','server/download-page.css','server/release-downloads.js'];
 for(const name of changed)zip.file(`${top}/app/${name}`,fs.readFileSync(path.join(root,name)));
+for (const asset of walk(path.join(root, 'web/icons/download'))) {
+  zip.file(`${top}/app/web/icons/download/${asset.name}`, fs.readFileSync(asset.file));
+}
 const ps=Buffer.concat([Buffer.from([239,187,191]),fs.readFileSync('deploy/portable/offline/offline-start.ps1')]);zip.file(top+'/offline-start.ps1',ps);
 zip.file(top+'/FONT-POLICY.txt','Only fonts identical to original rhwp v0.9.0 are included, including its embedded equation font. FontDB/HFT source fonts and extracted outlines are not distributed. Numeric matching and corrections are retained.\n');
 for(const [name,flag] of [['설치 시작.bat',''],['종료.bat',' -Stop'],['상태 확인.bat',' -Status']])zip.file(`${top}/${name}`,`@echo off\r\nchcp 65001 >nul\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0offline-start.ps1"${flag}\r\nif errorlevel 1 pause\r\n`);

@@ -16,8 +16,8 @@
 .dx .dx-text,.dx-dialog .dx-text{padding:3px 6px;background:transparent;border:0;box-shadow:none;color:var(--muted,#64748b);white-space:nowrap}
 .dx .dx-icon,.dx-dialog .dx-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;padding:5px;border:0;box-shadow:none;background:transparent;border-radius:5px;color:var(--muted,#64748b)}
 .dx-icon svg{width:19px;height:19px;display:block}.dx .dx-icon:hover,.dx .dx-text:hover,.dx-dialog .dx-icon:hover{background:#f0f3f8}
-.dx-layout{display:grid;grid-template-columns:205px minmax(0,1fr);min-height:570px}
-.dx-sidebar{padding:18px 9px 12px;background:#f8fafc;border-right:1px solid var(--line,#dce2ea);display:flex;flex-direction:column;min-width:0}
+.dx-layout{display:grid;grid-template-columns:min(var(--dx-side-w,205px),50%) minmax(0,1fr);min-height:570px}
+.dx-sidebar{position:relative;padding:18px 9px 12px;background:#f8fafc;border-right:1px solid var(--line,#dce2ea);display:flex;flex-direction:column;min-width:0}
 .dx-side-title{padding:0 12px 12px;color:var(--muted,#758194);font-size:11px;font-weight:600;letter-spacing:.04em}
 .dx-tree{display:flex;flex-direction:column;gap:2px;max-height:65vh;overflow:auto}
 .dx-tree button{display:flex;gap:8px;align-items:center;text-align:left;min-height:36px;padding:7px 10px;background:transparent;border:0;box-shadow:none;border-radius:5px;color:var(--text,#263342)}
@@ -54,7 +54,7 @@
 .dx-dialog>footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:13px 20px;border-top:1px solid var(--line,#dce2ea)}.dx-dialog>footer>span{margin-right:auto;overflow-wrap:anywhere;min-width:0}.dx-dialog>footer button{padding:6px 15px;white-space:nowrap}.dx-dialog-actions{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}
 .dx-dialog details{margin:18px 0;font-size:12px}.dx-dialog summary{cursor:pointer}.dx-dialog li{margin:6px 0}.dx-pair{display:flex;flex-direction:column;gap:5px;background:#edf4ff;border-radius:8px;padding:16px;margin:12px 0;overflow-wrap:anywhere}.dx-pair strong{font-size:23px;letter-spacing:.08em;user-select:all}.dx-dialog .dx-danger{color:#b83f36;background:transparent;margin-top:12px}
 .dx-ai-choice{display:flex;align-items:center;gap:8px}.dx-proposal{border-top:1px solid var(--line,#dce2ea);padding-top:15px;margin-top:15px}.dx-proposal p{margin:5px 0}.dx-proposal small{color:var(--muted,#758194);overflow-wrap:anywhere}.dx-stored>div{display:flex;gap:7px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line,#dce2ea);flex-wrap:wrap}.dx-stored>div>span{width:100%;overflow-wrap:anywhere}.dx-stored small{margin-right:auto}
-@container (max-width:720px){.dx-layout{grid-template-columns:165px minmax(0,1fr)}.dx-toolbar{padding:10px;gap:5px}.dx-toolbar>button:not(.dx-icon){padding:6px 8px}.dx-toolbar .dx-ic{display:none}.dx-location{padding:9px 10px}.dx-location input{max-width:150px}.dx-header{padding:10px 12px;gap:7px}.dx .dx-provider{font-size:15px}.dx-connected{font-size:10px}.dx-table .dx-type{display:none}.dx-table .dx-size{width:75px;padding-right:12px}}
+@container (max-width:720px){.dx-layout{grid-template-columns:min(var(--dx-side-w,165px),50%) minmax(0,1fr)}.dx-toolbar{padding:10px;gap:5px}.dx-toolbar>button:not(.dx-icon){padding:6px 8px}.dx-toolbar .dx-ic{display:none}.dx-location{padding:9px 10px}.dx-location input{max-width:150px}.dx-header{padding:10px 12px;gap:7px}.dx .dx-provider{font-size:15px}.dx-connected{font-size:10px}.dx-table .dx-type{display:none}.dx-table .dx-size{width:75px;padding-right:12px}}
 @container (max-width:520px){.dx-layout{grid-template-columns:minmax(0,1fr);min-height:470px}.dx-sidebar{display:none}.dx-brand{display:none}.dx-header{flex-wrap:wrap;min-height:58px;gap:5px}.dx .dx-provider{font-size:14px;max-width:175px}.dx-toolbar{justify-content:flex-start}.dx-toolbar .spacer{display:none}.dx-toolbar>button:not(.dx-icon){font-size:11px;gap:3px}.dx-location input{width:100%;max-width:none;flex-basis:100%}.dx-location nav{font-size:11px}.dx-files{min-height:280px}.dx-name button{font-size:12px}.dx-connected{margin-right:auto}.dx-header .spacer{display:none}.dx-header .dx-text{font-size:11px}.dx-footer{padding:8px 10px}.dx-toolbar .dx-more{margin-left:auto}.dx-table th.dx-check,.dx-table td.dx-check{width:33px;padding-left:8px}.dx-table td{padding:6px 8px}.dx-file-icon svg{width:18px}.dx-name button{gap:7px}}
 @media(max-width:600px){.dx-expanded{inset:8px}.dx-space-choice{flex-direction:column}.dx-dialog-body{padding:15px}.dx-dialog>header,.dx-dialog>footer{padding:12px 15px}}
 /* 드라이브 개인정보 안내(2026-10-30) */
@@ -79,3 +79,9 @@
 .dx-project-list li { padding: 7px 0; border-bottom: 1px solid var(--line, #dce2ea); }
 .dx-project-list label { display: flex; align-items: center; gap: 8px; }
 .dx-project-list small { margin-left: auto; color: var(--muted, #758194); }
+/* 2026-11-18 폴더 칸 폭 조절(web/side-splitter.js): 옆 칸 오른쪽 테두리 위에 겹친 경계선. 좁은 칸(520px 이하)은 옆 칸과 함께 숨는다 */
+.dx-sidebar>.dx-splitter{position:absolute;top:0;bottom:0;right:-5px;width:9px}
+@media (pointer:coarse){.dx-sidebar>.dx-splitter{right:-9px;width:17px}}
+.dx-drives button>span:nth-child(2){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 좁은 칸(휴대전화): 파일 이름을 말줄임으로 자르지 않고 줄을 바꿔 전부 보인다 */
+@container (max-width:520px){.dx-name button>span:last-child{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}.dx-table td{padding-top:8px;padding-bottom:8px}}

@@ -3,6 +3,7 @@ import {api,state,toast,fmt,fmtSize} from './util.js';
 import {ICON} from './icons.js';
 import {driveImportTargets,defaultDriveImportTarget,driveDocumentChoices} from './drive-library.js';
 import {canImportDriveFile,driveRows,driveTree,folderKey,importSpaceTargets} from './drive-explorer-model.js';
+import {SideSplitter,useSideWidth} from './side-splitter.js';
 
 // 2026-11-17 두레이 서비스 API 방식: 사용자가 두레이에서 직접 만든 개인 API 인증 토큰을 한 번 등록하면 서버가 내 개인 드라이브를 다룬다(확장프로그램 없음).
 // 2026-11-18 프로젝트 드라이브: 왼쪽 드라이브 목록 = 내 드라이브 + 사용자가 [프로젝트 추가]로 허용한 프로젝트(서버 status.drives — 없는 옛 서버면 내 드라이브만)
@@ -14,7 +15,10 @@ const icons={...ICON,upload:svg('<path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/>'
 /** 사용자가 넣은 사이트 주소 → 열 수 있는 https 주소(두레이 도메인만) */
 export function doorayHome(site){let s=String(site||'').trim();if(!s)return '';if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(s))s='https://'+s;try{const u=new URL(s);return u.protocol==='https:'&&/(^|\.)(dooray\.com|gov-dooray\.com|dooray\.co\.kr|gov-dooray\.co\.kr)$/i.test(u.hostname)?u.origin:'';}catch{return '';}}
 
+// 2026-11-18 왼쪽 폴더 칸 폭 = 경계선(테두리)을 끌어 바꾸고 이 브라우저에 기억(web/side-splitter.js — null 이면 drive.css 기본 205px · 좁은 칸 165px)
+const SIDE_W={min:150,max:480};
 export const DriveTab={
+  components:{SideSplitter},
   props:{library:{type:Object,default:null},libraryLocation:{type:Object,default:null}},emits:['imported'],
   template:`<Teleport to="body" :disabled="!expanded">
     <div v-if="expanded" class="dx-backdrop"></div>
@@ -27,13 +31,14 @@ export const DriveTab={
         <button class="dx-text" @click="openModal('settings')">연결 설정</button>
         <button class="dx-icon" @click="expanded=!expanded" :aria-label="expanded?'크게 보기 닫기':'드라이브 크게 보기'" :title="expanded?'크게 보기 닫기':'크게 보기'"><span v-html="expanded?icons.x:icons.expand"></span></button>
       </header>
-      <div class="dx-layout">
+      <div class="dx-layout" :style="sideW!=null?{'--dx-side-w':sideW+'px'}:null">
         <aside class="dx-sidebar" aria-label="폴더">
+          <SideSplitter class="dx-splitter" v-model="sideW" :min="SIDE_W.min" :max="SIDE_W.max" :main-min="300" target="parent" label="폴더 칸 폭 조절" data-testid="drive-splitter" @commit="saveSideW"/>
           <div class="dx-side-title">드라이브</div>
           <nav class="dx-tree dx-drives" data-testid="drive-list" aria-label="드라이브"><button v-for="dv in drives" :key="dv.key" :class="{current:dv.key===driveKey}" :aria-current="dv.key===driveKey?'page':undefined" :disabled="busy||!status.connected" @click="switchDrive(dv.key)" :title="dv.kind==='project'?'프로젝트 드라이브 · 목록·내려받기·새 파일 올리기':'내 개인 드라이브'"><span class="dx-folder-icon" v-html="icons.folder"></span><span>{{dv.name}}</span><small v-if="dv.kind==='project'">{{dv.scope==='public'?'공개':'프로젝트'}}</small></button></nav>
           <button v-if="projectsSupported" class="dx-text dx-add-project" data-testid="drive-add-project" @click="openModal('projects')" :disabled="busy||!status.connected">+ 프로젝트 추가</button>
           <div class="dx-side-title">폴더</div>
-          <nav class="dx-tree"><button v-for="node in tree" :key="node.id" :class="{current:node.id===folderId}" :style="{paddingLeft:(12+node.depth*16)+'px'}" @click="goPath(node.path)" :disabled="busy||!status.connected" :aria-current="node.id===folderId?'page':undefined"><span class="dx-folder-icon" v-html="icons.folder"></span><span>{{node.name}}</span></button></nav>
+          <nav class="dx-tree"><button v-for="node in tree" :key="node.id" :class="{current:node.id===folderId}" :style="{paddingLeft:(12+node.depth*16)+'px'}" @click="goPath(node.path)" :disabled="busy||!status.connected" :aria-current="node.id===folderId?'page':undefined" :title="node.name"><span class="dx-folder-icon" v-html="icons.folder"></span><span>{{node.name}}</span></button></nav>
           <div class="dx-side-note">{{currentDrive.kind==='project'?'프로젝트 드라이브 · 목록·내려받기·새 파일 올리기':'두레이 API · 내 개인 드라이브'}}</div>
           <ul class="dx-policy" data-testid="drive-policy" aria-label="드라이브 개인정보 안내"><li v-for="t in DRIVE_POLICY" :key="t">{{t}}</li></ul>
         </aside>
@@ -120,6 +125,7 @@ export const DriveTab={
     const items=ref([]),listed=ref(false),selected=ref([]),query=ref(''),descending=ref(false),busy=ref(false),error=ref(''),progress=ref(''),expanded=ref(false),modal=ref(''),dragging=ref(false),cache=ref(new Map());
     const page=ref(0),nextPage=ref(null),imported=ref([]),importedWhere=ref(''),libraryState=ref(null),libraryDocId=ref(''),importKey=ref(''),importSpace=ref('private'),openAfterImport=ref(false);
     const siteInput=ref(''),tokenInput=ref(''),replacing=ref(false);
+    const {width:sideW,save:saveSideW}=useSideWidth('hwpx.drive.sideW',SIDE_W);
     let disposed=false,refreshQueue=Promise.resolve(),dragDepth=0,replaceTarget=null,modalFocus=null,expandFocus=null,bodyOverflow='';
     const folderId=computed(()=>crumbs.value.at(-1).id),target=()=>({provider:PROVIDER,projectId:driveKey.value,drive:driveKey.value,folderId:folderId.value});
     const projectsSupported=computed(()=>Array.isArray(status.value.drives));
@@ -212,6 +218,6 @@ export const DriveTab={
     watch(expanded,async v=>{if(v){expandFocus=document.activeElement;bodyOverflow=document.body.style.overflow;document.body.style.overflow='hidden';await nextTick();root.value?.querySelector('[aria-label="크게 보기 닫기"]')?.focus();}else{document.body.style.overflow=bodyOverflow;await nextTick();if(expandFocus?.isConnected)expandFocus.focus();}});
     onMounted(async()=>{await action(async()=>{await Promise.all([refresh(),refreshLibrary()]);if(status.value.connected)await readFolder();});});
     onBeforeUnmount(()=>{disposed=true;if(expanded.value)document.body.style.overflow=bodyOverflow;});
-    return {DRIVE_POLICY,writable,personalWritable,drives,driveKey,currentDrive,projectsSupported,projectChoices,projectPicked,switchDrive,saveProjects,deleteSelected,renameSelected,d,icons,root,dialog,more,uploadInput,replaceInput,status,crumbs,folderId,ready,rows,selected,selectedFiles,visibleFiles,allSelected,someSelected,importable,query,descending,busy,error,progress,expanded,modal,modalTitle,dragging,page,nextPage,tree,imported,importedWhere,importSpace,importKey,spaceTargets,importTarget,targetsFor,libraryDocs,libraryDocId,openAfterImport,siteInput,tokenInput,replacing,fmt,fmtSize,canImportDriveFile,fileType,doorayHome,loadFolder,goPath,next,previousPage,rowClick,toggleFile,selectAll,downloadSelected,openModal,closeModal,openImport,openFile,importSelected,pickUpload,pickReplacement,uploadInputChanged,replacementChanged,dragEnter,dragOver,dragLeave,dropFiles,uploadLibrary,uploadStored,removeStored,openDooray,pasteToken,connectDooray,checkConnection,startReplace,disconnect,panelKey};
+    return {sideW,saveSideW,SIDE_W,DRIVE_POLICY,writable,personalWritable,drives,driveKey,currentDrive,projectsSupported,projectChoices,projectPicked,switchDrive,saveProjects,deleteSelected,renameSelected,d,icons,root,dialog,more,uploadInput,replaceInput,status,crumbs,folderId,ready,rows,selected,selectedFiles,visibleFiles,allSelected,someSelected,importable,query,descending,busy,error,progress,expanded,modal,modalTitle,dragging,page,nextPage,tree,imported,importedWhere,importSpace,importKey,spaceTargets,importTarget,targetsFor,libraryDocs,libraryDocId,openAfterImport,siteInput,tokenInput,replacing,fmt,fmtSize,canImportDriveFile,fileType,doorayHome,loadFolder,goPath,next,previousPage,rowClick,toggleFile,selectAll,downloadSelected,openModal,closeModal,openImport,openFile,importSelected,pickUpload,pickReplacement,uploadInputChanged,replacementChanged,dragEnter,dragOver,dragLeave,dropFiles,uploadLibrary,uploadStored,removeStored,openDooray,pasteToken,connectDooray,checkConnection,startReplace,disconnect,panelKey};
   },
 };

@@ -102,9 +102,9 @@ export function buildAdvanced(env, tasks = ADVANCED_TASKS) {
         text: () => {
           const r = reqOf(ridOf(task));
           if (!r || !finished(task)) return 'AI에게 보내고 답변을 기다리는 중입니다…';
-          if (r.status !== 'done') return `답변을 넣지 못했습니다${r.error ? `: ${r.error}` : ''}. [다시 요청]을 누르거나 준비 단계부터 다시해 주세요.`;
+          if (r.status !== 'done') return `답변을 넣지 못했습니다${r.error ? `: ${r.error}` : ''}. [다시 요청]을 누르거나 [다시 하기]로 요청부터 다시 하세요.`;
           const what = [propsOf(task).length ? `제안 ${propsOf(task).length}건` : '', (r.comments || []).length ? `메모 ${r.comments.length}건` : ''].filter(Boolean).join(' · ') || '결과';
-          if (pendingOf(task).length && propsOf(task).some((p) => p.status === 'applied')) return `남은 제안 ${pendingOf(task).length}건을 반영해 주세요. 반영할 수 없으면 [이 단계 다시하기]로 결과를 복구하세요.`;
+          if (pendingOf(task).length && propsOf(task).some((p) => p.status === 'applied')) return `남은 제안 ${pendingOf(task).length}건을 반영해 주세요. 반영할 수 없으면 [다시 하기]로 결과를 되돌리세요.`;
           return pendingOf(task).length
             ? `AI가 ${what}을 남겼습니다. ${task.look} 초록 테두리의 [모두 반영]을 누르면 바뀐 본문으로 이동해 보여 줍니다.`
             : `AI가 ${what}을 남겼습니다. ${task.look}`;

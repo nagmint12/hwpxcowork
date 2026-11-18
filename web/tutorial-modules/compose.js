@@ -177,7 +177,8 @@ export function buildComposedTutorialSteps(course, env) {
   const fallback = stepHelpers(env);
   const moduleNames = groups.map(group => group.entry.title || group.descriptor.title).join(' → ');
   const note = course.sourceId === 'ai-advanced' ? ' 준비된 예시 답변으로 연습하므로 AI 연결이나 사용료가 필요 없습니다. 문서의 수치는 모두 연습용 가상 자료입니다.' : '';
-  const intro = fallback.intro(course.title || defaults?.title || '튜토리얼', `${course.description ?? defaults?.description ?? '선택한 모듈을 따라 해 봅니다.'}\n${moduleNames}\n임시 문서에서 연습하며 완료할 때 내 문서함에 저장합니다.${note}`);
+  // 소개 글: 설명 · 순서 · 임시 문서 안내 · 잘못 눌렀을 때의 [다시 하기](2026-11-18 — 게임의 재시작처럼 단계마다 되돌릴 수 있음을 처음에 알린다)
+  const intro = fallback.intro(course.title || defaults?.title || '튜토리얼', `${course.description ?? defaults?.description ?? '선택한 모듈을 따라 해 봅니다.'}\n${groups.length > 1 ? `순서: ${moduleNames}\n` : ''}임시 문서에서 연습하며 완료할 때 내 문서함에 저장합니다.${note}\n잘못 눌러도 괜찮아요 — [↻ 다시 하기]로 그 단계를 처음부터 다시 할 수 있습니다.`);
   const steps = [{ ...intro, id: 'course/intro', moduleKey: null, originalTitle: intro.title }];
   for (const group of groups) {
     const { entry, descriptor, selected } = group;

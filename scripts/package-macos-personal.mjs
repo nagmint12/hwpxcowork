@@ -130,6 +130,7 @@ fs.copyFileSync(path.join(root, 'deploy/portable/personal.mjs'), path.join(paylo
 put(path.join(payloadDir, 'app/scripts/desktop-ai.mjs'), fs.readFileSync(path.join(root, 'deploy/desktop/desktop-ai.mjs'), 'utf8').replaceAll("'../../server/", "'../server/"));
 fs.copyFileSync(path.join(root, 'deploy/desktop/cli-versions.mjs'), path.join(payloadDir, 'app/scripts/cli-versions.mjs'));
 for (const name of ['release-downloads.js', 'download-page.js', 'download-page.css']) fs.copyFileSync(path.join(root, 'server', name), path.join(payloadDir, 'app/server', name));
+fs.cpSync(path.join(root, 'web/icons/download'), path.join(payloadDir, 'app/web/icons/download'), { recursive: true });
 // AI 실행기 창(deploy/desktop/runners.mjs — Windows 앱과 같은 main.mjs)이 띄우는 실행기 파일
 for (const need of RUNNER_PAYLOAD_FILES) if (!fs.existsSync(path.join(payloadDir, 'app', need))) throw new Error('앱 묶음에 실행기 파일이 없습니다: ' + need);
 const productAudit = auditDesktopProduct({ payload: path.join(payloadDir, 'app'), studioDir, enginePkg, root });

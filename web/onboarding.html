@@ -8,11 +8,11 @@
   <link rel="stylesheet" href="/onboarding.css">
 </head>
 <body>
-  <div class="welcome-shell">
-    <header><a class="brand" href="/onboarding.html"><img src="/icons/icon-192.png?v=20261118" alt="">HWPX 공동 검토</a><a id="skip" href="/?teaser=0&welcome=start">건너뛰고 시작</a></header>
-    <main id="welcome" aria-labelledby="step-title"></main>
-    <footer>선택은 시작 안내에만 사용합니다. 지금 연결된 계정이나 서버 설정은 바뀌지 않습니다.</footer>
-  </div>
+  <header class="welcome-header"><div class="shell header-inner">
+    <a class="brand" href="/?teaser=0"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
+    <a id="skip" href="/?teaser=0&welcome=start">웹에서 바로 시작 <span aria-hidden="true">↗</span></a>
+  </div></header>
+  <main id="welcome" class="shell" aria-labelledby="step-title"></main>
   <script type="module" src="/onboarding.js"></script>
 </body>
 </html>

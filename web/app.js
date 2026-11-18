@@ -34,6 +34,7 @@ import { AdminServerPanel } from './admin.js';
 import { PersonalAiPanel, AiRunPanel } from './personal-ai.js';
 import { OrchestrationPanel } from './orchestration.js';
 import { DriveTab } from './drive.js';
+import { SideSplitter, useSideWidth } from './side-splitter.js';
 import { ICON } from './icons.js';
 import { LocalFoldersDialog, ReviewServersDialog, ReviewDialog, localTip, localLabel } from './local.js';
 import { LibraryTree, AccessDialog, MoveDialog, NameDialog, PUBLIC_ROOT, parseLocKey, locKey, locExists, foldersAt, docsAt, crumbs, permsAt, docLoc, docBadge, SORTS, DEFAULT_SORT, sortOk, sortDocs, sortFolders, nextSort } from './library.js';
@@ -91,14 +92,33 @@ async function enterApp(me, requested = state.route) {
 
 // ───────── 로그인 ─────────
 const Login = {
-  template: `<div class="login"><h1>HWPX 공동 검토</h1>
-    <p class="muted">관리자에게 받은 접속 토큰을 넣으세요.</p>
-    <p class="muted" v-if="localHost" data-testid="login-local-hint">이 PC의 관리자는 시작 아이콘(시작 파일)으로 다시 열면 바로 들어갑니다.</p>
-    <p class="muted" v-if="tryHint" data-testid="login-tutorial-hint">체험용 접속 토큰: <strong>{{ tryHint }}</strong>{{ tryHint.includes('~') ? ' 중 하나를' : '을' }} 입력하세요.</p>
-    <input v-model="token" placeholder="토큰" @keyup.enter="go" aria-label="접속 토큰"/>
-    <p class="err" v-if="err">{{ err }}</p>
-    <div class="login-actions"><button class="primary" :disabled="busy" @click="go">{{ busy ? '여는 중…' : '들어가기' }}</button><a class="login-guide" href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a><a class="login-video" href="/teaser/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상 다시 보기</a><a class="login-guide" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-replay">나에게 맞게 시작하기</a></div>
-    <p class="muted" style="margin-top:16px">본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다. 편집기는 rhwp(MIT)입니다.</p></div>`,
+  template: `<div class="entry-page">
+    <header class="entry-header"><div class="entry-shell entry-header-inner">
+      <a class="entry-brand" href="/?teaser=0"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
+      <nav aria-label="시작 도구"><a href="/download">다운로드</a><a href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a></nav>
+    </div></header>
+    <main class="entry-shell entry-main">
+      <section class="entry-intro">
+        <h1>HWPX 공동 검토</h1>
+        <p>HWPX 문서를 함께 편집하고 변경 내용과 제안을 검토하세요.</p>
+        <div class="entry-actions"><a class="btnlike entry-start" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-replay">나에게 맞게 시작하기 <span aria-hidden="true">→</span></a>
+        <a class="entry-video" href="/teaser/?intro=1&next=%2F%3Fteaser%3D0" data-testid="intro-replay">소개 영상</a></div>
+      </section>
+      <section class="login" aria-labelledby="login-title">
+        <h2 id="login-title">문서함에 들어가기</h2>
+        <p class="login-lead">관리자에게 받은 접속 토큰을 입력하세요.</p>
+        <form @submit.prevent="go">
+          <label for="login-token">접속 토큰</label>
+          <input id="login-token" v-model="token" autocapitalize="off" spellcheck="false" :aria-invalid="err ? 'true' : null" :aria-describedby="err ? 'login-error' : null"/>
+          <p id="login-error" class="err" v-if="err" role="alert">{{ err }}</p>
+          <button type="submit" class="primary" :disabled="busy">{{ busy ? '여는 중…' : '들어가기' }}</button>
+        </form>
+        <p class="login-hint" v-if="tryHint" data-testid="login-tutorial-hint">체험용 접속 토큰 <strong>{{ tryHint }}</strong>{{ tryHint.includes('~') ? ' 중 하나를' : '을' }} 입력하세요.</p>
+        <p class="login-hint" v-if="localHost" data-testid="login-local-hint">이 PC의 관리자는 앱이나 시작 파일로 바로 들어갈 수 있습니다.</p>
+      </section>
+    </main>
+    <footer class="entry-shell entry-footer">한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고했습니다. 편집기는 rhwp(MIT)입니다.</footer>
+  </div>`,
   setup() {
     const token = ref(state.token); const err = ref(''); const busy = ref(false);
     // 체험 토큰 안내: 서버가 알려 준 글(/api/config tutorialLogin — 체험 계정이 없으면 null, 2026-11-17).
@@ -121,33 +141,27 @@ const Login = {
 // 왼쪽 문서함 나무(공용 · 개인 · 공유받은) | 오른쪽 위치 줄 · [새 폴더] [올리기] [권한] · 폴더와 문서 목록. 찾기 칸에 글을 넣으면 보이는 문서 전부에서 찾는다.
 // 지금 자리는 이 브라우저에 기억한다(hwpx.lib.loc). 폴더·문서 행의 [옮기기]·[권한]·[삭제]는 그럴 권한이 있을 때만 보인다.
 const LOC_KEY = 'hwpx.lib.loc';
+const LIB_SIDE_W = { min: 180, max: 520 };   // 문서함 나무 폭 범위(px) — 기본 240 은 library.css
 const DocList = {
-  components: { PersonalAiPanel, AiRunPanel, OrchestrationPanel, DriveTab, LibraryTree, AccessDialog, MoveDialog, NameDialog, LocalFoldersDialog, ReviewServersDialog, ReviewDialog },
+  components: { PersonalAiPanel, AiRunPanel, OrchestrationPanel, DriveTab, LibraryTree, AccessDialog, MoveDialog, NameDialog, LocalFoldersDialog, ReviewServersDialog, ReviewDialog, SideSplitter },
   template: `<div class="listpage">
-    <div class="topbar"><span class="title">HWPX 공동 검토</span><span class="muted me-role" :data-role="me.role">{{ me.name }} · {{ roleLabel(me.role) }}</span><span class="spacer"></span>
-      <a v-if="me.role==='admin'" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
-      <a v-if="me.tutorial" class="btnlike small tutorial-nav" href="#/tutorial" data-testid="tutorial-nav">튜토리얼</a>
-      <a class="btnlike small" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-list">시작 안내</a>
-      <a class="btnlike help-link" href="/help.html" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
-      <button class="small" @click="logout">나가기</button></div>
-    <div class="libpage" :class="{'drive-mode':showDrive}">
+    <header class="topbar listbar"><div class="listbar-inner">
+      <div class="listbar-identity"><a class="entry-brand" href="#/"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
+        <span class="muted me-role" :data-role="me.role">{{ me.name }} · {{ roleLabel(me.role) }}</span></div>
+      <nav class="listbar-nav" aria-label="문서함 메뉴">
+        <a v-if="me.role==='admin'" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
+        <a v-if="me.tutorial" class="btnlike small tutorial-nav" href="#/tutorial" data-testid="tutorial-nav">튜토리얼</a>
+        <a class="btnlike small" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-list">시작 안내</a>
+        <a class="btnlike help-link" href="/help.html" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
+        <button class="small" @click="logout">나가기</button>
+      </nav></div></header>
+    <div class="libpage" :class="{'drive-mode':showDrive}" :style="sideW != null ? { '--lib-side-w': sideW + 'px' } : null">
       <aside class="libside"><LibraryTree v-if="lib" :lib="lib" :cur="cur" :me="me" :drive-active="showDrive" @go="goLibrary" @drive="showDrive=true"/></aside>
+      <SideSplitter class="lib-splitter" v-model="sideW" :min="SIDE_W.min" :max="SIDE_W.max" :main-min="420" label="문서함 나무 폭 조절" data-testid="lib-splitter" @commit="saveSideW"/>
       <div class="doclist">
         <section v-if="showDrive" class="list-drive"><DriveTab :library="lib" :library-location="cur" @imported="driveImported"/></section>
         <template v-else>
-        <details class="list-connections" v-if="config" data-testid="list-connections" @toggle="onConnToggle"><summary>AI 연결 <span class="muted" v-if="connSummary" :title="connTip" data-testid="list-conn-state">— {{ connSummary }}</span></summary>
-          <p v-if="personalLine">{{ personalLine }}</p>
-          <ol class="ai-ways" style="margin:6px 0;padding-left:20px" data-testid="ai-ways">
-            <li data-way="subscription" :title="WAY_TIPS.subscription"><b>내 PC의 구독 AI</b> <span class="muted">· 기본 · 추가 비용 없음</span> — Codex(ChatGPT 로그인) · Claude Code(Claude 로그인) 실행기 <a href="/help.html#agents" target="_blank" rel="noopener">설정 방법</a></li>
-            <li data-way="chatgpt-app" :title="WAY_TIPS.app"><b>ChatGPT 앱 연결</b> <span class="muted">· 고급 선택</span> — MCP 주소 <code>{{ urls.mcpUrl }}</code> <a href="/help.html#chatgpt-oauth" target="_blank" rel="noopener">설정 방법</a></li>
-            <li data-way="api-key" :title="WAY_TIPS.key"><b>내 AI 키</b> <span class="muted">· 선택 · 사용료 별도</span><span v-if="keyLine"> — {{ keyLine }}</span></li>
-          </ol>
-          <p><a href="/help.html#ai" target="_blank" rel="noopener">연결 방법</a> · 사용자별 토큰으로 연결합니다.</p>
-          <p>지금 접속한 주소: <code>{{ urls.currentWebUrl }}</code></p>
-          <p>공유할 서버 주소: <code>{{ urls.sharedWebUrl }}</code><span v-if="urls.localOnly" class="muted"> — 이 PC 전용입니다. 설명서에서 공유 주소를 점검하세요.</span></p></details>
-        <AiRunPanel/>
-        <PersonalAiPanel/>
-        <OrchestrationPanel/>
+        <h1 class="lib-title">문서함</h1>
         <div class="lib-head">
           <nav class="lib-crumbs" aria-label="위치"><template v-for="(c, i) in crumbList" :key="i"><span v-if="i" class="muted">›</span><a href="#/" :class="{ cur: i === crumbList.length - 1 }" @click.prevent="go(c.loc)">{{ c.label }}</a></template></nav>
           <span class="spacer"></span>
@@ -166,11 +180,11 @@ const DocList = {
           </template>
           <span class="muted lib-note" v-if="placeNote" :title="placeNote.tip">{{ placeNote.text }}</span>
         </div>
-        <table class="libtable"><thead><tr><th class="sortable" :aria-sort="ariaSort('name')" title="이름순으로 정렬(다시 누르면 반대로)" data-sort="name" @click="sortBy('name')">문서<span class="sort-ic" v-if="sortField === 'name'">{{ sortArrow }}</span></th><th>버전</th><th>제안(대기/적용)</th><th>AI 작업 대기</th><th class="sortable" :aria-sort="ariaSort('updated')" title="마지막 수정순으로 정렬(다시 누르면 반대로)" data-sort="updated" @click="sortBy('updated')">마지막 수정<span class="sort-ic" v-if="sortField === 'updated'">{{ sortArrow }}</span></th><th></th></tr></thead>
+        <div class="lib-table-wrap"><table class="libtable"><thead><tr><th class="sortable" :aria-sort="ariaSort('name')" title="이름순으로 정렬(다시 누르면 반대로)" data-sort="name" @click="sortBy('name')">문서<span class="sort-ic" v-if="sortField === 'name'">{{ sortArrow }}</span></th><th>버전</th><th class="doc-props">제안(대기/적용)</th><th class="doc-reqs">AI 작업 대기</th><th class="sortable" :aria-sort="ariaSort('updated')" title="마지막 수정순으로 정렬(다시 누르면 반대로)" data-sort="updated" @click="sortBy('updated')">마지막 수정<span class="sort-ic" v-if="sortField === 'updated'">{{ sortArrow }}</span></th><th></th></tr></thead>
         <tbody>
           <tr class="folder" v-for="f in subfolders" :key="f.id" :data-folder="f.id" @click="go(folderLoc(f))">
-            <td colspan="4"><span class="ic lib-fic" v-html="ICON.folder"></span><b>{{ f.name }}</b><span class="lib-badge pc" v-if="f.local && f.local.root" :title="linkTip(f)"><span class="ic" v-html="ICON.pc"></span>PC</span><span class="muted" v-if="f.inherit === false" title="이 폴더는 권한을 직접 정했습니다"> · <span class="ic" v-html="ICON.people"></span></span></td>
-            <td class="muted">{{ f.createdBy || '' }}</td>
+            <td class="lib-name" colspan="4"><span class="ic lib-fic" v-html="ICON.folder"></span><b>{{ f.name }}</b><span class="lib-badge pc" v-if="f.local && f.local.root" :title="linkTip(f)"><span class="ic" v-html="ICON.pc"></span>PC</span><span class="muted" v-if="f.inherit === false" title="이 폴더는 권한을 직접 정했습니다"> · <span class="ic" v-html="ICON.people"></span></span></td>
+            <td class="muted folder-by">{{ f.createdBy || '' }}</td>
             <td class="lib-acts" @click.stop>
               <button class="icon" v-if="f.perms.includes('manage')" title="이름 바꾸기" aria-label="이름 바꾸기" @click="dlg = { type: 'name', mode: 'rename', folder: f }" v-html="ICON.edit"></button>
               <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="옮기기" aria-label="옮기기" @click="dlg = { type: 'move', item: { kind: 'folder', id: f.id, name: f.name, loc: parentOf(f), folder: f, localOnly: !!f.local } }" v-html="ICON.move"></button>
@@ -178,9 +192,9 @@ const DocList = {
               <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="폴더 삭제(비어 있어야)" aria-label="폴더 삭제" @click="removeFolder(f)" v-html="ICON.trash"></button>
               <button class="icon" v-if="f.local && f.local.root && lib.local && lib.local.canLink" title="연결 끊기 — PC 의 파일은 그대로 남습니다" aria-label="연결 끊기" data-testid="local-unlink" @click="unlinkFolder(f)" v-html="ICON.x"></button></td></tr>
           <tr class="doc" v-for="d in shownDocs" :key="d.id" :data-doc="d.id" :class="{selected:selectedDoc===d.id}" :aria-selected="selectedDoc===d.id" tabindex="0" @click="selectedDoc=d.id" @dblclick="open(d)" @keydown.enter.self.prevent="open(d)" title="제목을 누르거나 두 번 클릭·Enter로 문서 열기">
-            <td><a class="doc-link" :href="'#/doc/' + d.id" data-testid="doc-open-title" title="문서 열기" @click.stop><b>{{ d.title }}</b></a><span class="lib-badge" v-if="badge(d)" :title="badge(d).title"><span class="ic" v-html="ICON[badge(d).icon]"></span>{{ badge(d).text }}</span><span class="lib-badge pc" v-if="d.local" :class="'st-' + d.local.state" :title="localTip(d.local)" data-testid="doc-pc"><span class="ic" v-html="ICON.pc"></span>{{ localLabel(d.local) }}</span><span class="lib-badge rv" v-if="d.review" :title="reviewTip(d)" data-testid="doc-review"><span class="ic" v-html="ICON.send"></span>{{ d.review.server }}</span>
+            <td class="lib-name"><a class="doc-link" :href="'#/doc/' + d.id" data-testid="doc-open-title" title="문서 열기" @click.stop><b>{{ d.title }}</b></a><span class="lib-badge" v-if="badge(d)" :title="badge(d).title"><span class="ic" v-html="ICON[badge(d).icon]"></span>{{ badge(d).text }}</span><span class="lib-badge pc" v-if="d.local" :class="'st-' + d.local.state" :title="localTip(d.local)" data-testid="doc-pc"><span class="ic" v-html="ICON.pc"></span>{{ localLabel(d.local) }}</span><span class="lib-badge rv" v-if="d.review" :title="reviewTip(d)" data-testid="doc-review"><span class="ic" v-html="ICON.send"></span>{{ d.review.server }}</span>
               <div class="muted">{{ d.fileName }} · {{ d.createdBy }}<template v-if="sortField === 'created' && d.createdAt"> · {{ fmt(d.createdAt) }} 올림</template><template v-if="query.trim()"> · {{ placeOf(d) }}</template></div></td>
-            <td class="doc-ver" :title="verTip(d)">{{ verText(d) }}</td><td>{{ d.proposals.pending }} / {{ d.proposals.applied }}</td><td>{{ d.requests }}</td><td>{{ fmt(d.updatedAt) }}</td>
+            <td class="doc-ver" :title="verTip(d)">{{ verText(d) }}</td><td class="doc-props">{{ d.proposals.pending }} / {{ d.proposals.applied }}</td><td class="doc-reqs">{{ d.requests }}</td><td class="doc-updated" title="마지막 수정">{{ fmt(d.updatedAt) }}</td>
             <td class="lib-acts" @click.stop>
               <!-- 열기는 문서 그림, 이름 바꾸기는 연필(폴더 줄과 같은 그림) — 2026-11-17: 둘 다 연필이라 구분되지 않았다 -->
               <button class="icon" title="문서 열기" aria-label="문서 열기" @click="open(d)" v-html="ICON.file"></button>
@@ -189,7 +203,24 @@ const DocList = {
               <button class="icon" v-if="has(d, 'manage')" title="옮기기" aria-label="옮기기" @click="dlg = { type: 'move', item: { kind: 'doc', id: d.id, name: d.title, loc: locOfDoc(d), localOnly: !!d.local } }" v-html="ICON.move"></button>
               <button class="icon" v-if="has(d, 'manage')" title="권한" aria-label="권한" @click="dlg = { type: 'access', target: docTarget(d) }" v-html="ICON.people"></button>
               <button class="icon" v-if="has(d, 'delete')" title="삭제" aria-label="삭제" @click="remove(d)" v-html="ICON.trash"></button></td></tr>
-          <tr v-if="!subfolders.length && !shownDocs.length"><td colspan="6" class="muted">{{ query.trim() ? '찾는 문서가 없습니다' : loaded ? (can('write') ? '비어 있습니다. HWPX 를 올리거나 새 문서로 시작하세요.' : '비어 있습니다') : '읽는 중…' }}</td></tr></tbody></table>
+          <tr class="lib-empty" v-if="!subfolders.length && !shownDocs.length"><td colspan="6" class="muted">{{ query.trim() ? '찾는 문서가 없습니다' : loaded ? (can('write') ? 'HWPX를 올리거나 새 문서를 만들어 보세요.' : '문서가 없습니다') : '읽는 중…' }}</td></tr></tbody></table></div>
+        <section class="lib-ai" aria-labelledby="lib-ai-title">
+          <h2 id="lib-ai-title">AI 설정</h2>
+          <details class="list-connections" v-if="config" data-testid="list-connections" @toggle="onConnToggle"><summary>AI 연결 <span class="muted" v-if="connSummary" :title="connTip" data-testid="list-conn-state">— {{ connSummary }}</span></summary>
+            <p v-if="personalLine">{{ personalLine }}</p>
+            <ol class="ai-ways" data-testid="ai-ways">
+              <li data-way="subscription" :title="WAY_TIPS.subscription"><b>내 PC의 구독 AI</b> — Codex·Claude Code 실행기 <a href="/help.html#agents" target="_blank" rel="noopener">설정 방법</a></li>
+              <li data-way="chatgpt-app" :title="WAY_TIPS.app"><b>ChatGPT 앱</b> — MCP 주소 <code>{{ urls.mcpUrl }}</code> <a href="/help.html#chatgpt-oauth" target="_blank" rel="noopener">설정 방법</a></li>
+              <li data-way="api-key" :title="WAY_TIPS.key"><b>내 AI 키</b> <span class="muted">· 사용료 별도</span><span v-if="keyLine"> — {{ keyLine }}</span></li>
+            </ol>
+            <p>현재 주소 <code>{{ urls.currentWebUrl }}</code></p>
+            <p>공유 주소 <code>{{ urls.sharedWebUrl }}</code><span v-if="urls.localOnly" class="muted"> · 이 PC 전용</span></p>
+            <p><a href="/help.html#ai" target="_blank" rel="noopener">연결 설명서</a></p>
+          </details>
+          <AiRunPanel/>
+          <PersonalAiPanel/>
+          <OrchestrationPanel/>
+        </section>
         </template>
       </div>
     </div>
@@ -206,6 +237,8 @@ const DocList = {
     const sectionKey = 'hwpx.lib.section:' + me.name;
     const readSection = () => { try { return sessionStorage.getItem(sectionKey) === 'drive'; } catch { return false; } };
     const showDrive = ref(readSection());
+    // 왼쪽 나무 폭(web/side-splitter.js — 경계선을 끌어 바꾸고 이 브라우저에 기억, null = 기본 240px)
+    const { width: sideW, save: saveSideW } = useSideWidth('hwpx.lib.sideW', LIB_SIDE_W);
     const selectedDoc = ref('');
     watch(showDrive, value => { try { sessionStorage.setItem(sectionKey, value ? 'drive' : 'library'); } catch { /* 저장 못 함 */ } });
     const query = ref('');
@@ -397,7 +430,7 @@ const DocList = {
     const connTip = computed(() => { const st = conn.value; const a = st?.automatic; if (!a) return ''; return a.method == null && !st.apiOnly ? NO_AI_TIP : a.message || ''; });
     const folderLoc = (f) => ({ space: f.space, owner: f.space === 'private' ? f.owner : null, folderId: f.id });
     return {
-      lib, loaded, cur, query, dlg, showDrive, selectedDoc, me, config: state.config, urls, personalLine, keyLine, WAY_TIPS, connSummary, connTip, onConnToggle, crumbList, subfolders, shownDocs, curAccess, placeNote,
+      lib, loaded, cur, query, dlg, showDrive, sideW, saveSideW, SIDE_W: LIB_SIDE_W, selectedDoc, me, config: state.config, urls, personalLine, keyLine, WAY_TIPS, connSummary, connTip, onConnToggle, crumbList, subfolders, shownDocs, curAccess, placeNote,
       sort, sortField, sortArrow, sortBy, ariaSort, SORTS,
       go, goLibrary, can, has, badge, placeOf, locOfDoc, parentOf, folderLoc, folderTarget, docTarget, upload, uploading, saveName, nameDlg, canRename, removeFolder, remove, open, logout, load, driveImported,
       localChanged, linkTip, reviewTip, unlinkFolder, localTip, localLabel,
@@ -511,7 +544,7 @@ const DocView = {
       <button class="agentpill" :class="{ on: !!env.connected }" data-testid="agent-pill" :aria-label="agentLabel" :title="agentTip" @click="openAgentHelp"><span class="ap-full">{{ agentLabel }}</span><span class="ap-short" aria-hidden="true">{{ env.connected ? '● AI' : '○ AI' }}</span></button>
       <a v-if="stateMeTutorial" class="btnlike small tourbtn tutorial-nav" href="#/tutorial" data-testid="tutorial-doc-nav">튜토리얼</a>
       <span v-if="s.info?.tutorialSession" class="tutorial-temp-label">임시 연습 문서</span>
-      <button v-if="tourOn" class="small tourbtn" data-testid="tour-open" @click="openTour">{{ tourPaused ? '튜토리얼 계속하기' : '튜토리얼 안내' }}</button>
+      <button v-if="tourOn && tourPaused" class="small tourbtn" data-testid="tour-open" @click="openTour">튜토리얼 계속하기</button>
       <button v-if="s.info?.tutorialSession" class="small primary" data-testid="tutorial-complete" :disabled="tutorialSaving" @click="completeTutorial">{{ tutorialSaving ? '저장 중…' : '완료하고 문서함에 저장' }}</button>
       <button v-if="s.info?.tutorialCompletedAt && nextCourse" class="small" data-testid="tutorial-next-course" :disabled="tutorialSaving" @click="startNextTutorial">다음 튜토리얼로 가기</button>
       <button class="small savebtn" data-testid="save-hangul" :disabled="saving" :title="saveTip" @click="saveHangul"><span v-if="saving" class="spin dark"></span>한글로 저장</button>
@@ -1253,7 +1286,7 @@ const DocView = {
           if (resume) state.tutorialResumeDocId = null;
           state.tutorialIntroDocId = null;
           await startTourHere({ showIntro, resume });
-        } catch (e) { toastError(e, '안내 진행 정보를 읽지 못했습니다: '); }
+        } catch (e) { tourPaused.value = true; toastError(e, '안내 진행 정보를 읽지 못했습니다: '); }
       }
     });
     // ── 체험(공모전 체험 계정 — server/tutorial.js·web/tutorial.js) ──
@@ -1328,7 +1361,7 @@ const DocView = {
     async function openTour() {
       tour?.stop(); tour = null;
       try { await loadTour(props.id); await startTourHere({ resume: true }); }
-      catch (e) { toastError(e, '튜토리얼 안내를 다시 열지 못했습니다: '); }
+      catch (e) { tourPaused.value = true; toastError(e, '튜토리얼 안내를 다시 열지 못했습니다: '); }
     }
     onBeforeUnmount(() => {
       tutorialClosed = true;

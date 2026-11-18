@@ -185,6 +185,8 @@ test('download: Windows 앱 설치 파일(.exe)을 보여 주고 내려주며, �
     const html = await (await fetch(base)).text();
     for (const p of packages) assert.ok(html.includes(`/download/${p.file}`), p.file);
     assert.ok(html.includes('id="windows-app"') && html.includes('실행기 관리') && html.includes('Windows 앱 설치 안내'));
+    assert.match(html, /href="\/download\/HwpxCowork-Setup-[^"]+\.exe" download[^>]*><span>설치 파일 다운로드<\/span>/);
+    assert.ok(html.includes('받은 .exe 파일 실행') && !html.includes('클릭해서 설치'));
     assert.ok(!html.includes('id="windows-personal"') && !html.includes('시작.bat'), '옛 bat 묶음 안내는 없다');
     for (const phrase of ['설치된 글꼴', '미검증']) assert.ok(!html.includes(phrase), phrase);
     const exe = await fetch(`${base}/HwpxCowork-Setup-0.6.0-20261117.exe`);

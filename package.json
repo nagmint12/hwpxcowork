@@ -31,6 +31,7 @@
     "package:macos:local": "node scripts/package-macos-local.mjs",
     "test:personal": "node --test tests/local_folders.test.mjs tests/personal_app.test.mjs",
     "test:ui:local": "python -I tests/ui_local.py",
+    "test:ui:library": "python -I tests/ui_library_layout.py",
     "build:submission": "python scripts/build-submission.py",
     "test:portable": "node --test tests/package_portable.test.mjs",
     "build:manuals": "node scripts/build-manuals.mjs",

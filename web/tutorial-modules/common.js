@@ -79,7 +79,7 @@ export function typeInTutorialComposer(env, value, title = null, { instant = fal
 }
 
 export function openTutorialMemoReply(d, memo) {
-  if (!memo) throw new Error('연습 메모를 찾지 못했습니다. 준비 단계부터 다시해 주세요.');
+  if (!memo) throw new Error('연습 메모를 찾지 못했습니다. [다시 하기]를 눌러 주세요.');
   d.s.active = { kind: 'memo', id: memo.id };
   d.openReply({ key: Date.now(), kind: 'memo', memoId: memo.id, ref: memo.ref, quote: memo.body ?? memo.text ?? '', anchor: null });
 }

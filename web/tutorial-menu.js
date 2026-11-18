@@ -17,7 +17,7 @@ export const TutorialMenu = {
     <p v-else-if="!data.items?.length">튜토리얼을 준비 중입니다. 잠시 후 다시 열어 주세요.</p>
     <div class="tutorial-grid"><article v-for="item in data.items" :key="item.id" class="tutorial-card" :data-tutorial="item.id">
       <h2><span class="tutorial-number">{{ item.number }}</span>{{ item.title }}</h2><p>{{ item.description }}</p>
-      <ol v-if="item.modules?.length" class="tutorial-module-summary"><li v-for="module in item.modules" :key="module.key">{{ module.title || moduleTitle(module.moduleId) }}</li></ol>
+      <ol v-if="item.modules?.length > 1" class="tutorial-module-summary"><li v-for="module in item.modules" :key="module.key">{{ module.title || moduleTitle(module.moduleId) }}</li></ol>
       <p class="muted">{{ item.guided ? '안내를 따라하여 진행' : '관리자 참고 문서 · 실습 없음' }}</p>
       <button class="primary" :disabled="!!busy" @click="start(item)">{{ busy===item.id ? '준비 중…' : item.reference ? '참고 문서 열기' : '처음부터 시작' }}</button>
     </article></div>
