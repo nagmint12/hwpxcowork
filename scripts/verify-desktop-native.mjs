@@ -47,7 +47,11 @@ if (process.platform === 'darwin') {
 }
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(HWPX_|ANTHROPIC_|OPENAI_|GEMINI_API_KEY|GOOGLE_API_KEY|BAZE_API_KEY|ELECTRON_|NODE_OPTIONS|NODE_PATH)/i.test(key)));
 if (appDir) Object.assign(env, { HWPX_DESKTOP_PAYLOAD: payload, HWPX_DESKTOP_NODE: process.execPath });
-const child = spawn(app, [...(appDir ? [path.resolve(appDir)] : []), '--verification-profile', profile], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+// 사용자가 여는 것처럼 창을 보이게 띄운다(2026-11-18). windowsHide:true 는 Windows 에서 첫 창을 SW_HIDE 로 띄워(STARTUPINFO)
+// 문서가 visibilityState 'hidden' 이 되고, 데스크톱 편집기는 설치 글꼴을 읽기 전에 창이 보이기를 기다리므로(studio/build/font-selection-patches.mjs
+// desktop-local-font-automatic-preparation) '문서 초기화 중'에 멈추거나 글꼴 단계가 'Page needs to be visible' 로 실패했다(약 3번에 1번).
+// 시험이 다른 창 뒤에서 돌 때 Chromium 이 가려진 창을 hidden 으로 바꾸지 않게 가림 계산도 끈다(시험 환경만 — 앱 동작은 그대로).
+const child = spawn(app, [...(appDir ? [path.resolve(appDir)] : []), '--verification-profile', profile, '--disable-features=CalculateNativeWinOcclusion'], { env, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
 // Do not persist stdout: the personal server's bootstrap URL includes a private token.
 child.stdout.resume(); child.stderr.resume();
 let exited = false, exitCode; child.once('exit', code => { exited = true; exitCode = code; });
