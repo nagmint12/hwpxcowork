@@ -60,7 +60,7 @@ export function installAdminRoutes({ app, config, auth, wrap, restartControl, in
   // 튜토리얼 AI: 체험 요청을 처리할 연결(API·로컬 AI·ChatGPT·Codex·Claude Code — 재시작 없이 바로 적용)
   const tutorialAi = createAdminTutorialAi({ config, service });
   app.get('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.snapshot())));
-  app.put('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.save(req.body?.provider ?? null, req.body?.revision))));
+  app.put('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.save(req.body?.provider ?? null, req.body?.revision, { examples: req.body?.examples }))));
   return settings;
 }
 

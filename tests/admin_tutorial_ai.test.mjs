@@ -58,3 +58,19 @@ test('선택지마다 지금 쓸 수 있는지 보여 주고, 고르면 파일�
   assert.equal('provider' in JSON.parse(fs.readFileSync(s.configFile, 'utf8')).tutorial, false);
   assert.equal(tutorialConfig(s.config).shareAgent, 'hwpx-api-worker');
 });
+
+test('연습 문서 처리 방식(2026-11-18): 예시 답변 ↔ 공유 AI 를 고르면 파일과 실행 중 설정에 바로 반영, 안 보내면 그대로', (t) => {
+  const s = setup(t);
+  const file = () => JSON.parse(fs.readFileSync(s.configFile, 'utf8')).tutorial;
+  let snap = s.admin.snapshot();
+  assert.equal(snap.examples, true); assert.equal(snap.examplesEditable, true);   // 기본 = 예시 답변
+  snap = s.admin.save('claude-code', snap.revision, { examples: false });
+  assert.equal(snap.examples, false); assert.equal(file().examples, false); assert.equal(tutorialConfig(s.config).examples, false);
+  assert.equal(file().provider, 'claude-code');
+  snap = s.admin.save('local', snap.revision);   // examples 를 보내지 않으면 그대로(공유 AI)
+  assert.equal(snap.examples, false); assert.equal(file().provider, 'local');
+  assert.throws(() => s.admin.save('local', snap.revision, { examples: 'yes' }), { code: 'INVALID_TUTORIAL_AI' });
+  snap = s.admin.save('local', snap.revision, { examples: true });   // 기본으로 돌리면 키를 지운다
+  assert.equal(snap.examples, true); assert.equal('examples' in file(), false); assert.equal(tutorialConfig(s.config).examples, true);
+  assert.equal(file().shareAgent, 'hwpx-api-worker');
+});

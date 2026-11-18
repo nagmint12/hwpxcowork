@@ -6,7 +6,8 @@ import { windowsSetupSettings, windowsSetupZip } from './windows-setup.js';
 
 const safeName = (name) => typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && name !== '.' && name !== '..';
 // 공개 배포 파일만 허용한다: PC용 묶음(Windows 개인용·공동 작업용·Mac 편집기 포함)과 버전이 명시된 Android APK.
-const RELEASE_FILE = /^(?:hwpx-(?:(?:cowork-server|cowork-windows|cowork-macos|ai-worker|cowork-user-app)-[A-Za-z0-9._-]+\.(?:zip|tar\.gz)|cowork-\d+\.\d+\.\d+-\d{8}\.zip)|(?:hwp-document-lite|rhwp-editor|hwpx-cowork)-\d+\.\d+\.\d+\.apk)$/;
+// 2026-11-17: Windows 앱 설치 파일(HwpxCowork-Setup-<판>-<날짜>.exe)도 — bat 묶음 대신 클릭 설치(사용자 결정)
+const RELEASE_FILE = /^(?:hwpx-(?:(?:cowork-server|cowork-windows|cowork-macos|ai-worker|cowork-user-app)-[A-Za-z0-9._-]+\.(?:zip|tar\.gz)|cowork-\d+\.\d+\.\d+-\d{8}\.zip)|(?:hwp-document-lite|rhwp-editor|hwpx-cowork)-\d+\.\d+\.\d+\.apk|HwpxCowork-Setup-\d+\.\d+\.\d+-\d{8}\.exe)$/;
 
 export function installReleaseDownloads(app, { root, releaseDir = process.env.HWPX_COWORK_RELEASE_DIR } = {}) {
   const current = () => {
@@ -41,7 +42,8 @@ export function installReleaseDownloads(app, { root, releaseDir = process.env.HW
     const r = readCurrent(res); if (!r) return;
     try {
       // 시작 안내의 설치 링크는 고른 운영 방식의 Windows 설치 묶음으로 보낸다(AI 는 설치 뒤 AI 연결.bat 에서 고른다).
-      const installer = r.packages.find(p => !p.archived && p.target === `windows-${mode}`);
+      // 2026-11-17: Windows 앱(windows-app)은 운영 방식을 처음 실행에서 고르므로 두 방식 모두 그 설치 파일로
+      const installer = r.packages.find(p => !p.archived && p.target === `windows-${mode}`) || r.packages.find(p => !p.archived && p.target === 'windows-app');
       if (installer) return res.set('Cache-Control', 'no-store').redirect(302, `/download/${encodeURIComponent(installer.file)}`);
       // 옛 간편 설치 링크도 완전 포함 파일로 연결한다. 받는 PC에서 추가 다운로드하지 않는다.
       const offline = r.packages.find(p => !p.archived && p.target === `windows-offline-${mode}-${ai}`);
@@ -71,6 +73,7 @@ export function installReleaseDownloads(app, { root, releaseDir = process.env.HW
     } catch { return res.status(404).json({ error: 'RELEASE_FILE_NOT_FOUND' }); }
     res.set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-cache');
     if (name.endsWith('.apk')) res.type('application/vnd.android.package-archive');
+    else if (name.endsWith('.exe')) res.type('application/vnd.microsoft.portable-executable');
     res.download(file, name);
   });
 }

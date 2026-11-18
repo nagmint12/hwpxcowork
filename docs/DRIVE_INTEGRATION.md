@@ -1,5 +1,39 @@
 # Cowork 드라이브 연결
 
+## 2026-11-17 두레이 서비스 API로 전환 (현재 방식)
+
+브라우저 확장프로그램 방식을 걷어 냈다. 사용자는 두레이 **개인 설정 → API → 개인 인증 토큰**에서 직접 토큰을 만든다. 그 토큰을 **드라이브 → 연결 설정**에 한 번 등록하면, 서버가 두레이 서비스 API로 그 사람의 **개인 드라이브 하나**만 다룬다. 발급·등록 절차와 관리자 메모·오류 조치는 [DOORAY_API_TOKEN.md](DOORAY_API_TOKEN.md)에 있다.
+
+- 코드
+  - API 클라이언트 `server/dooray-api.js`: 사이트 주소로 클라우드 판별. `Authorization: dooray-api`. 파일 307은 같은 두레이 도메인 https일 때만 따라간다. 429는 한 번 다시 보낸다.
+  - 서비스 `server/drive.js`, 경로 `server/routes/drive.js`
+    - 연결: `GET /api/drive`, `PUT·DELETE /api/drive/connection`, `POST /api/drive/connection/check`
+    - 작업: `POST /api/drive/actions`(list·download·upload·delete·rename)
+    - 보관 파일·문서함 경로는 예전과 같다.
+  - 토큰 암호문 `server/secret-box.js`: config 옆 `.hwpx-cowork-secret` 열쇠를 쓰며, 개인 AI 키와 같은 파일이다.
+  - 화면 `web/drive-explorer.js`
+- 정책(10-30)은 그대로다.
+  - 폴더 목록은 요청한 화면에만 건네고 저장하지 않는다.
+  - AI는 드라이브를 쓰지 않는다. MCP 드라이브 도구도 걷어 냈다.
+  - 쓰기는 본인이 화면에서 할 때만, 개인 드라이브에서만 한다.
+  - 삭제는 휴지통으로 옮긴다.
+  - 교체·이름 바꾸기·삭제는 목록에서 본 revision이 그대로일 때만 한다.
+- 없앤 것
+  - `extensions/drive-bridge`, 연결 코드·확장 토큰, 작업 선점·WebSocket(`/api/drive/bridge/*`), 확장 ZIP(`/api/drive/extension.zip`, `npm run package:drive`)
+  - 확장 시험 8개
+  - 사본은 `backups/dooray_drive_extension_2026-11-17/`에 있다. 예전 연결 기록(확장 토큰 해시·폴더 목록)은 서버가 사용자 기록을 읽을 때 지운다.
+- **프로젝트 드라이브(2026-11-18)**: 왼쪽 '드라이브' 목록에 [+ 프로젝트 추가] — 내 두레이 계정이 볼 수 있는 프로젝트(`GET /drive/v1/drives?type=project&scope=private|public`)를 그때 읽어 체크한 것만 허용 목록(`state.dooray.projects`, `PUT /api/drive/projects`)에 남기고 그것만 보인다. 허용 목록 밖 드라이브는 서버가 403(`DRIVE_SCOPE`). 프로젝트 드라이브는 목록·내려받기·문서함 가져오기·새 파일 올리기만, 교체·이름 바꾸기·삭제는 `DRIVE_READONLY`(함께 쓰는 공간). 토큰을 바꿔 다시 등록해도 같은 계정·사이트면 목록은 남는다. 실제 두레이: 볼 수 있는 프로젝트 16개 목록·허용·최상위 읽기 확인(읽기만 — 프로젝트 드라이브 올리기는 실제로는 아직 안 해 봄).
+- 시험: `npm run test:drive`
+  - 가짜 두레이 `tests/helpers/fake-dooray.mjs`가 가이드의 경로·307·401·429를 흉내 낸다.
+  - 서버 시험은 `HWPX_COWORK_DOORAY_API`(loopback만 받음)로 가짜 두레이를 부른다.
+- **실제 두레이 확인(2026-11-18, 공공 클라우드 `example.gov-dooray.com` → `api.gov-dooray.com`, 관리자 개인 드라이브 `test` 폴더)**: 연결 → 목록 → 새 시험 파일 올리기 → 내려받기(바이트 일치) → 이름 바꾸기 → 교체(새 내용 확인) → 휴지통으로 옮기기까지 모두 통과. 원래 파일은 그대로였다.
+  - 최상위 폴더(`type=folder&subTypes=root`)·`parentId` 목록(폴더·파일 함께)·multipart 필드 `file`·목록과 메타 revision 비교가 실제와 맞았다.
+  - 올리기·교체·내려받기는 `api.gov-dooray.com` 이 307 로 `file-api.gov-dooray.com/uploads/…`·`/downloads/…` 를 알려 주고, 그 주소로 토큰을 다시 붙여 처리됐다.
+  - 같은 날 운영 반영: `apply.mjs --apply`, `config.json` `drive.doorayUrl`, 서버 재시작(사본 `backups/dooray_api_deploy_2026-11-18/config.json`).
+- 자동 발급은 하지 않는다. 두레이 API에 토큰 발급 기능이 없다.
+
+아래는 확장프로그램 방식의 기록이다(2026-10-29 ~ 11-12).
+
 2026-10-29. cowork 서버에 접속해서 함께 편집하는 기존 방식은 유지한다. 오른쪽 기본 탭은 AI 작업 / 메모 / 드라이브이며, 자세히 보기에서 변경 요청·변경 추적·첨부·이력을 연다. 문서 목록 상단에서도 드라이브를 열 수 있다.
 
 ## 확인 결과

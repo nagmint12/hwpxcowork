@@ -159,6 +159,53 @@ test('download: Android APK appears with the PC bundle and supports a correctly 
   }
 });
 
+// 2026-11-17: Windows 는 클릭 설치 앱(setup.exe) 하나 — bat 묶음 대신(사용자 결정). 시작 안내의 두 방식 링크도 그 설치 파일로.
+test('download: Windows 앱 설치 파일(.exe)을 보여 주고 내려주며, 시작 안내 링크는 두 방식 모두 그 파일로 보낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-download-app-'));
+  const dir = path.join(root, 'artifacts/release-20261117');
+  fs.mkdirSync(dir, { recursive: true });
+  const make = (target, file, extra = {}) => {
+    const bytes = Buffer.from(`package ${file}`);
+    fs.writeFileSync(path.join(dir, file), bytes);
+    return { target, file, bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), ...extra };
+  };
+  const packages = [
+    make('windows-app', 'HwpxCowork-Setup-0.6.0-20261117.exe', { version: '0.6.0', guide: 'Windows 앱 설치 안내' }),
+    make('local-editor-macos-universal', 'hwpx-cowork-macos-editor-1.0.5-20261116.zip', { arch: 'universal', version: '1.0.5' }),
+    make('android-rhwp-editor', 'hwpx-cowork-1.0.11.apk', { version: '1.0.11' }),
+  ];
+  fs.writeFileSync(path.join(dir, 'HwpxCowork-Setup-0.6.0-20261117.exe.blockmap'), 'not listed');
+  fs.writeFileSync(path.join(dir, 'release.json'), JSON.stringify({ version: '0.6.0', releasedOn: '2026-11-17', packages }));
+  const app = express();
+  installReleaseDownloads(app, { root });
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}/download`;
+  try {
+    const html = await (await fetch(base)).text();
+    for (const p of packages) assert.ok(html.includes(`/download/${p.file}`), p.file);
+    assert.ok(html.includes('id="windows-app"') && html.includes('실행기 관리') && html.includes('Windows 앱 설치 안내'));
+    assert.ok(!html.includes('id="windows-personal"') && !html.includes('시작.bat'), '옛 bat 묶음 안내는 없다');
+    for (const phrase of ['설치된 글꼴', '미검증']) assert.ok(!html.includes(phrase), phrase);
+    const exe = await fetch(`${base}/HwpxCowork-Setup-0.6.0-20261117.exe`);
+    assert.equal(exe.status, 200);
+    assert.match(exe.headers.get('content-type'), /^application\/vnd\.microsoft\.portable-executable/);
+    assert.match(exe.headers.get('content-disposition'), /attachment;.*HwpxCowork-Setup-0\.6\.0-20261117\.exe/);
+    assert.equal(await exe.text(), 'package HwpxCowork-Setup-0.6.0-20261117.exe');
+    for (const mode of ['personal', 'shared']) {
+      const r = await fetch(`${base}/windows-setup.zip?mode=${mode}&ai=claude-code`, { redirect: 'manual' });
+      assert.equal(r.status, 302);
+      assert.equal(r.headers.get('location'), '/download/HwpxCowork-Setup-0.6.0-20261117.exe');
+    }
+    for (const file of ['HwpxCowork-Setup-0.6.0-20261117.exe.blockmap', 'HwpxCowork-Setup-latest.exe', 'setup.exe']) assert.equal((await fetch(`${base}/${file}`, { redirect: 'manual' })).status, 404, file);
+    const old = await fetch(`${base}/HwpxCowork-Setup-0.5.3-20261117.exe`, { redirect: 'manual' });
+    assert.equal(old.status, 302, '지난 설치 파일 주소는 안내 페이지로');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // 2026-11-16 재빌드: Windows 개인용·공동 작업용 두 묶음 + Mac 편집기 + Android. 페이지는 기능·요구 사항·설치 순서만 보여 준다.
 test('download: Windows 개인용·공동 작업용과 Mac 편집기를 기능 위주로 보여 주고, 시작 안내 링크는 고른 방식의 묶음으로 보낸다', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-download-'));

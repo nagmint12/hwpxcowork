@@ -1,62 +1,62 @@
-// 브라우저 로그인은 브라우저에만 둔다. 서버는 전송 파일·일회성 작업만 보관한다.
-// 2026-10-30 정책: 폴더 목록은 그 사용자 화면에만 보인다 — 서버는 확장이 보낸 목록을 메모리에서 한 번 건네주고 지우며 디스크에 쓰지 않는다.
-// AI 는 드라이브를 쓰지 않는다(DRIVE_AI_ENABLED=false: 목록 공유·업로드 제안·파일 준비 MCP 도구 없음). 소스는 다시 켤 때를 위해 남긴다.
+// 두레이 드라이브 연결 — 2026-11-17 브라우저 확장프로그램 방식을 걷어 내고 두레이 서비스 API(개인 API 인증 토큰)로 바꿨다.
+//   - 토큰은 각 사용자가 두레이(개인설정 > API > 개인 인증 토큰)에서 직접 만들어 cowork 에 한 번 넣는다. 두레이 로그인은 사용자가 직접 한다.
+//     서버는 토큰을 암호문으로만 보관하고(server/secret-box.js — config 옆 .hwpx-cowork-secret 열쇠) 화면·AI·기록에 다시 보여 주지 않는다(끝 4자리만).
+//   - 쓰는 범위: 그 토큰 주인의 '개인 드라이브'(GET /drive/v1/drives?type=private) + 사용자가 [프로젝트 추가]로 고른 프로젝트 드라이브(2026-11-18).
+//     프로젝트 드라이브는 목록·내려받기·새 파일 올리기만(교체·이름 바꾸기·삭제는 개인 드라이브에서만). 추가한 목록 밖의 드라이브는 거절한다.
+//   - 폴더 목록은 요청한 화면에 바로 건네고 서버에 저장하지 않는다. AI 는 드라이브를 쓰지 않는다(MCP 드라이브 도구 없음).
+//   - 가져오기·업로드·교체·삭제(휴지통으로)·이름 바꾸기는 본인이 cowork 화면에서 직접 할 때만. 쓰기 전에 목록에서 본 revision 과 폴더를 다시 확인한다.
+//   - 예전 확장 방식(연결 코드·작업 선점·WebSocket·확장 ZIP)의 사본: backups/dooray_drive_extension_2026-11-17/
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {EventEmitter} from 'node:events';
 import { ServiceError } from './service.js';
+import { createSecretBox } from './secret-box.js';
+import { DOORAY_CLOUDS, createDoorayClient, doorayEndpoint, normalizeDoorayToken } from './dooray-api.js';
 
-export const DOORAY_DISCOVERY = 'personal';
 export const DRIVE_MAX_BYTES = 50 * 1024 * 1024;
-/** AI 드라이브 기능(현재 폴더 목록을 AI 에 보여주기·AI 업로드 제안·prepare_drive_file). 다시 쓰려면 true — 그때는 목록이 서버 디스크(context)에 남는다 */
+/** AI 드라이브 기능은 없다(예전 확장 방식의 AI 문맥·업로드 제안은 확장과 함께 걷어 냈다) */
 export const DRIVE_AI_ENABLED = false;
-const projectId = value => typeof value === 'string' && /^\d{1,30}$/.test(value);
-const newer = (v, min) => { const a = String(v || '0').split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== b[i]) return (a[i] || 0) > b[i]; } return true; };
-const hash = s => crypto.createHash('sha256').update(s).digest('hex');
-const id = () => crypto.randomBytes(16).toString('hex');
+export const DRIVE_PAGE_SIZE = 50;
+const NAME_SCAN_PAGES = 40;   // 같은 이름 찾기: 100개씩 40쪽(4천 개)까지 본다
+const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const newId = () => crypto.randomBytes(16).toString('hex');
 const fail = (code, message, status = 400) => { throw new ServiceError(code, message, status); };
-const safeId = s => typeof s === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(s);
-const providers = new Set(['dooray']);
-const activeTarget = target => providers.has(target?.provider) && (projectId(target.projectId) || target.projectId === DOORAY_DISCOVERY);
-const actions = new Set(['projects', 'list', 'download', 'upload', 'login', 'delete', 'rename']);
+const safeId = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(s);
+const doorayId = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(s);
+const actions = new Set(['list', 'download', 'upload', 'delete', 'rename']);
+const PERSONAL = 'personal';
+const PROJECT_ACTIONS = new Set(['list', 'download', 'upload']);   // 프로젝트 드라이브: 목록·내려받기·새 파일 올리기만(교체·이름 바꾸기·삭제 없음)
+const MAX_PROJECTS = 30;
+
 export function fileName(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > 240 || /[\\/\x00-\x1f]/.test(value) || ['.', '..'].includes(value)) fail('DRIVE_NAME', '올바른 파일 이름을 지정하세요.');
+  if (typeof value !== 'string' || !value.trim() || value.length > 240 || /[\\/\x00-\x1f]/.test(value) || ['.', '..'].includes(value.trim())) fail('DRIVE_NAME', '올바른 파일 이름을 지정하세요.');
   return value.trim();
 }
-export function validateTarget(v) {
-  if (!v || typeof v.provider !== 'string' || !safeId(v.projectId) || !safeId(v.folderId || 'root')) fail('DRIVE_TARGET', '드라이브·프로젝트·폴더를 확인하세요.');
-  if (!providers.has(v.provider)) fail('DRIVE_PROVIDER_DISABLED', '현재 연결할 수 없는 드라이브입니다.', 403);
-  if (!activeTarget(v)) fail('DRIVE_SCOPE', '올바른 두레이 개인 프로젝트를 선택하세요.', 403);
-  return { provider: v.provider, projectId: v.projectId, folderId: v.folderId || 'root' };
-}
+const norm = (f) => ({ id: String(f.id), name: String(f.name || ''), type: f.type === 'folder' ? 'folder' : 'file', size: Math.max(0, Number(f.size) || 0), mime: String(f.mimeType || '').slice(0, 150), revision: String(f.revision ?? '').slice(0, 200) });
+
 export class DriveService {
-  constructor({ config, service, now = Date.now, aiEnabled = DRIVE_AI_ENABLED }) {
-    this.service = service; this.now = now; this.aiEnabled = aiEnabled === true; this.dir = path.join(config.dataDir, 'drive'); this.config = config;
-    this.pairs = new Map(); this.jobs = new Map(); this.sessions = new Map();
-    this.events=new EventEmitter();
+  /**
+   * @param {{config:object, service?:object, now?:Function, fetchImpl?:Function, secretFile?:string|null, apiOverride?:string|null}} o
+   *   apiOverride: 시험용 두레이 API 주소(loopback 만) — 기본은 환경 변수 HWPX_COWORK_DOORAY_API
+   */
+  constructor({ config, service, now = Date.now, fetchImpl = globalThis.fetch, secretFile = null, apiOverride = process.env.HWPX_COWORK_DOORAY_API || null }) {
+    this.service = service; this.now = now; this.config = config; this.fetchImpl = fetchImpl; this.apiOverride = apiOverride || null;
+    this.dir = path.join(config.dataDir, 'drive');
+    this.aiEnabled = false;
     this.maxBytes = Math.min(config.attachments?.maxBytes || DRIVE_MAX_BYTES, DRIVE_MAX_BYTES);
-    this.restoreSessions();
+    this.box = createSecretBox({ config, secretFile, purpose: 'dooray-token' });
+    this.roots = new Map();      // 'owner:driveId' → rootId
+    this.running = new Map();    // owner → 진행 중 작업 수
+    this.using = new Set();      // 전송 중인 보관 파일 id
   }
-  // 브라우저 연결(확장 토큰의 해시만)을 사용자별 index.json 에 남겨 서버를 다시 켜도 다시 연결하지 않게 한다(2026-10-30)
-  restoreSessions() {
-    let owners = [];
-    try { owners = fs.readdirSync(this.dir); } catch { return; }
-    for (const owner of owners) {
-      try {
-        const b = JSON.parse(fs.readFileSync(path.join(this.dir, owner, 'index.json'), 'utf8')).bridge;
-        if (b && /^[0-9a-f]{64}$/.test(b.tokenHash || '') && typeof b.user?.name === 'string' && hash(b.user.name) === owner) this.sessions.set(owner, { tokenHash: b.tokenHash, user: { name: b.user.name, role: b.user.role }, lastSeen: null, version: b.version || null, projectId: projectId(b.projectId) ? b.projectId : null });
-      } catch { /* 깨진 파일은 연결 없음으로 */ }
-    }
-  }
-  rememberBridge(user, session) { const state = this.read(user); state.bridge = session ? { tokenHash: session.tokenHash, user: session.user, version: session.version || null, projectId: session.projectId || null, pairedAt: new Date(this.now()).toISOString() } : null; this.save(user, state); }
   owner(user) { if (!user?.name) fail('DRIVE_AUTH', '로그인이 필요합니다.', 401); return hash(user.name); }
   read(user) {
-    const owner = this.owner(user); const p = path.join(this.dir, owner, 'index.json');
+    const p = path.join(this.dir, this.owner(user), 'index.json');
     let state;
-    try { state = JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) { if (e.code !== 'ENOENT') throw e; return { files: [], context: null, bridge: null, proposals: [] }; }
-    // AI 기능을 끈 동안에는 예전에 남은 폴더 목록(context)을 디스크에서 지운다 — 목록은 서버에 저장하지 않는다
-    if (!this.aiEnabled && state.context) { state.context = null; this.save(user, state); }
+    try { state = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; return { files: [], dooray: null, lastSite: null }; }
+    // 예전 확장 방식의 흔적(확장 토큰 해시·폴더 목록·AI 제안)은 읽을 때 지운다
+    if ('bridge' in state || 'context' in state || 'proposals' in state) { delete state.bridge; delete state.context; delete state.proposals; this.save(user, state); }
+    state.files ||= []; state.dooray ||= null; state.lastSite ||= null;
     return state;
   }
   save(user, state) {
@@ -64,166 +64,248 @@ export class DriveService {
     const temp = path.join(dir, 'index.tmp'); fs.writeFileSync(temp, JSON.stringify(state), { mode: 0o600 }); fs.renameSync(temp, path.join(dir, 'index.json'));
   }
   publicFile(f) { const { disk, ...out } = f; return out; }
+  defaultSite() { const s = this.config.drive?.doorayUrl; return typeof s === 'string' && s.trim() ? s.trim() : null; }
+
   status(user) {
-    this.expire(); const state = this.read(user); const session = this.sessions.get(this.owner(user));
-    return { connected: !!session && session.lastSeen != null && this.now() - session.lastSeen < 70000, maxBytes: this.maxBytes,
-      bridge: { paired:!!session, version:session?.version||null, lastSeenAt:session?.lastSeen!=null?new Date(session.lastSeen).toISOString():null, minimumVersion:'0.6.0' },
-      providers: [{ id: 'dooray', name: '두레이', projectId: session?.projectId || null, scope: '개인 프로젝트', loginUrl: null }],
-      aiEnabled: this.aiEnabled, writeProjects: session?.projectId ? [session.projectId] : [],
-      context: this.aiEnabled && activeTarget(state.context) ? state.context : null, files: state.files.map(f => this.publicFile(f)), proposals: this.aiEnabled ? state.proposals.filter(p => activeTarget(p.target)) : [],
-      // 작업 목록에는 결과(폴더 목록·파일 이름)를 싣지 않는다 — 결과는 그 작업을 요청한 화면이 한 번만 받는다(deliver)
-      jobs: [...this.jobs.values()].filter(j => j.owner === this.owner(user) && activeTarget(j.target)).slice(-20).map(j => this.jobView(j, false)) };
+    const state = this.read(user); const c = state.dooray;
+    return {
+      connected: !!c, maxBytes: this.maxBytes, aiEnabled: false,
+      writeProjects: c ? [PERSONAL] : [],
+      // 2026-11-18 화면에 보일 드라이브: 내 드라이브 + 사용자가 [프로젝트 추가]로 고른 프로젝트 드라이브. can = 할 수 있는 작업
+      drives: c ? [{ key: PERSONAL, name: '내 드라이브', kind: 'personal', can: [...actions] }, ...(c.projects || []).map((d) => ({ key: d.driveId, name: d.name, kind: 'project', scope: d.scope, can: [...PROJECT_ACTIONS] }))] : [],
+      account: c ? { site: c.site, cloud: c.cloud, cloudLabel: c.cloudLabel, name: c.member?.name || '', keyHint: c.keyHint, connectedAt: c.connectedAt, checkedAt: c.checkedAt || null } : null,
+      site: c?.site || state.lastSite || this.defaultSite(),
+      clouds: DOORAY_CLOUDS.map(({ id, label, domain }) => ({ id, label, domain })),
+      providers: [{ id: 'dooray', name: '두레이', scope: '개인 드라이브·추가한 프로젝트 드라이브' }],
+      files: state.files.map((f) => this.publicFile(f)),
+    };
   }
-  pairCode(user) {
-    this.expire(); for (const [k,v] of this.pairs) if (v.user.name === user.name) this.pairs.delete(k);
-    const code = crypto.randomBytes(9).toString('hex').toUpperCase();
-    this.pairs.set(code, { user: { name:user.name, role:user.role }, expires: this.now()+300000 });
-    return { code, expiresAt: new Date(this.now()+300000).toISOString() };
+
+  client(endpoint, token) { return createDoorayClient({ apiBase: endpoint.apiBase, domain: endpoint.domain, token, fetchImpl: this.fetchImpl }); }
+  /** 토큰으로 계정·개인 드라이브·최상위 폴더를 확인한다(쓰기 없음) */
+  async probe(endpoint, token) {
+    const client = this.client(endpoint, token);
+    const me = (await client.me()).result;
+    if (!me?.id) fail('DOORAY_AUTH', '두레이 계정 정보를 확인하지 못했습니다. 토큰을 다시 확인하세요.', 409);
+    const drives = ((await client.drives({ type: 'private' })).result || []).filter((d) => d?.type === 'private' && doorayId(String(d.id ?? '')));
+    if (drives.length !== 1) fail('DOORAY_DRIVE', drives.length ? '개인 드라이브가 여러 개라 고르지 못했습니다.' : '이 토큰의 계정에서 개인 드라이브를 찾지 못했습니다.', 409);
+    const driveId = String(drives[0].id);
+    const rootId = await this.findRoot(client, driveId);
+    return { client, member: { id: String(me.id), name: String(me.name || me.nickname || '').slice(0, 80) }, driveId, rootId };
   }
-  pair(code) {
-    this.expire(); const pair = this.pairs.get(String(code || '').replace(/\s|-/g,'').toUpperCase());
-    if (!pair) fail('DRIVE_PAIR', '연결 코드가 없거나 만료되었습니다.', 401);
-    this.pairs.delete(String(code).replace(/\s|-/g,'').toUpperCase());
-    const token = id()+id(); const owner = this.owner(pair.user);
-    const session = { tokenHash: hash(token), user: pair.user, lastSeen: null };
-    this.sessions.set(owner, session); this.rememberBridge(pair.user, session);
-    this.events.emit('connection',owner);
-    return { token, user: pair.user.name, maxBytes: this.maxBytes };
+  async findRoot(client, driveId) {
+    const roots = ((await client.files(driveId, { type: 'folder', subTypes: 'root' })).result || []).filter((f) => f?.subType === 'root' && doorayId(String(f.id ?? '')));
+    if (roots.length !== 1) fail('DOORAY_DRIVE', '드라이브의 최상위 폴더를 찾지 못했습니다.', 502);
+    return String(roots[0].id);
   }
-  bridge(token, version = '') {
-    const digest = hash(String(token || ''));
-    for (const [owner, s] of this.sessions) if (s.tokenHash === digest) {
-      // 지운 사용자의 연결은 받지 않고, 역할은 지금 설정을 따른다(다시 켠 뒤 되살린 연결 포함)
-      if (Array.isArray(this.config.users)) {
-        const current = this.config.users.find(u => u.name === s.user.name);
-        if (!current) { this.sessions.delete(owner); try { this.rememberBridge(s.user, null); } catch { /* 기록 실패는 무시 */ } break; }
-        s.user = { name: current.name, role: current.role || 'editor' };
-      }
-      s.lastSeen = this.now();if(/^\d+\.\d+\.\d+$/.test(version))s.version=version;return s.user;
-    }
-    fail('DRIVE_BRIDGE_AUTH', '확장프로그램을 다시 연결하세요.', 401);
+
+  async connect(user, body = {}) {
+    this.owner(user);
+    const endpoint = doorayEndpoint(body.site || this.defaultSite(), this.apiOverride);
+    const token = normalizeDoorayToken(body.token);
+    const { member, driveId, rootId } = await this.probe(endpoint, token);
+    const at = new Date(this.now()).toISOString();
+    const state = this.read(user);
+    // 토큰만 바꾼 같은 계정·같은 사이트면 추가해 둔 프로젝트 목록을 그대로 둔다
+    const prev = state.dooray; const keep = prev?.member?.id === member.id && prev?.site === endpoint.site ? prev.projects || [] : [];
+    state.dooray = { site: endpoint.site, cloud: endpoint.cloud, cloudLabel: endpoint.cloudLabel, apiBase: endpoint.apiBase, domain: endpoint.domain,
+      token: this.box.seal(token, user.name), keyHint: '…' + token.slice(-4), member, driveId, projects: keep, connectedAt: at, checkedAt: at };
+    state.lastSite = endpoint.site;
+    this.save(user, state); this.forgetRoots(user); this.roots.set(`${this.owner(user)}:${driveId}`, rootId);
+    return this.status(user);
+  }
+  /** 저장한 토큰이 아직 쓰이는지 다시 확인(쓰기 없음) */
+  async check(user) {
+    const { c, client } = this.connection(user);
+    const me = (await client.me()).result;
+    if (!me?.id) fail('DOORAY_AUTH', '두레이 계정 정보를 확인하지 못했습니다.', 409);
+    if (String(me.id) !== c.member.id) fail('DOORAY_ACCOUNT', '토큰의 두레이 계정이 등록할 때와 다릅니다. 토큰을 다시 등록하세요.', 409);
+    const state = this.read(user); state.dooray.checkedAt = new Date(this.now()).toISOString(); this.save(user, state);
+    return this.status(user);
   }
   disconnect(user) {
-    if (this.sessions.delete(this.owner(user))) this.rememberBridge(user, null);
-    this.events.emit('connection',this.owner(user));
-    for (const [k,v] of this.pairs) if(v.user.name===user.name)this.pairs.delete(k);
-    for (const j of this.jobs.values()) if (j.owner === this.owner(user) && ['pending','running'].includes(j.status)) { j.status = 'failed'; j.error = '연결이 해제되었습니다. 실행 중이던 전송은 드라이브에서 결과를 확인하세요.'; }
+    const state = this.read(user);
+    if (state.dooray) { state.lastSite = state.dooray.site || state.lastSite; state.dooray = null; this.save(user, state); }
+    this.forgetRoots(user);
     return { ok: true };
   }
-  expire() {
-    for (const [k,p] of this.pairs) if (p.expires < this.now()) this.pairs.delete(k);
-    for (const [k,j] of this.jobs) {
-      if (this.now()-j.created > 600000) this.jobs.delete(k);
-      else if (['pending','running'].includes(j.status) && this.now()-j.created > 180000) { const pending=j.status==='pending'; j.status = 'failed'; j.error = pending ? '확장프로그램 응답 시간이 지났습니다.' : '응답 시간이 지났습니다. 드라이브 결과를 확인하세요. 자동으로 재전송하지 않습니다.'; }
+  connection(user) {
+    const c = this.read(user).dooray;
+    if (!c) fail('DRIVE_OFFLINE', '두레이 API 토큰을 먼저 등록하세요. [연결 설정]에서 등록합니다.', 409);
+    const token = this.box.unseal(c.token, user.name);
+    if (!token) fail('DOORAY_TOKEN_LOST', '저장한 두레이 토큰을 풀지 못했습니다(서버 암호 열쇠가 바뀜). 토큰을 다시 등록하세요.', 409);
+    // API 주소는 등록 때 정한 것을 쓴다(시험 주소로 바꾼 서버에서는 시험 주소만)
+    const endpoint = this.apiOverride ? doorayEndpoint(c.site, this.apiOverride) : { apiBase: c.apiBase, domain: c.domain };
+    return { c, client: this.client(endpoint, token) };
+  }
+  forgetRoots(user) { const prefix = this.owner(user) + ':'; for (const k of [...this.roots.keys()]) if (k.startsWith(prefix)) this.roots.delete(k); }
+  async rootOf(user, c, client) {
+    const key = `${this.owner(user)}:${c.driveId}`; const known = this.roots.get(key);
+    if (known) return known;
+    const rootId = await this.findRoot(client, c.driveId); this.roots.set(key, rootId); return rootId;
+  }
+  /** 화면의 폴더 id('root' 또는 두레이 id) → 두레이 폴더 id. 고른 드라이브(c.driveId) 안의 폴더만 */
+  async folderOf(user, c, client, folderId, verify) {
+    const rootId = await this.rootOf(user, c, client);
+    if (!folderId || folderId === 'root' || folderId === rootId) return rootId;
+    if (!doorayId(folderId)) fail('DRIVE_TARGET', '폴더를 확인하세요.');
+    if (verify) {
+      const f = (await client.meta(c.driveId, folderId)).result;
+      if (!f || f.type !== 'folder' || (f.driveId != null && String(f.driveId) !== c.driveId)) fail('DRIVE_SCOPE', '이 드라이브 안의 폴더가 아닙니다.', 403);
+      if (f.subType === 'trash') fail('DRIVE_SCOPE', '휴지통에는 올리거나 고칠 수 없습니다.', 403);
     }
+    return folderId;
   }
-  jobView(j, withResult = true) { return { id:j.id, action:j.action, provider:j.target.provider, status:j.status, result:withResult ? j.result || null : null, error:j.error || null }; }
-  /** 화면이 작업 결과를 받는다(GET /api/drive/jobs/:id). 끝난 작업의 결과(목록·파일 이름)는 건넨 뒤 메모리에서도 지운다 — 다시 읽으면 delivered */
-  deliver(user, jobId) {
-    const j = this.job(user, jobId); const view = this.jobView(j);
-    if (j.status === 'done') { view.delivered = !!j.delivered; j.result = null; j.delivered = true; }
-    return view;
+  /** 쓰기·내려받기 대상 파일: 고른 드라이브·선택한 폴더 바로 아래의 파일, 목록에서 본 revision 그대로 */
+  async checkedFile(c, client, folderId, fileId, revision) {
+    if (!doorayId(fileId)) fail('DRIVE_FILE_ID', '파일을 선택하세요.');
+    const f = (await client.meta(c.driveId, fileId)).result;
+    if (!f || f.type !== 'file') fail('DRIVE_FILE_ID', '파일이 아닙니다. 목록을 새로 읽어 주세요.', 409);
+    if (f.driveId != null && String(f.driveId) !== c.driveId) fail('DRIVE_SCOPE', '이 드라이브 안의 파일이 아닙니다.', 403);
+    if (String(f.parentFile?.id ?? '') !== folderId) fail('DRIVE_SCOPE', '선택한 폴더의 파일만 사용할 수 있습니다. 목록을 새로 읽어 주세요.', 409);
+    if (revision && String(f.revision ?? '') !== String(revision)) fail('DRIVE_REVISION', '파일이 다른 곳에서 바뀌었습니다. 목록을 새로 읽고 확인하세요.', 409);
+    return f;
   }
-  job(user, jobId) { this.expire(); const j=this.jobs.get(jobId); if(!j || j.owner!==this.owner(user))fail('DRIVE_JOB','전송 작업이 없습니다.',404); return j; }
-  create(user, body) {
-    this.expire(); const target=validateTarget(body); if(!actions.has(body.action))fail('DRIVE_ACTION','지원하지 않는 작업입니다.');
-    const session=this.sessions.get(this.owner(user)); if(!session || session.lastSeen==null || this.now()-session.lastSeen>70000)fail('DRIVE_OFFLINE','확장프로그램에 서버를 연결해 주세요. 백그라운드 연결 상태는 확장 아이콘에서 확인할 수 있습니다.',409);
-    if (!newer(session.version, '0.6.0')) fail('DRIVE_BRIDGE_OLD', '사용자별 드라이브 연결을 위해 확장을 0.6.0 이상으로 업데이트하세요.', 409);
-    if (!['projects','login'].includes(body.action) && (!projectId(target.projectId) || target.projectId !== session.projectId)) fail('DRIVE_SCOPE', '이 계정에 연결된 개인 프로젝트를 먼저 확인하세요. 드라이브를 새로 연결하거나 새로고침하세요.', 403);
-    if ([...this.jobs.values()].filter(j=>j.owner===this.owner(user)&&['pending','running'].includes(j.status)).length >= 4)fail('DRIVE_BUSY','진행 중인 전송이 끝난 뒤 다시 시도하세요.',409);
-    const payload={ page:Math.max(0,Math.min(1000,Number(body.page)||0)), pageToken:String(body.pageToken||'').slice(0,3000) };
-    if (body.action === 'delete' || body.action === 'rename') {
-      if (!safeId(body.fileId)) fail('DRIVE_FILE_ID', '파일을 선택하세요.');
-      payload.fileId = body.fileId; payload.expectedRevision = String(body.expectedRevision || '').slice(0, 200);
-      if (!payload.expectedRevision) fail('DRIVE_REVISION', '대상 파일의 최신 정보를 다시 읽어 주세요.', 409);
-      if (body.action === 'rename') payload.name = fileName(body.name);
+  async nameTaken(c, client, folderId, name, exceptId = null) {
+    for (let page = 0; page < NAME_SCAN_PAGES; page++) {
+      const r = await client.files(c.driveId, { parentId: folderId, page, size: 100 });
+      const items = r.result || [];
+      if (items.some((f) => f?.name === name && String(f.id) !== exceptId && f.subType !== 'trash')) return true;
+      if (items.length < 100 || (r.totalCount != null && (page + 1) * 100 >= r.totalCount)) return false;
     }
-    if (body.action === 'download' || body.replaceId) {
-      if(!safeId(body.fileId || body.replaceId))fail('DRIVE_FILE_ID','파일을 선택하세요.');
-      payload.fileId=body.fileId || body.replaceId; payload.expectedRevision=String(body.expectedRevision || '').slice(0,200);
-      if(body.replaceId && !payload.expectedRevision)fail('DRIVE_REVISION','교체 대상의 최신 정보를 다시 읽어 주세요.',409);
+    return false;   // 아주 큰 폴더는 끝까지 보지 않는다 — 두레이의 중복 거절(409)에 맡긴다
+  }
+
+  /** 작업 대상 드라이브: body.drive(옛 화면은 projectId) = 'personal' 또는 사용자가 추가한 프로젝트 드라이브 id. 추가하지 않은 드라이브는 거절 */
+  driveOf(c, body) {
+    const key = String(body.drive ?? body.projectId ?? PERSONAL);
+    if (key === PERSONAL) return { key, driveId: c.driveId, kind: 'personal', can: actions };
+    const d = (c.projects || []).find((x) => x.driveId === key);
+    if (!d) fail('DRIVE_SCOPE', '[프로젝트 추가]로 허용한 프로젝트 드라이브만 열 수 있습니다.', 403);
+    return { key, driveId: d.driveId, kind: 'project', can: PROJECT_ACTIONS };
+  }
+  /** 이 토큰으로 볼 수 있는 프로젝트 드라이브(두레이에서 그때그때 읽는다 — 서버에 저장하지 않는다). added = 이미 추가함 */
+  async availableProjects(user) {
+    const { c, client } = this.connection(user);
+    const seen = new Map();
+    for (const scope of ['private', 'public']) {
+      const list = (await client.drives({ type: 'project', scope })).result || [];
+      for (const d of list) {
+        const id = String(d?.id ?? '');
+        if (d?.type !== 'project' || !doorayId(id) || seen.has(id)) continue;
+        seen.set(id, { driveId: id, projectId: String(d.project?.id ?? ''), name: String(d.name || '이름 없는 프로젝트').slice(0, 120), scope });
+      }
     }
-    if(body.action==='upload') {
-      const state=this.read(user); const f=state.files.find(f=>f.id===body.stagedId); if(!f)fail('DRIVE_LOCAL_FILE','서버 파일을 선택하세요.',404);
-      Object.assign(payload,{ stagedId:f.id, name:fileName(body.name || f.name), size:f.size, mime:f.mime, replaceId:body.replaceId || null });
+    const added = new Set((c.projects || []).map((d) => d.driveId));
+    return { projects: [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((d) => ({ ...d, added: added.has(d.driveId) })) };
+  }
+  /** 허용 목록 바꾸기: driveIds = 보일 프로젝트 드라이브 id 전체. 두레이에서 지금 볼 수 있는 것만 받는다 */
+  async setProjects(user, driveIds) {
+    if (!Array.isArray(driveIds) || driveIds.length > MAX_PROJECTS || driveIds.some((x) => !doorayId(String(x)))) fail('DRIVE_PROJECTS', `프로젝트는 ${MAX_PROJECTS}개까지 고를 수 있습니다.`);
+    const wanted = [...new Set(driveIds.map(String))];
+    const available = wanted.length ? new Map((await this.availableProjects(user)).projects.map((d) => [d.driveId, d])) : new Map();
+    const missing = wanted.filter((id) => !available.has(id));
+    if (missing.length) fail('DRIVE_PROJECTS', '두레이에서 볼 수 없는 프로젝트가 있습니다. 목록을 새로 읽어 주세요.', 409);
+    const state = this.read(user);
+    if (!state.dooray) fail('DRIVE_OFFLINE', '두레이 API 토큰을 먼저 등록하세요.', 409);
+    const at = new Date(this.now()).toISOString();
+    const before = new Map((state.dooray.projects || []).map((d) => [d.driveId, d]));
+    state.dooray.projects = wanted.map((id) => { const d = available.get(id); return { driveId: id, projectId: d.projectId, name: d.name, scope: d.scope, addedAt: before.get(id)?.addedAt || at }; });
+    this.save(user, state);
+    return this.status(user);
+  }
+
+  async action(user, body = {}) {
+    if (!actions.has(body.action)) fail('DRIVE_ACTION', '지원하지 않는 작업입니다.');
+    const { c, client } = this.connection(user);
+    // 대상 드라이브·권한 검사는 진행 수를 세기 전에(거절된 요청이 '진행 중'으로 남지 않게)
+    const d = this.driveOf(c, body);
+    if (!d.can.has(body.action) || (body.action === 'upload' && body.replaceId && d.kind !== 'personal')) fail('DRIVE_READONLY', '프로젝트 드라이브에서는 목록·내려받기·새 파일 올리기만 할 수 있습니다.', 403);
+    const owner = this.owner(user);
+    if ((this.running.get(owner) || 0) >= 3) fail('DRIVE_BUSY', '진행 중인 전송이 끝난 뒤 다시 시도하세요.', 409);
+    this.running.set(owner, (this.running.get(owner) || 0) + 1);
+    try { return await this.run(user, { ...c, driveId: d.driveId }, client, body); }
+    finally { const n = (this.running.get(owner) || 1) - 1; if (n > 0) this.running.set(owner, n); else this.running.delete(owner); }
+  }
+  async run(user, c, client, body) {
+    const write = ['upload', 'delete', 'rename'].includes(body.action);
+    const folderId = await this.folderOf(user, c, client, body.folderId, write);
+    if (body.action === 'list') {
+      const page = Math.max(0, Math.min(1000, Math.floor(Number(body.page) || 0)));
+      const r = await client.files(c.driveId, { parentId: folderId, page, size: DRIVE_PAGE_SIZE });
+      const raw = (r.result || []).filter((f) => f && doorayId(String(f.id ?? '')) && f.subType !== 'trash' && f.subType !== 'root');
+      if (raw.some((f) => f.driveId != null && String(f.driveId) !== c.driveId)) fail('DRIVE_SCOPE', '폴더 범위를 확인하지 못했습니다.', 502);
+      const items = raw.slice(0, 100).map(norm).filter((f) => f.name && !/[\\/\x00-\x1f]/.test(f.name));
+      const total = r.totalCount != null && Number.isFinite(r.totalCount) ? r.totalCount : items.length;
+      return { items, total, nextPage: (page + 1) * DRIVE_PAGE_SIZE < total ? page + 1 : null };
     }
-    const j={ id:id(),owner:this.owner(user),target,action:body.action,payload,status:'pending',created:this.now() };
-    this.jobs.set(j.id,j);this.events.emit('work',j.owner); return this.jobView(j);
+    if (body.action === 'download') {
+      const f = await this.checkedFile(c, client, folderId, body.fileId, String(body.expectedRevision || ''));
+      if (Number(f.size) > this.maxBytes) fail('DRIVE_SIZE', '파일 크기 한도를 초과했습니다.', 413);
+      const bytes = await client.download(c.driveId, f.id, this.maxBytes);
+      const entry = this.stage(user, bytes, fileName(String(f.name || 'file')), f.mimeType || 'application/octet-stream', { provider: 'dooray', driveId: c.driveId, fileId: String(f.id), revision: String(f.revision ?? '') });
+      return { stagedId: entry.id, name: entry.name };
+    }
+    if (body.action === 'upload') {
+      const state = this.read(user); const staged = state.files.find((f) => f.id === body.stagedId);
+      if (!staged) fail('DRIVE_LOCAL_FILE', '서버 파일을 선택하세요.', 404);
+      const name = fileName(body.name || staged.name);
+      const bytes = fs.readFileSync(path.join(this.dir, this.owner(user), staged.id));
+      this.using.add(staged.id);
+      try {
+        if (body.replaceId) {
+          if (!body.expectedRevision) fail('DRIVE_REVISION', '교체 대상의 최신 정보를 다시 읽어 주세요.', 409);
+          const f = await this.checkedFile(c, client, folderId, body.replaceId, String(body.expectedRevision));
+          if (f.name !== name) fail('DRIVE_NAME', '교체 파일 이름은 원본과 같아야 합니다.');
+          await client.update(c.driveId, f.id, name, bytes, staged.mime);
+          return norm((await client.meta(c.driveId, f.id)).result || { ...f });
+        }
+        if (await this.nameTaken(c, client, folderId, name)) fail('DRIVE_EXISTS', '같은 이름의 파일이 있습니다. 목록에서 교체 대상을 선택하세요.', 409);
+        const r = await client.upload(c.driveId, folderId, name, bytes, staged.mime);
+        if (!r.result?.id) fail('DOORAY_ERROR', '업로드 결과를 확인하지 못했습니다. 두레이에서 확인하세요.', 502);
+        return norm({ name, ...r.result });
+      } finally { this.using.delete(staged.id); }
+    }
+    // 삭제 = 두레이 휴지통으로 옮김(두레이에서 되살릴 수 있다). 이름 바꾸기 = 같은 폴더에 같은 이름이 없을 때만. 둘 다 목록에서 본 revision 그대로일 때만
+    if (!body.expectedRevision) fail('DRIVE_REVISION', '대상 파일의 최신 정보를 다시 읽어 주세요.', 409);
+    const f = await this.checkedFile(c, client, folderId, body.fileId, String(body.expectedRevision));
+    if (body.action === 'delete') {
+      await client.move(c.driveId, f.id, 'trash');
+      return { id: String(f.id), deleted: true };
+    }
+    const name = fileName(body.name);
+    if (f.name === name) return norm(f);
+    if (await this.nameTaken(c, client, folderId, name, String(f.id))) fail('DRIVE_EXISTS', '같은 이름의 파일이 있습니다.', 409);
+    await client.rename(c.driveId, f.id, name);
+    return norm((await client.meta(c.driveId, f.id)).result || { ...f, name });
   }
-  claim(user) {
-    this.expire(); const owner=this.owner(user);
-    if([...this.jobs.values()].some(j=>j.owner===owner&&j.status==='running'))return {job:null};
-    const j=[...this.jobs.values()].find(j=>j.owner===owner&&j.status==='pending'&&activeTarget(j.target)); if(!j)return {job:null};
-    j.status='running'; j.claim=id(); return {job:{id:j.id,claim:j.claim,action:j.action,target:j.target,...j.payload,maxBytes:this.maxBytes}};
+
+  stage(user, bytes, name, mime = 'application/octet-stream', source = null) {
+    name = fileName(name); if (!Buffer.isBuffer(bytes) || bytes.length > this.maxBytes) fail('DRIVE_SIZE', '파일 크기 한도를 초과했습니다.', 413);
+    const state = this.read(user); if (state.files.length >= 50 || state.files.reduce((s, f) => s + f.size, 0) + bytes.length > this.maxBytes * 5) fail('DRIVE_QUOTA', '서버 보관 파일을 정리한 뒤 다시 올려 주세요.', 409);
+    const key = newId(); const dir = path.join(this.dir, this.owner(user)); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, key), bytes, { mode: 0o600 });
+    const entry = { id: key, name, size: bytes.length, mime: String(mime).slice(0, 150), sha256: hash(bytes), at: new Date(this.now()).toISOString(), source };
+    state.files.push(entry); this.save(user, state); return entry;
   }
-  claimed(user,jobId,claim) { const j=this.job(user,jobId); if(j.status!=='running'||j.claim!==claim)fail('DRIVE_CLAIM','이미 종료되었거나 다른 실행기의 작업입니다.',409);return j; }
-  finish(user,jobId,claim,body) {
-    const j=this.claimed(user,jobId,claim);
-    if(body.error) {j.status='failed';j.error=String(body.error).slice(0,700);return this.jobView(j);}
-    if(j.action==='download'&&!j.stagedId)fail('DRIVE_BYTES','파일 바이트가 도착하지 않았습니다.',409);
-    const result=body.result || {};
-    if(j.action==='login') {
-      j.result={opened:result.opened===true};
-    } else if(j.action==='list') {
-      if(!Array.isArray(result.items)||result.items.length>100)fail('DRIVE_LIST','폴더 목록 형식이 올바르지 않습니다.');
-      const items=result.items.map(f=>{if(!safeId(f.id))fail('DRIVE_LIST','파일 ID가 올바르지 않습니다.');return {id:f.id,name:fileName(f.name),type:f.type==='folder'?'folder':'file',size:Math.max(0,Number(f.size)||0),mime:String(f.mime||'').slice(0,150),revision:String(f.revision||'').slice(0,200)};});
-      j.result={items,total:Math.max(0,Number(result.total)||items.length),nextPage:result.nextPage??null,nextPageToken:String(result.nextPageToken||'').slice(0,3000)};
-      if(this.aiEnabled){const state=this.read(user); const previous=state.context;
-      state.context={...j.target,folderName:String(result.folderName||'선택한 폴더').slice(0,240),items,page:j.payload.page,pageToken:j.payload.pageToken,nextPage:j.result.nextPage,nextPageToken:j.result.nextPageToken,at:new Date(this.now()).toISOString(),aiAllowed:!!previous?.aiAllowed&&JSON.stringify(j.target)===JSON.stringify({provider:previous.provider,projectId:previous.projectId,folderId:previous.folderId})};
-      this.save(user,state);}
-    } else if(j.action==='projects') {
-      const projects = result.projects;
-      if (!Array.isArray(projects) || projects.length !== 1 || !projectId(projects[0].id) || projects[0].type !== 'private' || !projectId(projects[0].driveId)) fail('DRIVE_SCOPE', '로그인한 브라우저에서 개인 드라이브를 확인하지 못했습니다.', 403);
-      const session = this.sessions.get(this.owner(user));
-      if (!session) fail('DRIVE_BRIDGE_AUTH', '확장프로그램을 다시 연결하세요.', 401);
-      session.projectId = projects[0].id;
-      this.rememberBridge(user, session);
-      for (const pending of this.jobs.values()) if (pending.owner === j.owner && !['projects','login'].includes(pending.action) && pending.target.projectId !== session.projectId && pending.status === 'pending') { pending.status = 'failed'; pending.error = '연결된 개인 프로젝트가 변경되었습니다. 목록을 다시 읽어 주세요.'; }
-      j.result={projects:[{id:projects[0].id,name:'개인 프로젝트'}]};
-    } else if(j.action==='download') j.result={stagedId:j.stagedId};
-    else if(j.action==='delete') j.result={id:j.payload.fileId,deleted:result.deleted===true};
-    else j.result={id:safeId(result.id)?result.id:null,name:String(result.name||j.payload.name).slice(0,240),revision:String(result.revision||'').slice(0,200)};
-    j.status='done';return this.jobView(j);
-  }
-  stage(user,bytes,name,mime='application/octet-stream',source=null) {
-    name=fileName(name); if(!Buffer.isBuffer(bytes)||bytes.length>this.maxBytes)fail('DRIVE_SIZE','파일 크기 한도를 초과했습니다.',413);
-    const state=this.read(user);if(state.files.length>=50||state.files.reduce((s,f)=>s+f.size,0)+bytes.length>this.maxBytes*5)fail('DRIVE_QUOTA','서버 보관 파일을 정리한 뒤 다시 올려 주세요.',409);
-    const key=id();const dir=path.join(this.dir,this.owner(user));fs.mkdirSync(dir,{recursive:true});
-    fs.writeFileSync(path.join(dir,key),bytes,{mode:0o600});
-    const entry={id:key,name,size:bytes.length,mime:String(mime).slice(0,150),sha256:hash(bytes),at:new Date(this.now()).toISOString(),source};
-    state.files.push(entry);this.save(user,state);return entry;
-  }
-  bytes(user,key) {const f=this.read(user).files.find(f=>f.id===key);if(!f)fail('DRIVE_LOCAL_FILE','서버 파일이 없습니다.',404);return {entry:f,bytes:fs.readFileSync(path.join(this.dir,this.owner(user),f.id))};}
-  async importDocument(user,key,location=null) {
-    const file=this.bytes(user,key);
+  bytes(user, key) { const f = this.read(user).files.find((f) => f.id === key); if (!f) fail('DRIVE_LOCAL_FILE', '서버 파일이 없습니다.', 404); return { entry: f, bytes: fs.readFileSync(path.join(this.dir, this.owner(user), f.id)) }; }
+  async importDocument(user, key, location = null) {
+    const file = this.bytes(user, key);
     // 외부 드라이브의 개인 전송 파일은 목적지를 생략해도 공용 문서함으로 노출하지 않는다.
-    const target=location??{space:'private',owner:user.name,folderId:null};
-    if(!target||typeof target!=='object'||Array.isArray(target)||(!target.space&&!target.folderId))fail('DRIVE_LIBRARY_TARGET','저장할 문서함과 폴더를 선택하세요.');
-    return this.service.createDocument({fileName:file.entry.name,bytes:file.bytes,user,location:target});
+    const target = location ?? { space: 'private', owner: user.name, folderId: null };
+    if (!target || typeof target !== 'object' || Array.isArray(target) || (!target.space && !target.folderId)) fail('DRIVE_LIBRARY_TARGET', '저장할 문서함과 폴더를 선택하세요.');
+    return this.service.createDocument({ fileName: file.entry.name, bytes: file.bytes, user, location: target });
   }
-  async prepareDocument(user,docId,attachmentId=null) {
-    this.service.assertDocRead(docId,user);
-    const meta=this.service._meta(docId);const location=this.service.library.locOf(meta);
-    if(attachmentId){const f=await this.service.getAttachment(docId,attachmentId);return this.stage(user,f.bytes,f.entry.name,f.entry.mime,{kind:'library-attachment',docId,attachmentId,location});}
-    const snapshot=await this.service.workingSnapshot(docId);
-    return this.stage(user,Buffer.from(snapshot.bytes),`${meta.title||'공동 문서'}.hwpx`,'application/vnd.hancom.hwpx',{kind:'library',docId,version:snapshot.version,location});
+  async prepareDocument(user, docId, attachmentId = null) {
+    this.service.assertDocRead(docId, user);
+    const meta = this.service._meta(docId); const location = this.service.library.locOf(meta);
+    if (attachmentId) { const f = await this.service.getAttachment(docId, attachmentId); return this.stage(user, f.bytes, f.entry.name, f.entry.mime, { kind: 'library-attachment', docId, attachmentId, location }); }
+    const snapshot = await this.service.workingSnapshot(docId);
+    return this.stage(user, Buffer.from(snapshot.bytes), `${meta.title || '공동 문서'}.hwpx`, 'application/vnd.hancom.hwpx', { kind: 'library', docId, version: snapshot.version, location });
   }
-  receive(user,jobId,claim,bytes,name,mime) {
-    const j=this.claimed(user,jobId,claim);if(j.action!=='download'||j.stagedId)fail('DRIVE_ACTION','파일을 받을 수 없는 작업입니다.',409);
-    const f=this.stage(user,bytes,name,mime,{...j.target,fileId:j.payload.fileId,revision:j.payload.expectedRevision});j.stagedId=f.id;return f;
+  deleteFile(user, key) {
+    const s = this.read(user); const f = s.files.find((f) => f.id === key); if (!f) fail('DRIVE_LOCAL_FILE', '서버 파일이 없습니다.', 404);
+    if (this.using.has(key)) fail('DRIVE_BUSY', '전송 중인 파일입니다.', 409);
+    fs.unlinkSync(path.join(this.dir, this.owner(user), f.id)); s.files = s.files.filter((f) => f.id !== key); this.save(user, s); return { ok: true };
   }
-  deleteFile(user,key) {const s=this.read(user);const f=s.files.find(f=>f.id===key);if(!f)fail('DRIVE_LOCAL_FILE','서버 파일이 없습니다.',404);if([...this.jobs.values()].some(j=>j.owner===this.owner(user)&&j.payload.stagedId===key&&['running','pending'].includes(j.status)))fail('DRIVE_BUSY','전송 중인 파일입니다.',409);fs.unlinkSync(path.join(this.dir,this.owner(user),f.id));s.files=s.files.filter(f=>f.id!==key);this.save(user,s);return {ok:true};}
-  /** AI 기능을 끈 동안 AI 경로(문맥·허용·제안)는 403 */
-  assertAi() {if(!this.aiEnabled)fail('DRIVE_AI_DISABLED','AI 드라이브 기능은 꺼져 있습니다. AI는 드라이브 폴더 목록을 알 수 없습니다.',403);}
-  aiContext(user) {this.assertAi();const s=this.read(user);return {context:activeTarget(s.context)&&s.context.aiAllowed?s.context:null,files:s.files.map(f=>this.publicFile(f)),note:'사용자가 AI 사용을 허용한 두레이 폴더 한 쪽만 표시됩니다. 전체 탐색은 제공하지 않습니다. 업로드 제안은 사용자가 드라이브 화면에서 실행합니다.'};}
-  allowAi(user,allowed) {this.assertAi();const s=this.read(user);if(!activeTarget(s.context))fail('DRIVE_CONTEXT','두레이 폴더를 먼저 선택하세요.');s.context.aiAllowed=allowed===true;this.save(user,s);return {ok:true};}
-  propose(user,body) {
-    this.assertAi();const s=this.read(user),ctx=s.context;if(!ctx?.aiAllowed)fail('DRIVE_AI_SCOPE','사용자가 현재 폴더의 AI 사용을 허용해야 합니다.',403);
-    if(!s.files.some(f=>f.id===body.stagedId))fail('DRIVE_LOCAL_FILE','서버 파일을 선택하세요.',404);
-    if(body.replaceId&&!ctx.items.some(f=>f.id===body.replaceId&&f.type==='file'))fail('DRIVE_AI_SCOPE','현재 폴더에 표시된 파일만 교체 대상으로 제안할 수 있습니다.',403);
-    if(s.proposals.filter(p=>p.status==='pending'&&activeTarget(p.target)).length>=20)fail('DRIVE_BUSY','대기 중인 업로드 제안을 처리하세요.',409);
-    const p={id:id(),target:validateTarget(ctx),stagedId:body.stagedId,name:fileName(body.name||s.files.find(f=>f.id===body.stagedId).name),replaceId:body.replaceId||null,expectedRevision:ctx.items.find(f=>f.id===body.replaceId)?.revision||'',reason:String(body.reason||'').slice(0,1000),status:'pending'};
-    s.proposals=s.proposals.slice(-49);s.proposals.push(p);this.save(user,s);return p;
-  }
-  resolveProposal(user,key,accept) {this.assertAi();const s=this.read(user);const p=s.proposals.find(p=>p.id===key&&p.status==='pending');if(!p)fail('DRIVE_PROPOSAL','대기 중인 제안이 없습니다.',404);let job=null;if(accept){if(!s.context?.aiAllowed||JSON.stringify(validateTarget(s.context))!==JSON.stringify(p.target))fail('DRIVE_AI_SCOPE','제안한 폴더를 다시 선택하고 AI 사용을 허용하세요.',409);job=this.create(user,{...p.target,...p,action:'upload'});}p.status=accept?'accepted':'rejected';this.save(user,s);return {proposal:p,job};}
 }

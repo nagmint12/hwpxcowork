@@ -30,6 +30,14 @@ const steps = labels => `<ol class="steps">${labels.map((s, i) => `<li><span>${i
 
 // 패키지 종류별 화면 문구(기능·요구 사항·설치 순서)
 const PRODUCTS = {
+  // 2026-11-17: Windows 는 클릭 설치 앱 하나(혼자 쓰기·함께 쓰기·AI 실행기만을 처음 실행에서 고름) — bat 묶음 대신(사용자 결정)
+  'windows-app': {
+    icon: 'windows', eyebrow: 'WINDOWS · 설치 파일', title: 'Hwpx Cowork', tag: '클릭해서 설치',
+    lead: '설치 파일 하나로 설치하고, 처음 실행할 때 혼자 쓰기·여러 사람과 함께 쓰기·AI 실행기만 가운데 하나를 고릅니다.',
+    features: ['혼자 쓰기: PC 폴더의 HWPX를 열어 고치고 원래 파일에 저장', '함께 쓰기: 이 PC를 서버로 — 참여자는 브라우저로 접속, [함께 쓰기 → 외부 접속 열기]', 'AI 실행기 관리: Codex·Claude Code·Gemini CLI·Antigravity 구독으로 수정 제안 받기', 'AI 실행기만: 이미 운영 중인 공동 작업 서버에 내 AI만 연결'],
+    requires: ['Windows 10·11 (64비트)', '관리자 권한 필요 없음', 'AI는 본인 구독 계정 로그인'],
+    steps: ['설치 파일 실행 — "Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행]', '[다음] → [설치] → [마침]', '처음 실행에서 쓰는 방식 고르기', 'AI는 메뉴 [AI → 실행기 관리…]에서 [실행기 추가]'],
+  },
   'windows-personal': {
     icon: 'document', eyebrow: 'WINDOWS · 개인용', title: '개인용', tag: '이 PC에서만',
     lead: '내 PC의 HWPX 문서를 열어 고치고 원래 파일에 저장합니다.',
@@ -79,24 +87,25 @@ function archiveRow(p) {
 export function renderDownloadPage({ manifest, packages, notes = [] }) {
   const active = packages.filter(p => !isArchive(p));
   const byTarget = target => active.filter(p => p.target === target);
+  const winApp = byTarget('windows-app');
   const personal = byTarget('windows-personal');
   const shared = byTarget('windows-shared');
   const mac = active.filter(p => /^(?:macos-editor|local-editor-macos)-/.test(p.target || ''));
   const android = active.filter(p => p.file.endsWith('.apk'));
-  const known = new Set([...personal, ...shared, ...mac, ...android]);
+  const known = new Set([...winApp, ...personal, ...shared, ...mac, ...android]);
   const tools = active.filter(p => !known.has(p));
   const archived = packages.filter(isArchive);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(manifest.releasedOn || '') ? manifest.releasedOn.replaceAll('-', '.') : '';
-  const windows = personal.length || shared.length;
+  const windows = winApp.length || personal.length || shared.length;
   const nav = [windows && ['windows', 'Windows'], mac.length && ['mac', 'Mac'], android.length && ['android', 'Android']].filter(Boolean);
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="hwpx-cowork 다운로드: Windows 개인용·공동 작업용, Mac 편집기, Android 앱."><title>다운로드 · hwpx-cowork</title><style>${fs.readFileSync(cssFile, 'utf8')}</style></head><body>
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="hwpx-cowork 다운로드: ${winApp.length ? 'Windows 앱' : 'Windows 개인용·공동 작업용'}, Mac 편집기, Android 앱."><title>다운로드 · hwpx-cowork</title><style>${fs.readFileSync(cssFile, 'utf8')}</style></head><body>
   <a class="skip-link" href="#downloads">다운로드 목록으로 건너뛰기</a>
   <header class="site-header"><a class="brand" href="/">${icon('document')}<span>hwpx<span class="brand-dot">.</span>cowork</span></a><a class="web-link" href="/">웹 편집기 열기 ${icon('arrow')}</a></header>
   <main><section class="hero compact"><div class="hero-copy"><span class="eyebrow">HWPX COWORK / DOWNLOADS</span><h1>다운로드</h1><p>HWPX 문서를 열어 고치고 저장합니다. 혼자 쓸지, 여럿이 함께 쓸지 고르세요.</p>${date ? `<div class="release-line"><span class="status-dot"></span>업데이트 <time datetime="${manifest.releasedOn}">${date}</time></div>` : ''}</div>
-  <aside class="quick-guide"><span class="eyebrow">고르는 방법</span>${personal.length ? `<a href="#windows-personal"><span class="guide-symbol">${icon('document')}</span><span><strong>내 PC 파일을 혼자 편집</strong><small>Windows 개인용</small></span>${icon('arrow')}</a>` : ''}${shared.length ? `<a href="#windows-shared"><span class="guide-symbol">${icon('people')}</span><span><strong>여러 사람이 함께 편집</strong><small>Windows 공동 작업용 · 참여자는 브라우저</small></span>${icon('arrow')}</a>` : ''}${mac.length ? `<a href="#mac"><span class="guide-symbol">${icon('mac')}</span><span><strong>Mac에서 파일 편집</strong><small>Hwpx Editor · macOS 12.1 이상</small></span>${icon('arrow')}</a>` : ''}</aside></section>
+  <aside class="quick-guide"><span class="eyebrow">고르는 방법</span>${winApp.length ? `<a href="#windows-app"><span class="guide-symbol">${icon('windows')}</span><span><strong>Windows에서 혼자·함께 편집</strong><small>Hwpx Cowork 설치 파일 · 방식은 처음 실행에서</small></span>${icon('arrow')}</a>` : ''}${personal.length ? `<a href="#windows-personal"><span class="guide-symbol">${icon('document')}</span><span><strong>내 PC 파일을 혼자 편집</strong><small>Windows 개인용</small></span>${icon('arrow')}</a>` : ''}${shared.length ? `<a href="#windows-shared"><span class="guide-symbol">${icon('people')}</span><span><strong>여러 사람이 함께 편집</strong><small>Windows 공동 작업용 · 참여자는 브라우저</small></span>${icon('arrow')}</a>` : ''}${mac.length ? `<a href="#mac"><span class="guide-symbol">${icon('mac')}</span><span><strong>Mac에서 파일 편집</strong><small>Hwpx Editor · macOS 12.1 이상</small></span>${icon('arrow')}</a>` : ''}</aside></section>
   ${nav.length ? `<nav class="platform-nav" aria-label="운영체제별 다운로드">${nav.map(([id, name], i) => `<a href="#${id}">${icon(id)}${name}<span>0${i + 1}</span></a>`).join('')}</nav>` : ''}
   <div id="downloads" class="downloads">
-  ${windows ? `<section class="platform-section" id="windows">${sectionHeading('01', 'Windows', '프로그램만 받고, Node.js와 라이브러리는 처음 실행할 때 인터넷으로 설치합니다.')}<div class="pair-grid">${personal.length ? `<div id="windows-personal">${productCard('windows-personal', personal)}</div>` : ''}${shared.length ? `<div id="windows-shared">${productCard('windows-shared', shared)}</div>` : ''}</div></section>` : ''}
+  ${windows ? `<section class="platform-section" id="windows">${sectionHeading('01', 'Windows', winApp.length ? '설치 파일 하나로 설치합니다. 쓰는 방식은 처음 실행할 때 고릅니다.' : '프로그램만 받고, Node.js와 라이브러리는 처음 실행할 때 인터넷으로 설치합니다.')}${winApp.length ? `<div id="windows-app">${productCard('windows-app', winApp)}</div>` : ''}${personal.length || shared.length ? `<div class="pair-grid">${personal.length ? `<div id="windows-personal">${productCard('windows-personal', personal)}</div>` : ''}${shared.length ? `<div id="windows-shared">${productCard('windows-shared', shared)}</div>` : ''}</div>` : ''}</section>` : ''}
   ${mac.length ? `<section class="platform-section" id="mac">${sectionHeading(String(nav.findIndex(n => n[0] === 'mac') + 1).padStart(2, '0'), 'Mac', '서버 없이 내 Mac의 문서를 직접 편집합니다.')}${productCard('mac', mac)}</section>` : ''}
   ${android.length ? `<section class="platform-section" id="android">${sectionHeading(String(nav.findIndex(n => n[0] === 'android') + 1).padStart(2, '0'), 'Android', '휴대폰에서 문서를 직접 편집합니다.')}${productCard('android', android, { buttonLabel: 'Android APK 다운로드' })}</section>` : ''}
   ${!packages.length ? '<div class="empty-state">현재 준비된 배포 파일이 없습니다.</div>' : ''}

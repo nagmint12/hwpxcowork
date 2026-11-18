@@ -20,7 +20,6 @@ import { installAgentRoutes } from './routes/agents.js';
 import { installCollabRoutes } from './routes/collab.js';
 import { installConnectionRoutes } from './routes/connections.js';
 import { installDriveRoutes } from './routes/drive.js';
-import { createDriveSocket } from './drive-socket.js';
 import { createWorkerPackage } from './worker-package.js';
 import { installAdminRoutes, aiCredits } from './routes/admin.js';
 import { installLibraryRoutes } from './routes/library.js';
@@ -116,7 +115,7 @@ const clipboardParser = express.json({ limit: '30mb' });
 const nativeImportParser = express.json({ limit: '44mb' });
 // v0.4 실시간 밀어 넣기(PUT /live)도 편집기 내보내기 HWPX 바이트
 const RAW_ROUTES = [/^\/api\/docs\/?$/, /^\/api\/docs\/[^/]+\/attachments\/?$/, /^\/api\/docs\/[^/]+\/upload\/?$/, /^\/api\/docs\/[^/]+\/drafts\/mine\/?$/, /^\/api\/docs\/[^/]+\/live\/?$/, /^\/api\/docs\/[^/]+\/requests\/[^/]+\/files\/?$/];
-RAW_ROUTES.push(/^\/api\/drive\/files\/?$/, /^\/api\/drive\/bridge\/jobs\/[^/]+\/file\/?$/);
+RAW_ROUTES.push(/^\/api\/drive\/files\/?$/);
 app.use((req, res, next) => req.path === '/api/clipboard/import' ? nativeImportParser(req, res, next) : req.path === '/api/clipboard/native' ? clipboardParser(req, res, next)
   : ((req.method === 'POST' || req.method === 'PUT') && RAW_ROUTES.some((re) => re.test(req.path)) ? next() : jsonParser(req, res, next)));
 app.use(oauth.middleware);
@@ -639,12 +638,10 @@ app.use((err, req, res, next) => {
 });
 
 const server = http.createServer(app);
-const driveSocket=createDriveSocket(routeCtx.drive);
 server.on('upgrade', (req, socket, head) => {
   socket.on('error', () => socket.destroy());
   if (draining) { socket.destroy(); return; }
   let u; try { u = new URL(req.url, 'http://x'); } catch { socket.destroy(); return; }
-  if(u.pathname==='/api/drive/bridge/events'){driveSocket.upgrade(req,socket,head);return;}
   if (u.pathname !== '/ws') { socket.destroy(); return; }
   const user = userByToken(cfg, u.searchParams.get('token')); const docId = u.searchParams.get('doc');
   let meta = null; try { meta = docId ? store.readMeta(docId) : null; } catch { meta = null; }
@@ -706,7 +703,6 @@ async function prepareShutdown({ reason = 'restart' } = {}) {
   clearInterval(mcpSessionTimer);
   await adminMcp.close();
   routeCtx.agents?.closeAll();
-  driveSocket.close();
   // 긴 SSE·MCP·WS 연결은 저장이 끝난 다음 정리한다.
   const sessions = [...mcpSessions.values()]; mcpSessions.clear();
   await Promise.race([

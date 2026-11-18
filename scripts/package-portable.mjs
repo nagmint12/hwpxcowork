@@ -50,7 +50,7 @@ const WORKER_DEPENDENCIES = ['@modelcontextprotocol/sdk', 'zod'];   // Claude AP
 // 2026-11-16 사용자 지시: 배포물에 기관 자료·개인정보를 넣지 않는다. 첫 실행 설명서(docs/manuals)·튜토리얼 연습 문서(tutorial/)·
 // 체험 소개 화면(web/teaser*)은 묶지 않는다. 설명서는 manuals.seed=false 라 읽지 않고, 튜토리얼은 설치 도우미 설정에서 꺼져 있으며
 // (tutorial.enabled=false) 연습 파일이 없으면 메뉴에서 빠진다. 묶은 뒤 auditPrivate 가 글·압축 문서 안·로고 해시를 다시 검사한다.
-const SERVER_TREES = ['server', 'engine', 'web', 'extensions/drive-bridge', 'studio/dist'];
+const SERVER_TREES = ['server', 'engine', 'web', 'studio/dist'];   // 2026-11-17 두레이 확장(extensions/drive-bridge)은 두레이 API 방식으로 바꾸며 뺐다
 const SERVER_FILES = [
   // 웹 설명서(/manual.md·/manual-resources)·실행기 ZIP 이 읽는 안내
   'docs/DEPLOYMENT_AND_AI_GUIDE.md', 'docs/AGENT_SETUP.md', 'docs/MCP_EVENTS_GUIDE.md', 'docs/CHATGPT_WORK_FILES.md', 'docs/AUTOMATIC_AI_GUIDE.md', 'docs/MULTI_AGENT_ORCHESTRATION.md',
