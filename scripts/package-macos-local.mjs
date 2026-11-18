@@ -105,8 +105,9 @@ if (!signer) {
 }
 if (!signer) throw Error('rcodesign을 찾지 못했습니다. --signer <경로>로 지정하세요.');
 run(signer, ['--version']);
+// Mac 아이콘(16~1024px, macOS 격자 824/1024) — scripts/make-icons.mjs 가 원본 icon/hwpx-cowork.png 로 만든 것
 const icon = path.join(out, 'editor.icns');
-run('python', ['-c', 'from PIL import Image; import sys; Image.open(sys.argv[1]).convert("RGBA").resize((1024,1024)).save(sys.argv[2],format="ICNS")', path.join(root, 'mobile-rhwp/web/branding/icons/icon-512.png'), icon]);
+fs.copyFileSync(path.join(root, 'web/icons/hwpx-cowork.icns'), icon);
 const entitlements = path.join(out, 'entitlements.plist');
 put(entitlements, '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>');
 

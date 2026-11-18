@@ -83,7 +83,8 @@ fs.cpSync(path.join(vendor, 'assets', 'fonts'), path.join(staging, 'fonts'), {
 for (const name of ['rhwp.js', 'rhwp_bg.wasm', 'rhwp.d.ts', 'rhwp_bg.wasm.d.ts']) fs.copyFileSync(path.join(enginePkg, name), path.join(staging, name));
 fs.cpSync(path.join(root, 'web', 'favicon.ico'), path.join(staging, 'favicon.ico'));
 fs.mkdirSync(path.join(staging, 'icons'));
-for (const name of fs.readdirSync(path.join(root, 'web', 'icons'))) fs.cpSync(path.join(root, 'web', 'icons', name), path.join(staging, 'icons', name));
+// 편집기에는 낱장 PNG 만 넣는다(Windows·Mac 앱 아이콘 hwpx-cowork.ico·.icns 는 편집기가 쓰지 않는다)
+for (const name of fs.readdirSync(path.join(root, 'web', 'icons')).filter((n) => /^icon-\d+\.png$/.test(n))) fs.cpSync(path.join(root, 'web', 'icons', name), path.join(staging, 'icons', name));
 await assertFontDistributionTree(staging);
 
 const loaded = await vite.loadConfigFromFile({ command: 'build', mode: 'production' }, path.join(studioSrc, 'vite.config.ts'), studioSrc);

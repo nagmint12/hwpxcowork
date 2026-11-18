@@ -17,7 +17,8 @@ import { appDir, userDir, configFile, readConfig, writeConfig, portOf, prepareCo
 const here = path.join(appDir, 'portable');
 const packageDir = path.resolve(appDir, '..');
 const stateFile = path.join(userDir, 'manager.json');
-const iconFile = path.join(appDir, 'web', 'favicon.ico');   // hwpx-cowork 아이콘(scripts/make-icons.mjs)
+const iconFile = path.join(appDir, 'web', 'favicon.ico');   // 이 창의 탭 아이콘(scripts/make-icons.mjs)
+const shortcutIcon = path.join(appDir, 'web', 'icons', 'hwpx-cowork.ico');   // 바로 가기용 16~256px(scripts/make-icons.mjs)
 const version = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8')).version;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -192,7 +193,8 @@ async function userAppZip(serverUrl) {
     if (name === 'server-url.txt') bytes = Buffer.from(bytes.toString('utf8').replace('__SERVER_URL__', serverUrl), 'utf8');
     zip.file(`hwpx-cowork-user-app/${name}`, bytes);
   }
-  if (fs.existsSync(iconFile)) zip.file('hwpx-cowork-user-app/hwpx-cowork.ico', fs.readFileSync(iconFile));
+  const icon = [shortcutIcon, iconFile].find((f) => fs.existsSync(f));
+  if (icon) zip.file('hwpx-cowork-user-app/hwpx-cowork.ico', fs.readFileSync(icon));
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 

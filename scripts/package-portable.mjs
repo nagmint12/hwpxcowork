@@ -80,7 +80,8 @@ const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/s
 // web/tutorial-media/ = 예전 복사 튜토리얼 촬영 영상 — 2026-11-12 웹 그림 장면(web/tutorial-scenes.js)으로 바뀌어 부르지 않는다(원본은 개발 폴더에만 보관)
 // web/teaser·teaser3 = 공모전 소개 화면(연습 문서 화면 포함) — 없으면 서버가 /teaser/ 를 바로 다음 주소로 넘긴다(server/index.js).
 // server/run-watchdog-silent.vbs·install-watchdog.js = 개발 PC 전용 감시 도우미(이 PC 경로가 들어 있다), server/templates/README.md = 개발 메모
-const TREE_EXCLUDE = [/^web\/quick\//, /^web\/tutorial-media\//, /^web\/teaser3?\//, /^server\/run-watchdog-silent\.vbs$/, /^server\/install-watchdog\.js$/, /^server\/templates\/README\.md$/,/^studio\/dist\/samples\//, /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/, /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.DS_Store$/];
+// web/icons/hwpx-cowork.icns = Mac 앱 아이콘(scripts/make-icons.mjs) — Mac 묶음이 개발 폴더에서 바로 읽고, 서버·Windows 묶음에는 필요 없다
+const TREE_EXCLUDE = [/^web\/icons\/hwpx-cowork\.icns$/, /^web\/quick\//, /^web\/tutorial-media\//, /^web\/teaser3?\//, /^server\/run-watchdog-silent\.vbs$/, /^server\/install-watchdog\.js$/, /^server\/templates\/README\.md$/,/^studio\/dist\/samples\//, /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/, /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.DS_Store$/];
 // 운영 의존성에서 빼는 것: 소스맵·타입 선언·TypeScript 원본·설명서(라이선스 고지는 남김), exceljs 의 브라우저 묶음(서버는 lib/)
 const STRIP_FILE = /\.(map|d\.ts|d\.mts|d\.cts|ts|mts|cts|tsbuildinfo|md|markdown)$/i;
 const KEEP_NOTICE = /^(licen[cs]e|notice|copying|authors|patents)/i;
@@ -696,6 +697,7 @@ async function main() {
         const e = t(`user-app/${name}`, name);
         return name === 'server-url.txt' ? { ...e, data: Buffer.from(e.data.toString('utf8').replace('__SERVER_URL__', o.serverUrl), 'utf8') } : e;
       });
+      // 바로 가기 아이콘: 이 묶음은 수십 KB 로 둔다(tests/package_portable) — 16~256px hwpx-cowork.ico(약 70KB) 대신 16~64px favicon.ico
       entries.push({ path: 'hwpx-cowork.ico', src: path.join(root, 'web/favicon.ico') });
       builds.push({ target, entries, top: 'hwpx-cowork-user-app', format: 'zip', unix: false, file: `hwpx-cowork-user-app-${version}-${stamp}.zip` });
     } else if (target === 'server-lite') {

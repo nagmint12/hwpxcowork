@@ -115,7 +115,7 @@ if (!fs.existsSync(path.join(runtime, 'node.exe')) || !fs.existsSync(path.join(r
 
 // ── 5. Electron 앱(win32 x64) ──
 log(`Electron ${ELECTRON} 앱 만들기…`);
-const icon = path.join(root, 'web/favicon.ico');   // 16~256px 아이콘(scripts/make-icons.mjs)
+const icon = path.join(root, 'web/icons/hwpx-cowork.ico');   // 16~256px 아이콘(scripts/make-icons.mjs — 원본 icon/hwpx-cowork.png)
 const appOut = path.join(out, 'app');
 const [appDir] = await packager({
   dir: desktopSource, name: 'Hwpx Cowork', executableName: 'Hwpx Cowork', platform: 'win32', arch: 'x64', electronVersion: ELECTRON,

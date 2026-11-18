@@ -136,8 +136,8 @@ const productAudit = auditDesktopProduct({ payload: path.join(payloadDir, 'app')
 await assertFontDistributionTree(path.join(payloadDir, 'app'));
 put(path.join(payloadDir, 'desktop-product.json'), JSON.stringify(productAudit, null, 2) + '\n');
 put(path.join(out, 'desktop-product.json'), JSON.stringify(productAudit, null, 2) + '\n');
-const icon = path.join(out, 'app.icns');
-if (!fs.existsSync(icon)) run('python', ['-c', 'from PIL import Image; import sys; Image.open(sys.argv[1]).convert("RGBA").resize((1024,1024)).save(sys.argv[2], format="ICNS")', path.join(root, 'web/favicon.ico'), icon]);
+const icon = path.join(out, 'app.icns');   // scripts/make-icons.mjs 가 만든 Mac 아이콘(16~1024px)
+if (!fs.existsSync(icon)) fs.copyFileSync(path.join(root, 'web/icons/hwpx-cowork.icns'), icon);
 const nodeBase = `https://nodejs.org/dist/v${NODE}/`;
 const sums = (await get(nodeBase + 'SHASUMS256.txt')).toString();
 const signerName = 'apple-codesign-0.29.0-x86_64-pc-windows-msvc.zip';
