@@ -87,4 +87,14 @@ ${a}`,
     anchor: '  "ai.settings.rememberUnavailable": "This browser cannot remember the key (session only)",\n',
     replace: (a) => `${a}  "ai.settings.rememberBlocked": "This public page never stores API keys (session only, cleared on reload)",\n`,
   },
+  {
+    // 2026-11-18 사용자 결정: 공개 체험 페이지(GitHub Pages)의 편집기에서는 AI 도우미를 아예 올리지 않는다 —
+    // 그 페이지는 'AI 연결은 hwpx-cowork 서버(설치판)에서' 로 안내한다. 배포가 index.html 에 <meta name="hwpx-ai-assistant" content="off"> 를 넣는다
+    // (deploy/github-pages/build-site.mjs). 그 밖의 배포는 그대로(키 저장 막음은 위 패치들이 따로 맡는다).
+    id: 'ai-assistant-hidden-on-public-page',
+    file: 'src/main.ts',
+    why: '공개 체험 페이지(meta hwpx-ai-assistant=off)에서는 AI 도우미를 올리지 않는다',
+    anchor: 'if (__RHWP_AI__ && sidePanels && window.parent === window) {',
+    replace: () => "if (__RHWP_AI__ && sidePanels && window.parent === window && document.querySelector('meta[name=\"hwpx-ai-assistant\"]')?.getAttribute('content') !== 'off') {",
+  },
 ];

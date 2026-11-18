@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// GitHub Pages 사이트 만들기(2026-11-18 사용자 요청): 소개 쪽(이 폴더의 index.html·site.css) + 브라우저 편집기 체험(studio/dist → studio/).
+// GitHub Pages 사이트 만들기(2026-11-18 사용자 요청): 서버 없이 도는 공개 체험 페이지 — 운영 서버와 연결하지 않는다.
+//   index.html(체험 고르기: 튜토리얼·자유 편집기·AI 연결 안내 — 첫 방문은 intro/ 소개 영상부터) · intro/(web/teaser3 재생기·장면)
+//   · studio/(브라우저 편집기, studio/dist) · samples/report-sample.hwpx(견본 보고서 = tutorial/결과보고서.hwpx)
 //   node deploy/github-pages/build-site.mjs <출력 폴더>      (저장소 맨 위에서 — .github/workflows/pages.yml 이 부른다)
 // Node 기본 모듈만 쓴다(Actions 에서 npm 설치 없이).
 //
@@ -9,6 +11,7 @@
 //   편집기 index.html 에 <meta name="hwpx-ai-key-storage" content="off"> 를 넣고, 그 막음 코드(studio/build/ai-key-storage-patches.mjs)가
 //   든 편집기 빌드인지 확인한다 — 없으면 만들지 않는다. *.github.io 주소는 그 코드가 주소만으로도 막는다.
 // - 편집기 예시 문서(studio/dist/samples)는 싣지 않는다.
+// - 공개 체험 페이지의 편집기에서는 AI 도우미를 올리지 않는다(<meta name="hwpx-ai-assistant" content="off"> — 사용자 결정, 패치 ai-assistant-hidden-on-public-page).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,21 +29,28 @@ if (!fs.existsSync(path.join(dist, 'index.html'))) fail('studio/dist/index.html 
 if (fs.existsSync(out) && fs.readdirSync(out).length) fail(`출력 폴더가 비어 있지 않습니다: ${out}`);
 fs.mkdirSync(out, { recursive: true });
 
-// ── 첫 화면 ──
-// HWPX_SERVER_URL(저장소 변수 — .github/workflows/pages.yml)이 있으면 첫 화면은 그 서버의 화면을 그대로 보여 주는 입구(app.html)이고
-// 소개 쪽은 about.html 이 된다(2026-11-18 사용자 요청 — "기존 페이지와 다른 게 없게": 로그인·문서함·Codex/Claude 연결·튜토리얼은 그 서버가 처리).
-// 없으면 첫 화면은 소개 쪽(index.html)이다. 서버 주소는 저장소 글에 적지 않고 배포할 때만 넣는다.
+// ── 첫 화면(체험 고르기) ──
+fs.copyFileSync(path.join(here, 'index.html'), path.join(out, 'index.html'));
+// HWPX_SERVER_URL(저장소 변수)을 주면 app/ 에 그 서버 화면을 그대로 보여 주는 입구(app.html)를 더 만든다(별도 시험 서버를 둘 때 — 지금은 쓰지 않음,
+// 2026-11-18 사용자 결정: 공개 페이지는 운영 서버와 연결하지 않는다). 첫 화면을 바꾸지는 않는다. 서버 주소는 저장소 글에 적지 않는다.
 const serverUrl = (process.env.HWPX_SERVER_URL || '').trim();
 if (serverUrl) {
   let u; try { u = new URL(serverUrl); } catch { fail(`HWPX_SERVER_URL 이 주소가 아닙니다: ${serverUrl}`); }
   if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) fail('HWPX_SERVER_URL 은 경로·쿼리 없는 https 서버 주소여야 합니다');
   const shell = fs.readFileSync(path.join(here, 'app.html'), 'utf8');
   if (shell.split('__HWPX_SERVER__').length !== 2) fail('app.html 의 __HWPX_SERVER__ 자리가 하나가 아닙니다');
-  fs.writeFileSync(path.join(out, 'index.html'), shell.replace('__HWPX_SERVER__', () => JSON.stringify(u.origin + '/')));
-  fs.copyFileSync(path.join(here, 'index.html'), path.join(out, 'about.html'));
-} else {
-  fs.copyFileSync(path.join(here, 'index.html'), path.join(out, 'index.html'));
+  fs.mkdirSync(path.join(out, 'app'));
+  fs.writeFileSync(path.join(out, 'app', 'index.html'), shell.replace('__HWPX_SERVER__', () => JSON.stringify(u.origin + '/')).replaceAll('href="favicon.ico"', 'href="../favicon.ico"').replaceAll('href="icon.png"', 'href="../icon.png"'));
 }
+// 소개 영상: web/teaser3 의 재생기·장면·그림을 복사하고 첫 쪽만 이 사이트용(intro.html — 끝나면 ../?intro=0)
+const teaser = path.join(root, 'web/teaser3');
+const intro = path.join(out, 'intro');
+fs.mkdirSync(intro);
+for (const name of ['player.js', 'film', 'assets']) fs.cpSync(path.join(teaser, name), path.join(intro, name), { recursive: true });
+fs.copyFileSync(path.join(here, 'intro.html'), path.join(intro, 'index.html'));
+// 견본 보고서(가상 자료로 만든 튜토리얼 문서)
+fs.mkdirSync(path.join(out, 'samples'));
+fs.copyFileSync(path.join(root, 'tutorial', '결과보고서.hwpx'), path.join(out, 'samples', 'report-sample.hwpx'));
 fs.copyFileSync(path.join(here, 'site.css'), path.join(out, 'site.css'));
 fs.copyFileSync(path.join(root, 'web/icons/icon-256.png'), path.join(out, 'icon.png'));
 fs.copyFileSync(path.join(root, 'web/favicon.ico'), path.join(out, 'favicon.ico'));
@@ -72,6 +82,7 @@ if (!marker) fail('AI 도우미 키 저장 막음이 든 편집기 빌드가 아
 const index = path.join(studio, 'index.html');
 const html = fs.readFileSync(index, 'utf8');
 if (!/<head>/i.test(html)) fail('편집기 index.html 에 <head> 가 없습니다');
-fs.writeFileSync(index, html.replace(/<head>/i, '<head>\n  <meta name="hwpx-ai-key-storage" content="off">'));
+fs.writeFileSync(index, html.replace(/<head>/i, '<head>\n  <meta name="hwpx-ai-key-storage" content="off">\n  <meta name="hwpx-ai-assistant" content="off">'));
+if (!fs.readdirSync(path.join(studio, 'assets')).some((f) => f.endsWith('.js') && fs.readFileSync(path.join(studio, 'assets', f), 'utf8').includes('hwpx-ai-assistant'))) fail('AI 도우미 숨김 패치가 든 편집기 빌드가 아닙니다');
 if (fs.existsSync(path.join(studio, 'samples'))) fail('예시 문서가 남았습니다');
-console.log(`[pages] ${out} — 편집기 경로 ${replaced}곳을 ${base} 로, AI 키 저장 막음 확인`);
+console.log(`[pages] ${out} — 편집기 경로 ${replaced}곳을 ${base} 로, AI 키 저장 막음·AI 도우미 숨김 확인, 소개 영상·견본 보고서${serverUrl ? ', app/ 입구' : ''}`);

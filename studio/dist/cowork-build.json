@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-18T04:08:42.647Z",
-  "enginePackage": "artifacts\\public-build-20261117\\engine-pkg",
+  "builtAt": "2026-11-18T05:46:44.741Z",
+  "enginePackage": "artifacts\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "6341c33e406bf9fe58959be35ea00ba9b6178960"
+    "commit": "ccc6692090d26b4181e8da1295ca5428d0b67251"
   },
   "patches": [
     {
@@ -612,6 +612,11 @@
       "id": "ai-key-storage-blocked-text-en",
       "file": "src/i18n/locales/en.ts",
       "why": "공개 페이지의 키 저장 막음 안내(영어)"
+    },
+    {
+      "id": "ai-assistant-hidden-on-public-page",
+      "file": "src/main.ts",
+      "why": "공개 체험 페이지(meta hwpx-ai-assistant=off)에서는 AI 도우미를 올리지 않는다"
     },
     {
       "id": "allow-cowork-plugin",

@@ -3,47 +3,68 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hwpx Cowork</title>
-  <meta name="description" content="HWPX·HWP 문서를 브라우저에서 열어 고치고, 여러 사람과 AI의 수정 제안을 검토하는 편집기">
+  <title>Hwpx Cowork 체험</title>
+  <meta name="description" content="설치 없이 브라우저에서 HWPX·HWP 문서를 열어 고치고 내 PC에 저장해 보는 Hwpx Cowork 체험 페이지">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="icon.png">
   <link rel="stylesheet" href="site.css">
+  <script>
+    // 첫 방문은 소개 영상부터(한 번만). ?intro=0 이면 건너뛴다
+    try {
+      if (new URLSearchParams(location.search).get('intro') !== '0' && !localStorage.getItem('hwpx-pages.introSeen')) {
+        localStorage.setItem('hwpx-pages.introSeen', '1');
+        location.replace('intro/');
+      }
+    } catch (e) { /* 저장소를 못 쓰면 이 쪽을 그대로 보인다 */ }
+  </script>
 </head>
 <body>
   <header class="top">
     <div class="shell top-inner">
-      <a class="brand" href="./"><img src="icon.png" width="32" height="32" alt=""><span>hwpx<span class="dot">.</span>cowork</span></a>
-      <a class="top-link" href="studio/">편집기 열기</a>
+      <a class="brand" href="./?intro=0"><img src="icon.png" width="32" height="32" alt=""><span>hwpx<span class="dot">.</span>cowork</span></a>
+      <nav class="top-nav" aria-label="바로 가기"><a href="intro/">소개 영상</a><a href="https://github.com/nagmint12/hwpxcowork#readme">GitHub</a></nav>
     </div>
   </header>
 
   <main>
     <section class="hero shell">
-      <h1>HWPX 문서를 함께 고치는 편집기</h1>
-      <p class="lead">한/글 문서(HWPX·HWP)를 브라우저에서 열어 고치고, 여러 사람과 AI가 낸 수정 제안을 검토해 반영합니다.</p>
-      <div class="actions">
-        <a class="btn primary" href="studio/">브라우저에서 편집기 열기 <span aria-hidden="true">→</span></a>
-      </div>
+      <h1>HWPX 문서를 브라우저에서 바로</h1>
+      <p class="lead">설치 없이 한/글 문서(HWPX·HWP)를 열어 고치고 내 PC에 저장해 보세요. 이 페이지는 서버 없이 브라우저 안에서만 동작합니다.</p>
     </section>
 
-    <section class="shell trial" aria-labelledby="trial-title">
-      <h2 id="trial-title">이 페이지의 체험 편집기</h2>
-      <ul class="checks">
-        <li><b>내 파일만, 내 브라우저 안에서</b><span>PC에 있는 HWP·HWPX 파일을 열어 고치고 저장합니다. 문서는 이 브라우저 안에서만 처리되고 어디에도 올라가지 않습니다.</span></li>
-        <li><b>API 키는 저장하지 않습니다</b><span>편집기의 AI 도우미에 넣은 API 키는 이번 실행 동안만 쓰고, 새로 고치거나 창을 닫으면 지워집니다. 이 공개 페이지는 키를 브라우저 저장소에 남기지 않습니다.</span></li>
-        <li><b>함께 쓰기는 서버에서</b><span>공동 검토, 문서함, AI 작업(수정 제안·메모)은 hwpx-cowork 서버에 접속해 씁니다. Windows 앱으로 내 PC를 서버로 쓸 수도 있습니다.</span></li>
-      </ul>
+    <section class="shell choices" aria-label="체험 고르기">
+      <article class="choice" data-testid="choice-tutorial">
+        <span class="tag soon">준비 중</span>
+        <h2>튜토리얼 · AI 검토 따라하기</h2>
+        <p>견본 보고서에 AI가 낸 수정 제안을 받아 [반영]·[거절]하는 과정을, 미리 준비한 답으로 따라 해 봅니다. 지금은 견본 보고서를 편집기에서 열어 볼 수 있습니다.</p>
+        <div class="actions"><a class="btn" href="studio/?url=..%2Fsamples%2Freport-sample.hwpx&amp;filename=%EA%B2%B0%EA%B3%BC%EB%B3%B4%EA%B3%A0%EC%84%9C.hwpx">견본 보고서 열기</a></div>
+      </article>
+      <article class="choice" data-testid="choice-editor">
+        <h2>자유 편집기</h2>
+        <p>새 문서로 시작하거나, 편집기의 [파일 → 열기]로 내 PC의 HWP·HWPX 파일을 엽니다. 저장하면 내 PC로 내려받습니다. Chrome·Edge에서는 원래 파일에 바로 저장할 수도 있습니다.</p>
+        <div class="actions"><a class="btn primary" href="studio/">편집기 열기 <span aria-hidden="true">→</span></a></div>
+      </article>
+      <article class="choice" data-testid="choice-ai">
+        <span class="tag">설치판</span>
+        <h2>AI 연결 · 함께 쓰기</h2>
+        <p>ChatGPT·Claude 구독이나 API 키로 문서를 검토하고 여러 사람이 함께 고치려면 hwpx-cowork 서버가 필요합니다. 이 체험 페이지에는 서버가 없어 AI 연결과 함께 쓰기를 쓸 수 없습니다.</p>
+        <div class="actions"><a class="btn" href="https://github.com/nagmint12/hwpxcowork/releases/latest">Windows 앱 받기</a><a class="btn ghost" href="https://github.com/nagmint12/hwpxcowork#readme">설치 방법</a></div>
+      </article>
     </section>
 
     <section class="shell features" aria-labelledby="features-title">
-      <h2 id="features-title">할 수 있는 것</h2>
+      <h2 id="features-title">설치판으로 할 수 있는 것</h2>
       <div class="grid">
         <article><h3>함께 검토</h3><p>같은 문서를 여러 사람이 고치고, 바뀐 곳과 메모를 문서 위에서 주고받습니다.</p></article>
-        <article><h3>AI 수정 제안</h3><p>ChatGPT·Claude·Gemini 같은 내 AI가 낸 제안을 문서에 표시하고 [반영]·[거절]로 고릅니다.</p></article>
+        <article><h3>AI 수정 제안</h3><p>내 PC의 Codex·Claude Code(구독)나 API 키로 AI에게 맡기고, 문서에 표시된 제안을 [반영]·[거절]로 고릅니다.</p></article>
         <article><h3>한/글 기준 조판</h3><p>한/글 2022 출력을 기준으로 쪽·줄·표·그림 배치를 맞춥니다. 저장한 HWPX는 한/글에서 다시 열 수 있습니다.</p></article>
-        <article><h3>여러 기기</h3><p>Windows 앱(편집·함께 쓰기·AI 실행기), Mac 편집기, Android 편집기가 있습니다.</p></article>
+        <article><h3>여러 기기</h3><p>Windows 앱(편집·함께 쓰기·AI 실행기), Mac 편집기, Android 편집기를 <a href="https://github.com/nagmint12/hwpxcowork/releases/latest">GitHub 릴리스</a>에서 받습니다.</p></article>
       </div>
+    </section>
+
+    <section class="shell note" aria-label="이 페이지에서 처리하는 것">
+      <p>문서는 이 브라우저 안에서만 처리되고 어디에도 올라가지 않습니다. 이 페이지는 API 키·접속 토큰을 받지도 저장하지도 않습니다.</p>
     </section>
   </main>
 

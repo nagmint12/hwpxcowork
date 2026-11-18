@@ -9,6 +9,7 @@ on:
       - 'studio/dist/**'
       - 'deploy/github-pages/**'
       - 'web/icons/**'
+      - 'web/teaser3/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -35,12 +36,14 @@ jobs:
             deploy/github-pages
             web/icons
             web/favicon.ico
+            web/teaser3
+            tutorial/결과보고서.hwpx
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Build site
-        # HWPX_SERVER_URL(저장소 변수): 첫 화면이 보여 줄 hwpx-cowork 서버 — 없으면 소개 쪽이 첫 화면
+        # HWPX_SERVER_URL(저장소 변수): 주면 app/ 에 그 서버 입구를 더 만든다 — 2026-11-18 부터 비워 둔다(공개 페이지는 서버와 연결하지 않음)
         env:
           HWPX_SERVER_URL: ${{ vars.HWPX_SERVER_URL }}
         run: node deploy/github-pages/build-site.mjs _site
