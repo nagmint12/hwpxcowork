@@ -9,7 +9,7 @@
 // 한글로 저장은 단추 하나(설정대로 — /file?kind=export), ⚙ 문서 설정 창(web/settings.js — 설정할 수 있는 사람만), 패널 탭은 보기 규칙(web/view.js),
 // 실시간 문서에 내게 남은 승인 방식 때 수정본(진행 중 변경 요청)이 있으면 편집기 위 띠 '남은 내 수정본 · 변경 요청 #n · n문단' [반영] [닫기].
 import { createApp, ref, computed, provide, inject, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from '/vendor/vue.esm-browser.prod.js';
-import { state, api, toast, toasts, toastError, fmt, isTyping, clip, kindLabel, roleLabel, josa, versionTip, milestoneAt, workEnv, docWorkEnv, agentEnvName, personalEnvName, presets, NO_AI_TIP, CONNECT_HELP } from './util.js';
+import { state, api, toast, toasts, toastError, fmt, isTyping, clip, kindLabel, roleLabel, josa, versionTip, milestoneAt, workEnv, docWorkEnv, agentEnvName, personalEnvName, presets, NO_AI_TIP, CONNECT_HELP, copyText } from './util.js';
 import { quickPrompt } from './menumodel.js';
 import { createDocStore } from './store.js';
 import { isMobileDevice } from './mobile-settings.js';
@@ -109,10 +109,25 @@ const Login = {
         <p class="login-lead">관리자에게 받은 접속 토큰을 입력하세요.</p>
         <form @submit.prevent="go">
           <label for="login-token">접속 토큰</label>
-          <input id="login-token" v-model="token" autocapitalize="off" spellcheck="false" :aria-invalid="err ? 'true' : null" :aria-describedby="err ? 'login-error' : null"/>
+          <input id="login-token" v-model="token" aria-label="접속 토큰" autocapitalize="off" spellcheck="false" :aria-invalid="err ? 'true' : null" :aria-describedby="err ? 'login-error' : null"/>
           <p id="login-error" class="err" v-if="err" role="alert">{{ err }}</p>
           <button type="submit" class="primary" :disabled="busy">{{ busy ? '여는 중…' : '들어가기' }}</button>
         </form>
+        <div v-if="selfIssue" class="login-issue" data-testid="login-self-issue">
+          <div v-if="issued" class="login-issued" role="alert" data-testid="login-issued"><b>{{ issued.name }} 님의 접속 토큰</b>
+            <code data-testid="login-issued-token">{{ issued.token }}</code>
+            <p>이 토큰은 지금 한 번만 보입니다. 복사해 두세요.</p>
+            <div class="row"><button type="button" class="small" data-testid="login-issued-copy" @click="copyIssued">{{ copied ? '복사됨' : '복사' }}</button>
+              <button type="button" class="primary small" data-testid="login-issued-enter" @click="enterIssued">이 토큰으로 들어가기</button></div></div>
+          <button v-else-if="!issuing" type="button" class="linklike" data-testid="login-self-issue-open" @click="issuing = true; issueErr = ''">개인 토큰 발급받기</button>
+          <form v-else @submit.prevent="issue" data-testid="login-self-issue-form">
+            <label for="login-issue-name">이름</label>
+            <input id="login-issue-name" v-model="issueName" maxlength="40" autocomplete="name" title="문서에 작성자로 보이는 이름입니다" :aria-invalid="issueErr ? 'true' : null" :aria-describedby="issueErr ? 'login-issue-error' : null" data-testid="login-self-issue-name"/>
+            <p id="login-issue-error" class="err" v-if="issueErr" role="alert">{{ issueErr }}</p>
+            <div class="row"><button type="submit" class="primary" :disabled="issueBusy || !issueName.trim()" data-testid="login-self-issue-submit">{{ issueBusy ? '발급하는 중…' : '발급받기' }}</button>
+              <button type="button" :disabled="issueBusy" @click="issuing = false">취소</button></div>
+          </form>
+        </div>
         <p class="login-hint" v-if="tryHint" data-testid="login-tutorial-hint">체험용 접속 토큰 <strong>{{ tryHint }}</strong>{{ tryHint.includes('~') ? ' 중 하나를' : '을' }} 입력하세요.</p>
         <p class="login-hint" v-if="localHost" data-testid="login-local-hint">이 PC의 관리자는 앱이나 시작 파일로 바로 들어갈 수 있습니다.</p>
       </section>
@@ -133,7 +148,20 @@ const Login = {
     }
     // 이 PC 에서 연 화면(localhost): 시작 파일·앱은 설정 파일의 관리자 토큰으로 자동 로그인한다는 것을 알린다
     const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-    return { token, err, busy, go, tryHint, localHost };
+    // 개인 토큰 스스로 발급(관리자가 [기능 설정]에서 켰을 때만 — /api/config selfIssue, 2026-11-18). 이름만 보내고 토큰은 서버가 만든다.
+    // 토큰은 이 응답에 한 번만 오므로 복사하거나 바로 들어가게 한다
+    const selfIssue = computed(() => state.config?.selfIssue === true);
+    const issuing = ref(false); const issueName = ref(''); const issueErr = ref(''); const issueBusy = ref(false); const issued = ref(null); const copied = ref(false);
+    async function issue() {
+      if (issueBusy.value || !issueName.value.trim()) return;
+      issueBusy.value = true; issueErr.value = '';
+      try { issued.value = (await api('/api/self-token', { method: 'POST', body: { name: issueName.value.trim() } })).issued; issuing.value = false; copied.value = false; }
+      catch (e) { issueErr.value = e.message || '발급하지 못했습니다'; }
+      finally { issueBusy.value = false; }
+    }
+    async function copyIssued() { copied.value = await copyText(issued.value.token); }
+    function enterIssued() { token.value = issued.value.token; go(); }
+    return { token, err, busy, go, tryHint, localHost, selfIssue, issuing, issueName, issueErr, issueBusy, issued, copied, issue, copyIssued, enterIssued };
   },
 };
 

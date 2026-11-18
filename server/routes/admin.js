@@ -7,7 +7,7 @@ import { usageReport } from '../usage-report.js';
 /** UI를 숨기는 것과 별개로 모든 관리 경로에 관리자 권한을 검사한다. */
 export function installAdminRoutes({ app, config, auth, wrap, restartControl, instanceId = '', adminSettings, adminAccounts, service, personalAi }) {
   const settings = adminSettings || createAdminSettings({ config, restartControl, instanceId });
-  const accounts = adminAccounts || createAdminAccounts({ config, serverAiStatus: service?.serverAiStatus ? () => service.serverAiStatus() : null });
+  const accounts = adminAccounts || createAdminAccounts({ config, serverAiStatus: service?.serverAiStatus ? () => service.serverAiStatus() : null, knownNames: () => namesInRecords(service) });
   const admin = (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     if (req.user?.role !== 'admin') return res.status(403).json({ error: 'ADMIN_REQUIRED', message: '관리자만 서버 설정을 변경할 수 있습니다.' });
@@ -49,6 +49,14 @@ export function installAdminRoutes({ app, config, auth, wrap, restartControl, in
   app.patch('/api/admin/users/:name', auth, admin, wrap(async (req, res) => res.json(accounts.updateUser(name(req), req.body?.user, req.body?.revision, req.user.name))));
   app.post('/api/admin/users/:name/token', auth, admin, wrap(async (req, res) => res.json(accounts.resetToken(name(req), req.body?.revision, req.user.name, req.body?.token))));
   app.delete('/api/admin/users/:name', auth, admin, wrap(async (req, res) => res.json(accounts.deleteUser(name(req), req.body?.revision ?? req.query.revision, req.user.name))));
+  // 기능 설정(바로 적용): 개인 토큰 스스로 발급 켜기·발급 계정 역할·발급 한도 — 2026-11-18
+  app.get('/api/admin/features', auth, admin, wrap(async (req, res) => res.json(accounts.features())));
+  app.patch('/api/admin/features', auth, admin, wrap(async (req, res) => res.json(accounts.saveFeatures(req.body?.features, req.body?.revision))));
+  // 개인 토큰 스스로 발급(로그인 전 — 관리자가 켰을 때만). 토큰은 이 응답에 한 번만 실린다
+  app.post('/api/self-token', wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ issued: accounts.issueSelf({ name: req.body?.name }) });
+  }));
   // AI 크레딧: 체험에 공유하는 키(tutorial.shareFrom)와 내 키의 API 잔액·이번 달 사용량(조회는 과금 없음)
   app.get('/api/admin/ai-credits', auth, admin, wrap(async (req, res) => res.json(await aiCredits(personalAi || service?.personalAi, config, req.user.name, req.query.refresh === '1'))));
   // AI 사용량: 모든 문서의 요청 기록 토큰 → 예상 API 비용(읽기만 — 화면이 10초마다 다시 읽는다. 같은 순간의 거듭된 조회는 2초 동안 앞의 답을 쓴다)
@@ -62,6 +70,22 @@ export function installAdminRoutes({ app, config, auth, wrap, restartControl, in
   app.get('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.snapshot())));
   app.put('/api/admin/tutorial-ai', auth, admin, wrap(async (req, res) => res.json(tutorialAi.save(req.body?.provider ?? null, req.body?.revision, { examples: req.body?.examples }))));
   return settings;
+}
+
+/**
+ * 문서·문서함 기록에 남은 사람 이름(지운 사용자 포함) — 개인 문서함 주인·폴더와 문서의 접근 목록·문서를 만든 사람.
+ * 개인 토큰 스스로 발급이 이 이름을 다시 주면 그 사람의 개인 문서함과 권한을 이어받으므로 막는다(admin-accounts.js issueSelf)
+ */
+export function namesInRecords(service) {
+  const names = new Set();
+  const add = (n) => { if (typeof n === 'string' && n) names.add(n); };
+  try {
+    for (const m of service?.store?.list() || []) { add(m.createdBy); add(m.spaceOwner); for (const e of m.access?.acl || []) add(e?.name); }
+  } catch { /* 문서 목록을 못 읽어도 사용자 목록 검사는 한다 */ }
+  try {
+    for (const f of service?.library?.data?.folders || []) { add(f.owner); add(f.createdBy); for (const e of f.acl || []) add(e?.name); }
+  } catch { /* 문서함 파일이 없거나 망가졌다 */ }
+  return names;
 }
 
 /**

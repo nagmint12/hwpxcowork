@@ -152,6 +152,14 @@ button.icon .ic, button.icon svg { width: 14px; height: 14px; }
 .login .primary { justify-content: center; min-height: 42px; margin-top: 3px; background: var(--entry-accent); border-color: var(--entry-accent); font-weight: 700; }
 .login .primary:hover:not(:disabled) { background: var(--entry-hover); border-color: var(--entry-hover); }
 .login-hint { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+/* 개인 토큰 스스로 발급(관리자가 [기능 설정]에서 켰을 때 — 2026-11-18) */
+.login-issue { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.login-issue .linklike { background: none; border: 0; padding: 0; min-height: 0; color: var(--entry-accent); font-weight: 650; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.login-issue .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.login-issue .row > button { flex: 0 0 auto; }
+.login-issued { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--entry-accent); border-radius: 10px; background: var(--entry-tint); }
+.login-issued code { font-size: 13px; overflow-wrap: anywhere; user-select: all; padding: 6px 8px; background: var(--panel); border-radius: 6px; }
+.login-issued p { margin: 0; font-size: 12.5px; color: var(--muted); }
 .entry-footer { margin-top: auto; padding-block: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 @media (max-width: 520px) {
   .entry-shell { width: calc(100% - 36px); }

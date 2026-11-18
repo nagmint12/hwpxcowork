@@ -71,7 +71,7 @@ export const AdminUsersPanel = {
         <div class="row"><button type="button" class="small" @click="copy(secret.token)">복사</button><button type="button" class="small" @click="secret = null">확인했습니다</button></div></div>
       <table class="admin-users" data-testid="admin-user-list"><thead><tr><th>이름</th><th>역할</th><th title="체크한 계정만 관리자 AI(서버의 API 키, 튜토리얼에서 나눠 쓰는 관리자 API 키·실행기·ChatGPT)를 씁니다. 체크하지 않은 계정은 본인 AI 키·연결된 AI(내 PC의 Codex·Claude Code)만 씁니다.">관리자 AI</th><th>토큰</th><th></th></tr></thead>
         <tbody><tr v-for="u in data.users" :key="u.name" :data-user="u.name">
-          <td>{{ u.name }}<span v-if="u.me" class="muted"> (나)</span></td>
+          <td>{{ u.name }}<span v-if="u.me" class="muted"> (나)</span><span v-if="u.selfIssued" class="muted" :title="'로그인 화면에서 스스로 발급받은 계정 · ' + new Date(u.selfIssued).toLocaleString()" data-testid="admin-user-self-issued"> · 스스로 발급</span></td>
           <td><select :value="u.role" :disabled="busy" :aria-label="u.name + ' 역할'" @change="setRole(u, $event.target.value)"><option v-for="r in data.roles" :key="r" :value="r">{{ roleLabel(r) }}</option></select></td>
           <td><input type="checkbox" :checked="u.serverAi" :disabled="busy" :aria-label="u.name + ' 관리자 AI 허용'" data-testid="admin-user-server-ai" @change="setServerAi(u, $event.target.checked)"/></td>
           <td><code>{{ u.tokenHint }}</code><button v-if="u.me && state.token" type="button" class="small" title="이 브라우저에 저장된 내 토큰을 복사합니다" data-testid="admin-user-copy-mine" @click="copy(state.token)">복사</button></td>

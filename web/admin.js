@@ -6,13 +6,14 @@ import { AdminLimitsPanel, AdminUsersPanel } from './admin-accounts.js';
 import { AdminCreditsPanel } from './admin-credits.js';
 import { AdminTutorialAiPanel } from './admin-tutorial-ai.js';
 import { AdminUsagePanel } from './admin-usage.js';
+import { AdminFeaturesPanel } from './admin-features.js';
 
 const hostMode = (host) => host === '127.0.0.1' ? 'local' : host === '0.0.0.0' ? 'lan' : 'custom';
 const binding = (s) => s ? `${s.host.includes(':') ? `[${s.host}]` : s.host}:${s.port}` : '';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const AdminServerPanel = {
-  components: { AdminLimitsPanel, AdminUsersPanel, AdminCreditsPanel, AdminTutorialAiPanel, AdminUsagePanel },
+  components: { AdminLimitsPanel, AdminUsersPanel, AdminCreditsPanel, AdminTutorialAiPanel, AdminUsagePanel, AdminFeaturesPanel },
   props: { modal: Boolean, prepareRestart: Function },
   emits: ['close'],
   template: `<component :is="modal ? 'dialog' : 'section'" ref="container" :class="['admin-server', { 'admin-dialog': modal }]"
@@ -63,6 +64,7 @@ export const AdminServerPanel = {
     <AdminCreditsPanel v-else-if="tab === 'credits'"/>
     <AdminTutorialAiPanel v-else-if="tab === 'tutorial-ai'"/>
     <AdminUsagePanel v-else-if="tab === 'usage'"/>
+    <AdminFeaturesPanel v-else-if="tab === 'features'"/>
     <AdminUsersPanel v-else/>
   </component>`,
   setup(props, { emit }) {
@@ -73,6 +75,8 @@ export const AdminServerPanel = {
     const reconnectDirect = ref(false); const configuredReconnectUrl = ref('');
     // 탭: 서버 접속(재시작 필요) · AI 응답 크기 · 사용자(둘 다 바로 적용 — 같은 설정 파일이라 돌아오면 서버 설정을 다시 읽는다) · AI 크레딧(읽기만)
     const tabs = [{ id: 'server', label: '서버 접속' }, { id: 'limits', label: 'AI 응답 크기' }, { id: 'users', label: '사용자' }, { id: 'credits', label: 'AI 크레딧' }, { id: 'usage', label: 'AI 사용량' }, { id: 'tutorial-ai', label: '튜토리얼 AI' }];
+    // 기능 설정(개인 토큰 발급 — 2026-11-18): 그 경로를 아는 서버(/api/config features.adminFeatures)에서만 보인다
+    if (state.config?.features?.adminFeatures) tabs.splice(3, 0, { id: 'features', label: '기능 설정' });
     // 주소로 바로 여는 탭: #/admin/usage → 'AI 사용량'(관리자 페이지에서만 — 대화상자는 늘 서버 접속부터)
     const linked = !props.modal && /^#\/admin\/([\w-]+)/.exec(location.hash)?.[1];
     const tab = ref(tabs.some((t) => t.id === linked) ? linked : 'server');

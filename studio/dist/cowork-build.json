@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-11-17T08:03:55.908Z",
+  "builtAt": "2026-11-18T04:08:42.647Z",
   "enginePackage": "artifacts\\public-build-20261117\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
@@ -577,6 +577,41 @@
       "id": "mobile-options-save",
       "file": "src/ui/options-dialog.ts",
       "why": "확인을 누를 때만 기기에 민감도를 저장한다"
+    },
+    {
+      "id": "ai-key-storage-blocked-detect",
+      "file": "src/ai/settings/key-store.ts",
+      "why": "GitHub Pages(공개 주소)에서는 API 키를 저장하지 않는다 — 판정 함수와 남은 키 저장소 지우기"
+    },
+    {
+      "id": "ai-key-storage-blocked-import",
+      "file": "src/ai/ai-context.ts",
+      "why": "키 저장 막기 판정을 AI 도우미 공유 상태에서 쓴다"
+    },
+    {
+      "id": "ai-key-storage-blocked-flag",
+      "file": "src/ai/ai-context.ts",
+      "why": "설정 화면이 \"이 페이지는 저장하지 않음\"을 알 수 있게 표시를 둔다"
+    },
+    {
+      "id": "ai-key-storage-blocked-create",
+      "file": "src/ai/ai-context.ts",
+      "why": "공개 페이지에서는 키 저장소(IndexedDB)를 열지 않고 남은 것을 지운다"
+    },
+    {
+      "id": "ai-key-storage-blocked-label",
+      "file": "src/ai/ui/ai-settings-dialog.ts",
+      "why": "잠긴 '기억' 칸에 이 페이지가 키를 저장하지 않는다는 이유를 보인다"
+    },
+    {
+      "id": "ai-key-storage-blocked-text-ko",
+      "file": "src/i18n/locales/ko.ts",
+      "why": "공개 페이지의 키 저장 막음 안내(한국어)"
+    },
+    {
+      "id": "ai-key-storage-blocked-text-en",
+      "file": "src/i18n/locales/en.ts",
+      "why": "공개 페이지의 키 저장 막음 안내(영어)"
     },
     {
       "id": "allow-cowork-plugin",

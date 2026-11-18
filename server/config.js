@@ -13,6 +13,23 @@ export function clampLimit(v, [min, max] = LIMIT_RANGE.mcpResponseChars) {
 }
 
 /**
+ * 개인 토큰 스스로 발급(2026-11-18 사용자 요청 — 관리자 [기능 설정]에서 켠다, 기본 끔).
+ * 켜면 로그인 화면에서 누구나 이름을 넣고 자기 접속 토큰을 받는다(server/admin-accounts.js issueSelf).
+ * role = 발급 계정의 역할(관리자는 고를 수 없다), max = 스스로 발급한 계정 수 한도(넘으면 받지 않는다)
+ */
+export const SELF_ISSUE_ROLES = Object.freeze(['editor', 'viewer']);
+export const SELF_ISSUE_MAX_RANGE = Object.freeze([1, 1000]);
+export const SELF_ISSUE_DEFAULTS = Object.freeze({ enabled: false, role: 'editor', max: 50 });
+export function normalizeSelfIssue(v) {
+  const o = obj(v); const max = Number(o.max);
+  return {
+    enabled: o.enabled === true,
+    role: SELF_ISSUE_ROLES.includes(o.role) ? o.role : SELF_ISSUE_DEFAULTS.role,
+    max: Number.isInteger(max) && max >= SELF_ISSUE_MAX_RANGE[0] && max <= SELF_ISSUE_MAX_RANGE[1] ? max : SELF_ISSUE_DEFAULTS.max,
+  };
+}
+
+/**
  * 설정 읽기. 환경 변수(모두 선택):
  *   HWPX_COWORK_CONFIG       다른 config 파일 경로(시험·체험용 임시 config). 주면 그 파일이 꼭 있어야 한다 —
  *                            없으면 오류(새로 만들지 않는다). 그 파일 안의 상대 경로(dataDir)는 그 파일이 있는 폴더 기준.
@@ -81,6 +98,9 @@ export function loadConfig(root) {
   // Claude Code 는 MCP 도구 결과가 2만 5천 토큰(MAX_MCP_OUTPUT_TOKENS 기본)을 넘으면 대화에 싣지 않고 파일로 돌린다 — 한글이 섞인 JSON 은 대략 2자 = 1토큰
   cfg.limits = { ...LIMIT_DEFAULTS, ...obj(cfg.limits) };
   cfg.limits.mcpResponseChars = clampLimit(cfg.limits.mcpResponseChars);
+  // 계정 기능(관리자 → 기능 설정, 바로 적용): selfIssue = 로그인 화면의 개인 토큰 스스로 발급(기본 끔 — normalizeSelfIssue)
+  cfg.accounts = { ...obj(cfg.accounts) };
+  cfg.accounts.selfIssue = normalizeSelfIssue(cfg.accounts.selfIssue);
   // 개인 에이전트(§2.2): 요청 선점 lease(분), 요청자·관리자 아닌 사람도 맡을 수 있는지
   cfg.agents = { leaseMinutes: 15, othersCanTake: false, ...obj(cfg.agents) };
   cfg.agents.leaseMinutes = Number(cfg.agents.leaseMinutes) > 0 ? Number(cfg.agents.leaseMinutes) : 15;

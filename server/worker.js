@@ -9,7 +9,8 @@ import { validateImage } from './image-integrity.js';
 import { withAiDebug, debugRecord, debugError } from './ai-debug.js';
 import { runEditWorkflow } from './edit-workflow-runner.js';
 
-const DEFAULT_TIMING = { pollMs: 30000, backoffMs: 1000, maxBackoffMs: 30000, connectTimeoutMs: 15000, callTimeoutMs: 120000, deadMs: 50000 };
+// modelsMs: 쓸 수 있는 모델 목록을 다시 읽어 웹에 알리는 간격(2026-11-18 — 켤 때만 알리면 새 모델(예: gpt-6.2)이 실행기를 다시 켤 때까지 웹에 안 보였다)
+const DEFAULT_TIMING = { pollMs: 30000, backoffMs: 1000, maxBackoffMs: 30000, connectTimeoutMs: 15000, callTimeoutMs: 120000, deadMs: 50000, modelsMs: 30 * 60 * 1000 };
 const DEFAULT_LOG = (line) => process.stderr.write(`[hwpx 개인 AI] ${line}\n`);
 const stopError = () => Object.assign(new Error('작업 중단'), { code: 'ABORTED' });
 const checkSignal = (signal) => { if (signal?.aborted) throw stopError(); };
@@ -101,13 +102,27 @@ class ApiWorker {
   }
 
   /** 이 계정으로 쓸 수 있는 모델 목록을 웹에 알린다(PUT /api/me/ai-run/catalog — 목록 조회만, 모델 호출 없음) */
+  //   켤 때 한 번, 그 뒤 timing.modelsMs 마다 다시 알린다(목록이 같아도 알려 웹의 '목록 시각'을 새로 한다). 로그는 처음과 목록이 바뀐 때만.
   async reportModels() {
     if (!this.runKind || typeof this.ai.listModels !== 'function') return null;
+    if (this.modelsBusy) return null;
+    this.modelsBusy = true;
     try {
       const models = await this.ai.listModels({ signal: this.shutdown.signal });
       const res = await this.fetch(`${apiBaseFrom(this.url)}/api/me/ai-run/catalog`, { method: 'PUT', headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: this.runKind, models }), redirect: 'error', signal: this.shutdown.signal });
-      if (res.ok) { this.say(`쓸 수 있는 모델 ${models.length}개를 웹에 알렸습니다(웹의 'AI 모델·추론 강도'에서 고릅니다).`); return models.length; }
+      if (res.ok) {
+        const ids = models.map((m) => m.id);
+        const before = this.reportedModels;
+        this.reportedModels = ids;
+        if (!before) this.say(`쓸 수 있는 모델 ${models.length}개를 웹에 알렸습니다(웹의 'AI 모델·추론 강도'에서 고릅니다).`);
+        else if (before.join('\n') !== ids.join('\n')) {
+          const added = ids.filter((id) => !before.includes(id)); const removed = before.filter((id) => !ids.includes(id));
+          this.say(`모델 목록이 바뀌어 웹에 알렸습니다(${models.length}개${added.length ? ` · 새 모델 ${added.join('·')}` : ''}${removed.length ? ` · 빠진 모델 ${removed.join('·')}` : ''}).`);
+        }
+        return models.length;
+      }
     } catch { /* 목록은 없어도 처리에는 지장 없다 */ }
+    finally { this.modelsBusy = false; }
     return null;
   }
 
@@ -127,12 +142,16 @@ class ApiWorker {
     this.sseTask = this.listen();
     this.wake();
     void this.reportModels();
+    if (this.runKind && typeof this.ai.listModels === 'function' && this.timing.modelsMs > 0) {
+      this.modelsTimer = setInterval(() => void this.reportModels(), this.timing.modelsMs);
+      this.modelsTimer.unref?.();
+    }
     return this;
   }
 
   async stop() {
     if (this.stopped) return;
-    this.stopped = true; this.running = false; clearInterval(this.poll);
+    this.stopped = true; this.running = false; clearInterval(this.poll); clearInterval(this.modelsTimer);
     this.shutdown.abort();
     this.sseController?.abort(); this.active?.controller.abort();
     this.sseReader?.cancel().catch(() => {});

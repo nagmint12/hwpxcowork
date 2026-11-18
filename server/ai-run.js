@@ -19,10 +19,13 @@ import { ServiceError } from './service.js';
 import { writeFileAtomic } from './store.js';
 
 export const CLAUDE_CODE_EFFORTS = CLAUDE_EFFORTS;
-// Claude Code 는 목록 명령이 없다 — 지금 모델(별칭 opus·sonnet·haiku 도 직접 입력해 쓸 수 있다)
+// Claude Code 는 목록 명령이 없다(2.1.327 확인) — 별칭(fable·opus·sonnet·haiku)을 앞에 둔다. 별칭은 그 PC 의 Claude Code 가
+// 아는 가장 새 모델로 풀리므로 새 모델이 나와도 이 목록을 고치지 않고 따라간다(2026-11-18 — `claude --help` 의 --model 설명). 뒤는 고정 ID.
 const CLAUDE_CODE_MODELS = Object.freeze([
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' }, { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
-  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' }, { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
+  { id: 'fable', label: 'Fable 최신 (자동)' }, { id: 'opus', label: 'Opus 최신 (자동)' },
+  { id: 'sonnet', label: 'Sonnet 최신 (자동)' }, { id: 'haiku', label: 'Haiku 최신 (자동)' },
+  { id: 'claude-fable-5-2', label: 'Claude Fable 5.2' }, { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' }, { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
 ]);
 
 /** 연결 종류 — applies: 'request'(요청마다 적용) | 'launch'(다음 실행부터), launchNote: 같은 값을 띄울 때 쓰는 다른 연결(채널)의 안내.

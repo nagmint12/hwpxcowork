@@ -88,7 +88,7 @@ def main():
             other = browser.new_context().new_page()   # 토큰 주소 없이 들어온 다른 사람
             other.goto(f'{base}/?teaser=0'); other.wait_for_selector('.login', timeout=10000)
             ok(not other.is_visible('[data-testid=admin-token-notice]') and not other.is_visible('.listpage'), '토큰 없는 접속은 로그인 화면에 머문다(안내도 뜨지 않는다)')
-            page.fill('input[aria-label="접속 토큰"]', mine); page.click('text=들어가기')
+            page.fill('input[aria-label="접속 토큰"]', mine); page.click('.login form button[type=submit]')   # 11-18 로그인 화면 제목 '문서함에 들어가기'와 겹치지 않게 단추로 찾는다
             page.wait_for_selector('.listpage', timeout=15000)
             ok(not page.is_visible('[data-testid=admin-token-notice]'), '토큰을 직접 넣어 들어오면 안내를 띄우지 않는다')
             browser.close()

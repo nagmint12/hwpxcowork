@@ -1,0 +1,49 @@
+# GitHub Pages: 소개 쪽 + 브라우저 편집기 체험(2026-11-18). 사이트는 deploy/github-pages/build-site.mjs 가 만든다.
+# 이 사이트는 누구나 여는 공개 주소다 — 편집기 AI 도우미의 API 키를 저장하지 않는 빌드인지 build-site.mjs 가 확인한다.
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'studio/dist/**'
+      - 'deploy/github-pages/**'
+      - 'web/icons/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            studio/dist
+            deploy/github-pages
+            web/icons
+            web/favicon.ico
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build site
+        run: node deploy/github-pages/build-site.mjs _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -207,7 +207,10 @@ app.get('/api/config', (req, res) => {
     // mcp2: 새 MCP 연결(작업 도구 넷 — server/mcp2.js)과 요청 내용 REST(GET …/requests/:rid/brief)를 이 서버가 안다(실행기가 --mcp 2 로 붙기 전에 확인한다)
     // contentFormatWorkflow: 내용·형식 나눠 처리(실험)를 받는가 — config.experiments.contentFormat(기본 끔, 2026-11-16). 꺼져 있으면 편집기가 그 선택 칸을 보이지 않는다
     // mcpDefault: 머리글·주소로 밝히지 않은 MCP 연결을 무엇으로 여는가('v2' 기본 | 'v1' — config.mcp.defaultSurface, 2026-11-17). 연결 안내 화면이 기본·예전 연결 주소를 고를 때 본다
-    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true, mcpDefault: cfg.mcp.defaultSurface },
+    // adminFeatures: 관리자 [기능 설정] 탭(GET/PATCH /api/admin/features)을 이 서버가 안다(2026-11-18 — 옛 서버면 탭을 숨긴다)
+    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true, mcpDefault: cfg.mcp.defaultSurface, adminFeatures: true },
+    // 로그인 화면의 [개인 토큰 발급받기](POST /api/self-token) — 관리자가 [기능 설정]에서 켰을 때만(config.accounts.selfIssue, 바로 적용)
+    selfIssue: cfg.accounts?.selfIssue?.enabled === true,
     local: !!service.local,   // PC 폴더 연결(개인용 앱)이 켜져 있는가
     tutorialLogin: tutorialLoginHint(),   // 로그인 화면 체험 토큰 안내 글(없으면 null)
     oauth: oauth.status(),

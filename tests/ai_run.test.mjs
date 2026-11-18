@@ -116,6 +116,34 @@ test('실행기: 요청마다 웹 값 적용(비우면 실행할 때 준 값), �
   await plain.applyRunSettings(); assert.equal(await plain.reportModels(), null); await plain.stop();
 });
 
+test('실행기: 모델 목록을 켤 때와 일정 간격마다 다시 알림, 바뀐 때만 로그(2026-11-18)', async () => {
+  const puts = []; let list = [{ id: 'gpt-6.1-sol' }];
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).endsWith('/api/me/ai-run/catalog')) { puts.push(JSON.parse(opts.body).models.map((m) => m.id)); return json({ ok: true }); }
+    return json({}, 404);
+  };
+  const ai = { runKind: 'codex', run: async () => ({}), setRunSettings() {}, listModels: async () => list };
+  const logs = [];
+  const w = createApiWorker({ url: 'http://127.0.0.1:1/mcp', token: 't', ai, fetchImpl, timing: { modelsMs: 40, pollMs: 60000 }, log: (l) => logs.push(l) });
+  w.start();
+  const until = async (ok) => { for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); assert.ok(ok()); };
+  await until(() => puts.length >= 2);
+  list = [{ id: 'gpt-6.2-sol' }, { id: 'gpt-6.1-sol' }];
+  await until(() => puts.some((p) => p.includes('gpt-6.2-sol')));
+  await w.stop();
+  const n = puts.length; await new Promise((r) => setTimeout(r, 100));
+  assert.equal(puts.length, n, '멈춘 뒤에는 다시 알리지 않는다');
+  const modelLogs = logs.filter((l) => l.includes('모델'));
+  assert.equal(modelLogs.filter((l) => l.includes('개를 웹에 알렸습니다')).length, 1, '같은 목록은 로그를 되풀이하지 않는다');
+  assert.ok(modelLogs.some((l) => l.includes('새 모델 gpt-6.2-sol')), modelLogs.join('\n'));
+});
+
+test('Claude Code 기본 목록: 최신 별칭이 앞에', async () => {
+  const { RUN_KINDS } = await import('../server/ai-run.js');
+  const ids = RUN_KINDS.find((k) => k.id === 'claude-code').models.map((m) => m.id);
+  assert.deepEqual(ids.slice(0, 4), ['fable', 'opus', 'sonnet', 'haiku']);
+});
+
 test('실행기 인자: codex 도 --effort(ultra 까지)·HWPX_COWORK_AI_EFFORT, 틀린 값은 거절', () => {
   const env = { HWPX_COWORK_TOKEN: 't' };
   assert.equal(parseWorkerArgs(['--provider', 'codex', '--effort', 'ultra'], env).effort, 'ultra');

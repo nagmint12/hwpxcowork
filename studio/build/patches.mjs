@@ -12,6 +12,7 @@ import { PROGRESSIVE_OPEN_PATCHES } from './progressive-open-patches.mjs';
 import { SELECT_ALL_PATCHES } from './select-all-patches.mjs';
 import { MOBILE_INPUT_PATCHES } from './mobile-input-patches.mjs';
 import { MOBILE_VIEW_PATCHES } from './mobile-view-patches.mjs';
+import { AI_KEY_STORAGE_PATCHES } from './ai-key-storage-patches.mjs';
 import { adaptRhwp090Patches } from './rhwp090-patches.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -37,6 +38,8 @@ export const PATCHES = [
   ...SELECT_ALL_PATCHES,
   ...MOBILE_INPUT_PATCHES,
   ...MOBILE_VIEW_PATCHES,
+  // 2026-11-18 GitHub Pages(공개 주소)에서는 AI 도우미 API 키를 저장하지 않는다 — 그 밖의 배포에서는 동작이 바뀌지 않는다
+  ...AI_KEY_STORAGE_PATCHES,
   {
     id: 'allow-cowork-plugin',
     file: 'src/main.ts',
