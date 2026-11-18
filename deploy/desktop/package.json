@@ -1,7 +1,7 @@
 {
   "name": "hwpx-cowork-personal",
   "productName": "Hwpx Cowork",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "main": "main.mjs"

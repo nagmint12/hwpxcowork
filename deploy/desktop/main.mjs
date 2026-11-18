@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,6 +26,10 @@ const mac = process.platform === 'darwin';
 const TITLES = { personal: 'Hwpx Cowork · 내 문서', shared: 'Hwpx Cowork · 공동 작업', runner: 'Hwpx Cowork · AI 실행기' };
 const SWITCH_QUESTION = { personal: '혼자 쓰기(개인용)로 바꿀까요?', shared: '여러 사람과 함께 쓰기(공동 작업용)로 바꿀까요?', runner: 'AI 실행기만 쓰는 방식으로 바꿀까요?' };
 const ownFile = file => pathToFileURL(path.join(here, file)).href;
+// 창 바탕(2026-11-18): 흰색, 어두운 테마면 검은색 — '여는 중' 화면(loading.html)·실행기 창과 같은 색
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff');
+// 앱 아이콘(scripts/make-icons.mjs) — 처음 실행의 운영 방식 고르기 창에 쓴다
+const appIcon = () => { try { const i = nativeImage.createFromPath(path.join(here, 'app-icon.png')); return i.isEmpty() ? undefined : i; } catch { return undefined; } };
 const localPage = url => { try { const u = new URL(url); return u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname) && Number(u.port) === host?.port; } catch { return false; } };
 // '다른 서버' 토큰 보관(2026-11-17): Electron safeStorage — Windows 는 사용자 계정 DPAPI, Mac 은 키체인. 평문 저장으로 물러서지 않는다(runners.mjs)
 const vault = {
@@ -48,7 +52,7 @@ function showRunners() {
   if (!host) return;
   if (mode === 'runner') { if (editor && !editor.isDestroyed()) { if (editor.isMinimized()) editor.restore(); editor.show(); editor.focus(); } return; }
   if (runnerWin && !runnerWin.isDestroyed()) { runnerWin.focus(); return; }
-  runnerWin = new BrowserWindow({ title: 'AI 실행기', parent: editor, width: 780, height: 720, minWidth: 560, minHeight: 480, autoHideMenuBar: true, backgroundColor: '#f5f6f2',
+  runnerWin = new BrowserWindow({ title: 'AI 실행기', parent: editor, width: 780, height: 720, minWidth: 560, minHeight: 480, autoHideMenuBar: true, backgroundColor: windowBackground(),
     webPreferences: { preload: path.join(here, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
   runnerWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   runnerWin.webContents.on('will-navigate', e => e.preventDefault());
@@ -164,7 +168,7 @@ async function bootstrap() {
   const appData = app.getPath('userData');
   mode = given || savedMode(appData);
   if (!mode) {
-    const choice = dialog.showMessageBoxSync({ type: 'question', title: 'Hwpx Cowork', message: MODE_CHOICE.message, detail: MODE_CHOICE.detail, buttons: MODE_CHOICE.buttons, defaultId: 0, cancelId: 0, noLink: true });
+    const choice = dialog.showMessageBoxSync({ type: 'question', icon: appIcon(), title: 'Hwpx Cowork', message: MODE_CHOICE.message, detail: MODE_CHOICE.detail, buttons: MODE_CHOICE.buttons, defaultId: 0, cancelId: 0, noLink: true });
     mode = MODE_CHOICE.modes[choice] || 'personal';
     saveMode(appData, mode);
   }
@@ -173,7 +177,7 @@ async function bootstrap() {
   host = new DesktopHost({ payload, node, userdata, mode, vault, otherUserdata: MODES.filter(m => m !== mode).map(m => path.join(appData, m)) });
   host.runners.on('change', pushRunnerState);
   const runnerOnly = mode === 'runner';
-  editor = new BrowserWindow({ title: TITLES[mode], width: runnerOnly ? 880 : 1440, height: runnerOnly ? 780 : 940, minWidth: runnerOnly ? 560 : 900, minHeight: runnerOnly ? 520 : 650, backgroundColor: '#f5f6f2',
+  editor = new BrowserWindow({ title: TITLES[mode], width: runnerOnly ? 880 : 1440, height: runnerOnly ? 780 : 940, minWidth: runnerOnly ? 560 : 900, minHeight: runnerOnly ? 520 : 650, backgroundColor: windowBackground(),
     webPreferences: { preload: path.join(here, runnerOnly ? 'preload.cjs' : 'editor-preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
   guardWindow(editor); refreshMenus();
   // 웹 편집기의 beforeunload 저장 경고가 창 닫기를 막을 수 있게 서버 종료보다 먼저 닫기를 시도한다.

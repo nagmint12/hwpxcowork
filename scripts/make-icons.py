@@ -12,6 +12,7 @@
 #   web/favicon.ico(16~64, 브라우저) · web/icons/hwpx-cowork.ico(16~256 — Windows 앱·설치 프로그램·PC 묶음 바로 가기)
 #   web/icons/icon-{128,192,256,512}.png(정사각) · web/icons/hwpx-cowork.icns(Mac 앱 — package-macos-*.mjs)
 #   mobile-rhwp/web/branding/(favicon.ico·icons/) · mobile-rhwp/android/app/src/main/res(mipmap-*·적응형 xml·바탕색)
+#   deploy/desktop/loading-icon.webp(움직이는 원본 icon/HWPX-Cowork-Animated.webp → 160px)·app-icon.png · deploy/installer/installer-{sidebar,header}.bmp(설치 마법사)
 # 웹 화면·편집기(/studio/ — scripts/build-studio.mjs 가 rhwp 아이콘 대신 넣음)·Windows 앱·PC 묶음·Mac 편집기·Android 앱이 모두 이 아이콘을 쓴다.
 import io
 import math
@@ -224,10 +225,49 @@ def remove(rel):
         print('지움:', rel)
 
 
+ANIMATED = os.path.join(ROOT, 'icon', 'HWPX-Cowork-Animated.webp')   # 사용자 제공 움직이는 아이콘(512px, 90장 × 40ms)
+
+
+def animated_tile(size):
+    """움직이는 원본을 타일 구도(묶음 78%)로 잘라 둥근 모서리를 입힌 움직이는 WebP — 데스크톱 앱 '여는 중' 화면"""
+    im = Image.open(ANIMATED)
+    k = im.width / SRC_IMG.width   # 정지 원본과 같은 그림(구도)을 줄인 것
+    side = SPAN / TILE_FRAC * k
+    cx, cy = CENTER[0] * k, CENTER[1] * k
+    box = (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
+    mask = shape_mask(size, 'rounded')
+    frames, durations = [], []
+    for i in range(im.n_frames):
+        im.seek(i)
+        f = im.convert('RGB').resize((size, size), Image.LANCZOS, box=box).convert('RGBA')
+        f.putalpha(mask)
+        frames.append(f)
+        durations.append(im.info.get('duration') or 40)
+    out = io.BytesIO()
+    frames[0].save(out, 'WEBP', save_all=True, append_images=frames[1:], duration=durations, loop=0, quality=82, method=6)
+    return out.getvalue()
+
+
+def installer_bitmap(width, height, icon_size, icon_at):
+    """설치 마법사(NSIS) 그림 — 흰 바탕 위 타일 아이콘. NSIS 는 24비트 BMP 만 받는다."""
+    img = Image.new('RGB', (width, height), (255, 255, 255))
+    t = tile(icon_size)
+    img.paste(t, icon_at, t)
+    out = io.BytesIO()
+    img.save(out, 'BMP')
+    return out.getvalue()
+
+
 def main():
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
     made = []
+    # Windows 앱(deploy/desktop): '내 문서를 여는 중' 화면의 움직이는 아이콘, 첫 실행 운영 방식 고르기 창 아이콘
+    made.append(write('deploy/desktop/loading-icon.webp', animated_tile(160)))
+    made.append(write('deploy/desktop/app-icon.png', png_bytes(tile(128))))
+    # 설치 마법사(setup.exe) 왼쪽 그림 164×314 · 머리 그림 150×57 (scripts/package-windows-desktop.mjs)
+    made.append(write('deploy/installer/installer-sidebar.bmp', installer_bitmap(164, 314, 104, (30, 62))))
+    made.append(write('deploy/installer/installer-header.bmp', installer_bitmap(150, 57, 45, (99, 6))))
     # 웹·편집기·Windows
     # 브라우저 탭용은 64px 까지만(가볍게), Windows 실행 파일·설치 프로그램·바로 가기용은 256px 까지
     made.append(write('web/favicon.ico', ico_bytes([tile(s) for s in (16, 20, 24, 32, 40, 48, 64)])))

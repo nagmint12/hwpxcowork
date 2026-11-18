@@ -143,6 +143,9 @@ await builder.build({
       oneClick: false, perMachine: false, allowElevation: false, allowToChangeInstallationDirectory: true,
       createDesktopShortcut: 'always', createStartMenuShortcut: true, shortcutName: 'Hwpx Cowork', menuCategory: false,
       runAfterFinish: true, deleteAppDataOnUninstall: false, installerIcon: icon, uninstallerIcon: icon,
+      // 설치 마법사 그림(2026-11-18 — 흰 바탕 + 앱 아이콘, scripts/make-icons.mjs). 없으면 NSIS 기본 그림(파란 metro)이 나온다
+      installerSidebar: path.join(root, 'deploy/installer/installer-sidebar.bmp'), uninstallerSidebar: path.join(root, 'deploy/installer/installer-sidebar.bmp'),
+      installerHeader: path.join(root, 'deploy/installer/installer-header.bmp'),
       installerLanguages: ['ko_KR'], language: '1042', multiLanguageInstaller: false, unicode: true,
       uninstallDisplayName: 'Hwpx Cowork', artifactName,
     },
