@@ -59,10 +59,16 @@ impl LayoutEngine {
         } else {
             row_heights.to_vec()
         };
+        // [hwpx-cowork] 각 행의 요구량은 그 행에서 끝나는 걸침 칸만 읽는다. 같은 행의 칸은 원본 순서로 처리한다.
+        let rows = self.table_rows_scope(table);
         for row in cursor_row..row_heights.len() {
             // 부분 시작 행은 컷/override의 상자를 유지한다. 뒤 행 요구에도 그
             // 실제 상자를 사용하므로 호출자에서 제거할 보정을 여기에 선반영하지 않는다.
             if row == cursor_row && (!start_cut.is_empty() || start_row_height_override.is_some()) {
+                continue;
+            }
+            let ending = rows.spans_ending_on(row);
+            if ending.is_empty() {
                 continue;
             }
             // 이 행에서 끝나는 걸침 칸마다 끝 행에 요구하는 높이를 다시 잰다. 앞 조각에서
@@ -71,14 +77,10 @@ impl LayoutEngine {
             let mut demand = 0.0f64;
             let mut original = 0.0f64;
             let mut any_crossing = false;
-            let mut any_ending = false;
             let mut has_actual_owner = false;
             let mut adjusted_preceding_rows = false;
-            for (index, cell) in table.cells.iter().enumerate() {
-                if cell.row_span <= 1 || cell.row as usize + cell.row_span as usize != row + 1 {
-                    continue;
-                }
-                any_ending = true;
+            for &index in ending {
+                let cell = &table.cells[index];
                 let start = cell.row as usize;
                 let declared = if cell.height < 0x8000_0000 {
                     hwpunit_to_px(cell.height as i32, self.dpi)
@@ -123,13 +125,14 @@ impl LayoutEngine {
                 demand = demand.max(remaining);
                 original = original.max(required - others);
             }
-            if !any_ending || !(any_crossing || adjusted_preceding_rows) {
+            if !(any_crossing || adjusted_preceding_rows) {
                 continue;
             }
-            let declared = table
-                .cells
+            let declared = rows
+                .starting(row)
                 .iter()
-                .filter(|cell| cell.row as usize == row && cell.row_span == 1)
+                .map(|&index| &table.cells[index])
+                .filter(|cell| cell.row_span == 1)
                 .filter(|cell| cell.height < 0x8000_0000)
                 .map(|cell| hwpunit_to_px(cell.height as i32, self.dpi))
                 .fold(0.0, f64::max);

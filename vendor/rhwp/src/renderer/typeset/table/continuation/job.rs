@@ -10,6 +10,47 @@ use crate::renderer::typeset::{
 };
 
 impl TypesetEngine {
+    // [hwpx-cowork] 재개형 표 쪽 나눔이 받는 문서 형상인가 — 측정 없이 알 수 있는 조건만(아래 `begin_resumable_table_pagination`
+    // 의 첫 두 검사 그대로). `begin_deferred_pagination` 이 구역 측정(큰 표는 수십~백 ms) 뒤에야 이 검사에서 거절돼 Fallback 으로
+    // 떨어지고, 이어지는 전체 쪽 나눔이 같은 측정을 다시 했다(2026-11-18 — 문단이 여럿인 보통 문서는 늘 거절). 측정 전에 묻는다.
+    pub(crate) fn resumable_table_pagination_shape_supported(
+        paragraphs: &[Paragraph],
+        column_def: &ColumnDef,
+        paragraph_index: usize,
+        control_index: usize,
+    ) -> bool {
+        if paragraphs.len() != 1 || paragraph_index != 0 || column_def.column_count.max(1) != 1 {
+            return false;
+        }
+        let Some(para) = paragraphs.get(paragraph_index) else {
+            return false;
+        };
+        let table = match para.controls.get(control_index) {
+            Some(Control::Table(table)) => table,
+            _ => return false,
+        };
+        !(table.common.treat_as_char
+            || !matches!(
+                table.layout_page_break(),
+                crate::model::table::TablePageBreak::RowBreak
+            )
+            || table.row_count <= 1
+            || para_has_visible_text(para)
+            || para.controls.iter().enumerate().any(|(index, control)| {
+                index != control_index
+                    && !matches!(
+                        control,
+                        Control::SectionDef(_) | Control::ColumnDef(_) | Control::Bookmark(_)
+                    )
+            })
+            || para
+                .controls
+                .iter()
+                .enumerate()
+                .skip(control_index + 1)
+                .any(|(_, control)| !matches!(control, Control::Bookmark(_))))
+    }
+
     /// [#2424] 단일 문단의 마지막 대형 RowBreak 표를 shadow flow state에서 시작한다.
     ///
     /// Stage D의 첫 fast path는 편집 지연 대상이 문서의 유일한 본문 표인 형상으로
@@ -33,7 +74,13 @@ impl TypesetEngine {
         control_index: usize,
         fragment_budget: usize,
     ) -> Option<ResumableTablePaginationJob> {
-        if paragraphs.len() != 1 || paragraph_index != 0 || column_def.column_count.max(1) != 1 {
+        // [hwpx-cowork] 형상 검사는 측정 전에도 쓰는 한 곳(`resumable_table_pagination_shape_supported`)에 둔다.
+        if !Self::resumable_table_pagination_shape_supported(
+            paragraphs,
+            column_def,
+            paragraph_index,
+            control_index,
+        ) {
             return None;
         }
         let para = paragraphs.get(paragraph_index)?;
@@ -41,29 +88,6 @@ impl TypesetEngine {
             Control::Table(table) => table,
             _ => return None,
         };
-        if table.common.treat_as_char
-            || !matches!(
-                table.layout_page_break(),
-                crate::model::table::TablePageBreak::RowBreak
-            )
-            || table.row_count <= 1
-            || para_has_visible_text(para)
-            || para.controls.iter().enumerate().any(|(index, control)| {
-                index != control_index
-                    && !matches!(
-                        control,
-                        Control::SectionDef(_) | Control::ColumnDef(_) | Control::Bookmark(_)
-                    )
-            })
-            || para
-                .controls
-                .iter()
-                .enumerate()
-                .skip(control_index + 1)
-                .any(|(_, control)| !matches!(control, Control::Bookmark(_)))
-        {
-            return None;
-        }
         let measured_table = measured_tables.iter().find(|measured| {
             measured.para_index == paragraph_index && measured.control_index == control_index
         })?;

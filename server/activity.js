@@ -70,7 +70,11 @@ const LABELS = {
   },
   edit: (a, v) => {
     const tally = new Map();
-    for (const op of Array.isArray(a?.ops) ? a.ops : []) { const k = EDIT_OPS[op?.op] || '고치기'; tally.set(k, (tally.get(k) || 0) + 1); }
+    for (const op of Array.isArray(a?.ops) ? a.ops : []) {
+      const k = op?.op === 'styles' && op.update?.length ? '스타일 수정'
+        : op?.op === 'styles' && op.define?.length ? '스타일 생성' : EDIT_OPS[op?.op] || '고치기';
+      tally.set(k, (tally.get(k) || 0) + 1);
+    }
     const what = [...tally].map(([k, c]) => (c > 1 ? `${k} ${c}` : k)).join(' · ') || '고치기';
     const failed = count(v?.failed);
     // 2026-11-17(§10.4 나-4): 저장 단계에서 실패하면 아무것도 저장하지 않는다(dry_run 이 아니면 '저장 안 됨')
@@ -84,10 +88,10 @@ const LABELS = {
   finish: (a, v) => (v?.completed === true ? (a?.error ? '못 한 것을 요약에 적음' : '요약 남김') : a?.error ? '실패로 기록' : '완료'),
 };
 const READ_VIEWS = { text: '문서 읽기', layout: '개체 배치 읽기', outline: '제목 얼개 확인', map: '문서 얼개 확인', tables: '표 확인', objects: '개체 확인', format: '서식 확인', memos: '메모 확인',
-  proposals: '제안 목록 확인', changes: '변경 추적 확인', fields: '누름틀 확인', figures: '그림 목록 확인', attachments: '첨부 목록 확인', attachment: '첨부 읽기', page: '쪽 구성 확인', guide: '작성 지침 확인', history: '문서 이력 확인', requests: '요청 목록 확인' };
+  proposals: '제안 목록 확인', changes: '변경 추적 확인', fields: '누름틀 확인', figures: '그림 목록 확인', attachments: '첨부 목록 확인', attachment: '첨부 읽기', page: '쪽 구성 확인', styles: '스타일 확인', guide: '작성 지침 확인', history: '문서 이력 확인', requests: '요청 목록 확인' };
 const EDIT_OPS = { replace: '수정 제안', insert: '문단 추가', table: '표 제안', table_edit: '표 고치기', format: '서식 제안', delete_objects: '개체 지우기', delete_paragraphs: '문단 지우기', move_paragraphs: '문단 옮기기', alternatives: '여러 안', memo: '의견', fill: '누름틀 채우기', toc: '차례 새로 고침',
   chart: '차트 제안', figure: '그림 제안', objects_to_body: '개체 → 본문', paper: '쪽 구성', section: '쪽 구성', split_section: '쪽 구성', merge_section: '쪽 구성', header: '쪽 구성', footer: '쪽 구성', page_number: '쪽 구성', master_page: '쪽 구성',
-  replace_all: '일괄 바꾸기', withdraw: '제안 거두기' };   // 2026-11-17 MCP_REDESIGN §10.4 나-6·나-4
+  replace_all: '일괄 바꾸기', withdraw: '제안 거두기', styles: '스타일 들여오기', restyle: '서식 제안' };   // 2026-11-17 MCP_REDESIGN §10.4 나-6·나-4
 
 /** 기록할 도구인가 */
 export const isActivityTool = (tool) => Object.hasOwn(LABELS, tool);

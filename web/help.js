@@ -75,6 +75,15 @@ function revealHash() {
   for (let d = target.closest('details:not([open])'); d; d = d.parentElement?.closest('details:not([open])')) { d.open = true; opened = true; }
   if (opened) target.scrollIntoView();
 }
+function markTopic() {
+  const target = document.getElementById(hashAnchor() || 'start');
+  const current = target?.closest('section[id]')?.id;
+  for (const link of document.querySelectorAll('.help-layout nav a[href^="#"]')) {
+    if (link.hash === `#${current}`) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+markTopic();
 // 프로그램 안 설명서(iframe)는 로그인 전에 열렸다가 로그인 뒤 다시 쓰일 수 있다 — 토큰이 바뀌거나 숨은 관리자 절로 가면 다시 확인한다
 window.addEventListener('storage', (event) => { if (event.key === 'hwpx.token' || event.key === null) revealAdmin(); });
 window.addEventListener('hashchange', () => {
@@ -82,6 +91,7 @@ window.addEventListener('hashchange', () => {
   const target = anchor ? document.getElementById(anchor) : null;
   if (target?.closest('[data-admin]')?.hidden) revealAdmin();
   revealHash();
+  markTopic();
 });
 
 function urls() { return connectionUrls({ browserOrigin: origin, publicUrl: config.publicUrl, diagnostics, selectedWebUrl }); }
@@ -167,6 +177,7 @@ async function copyText(value) {
   let ok = false; try { ok = document.execCommand('copy'); } catch { ok = false; } finally { area.remove(); } return ok;
 }
 const COPY_MESSAGES = {
+  'agent-setup-prompt': '설치 요청문을 복사했습니다. 에이전트 채팅에 붙여넣으세요.',
   'token-command': '복사했습니다. 내-토큰 자리를 내 토큰으로 바꿔 실행하고, VS Code를 다시 여세요.',
   'codex-login': '복사했습니다. 터미널에서 실행해 ChatGPT 계정으로 로그인하세요.',
   'codex-mcp-command': '복사했습니다. VS Code 터미널에 붙여넣어 실행하세요.',
@@ -187,6 +198,17 @@ document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('clic
   const message = COPY_MESSAGES[key] || (key.endsWith('-command') ? '복사했습니다. 예제의 개인 토큰·API 키·모델 ID는 본인 값으로 바꾸세요.' : '주소를 복사했습니다.');
   notice(await copyText(value) ? message : '복사하지 못했습니다. 내용을 직접 선택해 복사하세요.');
 }));
+$('download-agent-prompt')?.addEventListener('click', () => {
+  const markdown = $('agent-setup-prompt').textContent.trim() + '\n';
+  const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'hwpx-cowork-install-prompt.md';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 for (const id of ['provider', 'gateway', 'effort']) $(id)?.addEventListener('change', workerCommand);
 $('model-id')?.addEventListener('input', workerCommand);
 function append(parent, tag, value, cls) { const el = document.createElement(tag); el.textContent = value; if (cls) el.className=cls; parent.append(el); return el; }

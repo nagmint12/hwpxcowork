@@ -18,6 +18,29 @@ use crate::renderer::composer::compose_paragraph;
 use crate::renderer::style_resolver::ResolvedStyleSet;
 use crate::renderer::{TabStop, TextStyle};
 
+// [hwpx-cowork] 편집 중 채운 줄 캐시는 한정 HWP 저장 동안 읽거나 채우지 않고, 저장 오류 뒤에도 편집기가 다시 쓴다.
+#[cfg(feature = "pdf-import")]
+#[test]
+fn cell_compose_memo_bounded_save_restores_the_editor_cache_on_error() {
+    let engine = LayoutEngine::with_default_dpi();
+    let memo = std::sync::Arc::new(crate::renderer::composer::cell_compose_memo::CellComposeMemo::default());
+    engine.set_cell_compose_memo(Some(memo.clone()));
+    let para = Paragraph { text: "abc".into(), char_count: 3, ..Default::default() };
+    let styles = ResolvedStyleSet::default();
+    let compose = || engine.compose_cell_unit_paragraph(&para, 0, 0, 100.0, &styles);
+    compose();
+    assert_eq!(memo.stats(), (1, 0, 1));
+    let prepare = || -> Result<(), &'static str> {
+        let _uncached = engine.suspend_cell_compose_memo();
+        compose();
+        assert_eq!(memo.stats(), (1, 0, 1));
+        Err("request budget exceeded")
+    };
+    assert!(prepare().is_err());
+    compose();
+    assert_eq!(memo.stats(), (1, 1, 1));
+}
+
 fn a4_page_def() -> PageDef {
     PageDef {
         width: 59528,

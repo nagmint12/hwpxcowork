@@ -134,7 +134,7 @@ function snapWidth(mm) {
 }
 
 /** borderFill 항목을 고친 새 번호(같은 것이 있으면 그 번호): sides = { left|right|top|bottom: { type?, width?, color? } }, fill = '#RRGGBB' | 'none' | undefined */
-function patchBorderFill(header, id, { sides = {}, fill } = {}) {
+export function patchBorderFill(header, id, { sides = {}, fill } = {}) {
   const src = header.block('borderFill', id);
   if (!src) fail('TABLE_STYLE', `테두리 모양 ${id} 을 찾지 못했습니다`);
   let xml = src;
@@ -158,7 +158,7 @@ function patchBorderFill(header, id, { sides = {}, fill } = {}) {
 }
 
 /** 선 하나 { type?, width_mm?, color? } → { type, width, color } 꼴(빈 값은 그대로 둠) */
-function lineSpec(line, name) {
+export function lineSpec(line, name) {
   const l = line || {};
   const out = {};
   if (l.type != null) { if (!LINE_TYPES.includes(l.type)) fail('TABLE_SPEC', `${name}: 선 종류는 ${LINE_TYPES.join('·')} 가운데 하나입니다`); out.type = l.type; }

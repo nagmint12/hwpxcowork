@@ -211,6 +211,11 @@ export class HwpDocument {
      */
     captureSectionRaw(section_idx: number): number;
     /**
+     * [hwpx-cowork] 칸 문단 줄 구성 기억의 상태(시험·진단용): `{"entries":n,"hits":n,"misses":n,"passes":n,"keptPasses":n,"environmentChanges":n}`.
+     * hits = 같은 내용·같은 폭이라 다시 줄 나눔하지 않은 횟수(문서를 연 뒤 누적).
+     */
+    cellComposeMemoStats(): string;
+    /**
      * 개체 순서 — operation: front | back | forward | backward. 칸 안 개체도 된다(본문은 changeShapeZOrder 와 같다).
      */
     changeObjectZOrderH2022(sec: number, ppi: number, cell_path_json: string, ci: number, operation: string): string;
@@ -3365,6 +3370,7 @@ export interface InitOutput {
     readonly hwpdocument_captureDeleteRange: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly hwpdocument_capturePictureTransform: (a: number, b: number, c: number) => [number, number, number];
     readonly hwpdocument_captureSectionRaw: (a: number, b: number) => [number, number, number];
+    readonly hwpdocument_cellComposeMemoStats: (a: number) => [number, number];
     readonly hwpdocument_changeObjectZOrderH2022: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_changeParaNumberLevel: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_changePictureH2022: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];

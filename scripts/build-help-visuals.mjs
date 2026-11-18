@@ -2,6 +2,7 @@
 // 사용 설명서(web/help.html) 그림 만들기 — SVG 로 그리고 → PNG(@resvg/resvg-wasm) → WebP(Python Pillow). 브라우저를 쓰지 않는다.
 //   node scripts/build-help-visuals.mjs            → web/help-assets/*.webp (그림마다 150KB 미만)
 //   node scripts/build-help-visuals.mjs --svg <폴더> → 그 폴더에 SVG 원본도 남김(고칠 때 보기용)
+//   --only 이름,이름 --out <폴더> → 고른 그림만 별도 폴더에 생성
 // 글꼴: 저장소의 재배포 가능 글꼴(Pretendard·D2Coding, SIL OFL — vendor/rhwp/assets/fonts 의 woff2)을
 //   Python fontTools 로 풀어(임시 폴더) resvg 에 넘긴다. 그림은 자기 바탕(밝은 카드)을 갖고 바깥은 투명이라 밝은·어두운 화면 모두에서 읽힌다.
 // 글은 이름표만(docs/UI_TERMS.md §1) — 설명 문장은 설명서 본문에 둔다. 서버 주소·토큰·사람 이름은 그림에 넣지 않는다.
@@ -270,6 +271,31 @@ function vscodePlaces() {
 }
 
 const FIGURES = [
+  { name: 'agent-start', build: () => ({ ...stepStrip({ steps: [
+      { icon: 'window', title: '빈 폴더 열기', sub: 'VS Code 등에서' },
+      { icon: 'doc', title: '설치 요청문 복사', sub: '운영 방식과 AI 선택' },
+      { icon: 'chat', title: '에이전트 채팅에 보내기', sub: 'GitHub에서 받기·설치', tone: 'ai' }],
+    }), title: '빈 폴더를 열고 설치 요청문을 보내면 에이전트가 GitHub에서 프로그램을 받아 설치합니다' }) },
+  { name: 'install-steps', build: () => ({ ...stepStrip({ steps: [
+      { icon: 'doc', title: '설치 파일 다운로드', sub: 'Windows용 .exe' },
+      { icon: 'window', title: '받은 파일 실행', sub: '다음 → 설치 → 마침' },
+      { icon: 'check', title: '작업 방식 선택', sub: '혼자 쓰기 · 함께 쓰기\nAI 실행기만', tone: 'result' }],
+    }), title: 'Windows에서 설치 파일을 내려받아 실행하고 첫 실행에서 작업 방식을 고릅니다' }) },
+  { name: 'first-login', build: () => ({ ...stepStrip({ steps: [
+      { icon: 'key', title: '주소와 토큰 받기', sub: '서버 관리자에게' },
+      { icon: 'window', title: '접속 토큰 입력', sub: '서버 주소를 열고' },
+      { icon: 'doc', title: '문서함 열기', sub: '문서 열기 · HWPX 올리기', tone: 'result' }],
+    }), title: '관리자에게 주소와 토큰을 받은 뒤 서버 주소를 열고 문서함에 접속합니다' }) },
+  { name: 'library-steps', build: () => ({ ...stepStrip({ steps: [
+      { icon: 'list', title: '문서함 선택', sub: '공용 · 개인 · 공유받은' },
+      { icon: 'doc', title: '문서 올리기', sub: 'HWPX 올리기 · 새 문서' },
+      { icon: 'person', title: '폴더 권한 설정', sub: '공유할 사람과 권한 선택', tone: 'result' }],
+    }), title: '문서함을 고르고 문서를 올린 뒤 폴더 권한에서 공유할 사람과 권한을 고릅니다' }) },
+  { name: 'pc-folder-steps', build: () => ({ ...stepStrip({ steps: [
+      { icon: 'window', title: 'PC 폴더 연결', sub: '혼자 쓰기에서 폴더 선택' },
+      { icon: 'doc', title: '원래 파일에 저장', sub: '내 PC 파일 열기 · 편집' },
+      { icon: 'send', title: '함께 검토', sub: '서버로 보내기 · 검토본 받기', tone: 'ai' }],
+    }), title: '개인용 앱에서 PC 폴더를 연결해 편집하고 필요할 때 서버로 검토를 보냅니다' }) },
   { name: 'ai-flow', build: aiFlow },
   { name: 'realtime-steps', build: realtimeSteps },
   { name: 'vscode-places', build: vscodePlaces },
@@ -328,15 +354,28 @@ function prepareFonts(cacheDir) {
 }
 
 async function main() {
-  const svgOut = (() => { const i = process.argv.indexOf('--svg'); return i > 0 ? path.resolve(process.argv[i + 1]) : null; })();
+  function option(name) {
+    const index = process.argv.indexOf(name);
+    if (index < 0) return null;
+    const value = process.argv[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${name} 값을 지정하세요.`);
+    return value;
+  }
+  const svg = option('--svg');
+  const svgOut = svg ? path.resolve(svg) : null;
+  const outDir = path.resolve(option('--out') || OUT);
+  const selected = option('--only')?.split(',') || FIGURES.map(fig => fig.name);
+  for (const name of selected) {
+    if (!FIGURES.some(fig => fig.name === name)) throw new Error(`알 수 없는 그림: ${name}`);
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-help-visuals-'));
   try {
     await initWasm(fs.readFileSync(require.resolve('@resvg/resvg-wasm/index_bg.wasm')));
     const fontBuffers = prepareFonts(path.join(os.tmpdir(), 'hwpx-help-visual-fonts'));
-    fs.mkdirSync(OUT, { recursive: true });
+    fs.mkdirSync(outDir, { recursive: true });
     if (svgOut) fs.mkdirSync(svgOut, { recursive: true });
     const report = [];
-    for (const fig of FIGURES) {
+    for (const fig of FIGURES.filter(item => selected.includes(item.name))) {
       const { h, body, title } = fig.build();
       const svg = svgDoc(h, body, { title });
       if (svgOut) fs.writeFileSync(path.join(svgOut, `${fig.name}.svg`), svg);
@@ -349,7 +388,7 @@ async function main() {
       const tmpWebp = path.join(tmp, `${fig.name}.webp`);
       const [bytes, pw, ph, mode] = python(PY_WEBP, [pngPath, tmpWebp, String(LIMIT - 1024)]).split(/\s+/);
       if (Number(bytes) >= LIMIT) throw new Error(`${fig.name}.webp 가 너무 큽니다(${bytes}B)`);
-      const dest = path.join(OUT, `${fig.name}.webp`);
+      const dest = path.join(outDir, `${fig.name}.webp`);
       fs.copyFileSync(tmpWebp, `${dest}.tmp`); fs.renameSync(`${dest}.tmp`, dest);
       report.push({ file: `web/help-assets/${fig.name}.webp`, bytes: Number(bytes), px: `${pw}x${ph}`, css: `${W}x${h}`, mode });
     }

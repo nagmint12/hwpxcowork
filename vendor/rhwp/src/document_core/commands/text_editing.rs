@@ -1443,6 +1443,8 @@ impl DocumentCore {
             ));
         }
 
+        // [hwpx-cowork] 이 편집 전까지 밀린 변경이 글 편집뿐이었는가(칸 문단 줄 구성 기억을 남길 수 있는가).
+        let text_edit_trust = self.text_edit_trust_before();
         let flow_before = body_paragraph_flow_signature(
             &self.document.sections[section_idx].paragraphs[para_idx],
         );
@@ -1494,6 +1496,8 @@ impl DocumentCore {
             // 문단의 새 줄 구성은 위에서 갱신했다. 쪽 소속 확정은 endBatch가 소유한다.
             self.mark_section_dirty(section_idx);
         } else if flow_changed {
+            // [hwpx-cowork] 바뀐 것은 이 문단의 글뿐이다 — 표 칸의 줄 구성 기억은 남긴 채 쪽 나눔한다.
+            self.text_edit_trust_after(text_edit_trust);
             self.paginate();
             for _ in 0..2 {
                 let new_col = self
@@ -1520,10 +1524,13 @@ impl DocumentCore {
                     doc_hwp3_layout,
                 );
                 self.recompose_paragraph(section_idx, para_idx);
+                self.text_edit_trust_after(text_edit_trust); // [hwpx-cowork]
                 self.paginate();
             }
         } else {
             self.refresh_render_normalized_body_paragraph_after_edit(section_idx, para_idx);
+            // [hwpx-cowork] 쪽 나눔을 미룬 글 편집 — 다음 쪽 나눔(쉼 flush)이 줄 구성 기억을 남길 수 있다.
+            self.text_edit_trust_after(text_edit_trust);
         }
 
         let new_offset = char_offset + new_chars_count;
@@ -2122,7 +2129,8 @@ impl DocumentCore {
         char_offset: usize,
         text: &str,
     ) -> Result<String, HwpError> {
-        self.replace_text_in_cell_native_impl(
+        let text_edit_trust = self.text_edit_trust_before(); // [hwpx-cowork]
+        let edited = self.replace_text_in_cell_native_impl(
             section_idx,
             parent_para_idx,
             control_idx,
@@ -2132,7 +2140,9 @@ impl DocumentCore {
             0,
             text,
             false,
-        )
+        )?;
+        self.text_edit_trust_after(text_edit_trust);
+        Ok(edited)
     }
 
     /// 표 셀 내부의 짧은 IME 조합 문자열을 원자적으로 교체하고 전체 페이지네이션은 지연한다.
@@ -2177,7 +2187,8 @@ impl DocumentCore {
             ));
         }
 
-        self.replace_text_in_cell_native_impl(
+        let text_edit_trust = self.text_edit_trust_before(); // [hwpx-cowork]
+        let edited = self.replace_text_in_cell_native_impl(
             section_idx,
             parent_para_idx,
             control_idx,
@@ -2187,7 +2198,9 @@ impl DocumentCore {
             delete_count,
             text,
             false,
-        )
+        )?;
+        self.text_edit_trust_after(text_edit_trust);
+        Ok(edited)
     }
 
     pub(crate) fn replace_text_in_cell_native_impl(
@@ -2608,6 +2621,7 @@ impl DocumentCore {
         char_offset: usize,
         count: usize,
     ) -> Result<String, HwpError> {
+        let text_edit_trust = self.text_edit_trust_before(); // [hwpx-cowork]
         let edited = self.delete_text_in_cell_native_impl(
             section_idx,
             parent_para_idx,
@@ -2619,14 +2633,16 @@ impl DocumentCore {
             false,
         )?;
         // [hwpx-cowork] 셀을 고치면 그 표의 계산식을 다시 계산한다(h2022_table.rs).
-        Ok(self.h2022_recalc_formulas_after_cell_edit(
+        let edited = self.h2022_recalc_formulas_after_cell_edit(
             section_idx,
             parent_para_idx,
             control_idx,
             cell_idx,
             false,
             edited,
-        ))
+        );
+        self.text_edit_trust_after(text_edit_trust);
+        Ok(edited)
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -1,5 +1,5 @@
 """프로그램 안 설명서를 열고 닫아도 문서·보내지 않은 AI 요청이 그대로 유지되는지 확인한다."""
-import atexit, json, os, secrets, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+import atexit, hashlib, json, os, secrets, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -19,8 +19,20 @@ def main():
     sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
     cfg = {'host':'127.0.0.1', 'port':port, 'dataDir':'./data', 'tutorial': {'enabled': False}, 'users':[{'name':'내장설명서시험','role':'admin','token':token}], 'ai':{'enabled':False,'keyFile':str(tmp/'no-key')}}
     config = tmp/'config.json'; config.write_text(json.dumps(cfg), encoding='utf-8')
+    release = tmp/'release'; release.mkdir()
+    files = [
+        ('windows', 'windows-app', 'HwpxCowork-Setup-1.0.0-20261118.exe'),
+        ('mac', 'local-editor-macos-universal', 'hwpx-cowork-macos-editor-1.0.0-20261118.zip'),
+        ('android', 'android-rhwp-editor', 'hwpx-cowork-1.0.0.apk'),
+    ]
+    data = b'help navigation fixture'
+    manifest = []
+    for _, target, name in files:
+        (release / name).write_bytes(data)
+        manifest.append({'target': target, 'file': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+    (release / 'release.json').write_text(json.dumps({'packages': manifest}), encoding='utf-8')
     env = {k:v for k,v in os.environ.items() if not k.upper().startswith('HWPX_COWORK_')}
-    env.update(HWPX_COWORK_CONFIG=str(config), HWPX_COWORK_DATA_DIR=str(tmp/'data'), HWPX_COWORK_HOST='127.0.0.1', HWPX_COWORK_PORT=str(port), HWPX_COWORK_AI='off')
+    env.update(HWPX_COWORK_CONFIG=str(config), HWPX_COWORK_DATA_DIR=str(tmp/'data'), HWPX_COWORK_HOST='127.0.0.1', HWPX_COWORK_PORT=str(port), HWPX_COWORK_AI='off', HWPX_COWORK_RELEASE_DIR=str(release))
     count = 0; errors = []
     def ok(value, message):
         nonlocal count
@@ -42,7 +54,7 @@ def main():
                 br = p.chromium.launch(executable_path=CHROME)
                 ctx = br.new_context(viewport={'width':1280,'height':900})
                 page = ctx.new_page(); page.on('pageerror', lambda e: errors.append(str(e)))
-                page.goto(base); page.locator('input[aria-label="접속 토큰"]').fill('아직 입력 중인 값')
+                page.goto(base + '/?teaser=0'); page.get_by_label('접속 토큰').fill('아직 입력 중인 값')
                 before = page.url
                 page.locator('[data-testid="help-login"]').click()
                 modal = page.locator('[data-testid="help-dialog"]')
@@ -52,14 +64,28 @@ def main():
                 ok(page.url == before and len(ctx.pages) == 1, '로그인 화면 안에서 설명서를 열고 새 탭·주소 이동 없음')
                 ok(inner.locator('.help-top').evaluate('(e)=>getComputedStyle(e).display') == 'none', '내장 화면에서 중복 머리글 숨김')
                 ok(page.locator('[data-testid="help-full-manual"]').count() == 0 and inner.locator('#manual').is_hidden() and inner.locator('#host').is_hidden(), '로그인 전에는 상세 운영 매뉴얼 단추와 관리자 절 숨김')
+                inner.locator('#start a[href="#install"]').click()
+                for platform, _, name in files:
+                    with page.expect_popup() as opened:
+                        inner.locator(f'#install a[href="/download#{platform}"]').click()
+                    popup = opened.value
+                    popup.wait_for_url(base + f'/download#{platform}')
+                    link = popup.locator(f'#{platform} a[download]')
+                    link.wait_for()
+                    ok(link.get_attribute('href') == f'/download/{name}', f'{platform} 다운로드 절을 새 탭에 표시')
+                    with popup.expect_download() as received:
+                        link.click()
+                    ok(received.value.path().read_bytes() == data, f'{platform} 설치 파일 다운로드')
+                    popup.close()
+                ok(inner.locator('#install').is_visible() and modal.is_visible(), '다운로드를 열어도 앱 안의 설명서 창 유지')
                 page.locator('[data-testid="help-close"]').click(); modal.wait_for(state='hidden')
                 page.locator('[data-testid="help-login"]').click(); modal.wait_for(state='visible')
                 inner.locator('h1').first.wait_for()
-                ok(inner.locator('#join').count() == 1, '닫았다가 같은 설명서 버튼으로 다시 열기')
+                ok(inner.locator('#start [data-copy="agent-setup-prompt"]').is_visible(), '닫았다가 같은 설명서 버튼으로 시작하기 다시 열기')
                 inner.locator('body').press('Escape')
                 modal.wait_for(state='hidden')
-                ok(page.locator('input[aria-label="접속 토큰"]').input_value() == '아직 입력 중인 값', '설명서를 닫아도 로그인 입력 보존')
-                page.locator('input[aria-label="접속 토큰"]').fill(token)
+                ok(page.get_by_label('접속 토큰').input_value() == '아직 입력 중인 값', '설명서를 닫아도 로그인 입력 보존')
+                page.get_by_label('접속 토큰').fill(token)
                 page.get_by_role('button', name='들어가기', exact=True).click()
                 page.locator('[data-testid="help-list"]').wait_for()
                 page.goto(base+'/#/doc/'+doc['id'])

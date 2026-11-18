@@ -354,7 +354,7 @@ const ProposalBody = {
       <div v-else-if="p.type==='toc'" class="difftext" :class="{clamp: !open}"><span class="muted">차례 새로 고침</span>{{ tocNote(p) }}</div>
       <div v-else-if="p.type==='table_edit'" class="difftext" :class="{clamp: !open}"><span class="muted">표{{ p.tableEdit?.caption ? ' 「' + p.tableEdit.caption + '」' : '' }} 고치기: </span>{{ (p.tableEdit?.labels || []).join(', ') }}</div>
       <div v-else-if="p.type==='delete'" class="difftext"><span class="muted">이 문단의 개체 지우기: </span>{{ deleteNote(p) }}</div>
-      <div v-else-if="p.type==='page_layout'" class="difftext"><span class="muted">쪽 구성: </span>{{ (p.pageLayout?.labels || []).join(', ') }}</div>
+      <div v-else-if="p.type==='page_layout'" class="difftext"><span class="muted">{{ p.pageLayout?.title || '쪽 구성' }}: </span>{{ (p.pageLayout?.labels || []).join(', ') }}</div>
       <div v-else-if="p.type==='figure'" class="muted">{{ p.figure?.nativeChart ? '이 문단 뒤에 편집 가능한 차트' + (p.figure.caption ? ' 「' + p.figure.caption + '」' : '') : p.figure?.replace ? '이 문단의 그림' + (p.figure.replace.caption ? ' 「' + p.figure.replace.caption + '」' : '') + ' 교체' : '이 문단 뒤에 그림' + (p.figure?.caption ? ' 「' + p.figure.caption + '」' : '') }}{{ p.figure?.name ? ' — ' + p.figure.name : '' }}</div>
       <div v-else-if="p.type==='insert'" class="difftext" :class="{clamp: !open}"><span class="muted">이 문단 뒤에 새 문단: </span><ins>{{ p.text }}</ins></div>
       <div v-else-if="p.type==='edit_batch'" class="difftext">내용·서식 묶음: 내용 {{p.batch?.contentOperations || 0}}건 · 형식 {{p.batch?.formatOperations || 0}}건</div>

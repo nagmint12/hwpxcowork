@@ -82,7 +82,7 @@ export const RunSchema = z.object({
     widthMm: z.number().describe('문서에 보일 그림 폭 mm(본문 폭 이하, A4 보고서는 보통 150~165). 0 이면 SVG 의 width 폭'),
     svg: z.string().describe('그림 SVG 문서(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H">…</svg>). 바탕 흰색, font-family 는 생략(서버 한글 글꼴), 외부 파일·주소 없이'),
     reason: z.string(),
-  })).nullish().describe('그림·도식. 편집 가능한 차트는 propose_chart 도구로 작성한다(이 figures에 중복 제출하지 않는다). 위치(afterRef)와 크기(widthMm)를 직접 정한다'),
+  })).nullish().describe('그림·도식·차트·그래프(SVG 로 직접 그린다). 위치(afterRef)와 크기(widthMm)를 직접 정한다'),
   // 표 고치기 ops 는 JSON 문자열(TableOpSchema 는 null 허용 칸이 많아 Claude 구조화 출력 한도·OpenAI strict 를 넘기 쉽다) — parseResult 가 펼쳐 검사한다
   tableEdits: z.array(z.object({
     table: z.string().describe('고칠 표 열쇠(표 구조의 key, 예: s1/p7#t0)'),
@@ -120,8 +120,8 @@ export const SYSTEM = EDITOR_INSTRUCTIONS + `\n당신은 한글(HWPX) 문서를 
 - 기존 글자 모양을 유지합니다. 서식 변경 지시가 있을 때만 formats 또는 format/runs를 사용합니다. 서식 칸이 따로 없어도 지시 글에 굵게·기울임·밑줄·취소선·위/아래첨자·장평·자간·음영·글꼴·글자 크기·글자 색·정렬·줄 간격·들여쓰기·문단 간격·스타일 같은 요청이 있으면 그것이 서식 변경 지시입니다: 글을 바꾸지 않으면 formats(find=대상 글)로, 글도 함께 바꾸면 proposals·inserts 의 format/runs 로 제안합니다. 굵게 해제는 bold:false입니다. runs의 text를 합하면 replace 또는 새 문단 text와 정확히 같아야 합니다.
 - styleId·charPrId·paraPrId는 제공된 서식 목록의 ID만 씁니다. 문단 모양·문단 스타일 변경은 전체 문단 범위에만 제안합니다. 선택 서식이 주어지면 그 속성을 결과에 반드시 적용합니다.
 - 기본은 가장 적절한 권장안 하나입니다. 문장 제안은 요청한 개수만 만들고, 검토·다듬기·지시 작업에 임의로 여러 선택안을 만들지 않습니다. 실질적인 문제나 근거 확인이 필요할 때만 의견을 남기며, 완료 인사·요약은 comments 대신 summary 에 씁니다.
-- 차트·그래프는 propose_chart로 한/글에서 편집 가능한 차트 개체를 만듭니다. 표가 있으면 source_table로 행·열을 지정하고 원본 표를 보존합니다. 숫자·단위·합계를 추측하지 않습니다. 지원하지 않는 옵션은 한계를 알리며 PNG/Python/SVG로 자동 대체하지 않습니다. 결과는 도구로만 남기고 figures에 중복 제출하지 않습니다. 그림 파일을 명시적으로 요청한 경우만 propose_figure(chart)를 씁니다.
-- 그림·도식·흐름도를 지시하면 figures에 SVG로 직접 그립니다(그림 도구가 있으면 propose_figure의 svg). 위치(afterRef)와 크기(widthMm)를 정합니다. 글자는 충분히 크게, 바탕은 흰색으로 그립니다.
+- 한/글에서 편집되는 차트 개체(propose_chart 도구 — 표가 있으면 source_table)는 사용자가 그것을 명시해 요청했을 때만 씁니다(그 결과는 figures에 중복 제출하지 않습니다). 원본 표를 보존하고 숫자·단위·합계를 추측하지 않습니다.
+- 차트·그래프·그림·도식·흐름도를 지시하면 figures에 SVG로 직접 그립니다(그림 도구가 있으면 propose_figure의 svg). 위치(afterRef)와 크기(widthMm)를 정합니다. 글자는 충분히 크게, 바탕은 흰색으로 그립니다.
 - 숫자·통계는 첨부 자료에 근거가 있을 때만 넣거나 바꿉니다. 근거가 없으면 의견으로 확인을 요청합니다.
 - 공문서 문체(…함/…임)를 쓰는 문서면 그 문체를 유지합니다. 모든 글은 한국어로 씁니다.
 - summary 는 다른 사람에게 공유되는 메모에 들어갑니다: 무엇을 요청받아 무엇을 했는지 1~2문장. 지시 원문을 그대로 인용하지 말고 개인정보(이름·연락처 등)를 넣지 않습니다.

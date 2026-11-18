@@ -134,7 +134,8 @@ function walk(dir, base = dir, out = []) {
 
 // 묶을 때 고쳐 넣는 글(개발 폴더의 원본은 그대로 둔다)
 const dropInstitution = (b) => Buffer.from(b.toString('utf8').replaceAll('대학혁신센터 ', ''), 'utf8');
-const TEXT_TRANSFORMS = { 'skill/hwpx-standard-report/reference/AI_작성지침.md': dropInstitution, 'skill/hwpx-standard-report/reference/서식명세.md': dropInstitution };
+// server/mcp2/ops.js: 새 연결 도구 설명의 '대학혁신센터 표준서식' 한 곳(2026-11-18 스타일 속성 작업) — 묶음에는 '표준서식' 으로
+const TEXT_TRANSFORMS = { 'skill/hwpx-standard-report/reference/AI_작성지침.md': dropInstitution, 'skill/hwpx-standard-report/reference/서식명세.md': dropInstitution, 'server/mcp2/ops.js': dropInstitution };
 function copyInto(stage, relative, transform = TEXT_TRANSFORMS[relative]) {
   const src = sourceFile(relative);
   if (!fs.statSync(src).isFile()) throw new Error(`일반 파일이 아닙니다: ${relative}`);
@@ -321,6 +322,7 @@ const PRIVATE_TERMS = [
   // (공개 저장소: 원 개발 PC 의 개인 이름·계정 목록은 뺐습니다 — 배포 전에 자기 이름·계정을 여기에 더하세요)
   ['개발 PC 경로', /[A-Za-z]:[\\/]+Users[\\/]+Nag(?![A-Za-z])|[Dd]:[\\/]+claude[\\/]/],
 ];
+const PUBLIC_PROJECT_URL = /https?:\/\/(?:github\.com\/nagmint12\/hwpxcowork|nagmint12\.github\.io\/hwpxcowork)\b/gi;
 const PRIVATE_LOGOS = new Set(['2a2d146d0f5d9d7dc4e3edf23a78a6479c5ae120d4aa95b2057520bd3aaa8424', 'c170f8e50309621f2195c71dc16e7deea2d9ad2cdff23f5b254ea9a162a1ccea']);
 const ARCHIVE_DOC = /\.(hwpx|xlsx|docx|pptx|skill|zip)$/i;
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp)$/i;
@@ -336,7 +338,9 @@ async function auditPrivateBytes(where, bytes, depth = 0) {
     return;
   }
   if (!(TEXT_FILE.test(where) || /\.(xml|hpf|vbs|ps1|svg|csv)$/i.test(where)) || (depth === 0 && PRIVATE_TEXT_SKIP.test(where))) return;
-  const text = bytes.toString('utf8');
+  // 공개 저장소·공개 페이지 주소(2026-11-18 저장소 공개 — 도움말이 설치 안내로 가리킨다)는 계정 흔적으로 보지 않는다
+  // (scripts/export-public-repo.mjs 의 PUBLIC_REPO 허용과 같은 뜻). 그 밖의 계정 이름은 그대로 막는다
+  const text = bytes.toString('utf8').replace(PUBLIC_PROJECT_URL, '');
   for (const [label, re] of PRIVATE_TERMS) if (re.test(text)) throw new Error(`배포물에 ${label} 흔적이 있습니다: ${where} (${re.exec(text)[0]})`);
 }
 async function auditPrivate(entries) {

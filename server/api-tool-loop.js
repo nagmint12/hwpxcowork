@@ -32,8 +32,7 @@ const PREVIEW_RULE = `
 - 그림은 제안하기 전에 preview_figure(propose_figure 에 줄 svg·chart·width_mm·after_ref/replace_ref 그대로)로 한 번 그려 보고, 글자 겹침·잘림·너무 작은 글자·빈 공간·색을 고친 뒤 propose_figure 로 제안한다. 미리보기는 그림마다 두 번까지 — 고칠 것이 없으면 바로 제안한다.`;
 const FIGURE_RULES = `
 - 시각화·그래프·차트·도식·그림을 요청하면 실제 그림 제안을 남긴다. 표로 대신하거나 파일을 만들었다는 글만 쓰고 완료하지 않는다.
-- 차트·그래프는 propose_chart로 한/글에서 편집 가능한 차트 개체를 만든다. 표가 있으면 source_table의 행·열을 지정해 서버가 실제 값을 읽게 한다. 직접 자료는 근거가 있을 때만 chart.categories/series로 준다. PNG/Python/SVG 차트로 대신하지 않는다. 사용자가 그림 파일을 명시적으로 원할 때만 propose_figure(chart)를 쓴다. 차트 결과는 이 도구로 남기며 최종 JSON figures로 중복 제출하지 않는다.
-- 그 밖의 그림(상자형 도식·흐름도·개념도·구조도·아이콘 등)은 propose_figure(svg=SVG 문서)로 직접 그린다 — 서버가 PNG 로 그려 넣는다.
+- 차트·그래프와 그 밖의 그림(상자형 도식·흐름도·개념도·구조도·아이콘 등)은 propose_figure(svg=SVG 문서)로 직접 그린다 — 서버가 PNG 로 그려 넣는다. 값은 문서·첨부에 근거가 있는 것만 쓴다. 한/글에서 편집되는 차트 개체(propose_chart — 표가 있으면 source_table)는 사용자가 그것을 명시해 요청했을 때만 쓰고, 그 결과는 최종 JSON figures로 중복 제출하지 않는다.
 - 위치와 크기는 직접 정한다: after_ref = 그림이 들어갈 본문 문단(그 문단 바로 뒤), width_mm = 문서에 보일 폭(본문 폭 이하 — 필요하면 get_page_layout). 표를 그림으로 옮기면 보통 그 표가 든 문단 뒤에 넣고, 표 삭제는 사람이 정하게 둔다.
 - 그림의 색 팔레트·글꼴·바탕·차트 꼴은 문서의 기존 그림과 같게 맞춘다(문서 그림이 자료로 오지 않았으면 list_figures 로 찾아 비슷한 주제의 그림을 export_figure → read_attachment 로 본다).
 - SVG 는 viewBox 로 비율을 정하고, 글자는 viewBox 단위로 충분히 크게(본문 폭 160mm 에 viewBox 폭 1600 이면 글자 28~36), 바탕은 흰색, 원문 내용을 빠뜨리지 않는다. 그린 결과는 export_figure 없이도 propose_figure 응답의 크기(px·widthMm)로 확인한다.

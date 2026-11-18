@@ -138,14 +138,22 @@ export class Store {
     return JSON.parse(fs.readFileSync(f, 'utf-8'));
   }
 
+  /** 쓰기 직전 손질(있으면 — beforeSaveMeta(meta): 서비스가 큰 되돌리기 자료를 눌러 둔다). 던져도 저장은 그대로 한다 */
+  _beforeSave(meta) {
+    if (typeof this.beforeSaveMeta !== 'function') return;
+    try { this.beforeSaveMeta(meta); } catch (e) { console.error('[저장소] beforeSaveMeta:', e.message); }
+  }
+
   saveMeta(meta) {
     meta.updatedAt = new Date().toISOString();
+    this._beforeSave(meta);
     writeFileAtomic(path.join(this._docDir(meta.id), 'meta.json'), JSON.stringify(meta, null, 1));
     return meta;
   }
 
   /** meta 만 고쳐 쓴다(마지막 수정 시각은 그대로) — PC 파일 맞춤 기록처럼 문서 내용과 상관없는 표시(server/local-folders.js) */
   saveMetaQuiet(meta) {
+    this._beforeSave(meta);
     writeFileAtomic(path.join(this._docDir(meta.id), 'meta.json'), JSON.stringify(meta, null, 1));
     return meta;
   }

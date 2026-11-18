@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { CharFormatSchema, ParagraphFormatSchema } from './format-schema.js';
+import { styleParagraphFields } from '../engine/style-properties.js';
 const section = z.number().int().min(0);
 const apply = z.enum(['BOTH', 'EVEN', 'ODD']);
 const text = z.string().max(10000);
@@ -36,5 +38,27 @@ export const ObjectsToBodyOpSchema = z.object({
   background: z.enum(['remove', 'behind']).optional()
     .describe("쪽 배경 그림(옮길 글상자 밑에 깔린 쪽 크기 그림): remove(기본) = 지운다(내용으로 보이는 그림은 지우지 않고 글 뒤로), behind = 모두 글 뒤로 보내 남긴다(그 구역은 앞 구역에 합치지 않아 원래 쪽마다 새 쪽에서 시작)"),
 }).strict();
-export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema]);
-export const normalizePageLayoutOps = ops => z.array(StructureOpSchema).min(1).max(50).parse(ops);
+// 스타일 들여오기·정의와 여러 문단 서식(2026-11-18 — docs/MCP_REDESIGN_2026-11-16.md §15, engine/page-layout.js). 쪽 구성 제안과 같은 길(제안 하나·고치기 전 사본으로 되돌림)을 쓴다.
+// 근거: 실제 Codex 실행이 '표준서식에 맞추기'를 칸마다 format op 3,141개로 냈다(스타일을 들여올 길·표 전체 대상이 없어서) — 한도·120초 시간 초과.
+//  · styles: import 'standard' = 표준서식 스타일 세트(server/templates/blank.hwpx 의 '&본문 1.'·'&표내용__' …)에서 문서에 없는 이름만 들여온다, define = 새 스타일(기준 스타일 + 글자·문단 모양)
+//  · restyle: 여러 문단(문단 전체)에 스타일·글자 모양·문단 모양을 한 번에. at 항목: 문단 주소 's0/p3'·'s0/p3/n2' · 범위 's0/p3..p9'(본문 문단만) · 구역 's1' · '*'(모든 본문 문단) ·
+//    표 's0/p3#t0'(모든 칸) · { table, row_from?, row_to?, col_from?, col_to? }(칸 범위, 0부터). style 은 이름 — 같은 묶음의 styles 가 들여온·정의한 이름도 된다(차례대로 반영).
+//    새 연결(server/mcp2/ops.js)이 format op 의 여러 문단 대상을 이 꼴로 푼다 — 모델에게 보이는 이름은 format 이다
+const styleName = z.string().trim().min(1).max(160);
+export const styleTarget = z.object({ style: styleName }).strict();
+const styleFormat = { char: CharFormatSchema.optional(), paragraph: ParagraphFormatSchema.extend(styleParagraphFields).strict().optional() };
+const tableTarget = z.object({ table: z.string().min(1).max(200), row_from: z.number().int().min(0).optional(), row_to: z.number().int().min(0).optional(), col_from: z.number().int().min(0).optional(), col_to: z.number().int().min(0).optional() }).strict();
+export const StylesOpSchema = z.object({
+  op: z.literal('styles'),
+  import: z.literal('standard').optional().describe("표준서식 스타일 세트를 문서에 들여온다(문서에 없는 이름만 — 있는 스타일은 그대로)"),
+  define: z.array(z.object({ name: styleName, base: z.string().max(160).optional().describe('기준 스타일 이름(없으면 바탕글)'), type: z.enum(['PARA', 'CHAR']).optional(),
+    ...styleFormat, applyToBase: z.boolean().optional() }).strict()).min(1).max(50).optional().describe('새 스타일. applyToBase:true면 base를 쓰는 문단 전체에 함께 적용'),
+  update: z.array(z.object({ name: styleName, ...styleFormat }).strict()).min(1).max(50).optional().describe('기존 문단 스타일과 사용 문단 전체에서 지정한 속성만 수정'),
+}).strict();
+export const RestyleOpSchema = z.object({
+  op: z.literal('restyle'),
+  at: z.array(z.union([z.string().min(1).max(200), tableTarget, styleTarget])).min(1).max(5000),
+  style: styleName.optional(), char: CharFormatSchema.optional(), paragraph: ParagraphFormatSchema.optional(),
+}).strict();
+export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema, StylesOpSchema, RestyleOpSchema]);
+export const normalizePageLayoutOps = ops => z.array(StructureOpSchema).min(1).max(200).parse(ops);

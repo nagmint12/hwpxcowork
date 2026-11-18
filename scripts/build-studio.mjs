@@ -11,6 +11,17 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { assertFontDistributionTree } from './font-distribution-policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 모르는 인자는 빌드하지 않고 멈춘다(2026-11-18: `--help` 를 주자 인자를 무시하고 운영 번들 studio/dist 를 통째로 다시 빌드했다).
+{
+  const FLAGS = new Set(['--check', '--typecheck']); const VALUED = new Set(['--out', '--source', '--engine-pkg']);
+  const args = process.argv.slice(2); const unknown = [];
+  for (let i = 0; i < args.length; i++) { if (VALUED.has(args[i])) i++; else if (!FLAGS.has(args[i])) unknown.push(args[i]); }
+  if (unknown.length) {
+    const help = unknown.every((a) => a === '--help' || a === '-h');
+    console[help ? 'log' : 'error'](`${help ? '' : `[build-studio] 모르는 인자: ${unknown.join(' ')}\n`}사용법: node scripts/build-studio.mjs [--check | --typecheck] [--out artifacts/<작업>/studio-dist] [--engine-pkg artifacts/<작업>/engine-pkg] [--source <엔진 소스 폴더>]\n  인자가 없으면 운영 번들 studio/dist 를 다시 빌드합니다.`);
+    process.exit(help ? 0 : 1);
+  }
+}
 const sourceAt = process.argv.indexOf('--source');
 if (sourceAt >= 0 && !process.argv[sourceAt + 1]) throw new Error('--source에 엔진 소스 폴더가 필요합니다');
 const vendor = sourceAt < 0 ? path.join(root, 'vendor', 'rhwp') : path.resolve(root, process.argv[sourceAt + 1]);

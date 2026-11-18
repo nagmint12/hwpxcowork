@@ -38,9 +38,9 @@ const SUBSCRIPTION_AUTH = new Set(['claude.ai', 'oauth_token']);   // claude.ai 
 const ABORTED = () => fault('ABORTED', '개인 AI 요청이 취소되었습니다.');
 // 이 실행에는 명령·코드 실행 도구가 없다 — Codex 공통 지시의 'Python 으로 파일' 대신 쓸 길
 const CLAUDE_NOTE = `
-이 실행(Claude Code 실행기)에는 명령·코드 실행 도구(Bash·PowerShell·Python)가 없습니다. 그림은 propose_figure(svg)·preview_figure·propose_chart로 만들고, 결과 파일이 꼭 필요하면 Write 도구로 work/out/ 에 글 형식(SVG·CSV·Markdown 등)으로 쓴 뒤 upload_result_file로 올립니다. 파일 도구는 이 작업 폴더 안에서만 씁니다.`;
-// 새 MCP 연결(v2 — 작업 도구 넷)의 같은 안내: 예전 도구 이름(propose_*)은 쓰지 않는다. 그림·차트는 edit 의 op(server/mcp2/ops.js BRIEF 의 figure·chart)
-const CLAUDE_NOTE_V2 = '이 실행(Claude Code 실행기)에는 명령·코드 실행 도구(Bash·PowerShell·Python)가 없습니다. 그림은 edit 의 figure op(svg — 그린 모습은 preview_figure 로 확인), 차트는 edit 의 chart op로 만들고, 결과 파일이 꼭 필요하면 Write 도구로 work/out/ 에 글 형식(SVG·CSV·Markdown 등)으로 쓴 뒤 upload_result_file로 올립니다. 파일 도구는 이 작업 폴더 안에서만 씁니다.';
+이 실행(Claude Code 실행기)에는 명령·코드 실행 도구(Bash·PowerShell·Python)가 없습니다. 그림·차트·그래프는 propose_figure(svg)로 직접 그리고(그린 모습은 preview_figure로 확인), 결과 파일이 꼭 필요하면 Write 도구로 work/out/ 에 글 형식(SVG·CSV·Markdown 등)으로 쓴 뒤 upload_result_file로 올립니다. 파일 도구는 이 작업 폴더 안에서만 씁니다.`;
+// 새 MCP 연결(v2 — 작업 도구 넷)의 같은 안내: 예전 도구 이름(propose_*)은 쓰지 않는다. 그림·차트·그래프는 edit 의 figure op(svg 로 직접 그린다 — 2026-11-18, 한/글 차트 개체 chart op 는 숨긴 op: server/mcp2/ops.js HIDDEN_OPS)
+const CLAUDE_NOTE_V2 = '이 실행(Claude Code 실행기)에는 명령·코드 실행 도구(Bash·PowerShell·Python)가 없습니다. 그림·차트·그래프는 edit 의 figure op(svg 로 직접 그린다 — 그린 모습은 preview_figure 로 확인)로 만들고, 결과 파일이 꼭 필요하면 Write 도구로 work/out/ 에 글 형식(SVG·CSV·Markdown 등)으로 쓴 뒤 upload_result_file로 올립니다. 파일 도구는 이 작업 폴더 안에서만 씁니다.';
 
 /**
  * 새 MCP 연결(job.surface 'v2' — server/mcp2.js)의 첫 입력. 일하는 방식은 모델 지침(EDITOR_INSTRUCTIONS_V2)과 도구 설명(edit 의 op 꼴 포함)에 있으므로

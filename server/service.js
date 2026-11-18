@@ -153,7 +153,32 @@ const docSig = (doc) => [doc.header?.xml, ...doc.sections.map((s) => s.xml)];
 const sameDoc = (doc, sig) => doc.sections.length === sig.length - 1 && doc.header?.xml === sig[0] && doc.sections.every((s, i) => s.xml === sig[i + 1]);
 /** [hwpx-cowork] 지금 반영 중인 쪽 구성 제안 표시(기호 열쇠 — 저장되지 않음): 제 반영의 주소 옮김(_layoutRemap)이 제 ops 주소를 옮기거나 lost 로 만들지 않게(2026-11-17) */
 const LAYOUT_SELF = Symbol('layoutSelf');
-const publicProposal = p => { const { layoutUndo, childSnapshot, batchSnapshot, batchUndoSnapshot, ...view } = p; return view; };
+// 화면·도구에 주는 제안: 서버만 쓰는 되돌리기 자료는 뺀다. 표 고치기의 고치기 전 표 XML(tableUndo)·차례 되돌리기(tocUndo)도
+// 화면이 읽지 않는다(2026-11-18 — 2,000칸 표를 고친 제안 하나가 1.4MB 라 제안 목록이 3.5MB 였다)
+const publicProposal = p => { const { layoutUndo, tableUndo, tocUndo, childSnapshot, batchSnapshot, batchUndoSnapshot, ...view } = p; return view; };
+
+// 표 고치기 되돌리기 자료(고치기 전 표 XML — tableUndo.before)는 큰 표에서 1MB 를 넘고 제안마다 하나씩 쌓인다. meta.json 은 요청마다
+// 통째로 읽으므로(store.readMeta) 눌러서(deflate + base64 — tableUndo.beforeZ) 둔다(2026-11-18). 예전 기록(before 그대로)도 읽는다.
+const UNDO_PACK_MIN = 4096;
+/** tableUndo 의 큰 before 를 beforeZ 로 바꾼다(제자리) → 바꿨으면 true */
+export function packTableUndo(undo) {
+  if (!undo || typeof undo.before !== 'string' || undo.before.length < UNDO_PACK_MIN) return false;
+  undo.beforeZ = deflateRawSync(Buffer.from(undo.before, 'utf8')).toString('base64');
+  delete undo.before;
+  return true;
+}
+/** tableUndo 의 고치기 전 표 XML(없으면 null) */
+export function tableUndoBefore(undo) {
+  if (!undo) return null;
+  if (typeof undo.before === 'string') return undo.before;
+  return typeof undo.beforeZ === 'string' ? inflateRawSync(Buffer.from(undo.beforeZ, 'base64')).toString('utf8') : null;
+}
+/** 저장 직전(store.beforeSaveMeta): 예전 기록의 큰 tableUndo.before 를 눌러 둔다 — 내용은 그대로(되돌리기는 tableUndoBefore 로 읽는다) */
+export function packProposalUndo(meta) {
+  let n = 0;
+  for (const p of Array.isArray(meta?.proposals) ? meta.proposals : []) if (p?.tableUndo && packTableUndo(p.tableUndo)) n++;
+  return n;
+}
 
 /** 중첩 문단(표 셀 등) 목록 — 메모 본문은 뺀다 */
 function nestedParas(p) {
@@ -184,6 +209,8 @@ function normNoteLines(v, code) {
 export class Service {
   constructor({ store, hub, config, ai }) {
     this.store = store; this.hub = hub; this.cfg = config; this.ai = ai;
+    // meta.json 을 쓰기 직전: 예전 기록의 큰 표 되돌리기 XML 을 눌러 둔다(packProposalUndo — 그 문서를 다음에 저장할 때 한 번)
+    if (store && typeof store.saveMeta === 'function') store.beforeSaveMeta = packProposalUndo;
     this.attach = new Attachments({ docsDir: store.dir, cfg: config, docDir: id => store._docDir(id) });
     // AI 작업 진행 기록(server/activity.js — 메모리, 편집기에 실시간으로): AI 가 부른 도구를 요청별로 한 줄씩
     this.activity = new RequestActivity();
@@ -2506,8 +2533,14 @@ export class Service {
       p.pageLayout = { ops, labels: dry.labels, fingerprint: pageLayoutStateFingerprint(doc), state: pageLayoutState(doc, ops) };
       // 개체 → 본문(objects_to_body — engine/flow.js): 미리 해 본 결과 요약과, 그 개체가 제안 뒤 바뀌었는지 볼 지문을 남긴다
       if (dry.reports?.length) { p.pageLayout.result = dry.reports; p.pageLayout.objects = structureObjectsFingerprint(doc, ops); }
+      // [hwpx-cowork] 스타일 들여오기·여러 문단 서식(styles·restyle — 2026-11-18)만 든 제안은 '쪽 구성'이 아니라 '서식'으로 보인다(카드·메모 글의 머리말 — web 은 title 이 없으면 '쪽 구성')
+      const restyleOnly = ops.every((op) => op.op === 'styles' || op.op === 'restyle');
+      if (restyleOnly) p.pageLayout.title = '서식';
+      // 카드가 놓일 자리: 구역 op 는 그 구역 첫 문단, 서식 op 는 첫 대상의 본문 문단
+      const firstAt = ops.find((op) => op.op === 'restyle')?.at?.[0]; const firstRef = typeof firstAt === 'string' ? firstAt : firstAt?.table;
+      const anchor = restyleOnly ? /^s\d+\/p\d+/.exec(String(firstRef ?? ''))?.[0] || (/^s(\d+)$/.test(String(firstRef ?? '')) ? `${firstRef}/p0` : null) : null;
       const section = ops[0].section ?? Number(/^s(\d+)/.exec(ops[0].before_ref)?.[1] || 0);
-      p.ref = `s${section}/p0`; p.afterRef = p.ref;
+      p.ref = anchor && (() => { try { doc.resolve(anchor); return true; } catch { return false; } })() ? anchor : `s${section}/p0`; p.afterRef = p.ref;
       memoLoc = { ref: p.ref, start: 0, end: cpLen(this._text(doc, p.ref)) };
     } else if (type === 'toc') {
       // 차례 새로 고침(한/글 '모든 차례 새로 고침' — 2026-10-30): 차례 필드의 설정으로 편집기 엔진이 차례를 다시 만든다(적용할 때 — server/toc-engine.js).
@@ -3532,6 +3565,7 @@ export class Service {
         // [hwpx-cowork] 기대는 상태만 견준다(engine/page-layout.js pageLayoutState — 2026-11-17): 같은 요청의 문단 넣기·표 넣기·글 바꾸기를 먼저 반영해 문단 수만
         // 바뀐 것은 막지 않는다(예전 지문은 문단 수를 넣어 '마지막에 반영하라'고 낸 쪽 구성이 늘 STALE). 구역 구성·옮길 개체가 바뀌었으면 STALE 그대로
         const now = pageLayoutState(doc, p.pageLayout.ops);
+        if (state.styles !== now.styles) throw new ServiceError('STALE', '제안 뒤 스타일 정의나 사용 문단이 바뀌었습니다. 스타일을 다시 읽고 제안하세요.', 409);
         if (now.parts !== state.parts) throw new ServiceError('STALE', '제안한 뒤 구역 구성(구역 수·용지·여백·머리말·꼬리말·쪽 번호·바탕쪽)이 바뀌었습니다. get_page_layout으로 다시 읽고 제안하세요.', 409);
         if ((now.sizes ?? null) !== (state.sizes ?? null)) throw new ServiceError('STALE', '제안한 뒤 문단이 늘거나 줄었습니다 — 이 쪽 구성 제안은 구역 나누기·합치기 뒤의 문단 주소를 써서 따라 옮길 수 없습니다. 다시 요청하세요.', 409);
         if ((now.objects ?? null) !== (state.objects ?? null)) throw new ServiceError('STALE', '제안한 뒤 옮길 글상자·도형이 바뀌었습니다. 다시 요청하세요.', 409);
@@ -3551,10 +3585,13 @@ export class Service {
       }
       if (result.reports?.length) p.pageLayout.result = result.reports;
       // 되돌릴 때는 옮겨 간 중첩 주소만 쓴다(없어진 주소는 싣지 않는다 — 글상자 수천 개가 본문으로 옮겨진 문서)
-      p.layoutUndo = { before: deflateRawSync(before).toString('base64'), mapping: result.mapping, refs: result.refMapping.filter(m => m.to), proposalSeq: meta.seq.proposal };
+      // [hwpx-cowork] 아무 주소도 옮기지 않은 반영(스타일 들여오기·여러 문단 서식, 용지·쪽 번호 등 — 2026-11-18)은 옮김표를 싣지 않고 주소 다시 매김도 건너뛴다:
+      // 표 칸이 2,400개인 문서에서 제자리 옮김표(중첩 주소 2,400줄)가 제안마다 meta.json 에 100KB 씩 쌓였다
+      const moved = result.mapping.some(m => !m.to || m.old[0] !== m.to[0] || m.old[1] !== m.to[1]) || result.refMapping.some(m => m.old !== m.to);
+      p.layoutUndo = { before: deflateRawSync(before).toString('base64'), mapping: moved ? result.mapping : [], refs: moved ? result.refMapping.filter(m => m.to) : [], proposalSeq: meta.seq.proposal };
       // 제 반영의 주소 옮김은 제 ops 를 옮기지 않는다(_remapSectionsDeep 의 대기 쪽 구성 ops 옮기기 — ops 는 반영 전 문서의 주소 그대로 남는다)
       p[LAYOUT_SELF] = true;
-      try { this._layoutRemap(ctx, result.mapping, keys, result.refMapping); } finally { delete p[LAYOUT_SELF]; }
+      try { if (moved) this._layoutRemap(ctx, result.mapping, keys, result.refMapping); } finally { delete p[LAYOUT_SELF]; }
       (ctx.layoutSnapshots ||= []).push(p);
       ctx.formatting = true; ctx.changed.add(p.ref);
     } else if (p.type === 'format') {
@@ -3725,6 +3762,7 @@ export class Service {
       if (!p.tableKey) throw new ServiceError('GONE', `제안 ${p.pid} 의 표가 지워졌습니다`, 409);
       const res = this._engine(() => doc.editTable(p.tableKey, p.tableEdit.ops));
       p.tableUndo = { before: res.before, ...res.undo };
+      packTableUndo(p.tableUndo);   // 큰 표 XML 은 눌러서(meta.json 이 제안마다 표 크기만큼 커지지 않게)
       p.changeIds = [];
       ctx.formatting = true; ctx.changed.add(bodyRefOf(res.ref));
     } else {
@@ -4021,8 +4059,9 @@ export class Service {
     } else if (p.type === 'toc') {
       this._undoToc(ctx, p);
     } else if (p.type === 'table_edit') {
-      if (!p.tableUndo?.before || !p.tableKey) throw new ServiceError('STATE', '되돌릴 표 고치기 기록이 없습니다', 409);
-      this._engine(() => doc.restoreTable(p.tableKey, p.tableUndo.before, p.tableUndo));
+      const tableBefore = tableUndoBefore(p.tableUndo);
+      if (!tableBefore || !p.tableKey) throw new ServiceError('STATE', '되돌릴 표 고치기 기록이 없습니다', 409);
+      this._engine(() => doc.restoreTable(p.tableKey, tableBefore, p.tableUndo));
       ctx.changed.add(bodyRefOf(p.tableKey.replace(/#t\d+$/, '')));
     } else if (p.type === 'figure' && p.figure?.nativeChart) {
       const ref = p.insertedRef;
@@ -6142,7 +6181,7 @@ export class Service {
         ? 'propose_change(ref=target.ref, find=target.text 또는 start/end, replace=추천 문장, request_id). 한 가지 추천안을 제시하고 불필요한 선택지를 만들지 않음'
         : `propose_alternatives(ref=target.ref, find=target.text 또는 start/end, options ${r.options.count}개, request_id). 요청한 개수만 서로 다른 대안으로 제시`,
       polish: 'propose_changes(기준에 맞는 수정만, request_id). 수치·사실 확인이면 add_memo 로 확인 요청',
-      instruct: `지시에 맞게 propose_changes / propose_format / add_memo / propose_insert / propose_table / propose_chart(편집 가능한 한/글 차트 — 표는 source_table로 실제 값 읽기, PNG로 자동 대체하지 않음) / propose_figure(attachment_id, caption=제목만)를 사용. 원본 파일은 get_attachment_file로 받아 Work 자체 도구·개인 지침으로 처리하고, 생성 파일은 save_result_file(file)로 저장한 aid를 사용(로컬 브리지는 download_attachment_file·upload_result_file, 모두 request_id·expected_attempt). 문서 속 그림을 고치면 list_figures → export_figure(첨부로 꺼냄) → 처리 → propose_figure(attachment_id, replace_ref=figure). ${lean ? '서식 번호·값은 싣지 않았다(contextItems 에 스타일 이름만, 글만 바꾸는 제안은 그 자리 서식을 그대로 씀) — 서식을 바꾸거나 다른 문단과 맞추려면 get_formatting(refs)로 그 문단만 읽는다' : '현재 서식은 contextItems 의 styleId·paraPrId·runs[].charPrId(번호)와 formattingHeader(그 번호의 값), 다른 서식은 get_formatting(refs)'}. 서식(글자모양·문단모양·스타일) 지시는 propose_format 으로 제안한다 — 그 도구가 안 보이는 연결은 propose_changes 항목에 type=format·format 을 준다. 서식을 못 바꾼다고만 하고 끝내지 않는다. 표 구조·모양(줄·칸 지우기·넣기, 셀 합치기·나누기, 테두리 굵기·종류, 배경색, 칸 너비, 표 속성)은 propose_table_edit(table=tables[].key, ops — row·col 은 0부터)로 제안한다 — 편집기에서 직접 하라고 안내만 하고 끝내지 않는다. 표·그림·글상자·도형을 통째로 없애는 지시는 propose_delete(ref=그 개체를 품은 본문 문단, kinds)로 제안한다(개체 안 글을 하나씩 비우지 않는다). 차례 새로 고침(「차례 새로고침해줘」)은 propose_toc_update(apply_now=true; 차례 스타일 다시 주기는 apply_styles, 한 줄 맞추기는 one_line — 차례 문단에 propose_format 을 하지 않는다)`,
+      instruct: `지시에 맞게 propose_changes / propose_format / add_memo / propose_insert / propose_table / propose_figure(차트·그래프·도식은 svg로 직접 그리거나 만든 그림 파일 attachment_id, caption=제목만)를 사용. 한/글에서 편집되는 차트 개체(propose_chart — 표는 source_table로 실제 값 읽기)는 사용자가 그것을 명시해 요청했을 때만. 원본 파일은 get_attachment_file로 받아 Work 자체 도구·개인 지침으로 처리하고, 생성 파일은 save_result_file(file)로 저장한 aid를 사용(로컬 브리지는 download_attachment_file·upload_result_file, 모두 request_id·expected_attempt). 문서 속 그림을 고치면 list_figures → export_figure(첨부로 꺼냄) → 처리 → propose_figure(attachment_id, replace_ref=figure). ${lean ? '서식 번호·값은 싣지 않았다(contextItems 에 스타일 이름만, 글만 바꾸는 제안은 그 자리 서식을 그대로 씀) — 서식을 바꾸거나 다른 문단과 맞추려면 get_formatting(refs)로 그 문단만 읽는다' : '현재 서식은 contextItems 의 styleId·paraPrId·runs[].charPrId(번호)와 formattingHeader(그 번호의 값), 다른 서식은 get_formatting(refs)'}. 서식(글자모양·문단모양·스타일) 지시는 propose_format 으로 제안한다 — 그 도구가 안 보이는 연결은 propose_changes 항목에 type=format·format 을 준다. 서식을 못 바꾼다고만 하고 끝내지 않는다. 표 구조·모양(줄·칸 지우기·넣기, 셀 합치기·나누기, 테두리 굵기·종류, 배경색, 칸 너비, 표 속성)은 propose_table_edit(table=tables[].key, ops — row·col 은 0부터)로 제안한다 — 편집기에서 직접 하라고 안내만 하고 끝내지 않는다. 표·그림·글상자·도형을 통째로 없애는 지시는 propose_delete(ref=그 개체를 품은 본문 문단, kinds)로 제안한다(개체 안 글을 하나씩 비우지 않는다). 차례 새로 고침(「차례 새로고침해줘」)은 propose_toc_update(apply_now=true; 차례 스타일 다시 주기는 apply_styles, 한 줄 맞추기는 one_line — 차례 문단에 propose_format 을 하지 않는다)`,
       fill_table: 'propose_changes: ref = 셀 문단 ref(tables 의 cells.refs), find = 칸의 지금 글(빈 칸은 ""), replace = 첨부 근거 값, request_id',
       make_table: 'propose_table(after_ref=target.ref, rows, header_rows, caption=표 제목(번호 없이 — [표 N] 자동 번호가 붙는다), request_id) — 첨부(read_attachment) 수치로',
       insert: 'propose_insert(after_ref=target.ref, text, request_id)',

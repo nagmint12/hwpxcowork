@@ -1131,6 +1131,23 @@ export class HwpDocument {
         return ret[0] >>> 0;
     }
     /**
+     * [hwpx-cowork] 칸 문단 줄 구성 기억의 상태(시험·진단용): `{"entries":n,"hits":n,"misses":n,"passes":n,"keptPasses":n,"environmentChanges":n}`.
+     * hits = 같은 내용·같은 폭이라 다시 줄 나눔하지 않은 횟수(문서를 연 뒤 누적).
+     * @returns {string}
+     */
+    cellComposeMemoStats() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_cellComposeMemoStats(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 개체 순서 — operation: front | back | forward | backward. 칸 안 개체도 된다(본문은 changeShapeZOrder 와 같다).
      * @param {number} sec
      * @param {number} ppi

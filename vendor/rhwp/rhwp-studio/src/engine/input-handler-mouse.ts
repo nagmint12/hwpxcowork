@@ -450,9 +450,8 @@ export function onClick(this: any, e: MouseEvent): void {
             this.isMoveDragging = true;
             this.moveDragState = {
               tableRef: { sec: ref.sec, ppi: ref.ppi, ci: ref.ci },
-              startPpi: ref.ppi,
+              pageIndex: pi,
               startPageX: px, startPageY: py,
-              lastPageX: px, lastPageY: py,
               totalDeltaH: 0, totalDeltaV: 0,
               pendingEnterCellHit: enterCellHit,
             };
@@ -561,7 +560,6 @@ export function onClick(this: any, e: MouseEvent): void {
                 origVertOffset: multiMoveRefs[0].origVertOffset,
                 startPageX: px, startPageY: py,
                 grabOffsetX: px - minX, grabOffsetY: py - minY,
-                lastPageX: px, lastPageY: py,
                 totalDeltaH: 0, totalDeltaV: 0,
                 pageIndex: pi,
                 multiRefs: multiMoveRefs,
@@ -638,7 +636,9 @@ export function onClick(this: any, e: MouseEvent): void {
                 const startAngle = Math.atan2(cy - objCy, cx - objCx);
                 this.isPictureRotateDragging = true;
                 this.pictureRotateState = {
-                  ref: { sec: ref.sec, ppi: ref.ppi, ci: ref.ci, type: ref.type, cellPath: ref.cellPath, headerFooter: ref.headerFooter },
+                  ref: { ...ref },
+                  bbox: { pageIndex: picBbox.pageIndex, x: picBbox.x, y: picBbox.y, width: picBbox.w, height: picBbox.h },
+                  startClientX: e.clientX, startClientY: e.clientY,
                   origAngle,
                   centerX: objCx,
                   centerY: objCy,
@@ -653,7 +653,7 @@ export function onClick(this: any, e: MouseEvent): void {
               this.isPictureResizeDragging = true;
               this.pictureResizeState = {
                 dir,
-                ref: { sec: ref.sec, ppi: ref.ppi, ci: ref.ci, type: ref.type, cellPath: ref.cellPath, headerFooter: ref.headerFooter },
+                ref: { ...ref },
                 origWidth: props.width,
                 origHeight: props.height,
                 origHorzOffset: props.horzOffset,
@@ -699,12 +699,11 @@ export function onClick(this: any, e: MouseEvent): void {
                   e.preventDefault();
                   this.isPictureMoveDragging = true;
                   this.pictureMoveState = {
-                    ref: { sec: ref.sec, ppi: ref.ppi, ci: ref.ci, type: ref.type, cellPath: ref.cellPath, headerFooter: ref.headerFooter },
+                    ref: { ...ref },
                     origHorzOffset: props.horzOffset,
                     origVertOffset: props.vertOffset,
                     startPageX: px, startPageY: py,
                     grabOffsetX: px - picBbox.x, grabOffsetY: py - picBbox.y,
-                    lastPageX: px, lastPageY: py,
                     totalDeltaH: 0, totalDeltaV: 0,
                     pageIndex: pi,
                   };
@@ -1597,6 +1596,8 @@ export function onContextMenu(this: any, e: MouseEvent): void {
 }
 
 export function onMouseMove(this: any, e: MouseEvent): void {
+  // 창 밖에서 놓아 mouseup을 받지 못했다면 다음 이동을 새 편집으로 확정하지 않는다.
+  if (e.buttons === 0 && this.cancelObjectDragPreview()) return;
   // 연결선 드로잉 모드: 연결점 오버레이 + 프리뷰
   if (this.connectorDrawingMode) {
     const sc = this.container.querySelector('#scroll-content');
@@ -1715,52 +1716,14 @@ export function onMouseMove(this: any, e: MouseEvent): void {
     return;
   }
 
-  // 표 이동 드래그 중
-  if (this.isMoveDragging && this.moveDragState) {
-    if (this.dragRafId) return;
-    this.dragRafId = requestAnimationFrame(() => {
-      this.dragRafId = 0;
-      if (!this.isMoveDragging || !this.moveDragState) return;
-      this.updateMoveDrag(e);
-    });
-    return;
-  }
-
-  // 그림 이동 드래그 중
-  if (this.isPictureMoveDragging && this.pictureMoveState) {
-    if (this.dragRafId) return;
-    this.dragRafId = requestAnimationFrame(() => {
-      this.dragRafId = 0;
-      if (!this.isPictureMoveDragging || !this.pictureMoveState) return;
-      this.updatePictureMoveDrag(e);
-    });
-    return;
-  }
-
-  // 그림 회전 드래그 중: 실시간 각도 계산
-  if (this.isPictureRotateDragging && this.pictureRotateState) {
-    if (this.dragRafId) return;
-    this.dragRafId = requestAnimationFrame(() => {
-      this.dragRafId = 0;
-      if (!this.isPictureRotateDragging || !this.pictureRotateState) return;
-      this.updatePictureRotateDrag(e);
-    });
-    return;
-  }
-
-  // 그림 리사이즈 드래그 중: 실시간 피드백
+  // [hwpx-cowork] 이동 중에는 예비선만 바꾸고 놓을 때 최종 좌표로 문서를 갱신한다.
+  if (this.isMoveDragging) { this.updateMoveDrag(e); return; }
+  if (this.isPictureMoveDragging) { this.updatePictureMoveDrag(e); return; }
+  if (this.isPictureRotateDragging) { this.updatePictureRotateDrag(e); return; }
   if (this.isPictureResizeDragging && this.pictureResizeState) {
-    if (this.dragRafId) return;
-    this.dragRafId = requestAnimationFrame(() => {
-      this.dragRafId = 0;
-      if (!this.isPictureResizeDragging || !this.pictureResizeState) return;
-      this.updatePictureResizeDrag(e);
-
-      // 드래그 중에도 커서 방향 업데이트 (Flipping 대응)
-      const state = this.pictureResizeState;
-      const angleDeg = (state.rotationAngle ?? 0) as number;
-      this.container.style.cursor = getRotatedCursor(state.dir, angleDeg);
-    });
+    this.updatePictureResizeDrag(e);
+    const state = this.pictureResizeState;
+    this.container.style.cursor = getRotatedCursor(state.dir, state.rotationAngle ?? 0);
     return;
   }
 
@@ -2049,12 +2012,14 @@ function finishMouseUp(this: any, _e: MouseEvent): void {
 
   // 표 이동 드래그 종료
   if (this.isMoveDragging) {
+    this.updateMoveDrag(_e);
     this.finishMoveDrag();
     return;
   }
 
   // 그림 이동 드래그 종료
   if (this.isPictureMoveDragging) {
+    this.updatePictureMoveDrag(_e);
     this.finishPictureMoveDrag();
     return;
   }

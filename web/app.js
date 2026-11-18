@@ -95,7 +95,7 @@ const Login = {
   template: `<div class="entry-page">
     <header class="entry-header"><div class="entry-shell entry-header-inner">
       <a class="entry-brand" href="/?teaser=0"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
-      <nav aria-label="시작 도구"><a href="/download">다운로드</a><a href="/help.html#join" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a></nav>
+      <nav aria-label="시작 도구"><a href="/download">다운로드</a><a href="/help.html#start" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a></nav>
     </div></header>
     <main class="entry-shell entry-main">
       <section class="entry-intro">
@@ -180,7 +180,7 @@ const DocList = {
         <a v-if="me.role==='admin'" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
         <a v-if="me.tutorial" class="btnlike small tutorial-nav" href="#/tutorial" data-testid="tutorial-nav">튜토리얼</a>
         <a class="btnlike small" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-list">시작 안내</a>
-        <a class="btnlike help-link" href="/help.html" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
+        <a class="btnlike help-link" href="/help.html#start" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
         <button class="small" @click="logout">나가기</button>
       </nav></div></header>
     <div class="libpage" :class="{'drive-mode':showDrive}" :style="sideW != null ? { '--lib-side-w': sideW + 'px' } : null">

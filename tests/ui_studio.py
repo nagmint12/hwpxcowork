@@ -28,6 +28,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 OUT = f'{ROOT}/tests/out'
 os.makedirs(OUT, exist_ok=True)
 PORT = int(os.environ.get('UI_STUDIO_PORT', '8794'))
+# 기대하는 플러그인 판 = 소스의 PLUGIN_VERSION(tests/studio_plugin.py 와 같은 줄 — 2026-11-18: '0.4.0' 고정값이 0.4.1(11-17 insertSkip) 뒤로 낡아 [1]에서 멈췄다)
+with open(f'{ROOT}/studio/plugin/types.ts', encoding='utf-8') as _f:
+    PLUGIN_VERSION = re.search(r"export const PLUGIN_VERSION = '([^']+)'", _f.read()).group(1)
 BASE = f'http://localhost:{PORT}'          # 브라우저 주소(CLAUDE.md)
 REST = f'http://127.0.0.1:{PORT}'          # 시험 코드의 REST
 CHROME = '%USERPROFILE%/AppData/Local/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-win64/chrome-headless-shell.exe'
@@ -1181,7 +1184,7 @@ def main():
             print('[1] 두 사용자가 같은 문서를 연다 — 편집기·플러그인 준비', flush=True)
             open_doc(pa, d1)
             open_doc(pb, d1)
-            ok(pa.evaluate(f'{FRAME_JS}.contentWindow.rhwpCowork.version') == '0.4.0', '플러그인 판 0.4.0(syncToBase·flash·readOnly — V4 §2.5)')
+            ok(pa.evaluate(f'{FRAME_JS}.contentWindow.rhwpCowork.version') == PLUGIN_VERSION, f'플러그인 판 {PLUGIN_VERSION}(syncToBase·flash·readOnly — V4 §2.5)')
             ok(pa.locator('.seg.mode').count() == 0 and pa.locator('button.undo').count() == 0, "옛 '검토 보기/편집 보기'·호스트 되돌리기 단추 없음")
             wait_until(lambda: chip_text(pa) == '수정 없음', timeout=10, msg='칩 수정 없음')
             ok(True, f"내 수정본 칩 「{chip_text(pa)}」")

@@ -3,7 +3,9 @@ import crypto from 'node:crypto';
 import { scan, attrs, escapeAttr, escapeText, decodeEntities } from './xmlscan.js';
 import { Section } from './section.js';
 import { imageInfo, pictureXml, MM, PX } from './picture.js';
-import { docBytesSync } from './toc.js';
+import fs from 'node:fs';
+import { docBytesSync, containerFromBytesSync } from './toc.js';
+import { formatParagraphs, copyStyleDefinitionsFromSync, defineStyle, formattingCatalog, formattingTransaction, namedStyle, styleUsage, styleDefinitions, styleDependencies } from './formatting.js';
 import { objectsToBody } from './flow.js';
 import { layoutFingerprint } from './layout.js';
 
@@ -101,6 +103,20 @@ export const pageLayoutStateFingerprint = doc => crypto.createHash('sha256').upd
 //    앞에 문단이 들어와 주소만 밀려도 개체가 그대로면 같은 지문, 개체가 바뀌거나 생기거나 없어지면(개체 문단에 글이 들어가도) 다른 지문이다.
 // → { v: 2, parts(구역 구성 — 구역 수 포함), sizes?(구역별 문단 수), objects?(옮길 개체) } — 반영 때 같은 ops 로 다시 재어 견준다(server/service.js _applyCore).
 const REF_OPS = new Set(['split_section', 'objects_to_body']);
+// [hwpx-cowork] 여러 문단 서식(restyle — 2026-11-18)의 at 항목: 문단 주소(중첩 포함)·범위 's0/p3..p9'·표 열쇠 's0/p3#t0'·{ table }. 구역 's1'·'*' 는 주소가 아니다
+const RESTYLE_ONE = /^(s\d+\/p\d+)((?:\/[nd]\d+)*(?:#.*)?)$/;
+const RESTYLE_RANGE = /^s(\d+)\/p(\d+)\.\.(?:s(\d+)\/)?p(\d+)$/;
+function restyleBodyRefs(op) {
+  const out = [];
+  for (const item of op?.at || []) {
+    const v = typeof item === 'string' ? item : item?.table;
+    if (typeof v !== 'string') continue;
+    const r = RESTYLE_RANGE.exec(v);
+    if (r) { out.push(`s${r[1]}/p${r[2]}`, `s${r[3] ?? r[1]}/p${r[4]}`); continue; }
+    const m = RESTYLE_ONE.exec(v); if (m) out.push(m[1]);
+  }
+  return out;
+}
 const MOVES_REFS = new Set(['split_section', 'merge_section', 'objects_to_body']);
 const PARA_REF = /^(s\d+\/p\d+)(:L\d+)?$/;
 const digest = (v) => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -109,6 +125,7 @@ function opRefs(op) {
   const out = [];
   const walk = (v) => { if (typeof v === 'string') { if (PARA_REF.test(v)) out.push(v); } else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') Object.values(v).forEach(walk); };
   if (REF_OPS.has(op?.op)) walk(op);
+  if (op?.op === 'restyle') out.push(...restyleBodyRefs(op));
   return out;
 }
 /** ops 의 문단 주소 쓰임: lead = 지금 문서 주소를 쓰는 op 차례(주소를 바꾸는 op 앞 — 그 op 자신 포함), trailing = 그 뒤 op 가 주소를 쓰는가 */
@@ -128,6 +145,19 @@ export function pageLayoutState(doc, ops) {
     masters: [...doc.container.files.keys()].filter(n => /^Contents\/masterpage\d+\.xml$/.test(n)).sort().map(n => [n, doc.container.getText(n)]),
   }) };
   if (trailing) out.sizes = digest(doc.sections.map(s => s.bodyParas.length));
+  const watched = new Map();
+  for (const op of ops || []) {
+    if (op.op === 'styles') {
+      for (const d of op.define || []) if (d.applyToBase) watched.set(d.base, true);
+      for (const d of op.update || []) watched.set(d.name, true);
+    } else if (op.op === 'restyle') {
+      for (const a of op.at || []) if (a?.style) {
+        watched.set(a.style, true);
+        if (op.style && !watched.has(op.style)) watched.set(op.style, false);
+      }
+    }
+  }
+  if (watched.size) out.styles = digest(styleDependencies(doc, watched));
   const moves = (ops || []).filter((op) => op?.op === 'objects_to_body');
   if (moves.length) out.objects = digest(moves.map((op) => {
     // 앞 op 를 한 뒤에만 있는 구역('s3' — 구역 나누기 뒤) 등 지금 문서로 풀 수 없는 대상은 그 글 그대로(문단 수는 sizes 가 지킨다)
@@ -167,7 +197,33 @@ export function remapLayoutOps(ops, mapRef) {
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'op' ? x : fix(x)]));
     return v;
   };
-  const next = ops.map((op, i) => (lead.includes(i) ? fix(op) : op));
+  // 여러 문단 서식(restyle)의 at: 문단·표 주소는 본문 번호만 옮기고(꼬리 '/n2'·'#t0' 는 그대로), 지워진 것은 목록에서 뺀다. 범위는 두 끝을 옮기고 끝이 지워졌으면 lost
+  const restyle = (op) => {
+    const move = (v) => {
+      const r = RESTYLE_RANGE.exec(v);
+      if (r) {
+        const a = mapRef(`s${r[1]}/p${r[2]}`); const b = mapRef(`s${r[3] ?? r[1]}/p${r[4]}`);
+        if (a == null || b == null) { lost = true; return v; }
+        const ma = /^s(\d+)\/p(\d+)$/.exec(a); const mb = /^s(\d+)\/p(\d+)$/.exec(b);
+        const to = ma[1] === mb[1] ? `${a}..p${mb[2]}` : `${a}..${b}`;
+        if (to !== v) changed = true;
+        return to;
+      }
+      const m = RESTYLE_ONE.exec(v); if (!m) return v;
+      const to = mapRef(m[1]); if (to == null) return null;
+      if (to !== m[1]) changed = true;
+      return to + m[2];
+    };
+    const at = [];
+    for (const item of op.at || []) {
+      if (typeof item === 'string') { const v = move(item); if (v == null) changed = true; else at.push(v); }
+      else if (item && typeof item.table === 'string') { const v = move(item.table); if (v == null) changed = true; else at.push(v === item.table ? item : { ...item, table: v }); }
+      else at.push(item);
+    }
+    if ((op.at || []).length && !at.length) lost = true;
+    return { ...op, at };
+  };
+  const next = ops.map((op, i) => (!lead.includes(i) ? op : op?.op === 'restyle' ? restyle(op) : fix(op)));
   return { ops: changed || lost ? next : ops, changed, lost };
 }
 
@@ -212,6 +268,74 @@ function nestedSnapshot(doc) {
   return out;
 }
 
+/**
+ * [hwpx-cowork] 여러 문단 서식(restyle)의 at → 문단 주소 목록(2026-11-18). 범위·구역·'*' 는 본문 문단만(표 칸·글상자 안은 표 주소로 따로 준다),
+ * 표는 칸의 문단(캡션 제외) — { table, row_from?, row_to?, col_from?, col_to? } 는 그 범위에 걸친 칸만(합친 칸은 걸치면 든다, 0부터)
+ */
+export function restyleRefs(doc, at) {
+  const out = []; let tables = null; let uses = null;
+  const body = (si, from, to) => {
+    const sec = doc.sections[si]; if (!sec) throw fail('NO_PARAGRAPH', `구역이 없습니다: s${si}`);
+    if (from < 0 || to >= sec.bodyParas.length || from > to) throw fail('NO_PARAGRAPH', `문단 범위가 문서 밖입니다: s${si}/p${from}..p${to}(이 구역의 본문 문단은 p0~p${sec.bodyParas.length - 1})`);
+    for (let i = from; i <= to; i++) out.push(`s${si}/p${i}`);
+  };
+  const table = (key, range = {}) => {
+    tables ??= doc.tables();
+    const t = tables.find((x) => x.key === key); if (!t) throw fail('NO_TABLE', `표를 찾지 못했습니다: ${key}(read view='tables')`);
+    const r0 = range.row_from ?? 0; const r1 = Math.min(range.row_to ?? t.rows - 1, t.rows - 1); const c0 = range.col_from ?? 0; const c1 = Math.min(range.col_to ?? t.cols - 1, t.cols - 1);
+    if (r0 > r1 || c0 > c1) throw fail('RANGE', `표 ${key} 의 칸 범위가 표 밖입니다(${t.rows}×${t.cols}, 0부터)`);
+    for (const c of t.cells) if (c.row <= r1 && c.row + c.rowSpan - 1 >= r0 && c.col <= c1 && c.col + c.colSpan - 1 >= c0) out.push(...c.refs);
+  };
+  for (const item of at || []) {
+    if (item?.style) {
+      const source = namedStyle(doc, item.style);
+      if (!source || source.type !== 'PARA') throw fail('NO_STYLE', `대상 문단 스타일 「${item.style}」을 찾지 못했습니다. read(view='styles')에서 이름을 확인하세요`);
+      uses ??= styleUsage(doc);
+      const refs = uses.get(source.id);
+      if (!refs?.length) throw fail('NO_PARAGRAPH', `「${source.name}」을 쓰는 문단이 없습니다`);
+      for (const ref of refs) out.push(ref);
+      continue;
+    }
+    if (item && typeof item === 'object') { table(item.table, item); continue; }
+    const v = String(item); let m;
+    if (v === '*') { doc.sections.forEach((s, si) => { if (s.bodyParas.length) body(si, 0, s.bodyParas.length - 1); }); continue; }
+    if ((m = /^s(\d+)$/.exec(v))) { const sec = doc.sections[Number(m[1])]; if (!sec) throw fail('NO_PARAGRAPH', `구역이 없습니다: ${v}`); if (sec.bodyParas.length) body(Number(m[1]), 0, sec.bodyParas.length - 1); continue; }
+    if ((m = RESTYLE_RANGE.exec(v))) {
+      const a = Number(m[1]); const b = Number(m[3] ?? m[1]);
+      if (a > b || (a === b && Number(m[2]) > Number(m[4]))) throw fail('RANGE', `범위의 앞뒤가 바뀌었습니다: ${v}`);
+      for (let si = a; si <= b; si++) {
+        const sec = doc.sections[si]; if (!sec) throw fail('NO_PARAGRAPH', `구역이 없습니다: s${si}`);
+        const from = si === a ? Number(m[2]) : 0; const to = si === b ? Number(m[4]) : sec.bodyParas.length - 1;
+        if (to >= from) body(si, from, to);
+      }
+      continue;
+    }
+    if (v.includes('#')) { table(v); continue; }
+    out.push(v);
+  }
+  return out;
+}
+
+// 표준서식 스타일 원본(새 문서 바탕 server/templates/blank.hwpx — '&본문 1.'·'&표내용__' 등 23개, 실험 편집 server/document-edit.js 의 import_styles 와 같은 원본).
+// 한 번만 읽는다. 들여오기(copyStyleDefinitionsFromSync)는 받는 문서의 머리만 고친다
+let standardSource = null;
+function standardStyleSource(doc) {
+  standardSource ??= new doc.constructor(containerFromBytesSync(fs.readFileSync(new URL('../server/templates/blank.hwpx', import.meta.url))));
+  return standardSource;
+}
+// 들여온 결과는 받는 문서의 머리 글로 정해진다(표준서식 원본에는 포함 글꼴·그림 채움이 없다) — 같은 머리에는 다시 계산하지 않는다.
+// 머리가 큰 문서(문단 모양 301개·453KB)에서 들여오기 한 번이 3.3초이고, 저장 한 번에 사전 검사 사본·제안 만들기·반영이 같은 머리로 되풀이한다
+const importedHeaders = new Map();
+function importStandardStyles(doc) {
+  const before = doc.header.xml; const hit = importedHeaders.get(before);
+  if (hit !== undefined) { doc.header.xml = hit; return; }
+  copyStyleDefinitionsFromSync(doc, standardStyleSource(doc));
+  importedHeaders.set(before, doc.header.xml);
+  if (importedHeaders.size > 6) importedHeaders.delete(importedHeaders.keys().next().value);
+}
+/** 표준서식 스타일 이름들(들여올 수 있는 것 — read view='styles' 가 보인다) */
+export function standardStyleNames(doc) { return formattingCatalog(standardStyleSource(doc)).styles.map((s) => ({ name: s.name, type: s.type })); }
+
 /** 개체 → 본문 결과 한 줄(제안 카드·작업 기록 메모에 보인다) */
 export function structureLabel(r) {
   if (!r) return '개체 → 본문';
@@ -236,13 +360,62 @@ export function structureLabel(r) {
 }
 
 /** Returns reversible address maps; callers remap proposals/requests/memo threads. */
-export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); }, author = null } = {}) {
-  const beforeNested = nestedSnapshot(doc);
+export function editPageLayout(doc, ops, options = {}) {
+  const onlyStyles = ops.every(op => op.op === 'styles' || op.op === 'restyle');
+  return onlyStyles ? formattingTransaction(doc, () => applyLayoutOps(doc, ops, options, true)) : applyLayoutOps(doc, ops, options, false);
+}
+
+function applyLayoutOps(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); }, author = null }, onlyStyles) {
+  const beforeNested = onlyStyles ? [] : nestedSnapshot(doc);
   const mapping = doc.sections.map((s, si) => s.bodyParas.map((_, i) => ({ old: [si, i], to: [si, i] }))).flat();
   // 지워진 문단(to = null — 개체 → 본문이 비게 된 문단을 지운다)은 그대로 둔다
   const move = fn => { for (const m of mapping) if (m.to) m.to = fn(...m.to); };
   const reports = new Map();
+  const notes = new Map();   // styles·restyle 의 결과(라벨에 쓴다)
   for (const op of ops) {
+    // [hwpx-cowork] 스타일 들여오기·정의(2026-11-18): 머리(header.xml)에 정의만 더한다 — 본문·주소는 그대로
+    if (op.op === 'styles') {
+      if (!op.import && !op.define?.length && !op.update?.length) throw fail('PAGE_LAYOUT', "styles 는 import:'standard', define 또는 update가 필요합니다.");
+      const labels = formattingTransaction(doc, () => {
+        const result = [];
+        if (op.import === 'standard') {
+          const before = styleDefinitions(doc).length;
+          importStandardStyles(doc);
+          const added = styleDefinitions(doc).length - before;
+          result.push(`표준서식 스타일 들여오기 ${added}개${added ? '' : '(이미 모두 있음)'}`);
+        }
+        for (const [definitions, update] of [[op.define || [], false], [op.update || [], true]]) {
+          const names = [];
+          for (const d of definitions) {
+            const clean = v => Object.fromEntries(Object.entries(v || {}).filter(([, value]) => value != null));
+            const char = clean(d.char); const paragraph = clean(d.paragraph);
+            const format = { ...(Object.keys(char).length ? { char } : {}), ...(Object.keys(paragraph).length ? { paragraph } : {}) };
+            const edit = defineStyle(doc, { name: d.name, baseStyle: d.base, type: d.type || 'PARA', format, applyToBase: d.applyToBase, update });
+            names.push(`「${edit.name}」${edit.total == null ? '' : ` 사용 문단 ${edit.total}곳`}`);
+          }
+          if (names.length) result.push(`스타일 ${update ? '수정' : '정의'} ${names.join('·')}`);
+        }
+        return result.join(' · ');
+      });
+      notes.set(op, labels);
+      continue;
+    }
+    // [hwpx-cowork] 여러 문단 서식(2026-11-18): 대상을 문단 주소로 풀어 한 번에(engine/formatting.js formatParagraphs). style 은 이름 — 앞 op 가 들여온 것도 된다
+    if (op.op === 'restyle') {
+      const refs = restyleRefs(doc, op.at);
+      if (!refs.length) throw fail('NO_PARAGRAPH', '서식을 줄 문단이 없습니다.');
+      let styleId;
+      if (op.style != null) {
+        const list = formattingCatalog(doc).styles; const hit = list.find((x) => x.name === op.style && x.type !== 'CHAR') || list.find((x) => x.name === op.style);
+        if (!hit) throw fail('NO_STYLE', `스타일 「${op.style}」 이 문서에 없습니다(있는 스타일: ${list.filter((x) => x.type !== 'CHAR').slice(0, 30).map((x) => x.name).join(' · ')}) — 표준서식 스타일은 같은 호출에 {op:'styles', import:'standard'} 를 함께 내면 쓸 수 있습니다.`);
+        styleId = hit.id;
+      }
+      const clean = (v) => (v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x != null)) : {});
+      const char = clean(op.char); const paragraph = clean(op.paragraph);
+      const out = formatParagraphs(doc, refs, { ...(styleId != null ? { styleId } : {}), ...(Object.keys(char).length ? { char } : {}), ...(Object.keys(paragraph).length ? { paragraph } : {}) });
+      notes.set(op, { ...out, style: op.style ?? null, char: Object.keys(char).length > 0, paragraph: Object.keys(paragraph).length > 0 });
+      continue;
+    }
     if (op.op === 'objects_to_body') {
       // 개체 → 본문(engine/flow.js): 문단을 넣고 지우고 구역을 합친다 — 그 옮김표를 지금까지의 옮김표에 잇는다
       const out = objectsToBody(doc, { refs: structureRefs(doc, op.at), joinPages: op.join_pages, keepPageNumbers: op.keep_page_numbers, drop: op.drop, headerRows: op.header_rows,
@@ -336,6 +509,14 @@ export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail(
       updateSecPr(sec, xml => attrPatch(removeElements(xml, 'hp:masterPage'), 'hp:secPr', { masterPageCnt: refs.length }).replace('</hp:secPr>', refs.map(id => `<hp:masterPage idRef="${escapeAttr(id)}"/>`).join('') + '</hp:secPr>'));
     }
   }
+  // 서식은 문단을 옮기지 않는다. 머리말·꼬리말 안의 XML이 바뀌어도 주소는 그대로이고 바탕쪽 파일도 정리할 이유가 없다.
+  const formatLabel = op => {
+    if (op.op === 'styles') return notes.get(op);
+    const n = notes.get(op);
+    const what = [n.style ? `스타일 「${n.style}」` : '', n.char ? '글자 모양' : '', n.paragraph ? '문단 모양' : ''].filter(Boolean).join('·');
+    return `서식 ${n.total.toLocaleString('ko-KR')}곳: ${what}`;
+  };
+  if (onlyStyles) return { mapping, refMapping: doc.sections.flatMap(s => s.paras.filter(p => p.body == null).map(p => ({ old: p.ref, to: p.ref }))), reports: [], labels: ops.map(formatLabel) };
   // Remove unused master parts, leaving shared master pages and shared binary resources intact.
   const used = new Set(doc.sections.flatMap(s => elements(s.xml, 'hp:masterPage').map(e => `Contents/${e.attrs.idRef}.xml`)));
   for (const name of [...doc.container.files.keys()]) if (/^Contents\/masterpage\d+\.xml$/.test(name) && !used.has(name)) {
@@ -348,11 +529,13 @@ export function editPageLayout(doc, ops, { attachmentBytes = () => { throw fail(
   for (const q of afterNested) { const k = `${q.host}|${q.kind}`; if (!byHost.has(k)) byHost.set(k, []); byHost.get(k).push(q); }
   const refMapping = beforeNested.map(old => {
     const candidates = byHost.get(`${hosts.get(old.host)}|${old.kind}`) || [];
-    const next = old.kind === 'body' ? candidates[old.slot] : candidates.find(q => q.xml === old.xml);
+    // [hwpx-cowork] 2026-11-18: 글이 같은 머리말·꼬리말 문단이 여럿이면 제자리 것을 먼저 고른다(예전에는 첫 번째 같은 글로 옮겨 가 — 아무것도 옮기지 않는 op 에서도 주소가 바뀌었다)
+    const next = old.kind === 'body' ? candidates[old.slot] : (candidates.find(q => q.ref === old.ref && q.xml === old.xml) || candidates.find(q => q.xml === old.xml));
     return { old: old.ref, to: next?.ref || null };
   });
   return { mapping, refMapping, reports: ops.filter(op => reports.has(op)).map(op => reports.get(op)), labels: ops.map(op => {
     if (op.op === 'objects_to_body') return structureLabel(reports.get(op));
+    if (op.op === 'styles' || op.op === 'restyle') return formatLabel(op);
     const name = ({ paper:'용지·여백', section:'구역 설정', split_section:'구역 나누기', merge_section:'구역 합치기', header:'머리말', footer:'꼬리말', page_number:'쪽 번호', master_page:'바탕쪽' })[op.op];
     if (op.op === 'split_section') return `${op.before_ref} 앞에서 구역 나누기`;
     const extra = op.clear ? '삭제' : [op.orientation === 'landscape' ? '가로' : op.orientation === 'portrait' ? '세로' : '', op.width_mm ? `${op.width_mm}×${op.height_mm || '기존'}mm` : '', op.margins ? Object.entries(op.margins).map(([k,v]) => `${({left:'왼쪽',right:'오른쪽',top:'위',bottom:'아래',header:'머리말',footer:'꼬리말',gutter:'제본'})[k]} ${v}mm`).join(' · ') : '', op.text?.slice(0,40), op.position, op.start != null ? `${op.start}부터` : '', op.attachment_id ? '배경 그림' : ''].filter(Boolean).join(' · ');

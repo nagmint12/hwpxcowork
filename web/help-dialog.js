@@ -14,7 +14,7 @@ export function openHelp(hash = '#start', opener = null) {
 export const HelpDialog = {
   template: `<dialog ref="dialog" class="help-dialog" aria-labelledby="help-dialog-title" data-testid="help-dialog"
       @cancel.prevent="close" @click="backdrop" @keydown.esc.stop.prevent="close">
-    <header class="help-dialog-head"><h2 id="help-dialog-title">사용 설명서</h2>
+    <header class="help-dialog-head"><h2 id="help-dialog-title"><img src="/icons/icon-128.png?v=20261118" width="25" height="25" alt="">사용 설명서</h2>
       <div class="help-dialog-actions"><button class="small" v-if="isAdmin" data-testid="help-full-manual" @click="openTopic('#manual')">상세 운영 매뉴얼</button>
         <a class="btnlike small" :href="standaloneUrl" target="_blank" rel="noopener" data-help-new-tab>새 창으로 보기</a>
         <button ref="closeButton" autofocus class="small" data-testid="help-close" aria-label="설명서 닫기" @click="close">닫기</button></div></header>

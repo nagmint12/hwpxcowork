@@ -18,6 +18,8 @@ struct RowMembers {
 struct RowIndex {
     rows: HashMap<usize, RowMembers>,
     spanning: Vec<usize>,
+    // [hwpx-cowork] 쪽을 넘긴 걸침 칸의 높이를 계산할 때만 끝 행별 원본 칸 순서를 만든다.
+    spanning_by_end_row: OnceLock<HashMap<usize, Vec<usize>>>,
     raw_heights: OnceLock<Arc<Vec<HwpUnit>>>,
     declared_shrink: OnceLock<Arc<Vec<HwpUnit>>>,
     paragraph_widths: OnceLock<Arc<Vec<i32>>>,
@@ -46,6 +48,7 @@ impl RowIndex {
         Self {
             rows,
             spanning,
+            spanning_by_end_row: OnceLock::new(),
             raw_heights: OnceLock::new(),
             declared_shrink: OnceLock::new(),
             paragraph_widths: OnceLock::new(),
@@ -84,6 +87,20 @@ impl TableRows<'_> {
 
     pub(super) fn spanning(&self) -> &[usize] {
         &self.index.spanning
+    }
+
+    // [hwpx-cowork] 같은 불변 표를 빌린 모든 조각이 공유한다. 걸침 칸이 많은 표도 행마다 다시 훑지 않는다.
+    pub(super) fn spans_ending_on(&self, row: usize) -> &[usize] {
+        let by_end = self.index.spanning_by_end_row.get_or_init(|| {
+            let mut by_end = HashMap::<usize, Vec<usize>>::new();
+            for &idx in self.spanning() {
+                let cell = &self.table.cells[idx];
+                let end = usize::from(cell.row) + usize::from(cell.row_span) - 1;
+                by_end.entry(end).or_default().push(idx);
+            }
+            by_end
+        });
+        by_end.get(&row).map_or(&[], Vec::as_slice)
     }
 
     pub(super) fn raw_heights(&self) -> Arc<Vec<HwpUnit>> {
@@ -156,5 +173,32 @@ impl TableRowIndexCache {
 
     pub(super) fn clear(&self) {
         self.entries.borrow_mut().clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::table::Cell;
+
+    // [hwpx-cowork] 시작 행 순서가 섞인 병합 칸도 같은 끝 행 안에서는 원본 칸 순서를 지킨다.
+    #[test]
+    fn spans_ending_on_row_follow_source_order_and_refresh_after_edit() {
+        let mut table = Table::default();
+        table.cells = [(1, 2), (2, 1), (0, 3), (2, 2), (1, 0)]
+            .into_iter()
+            .map(|(row, row_span)| Cell { row, row_span, ..Default::default() })
+            .collect();
+        let cache = TableRowIndexCache::default();
+        {
+            let rows = cache.scope(&table);
+            assert!(rows.spans_ending_on(1).is_empty());
+            assert_eq!(rows.spans_ending_on(2), &[0, 2]);
+            assert_eq!(rows.spans_ending_on(3), &[3]);
+        }
+        table.cells[0].row_span = 3;
+        let rows = cache.scope(&table);
+        assert_eq!(rows.spans_ending_on(2), &[2]);
+        assert_eq!(rows.spans_ending_on(3), &[0, 3]);
     }
 }

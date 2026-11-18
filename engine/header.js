@@ -153,7 +153,8 @@ export class Header {
     const want = norm(xml);
     const ids = scan(this.xml).filter(t => t.name === `hh:${tag}` && (t.type === 'open' || t.type === 'selfclose')).map(t => Number(attr(this.xml, t, 'id')));
     for (const id of ids) { const b = this.block(tag, id); if (b && norm(b) === want) return String(id); }
-    const id = ids.length ? Math.max(...ids) + 1 : (tag === 'borderFill' ? 1 : 0);
+    // 한/글의 첫 글머리표·문단 번호는 1번이다. 정의가 없는 문서에서 0을 쓰면 '없음'과 겹친다.
+    const id = ids.length ? Math.max(...ids) + 1 : (['borderFill', 'numbering', 'bullet'].includes(tag) ? 1 : 0);
     const el = xml.replace(new RegExp(`^(<hh:${tag}\\b[^>]*?\\bid=)["']\\d+["']`), `$1"${id}"`);
     const close = `</hh:${listTag}>`;
     // A valid empty HWPX can omit unused definition lists. Create a missing
@@ -168,8 +169,8 @@ export class Header {
         this.xml = this.xml.slice(0, pos) + `<hh:${listTag} itemCnt="0"/>` + this.xml.slice(pos);
       }
     }
-    if (this.xml.includes(close)) this.xml = this.xml.replace(close, el + close);
-    else if (new RegExp(`<hh:${listTag}\\b[^>]*/>`).test(this.xml)) this.xml = this.xml.replace(new RegExp(`<hh:${listTag}\\b([^>]*?)/>`), `<hh:${listTag}$1>${el}${close}`);
+    if (this.xml.includes(close)) this.xml = this.xml.replace(close, () => el + close);
+    else if (new RegExp(`<hh:${listTag}\\b[^>]*/>`).test(this.xml)) this.xml = this.xml.replace(new RegExp(`<hh:${listTag}\\b([^>]*?)/>`), (_, a) => `<hh:${listTag}${a}>${el}${close}`);
     else throw new Error(`header.xml 에 ${listTag} 목록이 없습니다`);
     const n = (this.xml.match(new RegExp(`<hh:${tag}\\b`, 'g')) || []).length;
     this.xml = this.xml.replace(new RegExp(`(<hh:${listTag}\\b[^>]*?\\bitemCnt=")\\d+(")`), `$1${n}$2`);

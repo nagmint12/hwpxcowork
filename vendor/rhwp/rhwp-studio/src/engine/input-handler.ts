@@ -234,6 +234,18 @@ function highlightPenCursor(color: string): string {
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 2 18, text`;
 }
 
+interface ObjectMovePreview {
+  pageIndex: number;
+  startPageX: number;
+  startPageY: number;
+  totalDeltaH: number;
+  totalDeltaV: number;
+  hasMoved?: boolean;
+  dropPage?: number;
+  dropX?: number;
+  dropY?: number;
+}
+
 /** 클릭 커서 배치 + 키보드 입력을 처리한다 */
 export class InputHandler {
   private cursor: CursorState;
@@ -331,15 +343,9 @@ export class InputHandler {
 
   // 표 이동 드래그 상태
   private isMoveDragging = false;
-  private moveDragState: {
+  private moveDragState: ObjectMovePreview & {
     tableRef: { sec: number; ppi: number; ci: number };
-    startPpi: number;  // 드래그 시작 시 ppi (Undo용)
-    startPageX: number;
-    startPageY: number;
-    lastPageX: number;
-    lastPageY: number;
-    totalDeltaH: number;  // 누적 HWPUNIT 델타 (Undo용)
-    totalDeltaV: number;
+    pendingEnterCellHit?: DocumentPosition | null;
   } | null = null;
 
   // 그림 삽입 배치 모드 상태
@@ -399,19 +405,12 @@ export class InputHandler {
 
   // 그림/글상자 이동 드래그 상태
   private isPictureMoveDragging = false;
-  private pictureMoveState: {
+  private pictureMoveState: ObjectMovePreview & {
     ref: { sec: number; ppi: number; ci: number; type: 'image' | 'shape' | 'equation' | 'group' | 'line' | 'ole'; cellPath?: CellPathLike; headerFooter?: { kind: 'header' | 'footer'; outerParaIdx: number; outerControlIdx: number } };
     origHorzOffset: number;
     origVertOffset: number;
-    startPageX: number;
-    startPageY: number;
     grabOffsetX: number;
     grabOffsetY: number;
-    lastPageX: number;
-    lastPageY: number;
-    totalDeltaH: number;
-    totalDeltaV: number;
-    pageIndex: number;
     /** 다중 선택 이동 시 각 개체의 원래 offset 기록 */
     multiRefs?: { sec: number; ppi: number; ci: number; type: string; origHorzOffset: number; origVertOffset: number }[];
   } | null = null;
@@ -420,6 +419,10 @@ export class InputHandler {
   private isPictureRotateDragging = false;
   private pictureRotateState: {
     ref: { sec: number; ppi: number; ci: number; type: 'image' | 'shape' | 'equation' | 'group' | 'line' | 'ole'; cellPath?: CellPathLike; headerFooter?: { kind: 'header' | 'footer'; outerParaIdx: number; outerControlIdx: number } };
+    bbox: { pageIndex: number; x: number; y: number; width: number; height: number };
+    startClientX: number;
+    startClientY: number;
+    finalAngle?: number;
     origAngle: number;      // 드래그 시작 시 원래 회전각 (도)
     centerX: number;        // 도형 중심 (scroll-content 좌표, px)
     centerY: number;
@@ -558,7 +561,10 @@ export class InputHandler {
     this.onDblClickBound = this.onDblClick.bind(this);
     this.onKeyDownBound = this.onKeyDown.bind(this);
     this.onKeyUpBound = e => this._imeNavigationGuard.release(e);
-    this.onIMEWindowBlurBound = () => this._imeNavigationGuard.reset();
+    this.onIMEWindowBlurBound = () => {
+      this._imeNavigationGuard.reset();
+      this.cancelObjectDragPreview();
+    };
     this.onInputBound = this.onInput.bind(this);
     this.onCompositionStartBound = this.onCompositionStart.bind(this);
     this.onCompositionEndBound = this.onCompositionEnd.bind(this);
@@ -667,7 +673,9 @@ export class InputHandler {
     // 그 이벤트를 거치는 열기 경로는 여섯 중 하나뿐이라, 드롭·파일 input·`?url=`·
     // 자동저장 복구·호스트 API 로 연 문서에서는 이전 문서의 칸 좌표가 그대로 남았다.
     // `main.ts loadBytes()` 가 문서를 갈아치운 직후 이 이벤트를 낸다.
+    eventBus.on('document-mutated', () => this.cancelObjectDragPreview());
     eventBus.on('document-swapped', () => {
+      this.cancelObjectDragPreview(false);
       this.clearTableResizeRuntimeCache();
     });
 
@@ -1982,6 +1990,10 @@ export class InputHandler {
 
   /** 특수 키 처리 (Backspace, Enter, 화살표, Ctrl+Z/Y) */
   private onKeyDown(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && this.cancelObjectDragPreview()) {
+      e.preventDefault();
+      return;
+    }
     _keyboard.onKeyDown.call(this, e);
   }
 
@@ -4416,6 +4428,44 @@ export class InputHandler {
     _picture.cleanupPictureResizeDrag.call(this);
   }
 
+  // [hwpx-cowork] 쪽을 넘겨도 시작 쪽 기준으로 총 이동량을 구하고, 놓은 쪽 안의 좌표는 따로 보관한다.
+  private updateObjectMovePreview(
+    state: ObjectMovePreview, renderer: TableObjectRenderer | null, e: MouseEvent, threshold = 0,
+  ): void {
+    const sc = this.container.querySelector<HTMLElement>('#scroll-content');
+    if (!sc) return;
+    const rect = sc.getBoundingClientRect();
+    const zoom = this.viewportManager.getZoom();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const left = this.virtualScroll.getPageLeftResolved(state.pageIndex, sc.clientWidth);
+    const top = this.virtualScroll.getPageOffset(state.pageIndex);
+    const dx = x - left - state.startPageX * zoom;
+    const dy = y - top - state.startPageY * zoom;
+    if (!state.hasMoved && Math.hypot(dx, dy) < threshold) return;
+    state.hasMoved = true;
+    state.totalDeltaH = Math.round(dx * 75 / zoom);
+    state.totalDeltaV = Math.round(dy * 75 / zoom);
+    const page = this.virtualScroll.getPageAtPoint(x, y);
+    state.dropPage = page;
+    state.dropX = (x - (page === state.pageIndex ? left : this.virtualScroll.getPageLeftResolved(page, sc.clientWidth))) / zoom;
+    state.dropY = (y - (page === state.pageIndex ? top : this.virtualScroll.getPageOffset(page))) / zoom;
+    renderer?.previewMove(dx, dy);
+  }
+
+  private cancelObjectDragPreview(redraw = true): boolean {
+    if (!this.isMoveDragging && !this.isPictureMoveDragging &&
+        !this.isPictureResizeDragging && !this.isPictureRotateDragging) return false;
+    const hadPictureOutline = this.isPictureResizeDragging || this.isPictureRotateDragging;
+    this.isMoveDragging = this.isPictureMoveDragging = this.isPictureRotateDragging = false;
+    this.moveDragState = this.pictureMoveState = this.pictureRotateState = null;
+    this.cleanupPictureResizeDrag();
+    this.tableObjectRenderer?.previewMove(0, 0);
+    this.pictureObjectRenderer?.previewMove(0, 0);
+    if (redraw && hadPictureOutline) this.renderPictureObjectSelection();
+    return true;
+  }
+
   // ─── 그림 이동 드래그 ──────────────────────────────
 
   /** 마우스 드래그로 그림 이동 — 드래그 중 갱신 */
@@ -4601,6 +4651,7 @@ export class InputHandler {
   dispose(): void {
     this.cancelPendingObjectCut?.();
     this.cancelPendingObjectCut = null;
+    this.cancelObjectDragPreview(false);
     this.flushDeferredPaginationIfNeeded('before-dispose', false);
     if (this.isResizeDragging) {
       this.cleanupResizeDrag();

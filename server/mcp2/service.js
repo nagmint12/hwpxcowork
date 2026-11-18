@@ -9,7 +9,9 @@ import { ServiceError } from '../service.js';
 import { needsFormatting } from '../ai.js';
 import { imageForModel } from '../image-convert.js';
 import { docMap, textLines, pageLines, layoutLines, outlineLines, tableLines, rangePicker } from './views.js';
-import { parseOps, prepareOps, opsGuide } from './ops.js';
+import { parseOps, prepareOps, opsGuide, nativeChartAsked, NATIVE_CHART_TODO } from './ops.js';
+import { standardStyleNames } from '../../engine/page-layout.js';
+import { namedStyle, styleDefinitions, styleUsage, styleHeading, styleDetail } from '../../engine/formatting.js';
 import { pageEstimateMethods } from '../page-estimate.js';
 import { withdrawMethods, pidRanges } from '../proposal-withdraw.js';
 
@@ -30,7 +32,7 @@ const FINISH_SUMMARY_MAX = 2000;
 // 문서 전체 대상인데 본문이 이만큼 이하면 끊지 않고 다 싣는다 — 2026-11-16 밤 실험에서 8,600자 문서가 116/141줄에서 끊겨 12건 가운데 6건이 이어 읽기를 한 번 더 불렀다
 const BRIEF_WHOLE_CHARS = 12000;
 /** 이 지침(표준서식 작성 지침)의 예전 도구 이름을 새 연결의 op 로 읽는 법 — read view='guide' 응답 앞에 붙인다 */
-const GUIDE_NAMES_NOTE = "이 지침의 도구 이름은 예전 연결의 것이다. 새 연결에서는 이렇게 읽는다: propose_insert(after_ref, paragraphs) → edit 의 {op:'insert', after, paragraphs:[{text, style}]}(blank=true → text:''), format.styleId → style(스타일 이름), get_formatting → read(view='format', at), propose_changes → {op:'replace'}, propose_table → {op:'table'}, propose_table_edit → {op:'table_edit'}, propose_figure → {op:'figure'}, propose_chart → {op:'chart'}, propose_toc_update → {op:'toc'}, read_document → read, get_writing_guide(part='spec') → read(view='guide', id='spec'). 표 앞 단위 줄·표 아래 주석 → table 의 unit·notes(차트 제목은 chart 의 caption — insert 로 따로 넣지 않는다), 문단·절 지우기·옮기기 → {op:'delete_paragraphs'}·{op:'move_paragraphs'}, 같은 낱말 모두 바꾸기 → {op:'replace_all'}.";
+const GUIDE_NAMES_NOTE = "이 지침의 도구 이름은 예전 연결의 것이다. 새 연결에서는 이렇게 읽는다: propose_insert(after_ref, paragraphs) → edit 의 {op:'insert', after, paragraphs:[{text, style}]}(blank=true → text:''), format.styleId → style(스타일 이름), get_formatting → read(view='format', at), propose_changes → {op:'replace'}, propose_table → {op:'table'}, propose_table_edit → {op:'table_edit'}, propose_figure → {op:'figure'}(차트·그래프도 그림으로 직접 그린다), propose_toc_update → {op:'toc'}, read_document → read, get_writing_guide(part='spec') → read(view='guide', id='spec'). 표 앞 단위 줄·표 아래 주석 → table 의 unit·notes(insert 로 따로 넣지 않는다), 문단·절 지우기·옮기기 → {op:'delete_paragraphs'}·{op:'move_paragraphs'}, 같은 낱말 모두 바꾸기 → {op:'replace_all'}.";
 const dropEmpty = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length))));
 const escapeContext = (s) => String(s).replace(/<(\/?)(document_context)/gi, '＜$1$2');
 const wrapContext = (s) => `<document_context>\n${escapeContext(s)}\n</document_context>`;
@@ -46,6 +48,8 @@ const TODO = {
   insert: () => 'edit 의 insert(after=target.ref, paragraphs).',
 };
 
+// 구조 묶음에 든 op 번호들: 많으면(칸마다 낸 서식 op 수천 개가 한 제안으로 묶였을 때) 범위 글로 줄인다('0-3140')
+const opList = (indexes) => (indexes.length > 12 ? pidRanges(indexes) : indexes);
 /** 영수증에 싣는 제안 한 줄 */
 function receipt(index, p) {
   return dropEmpty({ op: index, pid: p.pid, ref: p.insertedRef || p.ref || p.afterRef, table: p.tableKey || null, status: p.status === 'pending' ? null : p.status,
@@ -147,12 +151,18 @@ export const agentServiceMethods = {
         : dropEmpty({ ref: t.ref, refs: refs.length > 1 ? refs : null, text: whole ? null : (t.text || null), whole: whole || null, start: whole ? null : t.start, end: whole ? null : t.end, table: t.tableKey || null, cell });
       const closed = r.status === 'done' || r.status === 'cancelled';
       const count = Number(r.options?.count) || 1;
+      const styleRequest = !v.instructionHidden && /글머리\s*표|빈\s*네모|채운\s*네모|개요\s*수준|문단\s*(번호|테두리)|탭\s*(위치|간격)|(?:같은|동일)\s*스타일/u.test(String(v.instruction || r.followUp?.instruction || ''));
       const todo = closed ? `이 요청은 이미 ${r.status === 'done' ? '완료' : '취소'}되었다 — 더 손대지 않는다.` : [
         r.followUp ? '이 요청은 메모에 사람이 단 답장이다 — follow_up.memo_text(앞 작업 메모, 자료)의 맥락을 이어 instruction 대로 실제 결과를 낸다.' : '',
         map.stats.floating ? "context 는 배치 요약이다(문단마다 읽힌 줄·표, 마지막 줄 = 옮기면 생길 표·문단). 글상자를 본문·표로 옮기는 일이면 이것으로 충분하다 — 바로 objects_to_body 를 쓰고(먼저 결과를 보려면 dry_run), 줄·칸을 자세히 보려면 read(view='layout', at='s0/p0')." : '',
         (TODO[r.kind] || TODO.instruct)(count),
-        needsFormatting(r) ? "서식을 바꾸거나 맞출 때는 read(view='format', at=그 문단들)로 지금 서식을 본다." : '',
-        this._isStandardFormat(doc) ? "표준서식 문서 — 새 문단·표·서식을 만들 때만 read(view='guide') 를 먼저 읽는다." : '',
+        // 한/글 차트 개체는 op 목록에 없다(server/mcp2/ops.js HIDDEN_OPS) — 지시가 그것을 가리켜 말했을 때만 꼴을 볼 길을 알린다(2026-11-18)
+        !v.instructionHidden && (nativeChartAsked(v.instruction) || nativeChartAsked(r.followUp?.instruction)) ? NATIVE_CHART_TODO : '',
+        styleRequest ? "read(view='styles')로 실제 글머리표·사용 수를 확인한다. 같은 스타일 전체를 바꾸라는 요청이면 styles.define(applyToBase:true) 또는 styles.update 한 번, 일부 문단이면 define 후 format으로 그 범위만 지정한다. 속성 예는 read(view='guide',id='styles')." :
+          needsFormatting(r) ? "서식을 바꾸거나 맞출 때는 read(view='format', at=그 문단들)로 지금 서식을 본다." : '',
+        this._isStandardFormat(doc) ? (styleRequest ? '' : "표준서식 문서 — 새 문단·표·서식을 만들 때만 read(view='guide') 를 먼저 읽는다.")
+          // 표준서식 스타일이 없는 문서를 표준서식에 맞추라는 지시(2026-11-18 — 실제 Codex 실행이 스타일을 들여올 길을 몰라 칸마다 직접 서식을 줬다): 길을 한 줄로
+          : (!v.instructionHidden && /표준\s*서식/.test(String(v.instruction || '')) ? "이 문서에는 표준서식 스타일이 없다 — edit 의 {op:'styles', import:'standard'} 로 들여오고 같은 호출의 format 에서 style 로 입힌다(여러 문단은 at 에 범위·표 — 스타일 이름·쓰임은 read(view='styles'))." : ''),
         v.attachments?.length ? "첨부는 read(view='attachment', id=aid) 로 읽는다." : '',
         `끝나면 edit 의 done 에 공유 요약 1~2문장을 준다(쓰기 없이 끝낼 때는 finish). request_id=${r.rid}·expected_attempt=${v.attempt ?? 1}.`,
       ].filter(Boolean).join(' ');
@@ -236,18 +246,59 @@ export const agentServiceMethods = {
         return { text: `${head ? `${head}${from ? `(줄 ${from}부터)` : ''}\n` : ''}${wrapContext(page.text)}${tail}` };
       });
     }
+    // 문서의 스타일 목록(2026-11-18 — docs/MCP_REDESIGN_2026-11-16.md §15): 이름과 쓰인 문단 수, 표준서식 스타일 가운데 없는 것과 들여오는 길.
+    // 실제 Codex 실행이 view:'styles' 를 불렀다가(없는 보기) 스타일 이름을 서식 보기·오류 글에서 주워 모았다
+    if (view === 'styles') {
+      return this._read(id, async () => {
+        const { doc } = await this._load(id);
+        const list = styleDefinitions(doc); const has = new Set(list.map((s) => s.name));
+        const used = styleUsage(doc);
+        if (item) {
+          const s = namedStyle(doc, item, list);
+          if (!s) throw new ServiceError('NO_STYLE', `스타일 「${item}」을 찾지 못했습니다`);
+          return compact({ ...styleDetail(doc, s), count: used.get(s.id)?.length || 0 });
+        }
+        const n = (v) => Number(v || 0).toLocaleString('ko-KR');
+        const show = (s) => {
+          const h = styleHeading(doc, s);
+          const marker = h.type === 'BULLET' ? ` [글머리표 ${h.image ? '그림' : h.char || '?'} · id=${s.id}]` : '';
+          return `${s.name}${s.type === 'CHAR' ? '(글자)' : ''} ${n(used.get(s.id)?.length)}${marker}`;
+        };
+        let standard = []; try { standard = standardStyleNames(doc); } catch { /* 원본을 못 읽으면 문서의 스타일만 */ }
+        const missing = standard.filter((s) => !has.has(s.name));
+        const lines = [`문서의 스타일 ${list.length}개(이름 — 쓰인 문단 수): ${list.map(show).join(' · ')}`];
+        if (standard.length) {
+          lines.push(missing.length
+            ? `표준서식 스타일 가운데 문서에 없는 것 ${missing.length}개: ${missing.map((s) => s.name).join(' · ')} — edit 의 {op:'styles', import:'standard'} 로 들여오고, 같은 호출의 format 에서 style 로 입힌다(문단 여럿은 at 에 범위 's0/p3..p9'·표 's0/p3#t0'·{table,row_from,row_to}).`
+            : '표준서식 스타일이 모두 있다 — format 의 style 로 바로 입힌다.');
+          lines.push('표준서식 스타일의 쓰임: &본문제목 = 문서 제목 · &본문 1. = 장 · &본문1) = 절·소절 · &■(글머리표 1) = 본문 · &◦ = 하위 항목 · &- = 세부 · &표단위 = 표 앞 단위 줄 · &표내용__ = 표 칸 글 · &표주석 = 표·그림 주석 · &표제목·&그림제목 = 캡션(자세히: read view=\'guide\', 수치: id=\'spec\')');
+        }
+        lines.push("새 스타일: styles.define. 기준 스타일의 모든 문단에 함께 입히려면 applyToBase:true, 기존 스타일 수정은 styles.update. 글머리표·번호·탭·테두리 예는 read(view='guide',id='styles'), 정의는 read(view='styles',id='스타일 이름').");
+        return { text: lines.join('\n') };
+      });
+    }
     if (view === 'format') {
       let refs = Array.isArray(at) ? at : at ? String(at).split(',').map((s) => s.trim()).filter(Boolean) : null;
       if (!refs?.length) throw new ServiceError('BAD_ARGS', "view='format' 은 at 에 서식을 볼 문단 주소(들)를 줍니다(예: at='s0/p3' 또는 's0/p3,s0/p4'). 스타일 이름만 필요하면 view='text' 의 〔 〕 로 충분합니다");
       // 범위('s1/p3..p9')·구역('s2')은 다른 보기처럼 그 안의 본문 문단으로 푼다(2026-11-16 밤 실험: 범위를 주면 NO_PARAGRAPH 였다)
       // 2026-11-17(§10.4 나-n 작은 버그): 역슬래시가 빠진 /..|^sd+$/ 는 모든 주소(표 칸 's0/p3/n2' 포함)를 범위로 보고 본문 문단으로 바꿨다 —
       // 범위는 '..' 가 든 것, 구역은 's숫자' 하나뿐인 것만
-      const isRange = (x) => String(x).includes('..') || /^s\d+$/.test(String(x));
+      // 2026-11-18: 표 열쇠('s0/p3#t0')는 그 표의 머리행·첫 자료행 칸 문단으로(칸 서식은 줄마다 대개 같다 — 표 전체를 다 싣지 않는다), '*' 는 모든 본문 문단으로 푼다.
+      // 실제 Codex 실행이 표 열쇠·'*' 를 줬다가 NO_PARAGRAPH 를 받았다
+      const isTable = (x) => /#t\d+/.test(String(x));
+      const isRange = (x) => String(x).includes('..') || /^s\d+$/.test(String(x)) || String(x) === '*' || isTable(x);
       if (refs.some(isRange)) {
         refs = await this._read(id, async () => {
-          const { doc } = await this._load(id); const out = [];
+          const { doc } = await this._load(id); const out = []; let tables = null;
           for (const x of refs) {
             if (!isRange(x)) { out.push(x); continue; }
+            if (isTable(x)) {
+              tables ??= doc.tables(); const t = tables.find((k) => k.key === String(x));
+              if (!t) throw new ServiceError('NO_TABLE', `표를 찾지 못했습니다: ${x}(read view='tables')`);
+              for (const c of t.cells) if (c.row <= 1) out.push(...c.refs.slice(0, 1));
+              continue;
+            }
+            if (String(x) === '*') { for (const sec of doc.sections) for (const p of sec.bodyParas) out.push(p.ref); continue; }
             const pick = rangePicker(x);
             for (const sec of doc.sections) for (const p of sec.bodyParas) if (pick(sec.index, p.body)) out.push(p.ref);
           }
@@ -283,7 +334,7 @@ export const agentServiceMethods = {
     // 쪽 구성 + 쪽 수 어림(2026-11-17, §10.4 나-7 — server/page-estimate.js). id=요청 번호면 그 요청의 대기 제안을 모두 반영한 쪽 수도
     if (view === 'page') return compact({ ...(await this.pageLayout(id)), pages: await this.agentEstimate(id, { rid: item != null && /^\d+$/.test(String(item)) ? Number(item) : null }) });
     if (view === 'guide') {
-      if (item && ['ops', 'table_edit', 'chart', 'page'].includes(item)) return { text: opsGuide(item) };
+      if (item && ['ops', 'table_edit', 'chart', 'page', 'styles'].includes(item)) return { text: opsGuide(item) };
       return compact({ names: GUIDE_NAMES_NOTE, ...(await this.writingGuide(id, { part: item === 'spec' ? 'spec' : 'guide' })) });
     }
     if (view === 'history') return compact(await this.history(id));
@@ -297,6 +348,8 @@ export const agentServiceMethods = {
       const { doc, meta } = await this._load(id);
       const clone = new HwpxDoc(containerFromBytesSync(docBytesSync(doc)));
       const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: (aid) => this._layoutAttachment({ id, meta }, aid), author }));
+      // 스타일 들여오기·여러 문단 서식만이면(2026-11-18) 글·주소가 그대로라 뒤 글을 싣지 않는다 — 무엇이 몇 곳인지는 labels 에 있다
+      if (ops.every((op) => op.op === 'styles' || op.op === 'restyle')) return { labels: dry.labels };
       const page = pageLines(textLines(clone).lines, { maxChars: 3000 });
       return { labels: dry.labels, result: compactReports(dry.reports), after: `${page.text}${page.done ? '' : `\n… (${page.total}줄 가운데 ${page.to}줄)`}` };
     });
@@ -352,7 +405,7 @@ export const agentServiceMethods = {
       if (sums.length) out.replace_all = sums;
       if (wstep) out.withdraw = { pids: pidRanges(wstep.targets) || null, count: wstep.targets.length };
       const st = prep.steps.find((s) => s.kind === 'structure');
-      if (st) out.structure = { ops: st.indexes, ...(await this.agentPreviewStructure(id, st.ops, author)) };
+      if (st) out.structure = { ops: opList(st.indexes), ...(await this.agentPreviewStructure(id, st.ops, author)) };
       // 2026-11-17(§10.4 나-7·나-9): 사본에서 제안을 만들고 이 요청의 앞선 대기 제안과 함께 반영해 본다 — 저장해도 실패할 op(failed)·반영에서 실패할 제안·쪽 수.
       // 한도를 넘으면 made 가 없고 예전 안내 글 그대로(server/page-estimate.js)
       const est = await this.agentEstimate(id, { rid, steps: prep.steps, author });
@@ -397,7 +450,7 @@ export const agentServiceMethods = {
         } else if (step.kind === 'structure') {
           const p = await this.propose(id, { type: 'page_layout', pageLayout: { ops: step.ops }, rid }, user, agent);
           made.push(p.pid);
-          structure = dropEmpty({ ops: step.indexes, pid: p.pid, status: p.status === 'pending' ? null : p.status, labels: p.pageLayout?.labels, result: compactReports(p.pageLayout?.result) });
+          structure = dropEmpty({ ops: opList(step.indexes), pid: p.pid, status: p.status === 'pending' ? null : p.status, labels: p.pageLayout?.labels, result: compactReports(p.pageLayout?.result) });
         } else if (step.kind === 'alternatives') {
           const out = await this.proposeAlternatives(id, { ...step.input, rid }, user, agent);
           for (const r of out.results) { if (r.ok) { made.push(r.proposal.pid); saved.push({ ...receipt(step.index, r.proposal), option: r.proposal.option }); } else failed.push({ op: step.index, error: r.error }); }

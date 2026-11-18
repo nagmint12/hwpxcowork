@@ -47,7 +47,7 @@ const KIND_GUIDE = {
     ? `propose_alternatives(ref=target.ref, find=대상 글, options ${n}개)로 서로 다른 안을 낸다.`
     : '대상 글을 대신할 추천 문장 하나를 propose_changes(ref=target.ref, find=대상 글)로 낸다(선택지를 여럿 만들지 않는다).'),
   polish: () => '기준에 맞게 고칠 곳만 propose_changes 로 남긴다(문단을 통째로 다시 쓰지 않는다). 수치·사실 확인이 필요하면 add_memo.',
-  instruct: () => '지시에 맞는 도구로 결과를 저장한다: 글 propose_changes · 서식 propose_format · 문단 propose_insert(paragraphs) · 표 propose_table/propose_table_edit · 편집 가능한 차트 propose_chart · 그림 propose_figure · 개체 삭제 propose_delete(본문 ref) · 차례 propose_toc_update(지금이면 apply_now) · 쪽 구성 propose_page_layout · 누름틀 propose_fill_fields(list_fields) · 의견 add_memo.',
+  instruct: () => '지시에 맞는 도구로 결과를 저장한다: 글 propose_changes · 서식 propose_format · 문단 propose_insert(paragraphs) · 표 propose_table/propose_table_edit · 그림·차트·그래프 propose_figure(직접 그린다) · 개체 삭제 propose_delete(본문 ref) · 차례 propose_toc_update(지금이면 apply_now) · 쪽 구성 propose_page_layout · 누름틀 propose_fill_fields(list_fields) · 의견 add_memo.',
   fill_table: () => 'propose_changes: ref = 표 칸 문단 ref(tables[].cells[].refs), find = 칸의 지금 글(빈 칸은 ""), replace = 첨부 근거 값.',
   make_table: () => 'propose_table(after_ref=target.ref, rows, header_rows, caption=제목만) — 첨부(read_attachment) 수치로.',
   insert: () => 'propose_insert(after_ref=target.ref, text 또는 paragraphs).',

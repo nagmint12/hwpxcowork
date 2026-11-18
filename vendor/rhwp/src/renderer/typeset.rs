@@ -389,6 +389,9 @@ pub struct TypesetEngine {
         std::sync::Arc<crate::renderer::render_normalization::RenderNormalizationOverlay>,
     /// 같은 상태 세대에서 반복된 미주 단 측정 결과.
     endnote_measure_memo: std::cell::RefCell<notes::endnotes::measure_memo::EndnoteMeasureMemo>,
+    // [hwpx-cowork] 문서가 쥔 칸 문단 줄 구성 기억 — 표 컷을 재는 배치 엔진에 넘긴다(`composer::cell_compose_memo`).
+    cell_compose_memo:
+        Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
 }
 
 /// 조판 중 현재 페이지/단 상태
@@ -3471,6 +3474,7 @@ impl TypesetEngine {
             format_next_stored_vpos: std::cell::Cell::new(None),
             render_normalization,
             endnote_measure_memo: Default::default(),
+            cell_compose_memo: None,
         }
     }
 
@@ -3490,6 +3494,15 @@ impl TypesetEngine {
         overlay: std::sync::Arc<crate::renderer::render_normalization::RenderNormalizationOverlay>,
     ) -> Self {
         self.render_normalization = overlay;
+        self
+    }
+
+    // [hwpx-cowork] 문서의 칸 문단 줄 구성 기억을 건다(수명·무효화는 문서가 맡는다).
+    pub(crate) fn with_cell_compose_memo(
+        mut self,
+        memo: Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
+    ) -> Self {
+        self.cell_compose_memo = memo;
         self
     }
 

@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const studio = path.join(root, 'vendor/rhwp/rhwp-studio');
 const patches = patchesForStudio(studio, process.env.STUDIO_TEST_PROFILE === 'standalone' ? STANDALONE_EDITOR_PATCHES : undefined);
 
-function load(file, patched = true) {
+function load(file, patched = true, extra = {}) {
   const filename = path.join(studio, file);
   let source = fs.readFileSync(filename, 'utf8');
   if (patched) source = coworkBuildPlugins({ studioSrc: studio, patches })[0].transform(source, filename)?.code ?? source;
@@ -22,8 +22,9 @@ function load(file, patched = true) {
   const names = file.endsWith('toolbar.ts') ? 'Toolbar'
     : file.endsWith('input-handler.ts') ? 'InputHandler' : 'isPageLocalTextEditCommand';
   const context = {
-    console, setTimeout, clearTimeout, t: value => value,
+    console, setTimeout, clearTimeout, performance, t: value => value,
     ...(file.endsWith('input-handler.ts') ? load('src/engine/input-edit-invalidation.ts', false) : {}),
+    ...extra,
   };
   return vm.runInNewContext(`${compiled}\n; ({ ${names} });`, context, { filename });
 }
@@ -150,4 +151,65 @@ test('mutation hints snapshot nested cell paths and preserve ordinary mutation e
   fixture.afterPageLocalEdit();
   assert.equal(events.find(event => event[0] === 'document-mutated')[2], undefined);
   assert.equal(events.find(event => event[0] === 'document-page-invalidated')[1].textOnlyPosition, undefined);
+});
+
+// [hwpx-cowork] 2026-11-18 쪽 나눔이 비싼 문서의 쉼 flush(studio/build/performance-patches.mjs typing-idle-flush-cost-*).
+// 운영 문서(22쪽·표 칸 2,382개)에서 전체 쪽 나눔 한 번이 100ms 를 넘는데 원본은 30쪽 이하면 120ms 쉴 때마다 동기로 했다(글자마다 멈춤).
+// 지난 쪽 나눔에 걸린 시간을 재서 한 프레임(16ms)을 넘으면 그 8배(최대 1.5초) 쉰 뒤에 한다 — 싼 문서와 30쪽 넘는 문서의 규칙은 그대로.
+function idleFlushFixture(patched = true) {
+  let clock = 0; let cost = 0; const delays = []; let pending = null;
+  const fake = {
+    performance: { now: () => clock },
+    setTimeout: (fn, ms) => { delays.push(ms); pending = fn; return { fn }; },
+    clearTimeout: () => { pending = null; },
+  };
+  const { InputHandler } = load('src/engine/input-handler.ts', patched, fake);
+  const fixture = Object.create(InputHandler.prototype);
+  const events = [];
+  Object.assign(fixture, {
+    deferredPaginationFlushTimer: null, deferredPaginationPending: false,
+    wasm: { pageCount: 22, flushDeferredPagination() { clock += cost; if (cost < 0) throw new Error('flush failed'); } },
+    deferredPaginationRunner: { hasPendingWork: () => false, cancel() {} },
+    cursor: { invalidateFocusedCellCursorGeometry() {} },
+    eventBus: { emit: (...args) => events.push(args) },
+  });
+  return { fixture, delays, events, setCost: (ms) => { cost = ms; }, fire: () => { const fn = pending; pending = null; fn?.(); } };
+}
+
+test('idle pagination flush waits in proportion to the measured full-pagination cost', () => {
+  const f = idleFlushFixture();
+  const next = () => { f.fixture.scheduleDeferredPaginationFlush(); return f.delays.at(-1); };
+  assert.equal(next(), 120, '아직 재지 않았으면 원본 간격');
+  for (const [cost, delay] of [[10, 120], [16, 120], [17, 136], [50, 400], [115, 920], [400, 1500], [5, 120]]) {
+    f.setCost(cost);
+    assert.equal(f.fixture.flushDeferredPaginationIfNeeded('manual'), true);
+    assert.equal(f.fixture.deferredPaginationPending, false);
+    assert.equal(next(), delay, `쪽 나눔 ${cost}ms → 쉼 ${delay}ms`);
+  }
+  // 쉼 timer 가 실제로 flush 하고 문서 바뀜을 알린다(원본 동작 그대로)
+  f.setCost(115);
+  f.fire();
+  assert.equal(f.fixture.deferredPaginationPending, false);
+  assert.deepEqual(f.events.at(-1), ['document-changed', 'deferred-pagination-flush:idle-auto']);
+  // 30쪽 넘는 문서는 원본 규칙 그대로 쉼 flush 를 예약하지 않는다
+  const before = f.delays.length;
+  f.fixture.wasm.pageCount = 31;
+  f.fixture.scheduleDeferredPaginationFlush();
+  assert.equal(f.delays.length, before);
+  assert.equal(f.fixture.deferredPaginationPending, true);
+  // flush 가 던져도 걸린 시간은 남고 미룬 쪽 나눔은 그대로 남는다(원본 catch)
+  f.fixture.wasm.pageCount = 22; f.setCost(-1);
+  const warn = console.warn; console.warn = () => {};
+  try { assert.equal(f.fixture.flushDeferredPaginationIfNeeded('manual'), false); } finally { console.warn = warn; }
+  assert.equal(f.fixture.deferredPaginationPending, true);
+});
+
+test('unpatched editor flushes every 120ms pause regardless of pagination cost (the reported stall)', () => {
+  const f = idleFlushFixture(false);
+  f.setCost(115);
+  assert.equal(f.fixture.flushDeferredPaginationIfNeeded('manual'), false, '미룬 것이 없으면 flush 하지 않는다');
+  f.fixture.scheduleDeferredPaginationFlush();
+  assert.equal(f.fixture.flushDeferredPaginationIfNeeded('manual'), true);
+  f.fixture.scheduleDeferredPaginationFlush();
+  assert.deepEqual(f.delays, [120, 120]);
 });

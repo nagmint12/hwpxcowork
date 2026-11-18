@@ -268,6 +268,8 @@ impl PdfImportSession {
                 "PDF_IMPORT_SESSION: invalid or failed snapshot request".into(),
             ));
         }
+        // [hwpx-cowork] 편집하는 동안 채운 칸 문단 사본을 예산이 제한된 저장 요청에서 복제하지 않는다.
+        let _uncached = core.layout_engine.suspend_cell_compose_memo();
         core.try_prepare_hwp_export_snapshot(&crate::parser::pdf::allocation::Allocation(
             &self.request,
         ))

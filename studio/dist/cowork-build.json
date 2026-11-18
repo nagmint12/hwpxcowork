@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-18T05:46:44.741Z",
-  "enginePackage": "artifacts\\engine-pkg",
+  "builtAt": "2026-11-18T11:05:57.720Z",
+  "enginePackage": "artifacts\\public-build-20261118-rel\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "ccc6692090d26b4181e8da1295ca5428d0b67251"
+    "commit": "4c50a5a5307e65cc8a1a2a5410c5313f4e17e3d3"
   },
   "patches": [
     {
@@ -172,6 +172,26 @@
       "id": "typing-command-input-target",
       "file": "src/engine/input-handler.ts",
       "why": "일반 입력과 삭제도 같은 문단인 것이 검증된 경우에만 부분 갱신한다"
+    },
+    {
+      "id": "typing-idle-flush-cost-constants",
+      "file": "src/engine/input-handler.ts",
+      "why": "쉼 flush 간격을 지난 쪽 나눔 시간에 맞추는 상수"
+    },
+    {
+      "id": "typing-idle-flush-cost-delay",
+      "file": "src/engine/input-handler.ts",
+      "why": "쪽 나눔이 비싼 문서는 입력이 충분히 쉰 뒤에만 전체 쪽 나눔을 한다(글자마다 멈추지 않게)"
+    },
+    {
+      "id": "typing-idle-flush-cost-measure",
+      "file": "src/engine/input-handler.ts",
+      "why": "경계·쉼 flush 의 전체 쪽 나눔 시간을 잰다"
+    },
+    {
+      "id": "typing-idle-flush-cost-measure-cell-overflow",
+      "file": "src/engine/input-handler.ts",
+      "why": "칸 넘침 flush 의 전체 쪽 나눔 시간도 같은 값으로 잰다"
     },
     {
       "id": "toolbar-preserve-unchanged-toggle",
@@ -617,6 +637,16 @@
       "id": "ai-assistant-hidden-on-public-page",
       "file": "src/main.ts",
       "why": "공개 체험 페이지(meta hwpx-ai-assistant=off)에서는 AI 도우미를 올리지 않는다"
+    },
+    {
+      "id": "ime-composition-plain-caret",
+      "file": "src/engine/input-handler.ts",
+      "why": "한글 조합 중에도 검은 상자 대신 보통 글자와 보통 캐럿으로 보인다"
+    },
+    {
+      "id": "ime-composition-plain-caret-flag",
+      "file": "src/engine/input-handler.ts",
+      "why": "조합 상자를 끄는 상수(다시 켜려면 true)"
     },
     {
       "id": "allow-cowork-plugin",

@@ -342,7 +342,7 @@ function acceptedLine(it, crOf) {
   } else if (p.type === 'table_edit') {
     s = ` · 표 고치기${p.tableEdit?.caption ? ` 「${clip(p.tableEdit.caption)}」` : ''}: ${clip((p.tableEdit?.labels || []).join(', '), 80)}`;
   } else if (p.type === 'page_layout') {
-    s = ` · 쪽 구성: ${(p.pageLayout?.labels || []).join(', ')}`;
+    s = ` · ${p.pageLayout?.title || '쪽 구성'}: ${(p.pageLayout?.labels || []).join(', ')}`;
   } else if (p.type === 'figure' && p.figure?.nativeChart) {
     s = ` · 편집 가능한 차트(${p.figure.nativeChart.type})${p.figure.caption ? ` 「${clip(p.figure.caption)}」` : ''}`;
   } else if (p.type === 'figure') {
@@ -507,7 +507,7 @@ export function renderProposalMemo(p, request = null, { thread = null } = {}) {
   if (p.type === 'para_delete') tags.push('문단 지우기');
   if (p.type === 'para_move') tags.push('문단 옮기기');
   if (p.type === 'toc') tags.push('차례 새로 고침');
-  if (p.type === 'page_layout') tags.push('쪽 구성');
+  if (p.type === 'page_layout') tags.push(p.pageLayout?.title || '쪽 구성');
   if (p.type === 'figure') tags.push(p.figure?.replace ? '그림 교체' : '그림 삽입');
   if (p.rid != null) tags.push(`AI 작업 #${p.rid}`);
   const lines = [`[제안 ${p.pid}${tags.length ? ' · ' + tags.join(' · ') : ''}] ${p.by}`];
@@ -532,7 +532,7 @@ export function renderProposalMemo(p, request = null, { thread = null } = {}) {
   } else if (p.type === 'table_edit') {
     lines.push(`이 표${p.tableEdit?.caption ? ` 「${p.tableEdit.caption}」` : ''} 고치기: ${(p.tableEdit?.labels || []).join(', ')}`);
   } else if (p.type === 'page_layout') {
-    lines.push(`쪽 구성 변경: ${(p.pageLayout?.labels || []).join(', ')}`);
+    lines.push(`${p.pageLayout?.title || '쪽 구성'} 변경: ${(p.pageLayout?.labels || []).join(', ')}`);
   } else if (p.type === 'figure') {
     if (p.figure?.nativeChart) lines.push(`이 문단 뒤에 편집 가능한 한/글 차트(${p.figure.nativeChart.type})${p.figure.caption ? `: 「${p.figure.caption}」` : ''}`);
     else if (p.figure?.replace) lines.push(`이 문단의 그림${p.figure.replace.caption ? ` 「${p.figure.replace.caption}」` : ''}을 새 그림(${p.figure.name || p.figure.aid || '첨부'})으로 교체`);

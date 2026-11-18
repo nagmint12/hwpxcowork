@@ -57,6 +57,7 @@ impl DocumentCore {
             next_request: 0,
         }); // dropping the old owner invalidates retained TextStyles too
         self.styles.supplemental_metrics = None;
+        self.cell_compose_memo.invalidate(); // [hwpx-cowork] 측정 환경이 바뀜
         if was_active {
             self.rebuild_derived_state();
         }

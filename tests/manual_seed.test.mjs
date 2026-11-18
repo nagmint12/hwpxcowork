@@ -19,8 +19,8 @@ test('설명서 파일: manifest 의 HWPX 5건이 있고 따라하기 영역·�
   assert.equal(manifest.documents.filter((d) => d.scenario === 'ai-requests').length, 1);
 });
 
-// 표준서식의 앞부분+본문 구조를 유지한다. 2026-11-17 사용자 요청으로
-// 튜토리얼 앞부분에도 홀짝 바탕쪽을 연결하고 1~3쪽은 감추기로 저장한다.
+// 표준서식의 앞부분+본문 구조를 유지한다. 2026-11-17 사용자 요청으로 튜토리얼 앞부분에도 홀짝 바탕쪽을 연결했고,
+// 2026-11-18 사용자 요청으로 1~3쪽도 4쪽처럼 쪽배경을 보인다(바탕쪽 감추기 없음 — scripts/tutorial_backgrounds.py).
 test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 차례 항목에 차례제목·차례1·차례2', async () => {
   const { HwpxDoc } = await import('../engine/doc.js');
   const { tocRegions, physicalParas } = await import('../engine/toc.js');
@@ -31,7 +31,7 @@ test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 
     assert.equal(doc.sections.length, 2, d.file);
     assert.match(doc.sections[0].xml, /masterPageCnt="2"/, `앞부분에도 홀짝 바탕쪽 연결: ${d.file}`);
     assert.equal((doc.sections[0].xml.match(/<hp:masterPage\b/g) || []).length, 2, d.file);
-    assert.match(doc.sections[0].xml, /<hp:pageHiding\b[^>]*hideMasterPage="1"/, `앞쪽 바탕쪽 감추기: ${d.file}`);
+    assert.doesNotMatch(doc.sections.map((s) => s.xml).join(''), /<hp:pageHiding\b[^>]*hideMasterPage="1"/, `1~3쪽도 바탕쪽을 감추지 않음: ${d.file}`);
     assert.ok(!/<hp:linesegarray>/.test(doc.sections.map((s) => s.xml).join('')), `줄 배치 캐시 없음(한/글이 다시 계산): ${d.file}`);
     const styleId = (name) => (new RegExp(`<hh:style\\b[^>]*\\bid="(\\d+)"[^>]*\\bname="${name.replace(/[.)]/g, '\\$&')}"`).exec(doc.header.xml) || [])[1];
     const chapter = styleId('&amp;본문 1.');
@@ -46,8 +46,8 @@ test('설명서 서식: 표준서식 표지·차례 구역, 장·절 스타일, 
   }
 });
 
-// 차례 새로 고침이 기존 바탕쪽 연결·감추기와 첫 차례 문단의 쪽 나누기를 남긴다.
-test('편집기 엔진: 표준서식 설명서의 차례를 새로 고쳐도 차례가 새 쪽에서 시작하고 앞부분 구역은 바탕쪽이 없다', async () => {
+// 차례 새로 고침이 기존 바탕쪽 연결과 첫 차례 문단의 쪽 나누기를 남기고 바탕쪽 감추기를 새로 넣지 않는다.
+test('편집기 엔진: 표준서식 설명서의 차례를 새로 고쳐도 차례가 새 쪽에서 시작하고 앞부분 구역의 바탕쪽 연결이 남는다', async () => {
   const { refreshTocInEngine } = await import('../server/toc-engine.js');
   const { HwpxDoc } = await import('../engine/doc.js');
   const { containerFromBytesSync, tocRegions, physicalParas } = await import('../engine/toc.js');
@@ -58,7 +58,7 @@ test('편집기 엔진: 표준서식 설명서의 차례를 새로 고쳐도 차
   const out = refreshTocInEngine(fs.readFileSync(file), { sec: reg.sec, para: reg.start });
   const after = new HwpxDoc(containerFromBytesSync(out.bytes));
   assert.match(after.sections[0].xml, /masterPageCnt="2"/);
-  assert.match(after.sections[0].xml, /<hp:pageHiding\b[^>]*hideMasterPage="1"/);
+  assert.doesNotMatch(after.sections[0].xml, /<hp:pageHiding\b[^>]*hideMasterPage="1"/);
   const first = physicalParas(after.sections[0])[out.start];
   assert.match(after.sections[0].xml.slice(first.start, first.start + 200), /pageBreak="1"/);
 });

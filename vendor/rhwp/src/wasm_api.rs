@@ -2051,6 +2051,17 @@ impl HwpDocument {
         self.core.cancel_deferred_pagination()
     }
 
+    /// [hwpx-cowork] 칸 문단 줄 구성 기억의 상태(시험·진단용): `{"entries":n,"hits":n,"misses":n,"passes":n,"keptPasses":n,"environmentChanges":n}`.
+    /// hits = 같은 내용·같은 폭이라 다시 줄 나눔하지 않은 횟수(문서를 연 뒤 누적).
+    #[wasm_bindgen(js_name = cellComposeMemoStats)]
+    pub fn cell_compose_memo_stats(&self) -> String {
+        let (entries, hits, misses) = self.core.cell_compose_memo.stats();
+        let (passes, kept, environment_changes) = self.core.cell_compose_memo.pass_stats();
+        format!(
+            "{{\"entries\":{entries},\"hits\":{hits},\"misses\":{misses},\"passes\":{passes},\"keptPasses\":{kept},\"environmentChanges\":{environment_changes}}}"
+        )
+    }
+
     /// 지연된 페이지네이션을 동기 barrier로 flush하고 최신 페이지 수를 반환한다.
     #[wasm_bindgen(js_name = flushDeferredPagination)]
     pub fn flush_deferred_pagination(&mut self) -> Result<String, JsValue> {

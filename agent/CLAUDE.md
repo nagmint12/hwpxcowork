@@ -19,14 +19,16 @@
 2. 받은 내용으로 충분하면 바로 `edit` 한다. 더 볼 것이 있을 때만 `read` 로 필요한 범위만(`at='s0/p3..p20'`, `find`, `view='outline'`) 읽는다. 끊기면 응답의 `cursor` 로 이어 읽는다.
    - 얼개(`map`)에 ⚠ 가 있으면 글이 글상자·선으로 흩어진 문서다. **글을 다시 치지 않는다** — `context` 의 배치 요약(더 보려면 `read view='layout'`)으로 구조를 확인하고 `edit` 의 `objects_to_body` 하나로 본문 문단·표로 옮긴다. 옮긴 글상자·선은 그 op 가 지우므로 같은 문단에 `delete_objects` 를 함께 내지 않는다(옮기지 못해 남는 그림·표·도형까지 지우려면 `remove_rest`). 그 밖의 표·그림·도형 지우기는 `delete_objects`.
    - 글만 바꾸면 그 자리 서식이 유지된다. 서식을 바꾸거나 다른 문단과 맞출 때만 `read(view='format', at=문단들)`. 표준서식 작성 지침(`read view='guide'`)은 새 문단·표·서식을 만들 때 읽는다.
-3. 결과는 `edit` 의 `ops` 로만 남긴다: 글 `replace` · 문단 `insert` · 표 `table`·`table_edit` · 서식 `format` · 개체 지우기 `delete_objects` · 개체 → 본문 `objects_to_body` · 의견 `memo` · 여러 안 `alternatives`(비교 요청만) · 누름틀 `fill` · 차례 `toc` · 차트 `chart` · 그림 `figure` · 쪽 구성 `paper` 등. 도구 설명의 op 목록에 있으면 문단 지우기·옮기기 `delete_paragraphs`·`move_paragraphs`, 일괄 바꾸기 `replace_all`, 내 대기 제안 거두기 `withdraw` 도 쓴다.
+3. 결과는 `edit` 의 `ops` 로만 남긴다: 글 `replace` · 문단 `insert` · 표 `table`·`table_edit` · 서식 `format` · 스타일 `styles` · 개체 지우기 `delete_objects` · 개체 → 본문 `objects_to_body` · 의견 `memo` · 여러 안 `alternatives`(비교 요청만) · 누름틀 `fill` · 차례 `toc` · 그림·차트·그래프 `figure` · 쪽 구성 `paper` 등. 도구 설명의 op 목록에 있으면 문단 지우기·옮기기 `delete_paragraphs`·`move_paragraphs`, 일괄 바꾸기 `replace_all`, 내 대기 제안 거두기 `withdraw` 도 쓴다.
    - 주소(`at`·`after`)와 `find` 는 `read`·`task` 가 보여 준 그대로 쓴다. 표 칸은 `at:{table:'s0/p3#t0', row, col}`(0부터).
    - 영수증에 `failed` 가 있으면 `saved` 를 본다 — `saved` 가 비었으면 아무것도 저장되지 않은 것이니 고쳐서 ops 전체를 다시 내고, `saved` 에 든 op 는 다시 내지 않는다(중복 제안이 된다). 잘못 낸 내 대기 제안은 `withdraw` 가 있으면 그것으로 거둔다(거절은 사람만 한다).
    - op 꼴은 `edit` 도구 설명을 먼저 본다 — 거기 없는 것만 `read view='guide' id='ops'` 로 본다. `dry_run` 은 `objects_to_body`·쪽 구성의 결과를 보거나 쪽 수를 확인할 때만 쓴다.
    - 분량(쪽 수)이 정해진 일은 ops 를 `dry_run` 으로 먼저 내어 응답의 `pages`(편집기 조판 어림 — `all_applied` = 이 요청의 제안을 모두 반영하면 쪽 수, `last_page_fill` = 마지막 쪽이 찬 비율)를 보고 글을 늘리거나 줄인 뒤 저장한다. 응답에 `pages` 가 없으면 서식 수치로 어림하고 요약에 어림이라고 적는다. 분량은 글 길이로 맞추고, 지시하지 않은 구성(장·절의 수·차례)과 서식 규칙(쪽 나눔·빈 줄)은 바꾸지 않는다.
    - 문단을 지우고 같은 글로 다시 넣지 않는다(문단 모양·쪽 나눔이 바뀐다). 쪽 나눔 켜기·끄기는 `format` 의 `paragraph.pageBreakBefore`.
    - 문단·절을 통째로 지우거나 옮길 때: op 목록에 `delete_paragraphs`·`move_paragraphs` 가 있으면 그것을 쓴다(빈 줄이 남지 않고 표·서식이 원본 그대로 옮겨진다). 없으면 지우기는 `replace`(`whole:true`, `with:''`)로 글을 비우고, 옮기기는 새 자리에 `insert`·`table` 로 다시 넣고 원래 자리를 비운다 — 남는 빈 줄은 사람이 지워야 하므로 `memo` 와 요약에 그렇게 적는다.
-   - 표 앞 단위 줄·표 아래 주석, 차트 제목: `table` 꼴에 `unit`·`notes`, `chart` 꼴에 `caption` 이 있으면 그것으로 낸다(`insert` 로 따로 넣지 않는다).
+   - 표 앞 단위 줄·표 아래 주석: `table` 꼴에 `unit`·`notes` 가 있으면 그것으로 낸다(`insert` 로 따로 넣지 않는다).
+   - 여러 문단·표 서식은 `format.at`에 범위(`'s0/p3..p9'`)·표·칸 범위를 준다. 표준서식은 `styles(import:'standard')` 뒤 같은 호출의 `format`으로 입힌다. 같은 스타일 전체의 글머리표·번호·탭·테두리를 바꿀 때는 `read(view='styles')`에서 이름과 사용 수를 확인한다. 새 이름은 `styles.define`의 `base,applyToBase:true`, 기존 이름은 `styles.update`로 한 번에 제안한다. 속성 예시는 `read(view='guide',id='styles')`에 있다.
+   - 차트·그래프·도식 등 시각화는 `figure` 로 **직접 그린 그림**으로 낸다: `svg` 로 그리거나(`viewBox` 로 비율, 글자는 크게, `font-family` 생략), `work/` 에서 만든 그림 파일을 올려 `attachment_id` 로 넣는다(절차는 `guides/figure-files.md`). 값은 문서·첨부에 있는 것만 쓰고, 색·글꼴·폭은 문서의 기존 그림에 맞추며, 내기 전에 `preview_figure` 로 글자 겹침·잘림을 본다(그림마다 두 번까지). 그림 안에는 제목을 넣지 않는다(`caption` 이 맡는다).
    - 같은 `after` 에 여러 문단·표·그림을 낼 때는 놓일 차례대로 낸다.
    - 표·그림의 `caption` 은 제목 글만(번호는 자동). 숫자·사실은 문서나 첨부에 근거가 있을 때만 — 없으면 `memo` 로 "확인 필요". 문서의 수치는 지시 없이 고치지 않고(틀려 보이면 `memo`), 지시하지 않은 장·절·안내 문단(참고문헌·차례 등)과 표·그림은 지우거나 옮기지 않는다.
 4. 끝내기: 마지막 `edit` 에 `done` 을 준다(응답의 `completed` 가 true 인지 본다 — false 면 `complete_note` 대로 고친 뒤 다시). 요약은 무엇을 요청받아 무엇을 했는지 1~2문장 — 지시 원문·개인정보를 넣지 않는다. 결과를 저장했으면 목표를 다 이루지 못해도 `done`(또는 `finish` 의 `summary`)으로 끝내고 못 이룬 점을 요약에 적는다. `finish(error=…)` 는 쓸 만한 결과를 하나도 내지 못했을 때만.
@@ -42,7 +44,7 @@
 | `event="orchestration_task"` 알림(멀티에이전트 작업) | `guides/orchestration.md` |
 | 내가 변경 요청 검토를 시켰을 때 | `guides/change-requests.md` |
 
-그 절차의 예전 도구 이름은 이렇게 읽는다: `read_document`·`list_figures`·`read_attachment` → `read`(view=`text`·`figures`·`attachment`), `propose_figure(attachment_id, replace_ref)` → `edit` 의 `{op:'figure', replace, attachment_id}`, `add_memo` → `{op:'memo'}`, `complete_request`·`fail_request` → `edit` 의 `done`·`finish`.
+그 절차의 예전 도구 이름은 이렇게 읽는다: `read_document`·`list_figures`·`read_attachment` → `read`(view=`text`·`figures`·`attachment`), `propose_figure(attachment_id, replace_ref)` → `edit` 의 `{op:'figure', replace, attachment_id}`(새 그림은 `{op:'figure', after, attachment_id, caption}`), `add_memo` → `{op:'memo'}`, `complete_request`·`fail_request` → `edit` 의 `done`·`finish`.
 새 문서는 내가 대상 문서 없이 새 보고서 작성을 명시했을 때만 `create_document` 로 만든다.
 
 ## 지켜야 할 것

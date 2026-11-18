@@ -13,7 +13,7 @@ import { imageInfo, scanPictures, pictureXml, PX, MM } from './picture.js';
 import { importChartParts, releaseChartParts, chartPartKey, fixSwitchIds, pruneChartParts, syncSwitchCopies } from './chart-parts.js';
 import { SHAPE_TAGS, shapeProps, shapePrintText, shapeChange, shapeKey, pairShapes, patchShape, shapeName, shapeFlowsText } from './shapes.js';
 import { planBody, planBodyAnchored, charOps, entryKind, foldOwners } from './diff.js';
-import { inspectFormatting, formattingCatalog, formatRange, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, breakChangeLabels } from './formatting.js';
+import { inspectFormatting, formattingCatalog, formatRange, formatParagraphs, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, breakChangeLabels } from './formatting.js';
 export { validateFormatSpec } from './formatting.js';
 
 const SUBLIST_ATTRS = 'id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"';
@@ -262,6 +262,8 @@ export class HwpxDoc {
   text(ref, view = 'final') { const { p } = this.resolve(ref); return view === 'markup' ? Section.markupText(p) : Section.text(p, view); }
 
   inspectFormatting(ref) { return inspectFormatting(this, ref); }
+  /** 여러 문단(문단 전체)의 스타일·글자모양·문단모양을 한 번에 — engine/formatting.js formatParagraphs */
+  formatParagraphs(refs, input) { return formatParagraphs(this, refs, input); }
   formattingCatalog() { return formattingCatalog(this); }
   formatRange(ref, spec) { return formatRange(this, ref, spec); }
   undoFormatting(undo) { return undoFormatting(this, undo); }

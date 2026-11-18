@@ -48,7 +48,7 @@ export function setupPlan(deployment, subscription) {
       ai ? `AI 연결.bat을 실행해 ${ai}를 고르고 본인 ${subscription === 'chatgpt' ? 'ChatGPT' : 'Claude'} 계정으로 로그인합니다.` : (personal ? '문서함 [PC 폴더 연결]로 문서 폴더를 연결합니다.' : '[관리자] → [사용자]에서 참여자를 추가하고 외부 접속 열기.bat의 주소를 전달합니다.'),
     ],
     aiNote: ai ? `${ai} 로그인과 AI 요청에는 인터넷이 필요합니다. 최초 로그인·동의는 직접 진행하며 API 키·유료 API로 바꾸지 않습니다.` : 'AI 연결은 나중에 AI 연결.bat으로 할 수 있습니다.',
-    help: personal ? '/help.html#local' : '/manual.md',
+    help: '/help.html#install',
   };
 }
 

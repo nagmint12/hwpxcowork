@@ -8,35 +8,35 @@
       "order": 0,
       "file": "00 처음 읽기 — hwpx-cowork 둘러보기.hwpx",
       "scenario": null,
-      "bytes": 23403,
+      "bytes": 23386,
       "pages": 7
     },
     {
       "order": 1,
       "file": "01 따라하기 — 한글과 복사·붙여넣기.hwpx",
       "scenario": null,
-      "bytes": 27249,
+      "bytes": 27229,
       "pages": 9
     },
     {
       "order": 2,
       "file": "02 따라하기 — AI 작업 맡기기.hwpx",
       "scenario": "ai-requests",
-      "bytes": 26216,
+      "bytes": 26198,
       "pages": 9
     },
     {
       "order": 3,
       "file": "03 AI 연결 — MCP 자동 설정.hwpx",
       "scenario": null,
-      "bytes": 23740,
+      "bytes": 23724,
       "pages": 7
     },
     {
       "order": 4,
       "file": "04 관리자 안내 — 관리자 앱·계정·문서함.hwpx",
       "scenario": null,
-      "bytes": 21863,
+      "bytes": 21818,
       "pages": 7
     }
   ]

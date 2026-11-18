@@ -5,6 +5,8 @@ import { Section } from './section.js';
 import { EngineError } from './errors.js';
 import { scan, attr, attrs, escapeAttr, escapeText, decodeEntities } from './xmlscan.js';
 import { replacementShapes, projectTextFormats } from './format-projection.js';
+import { borderSides, privateStyleChar, styleKey, styleParagraphFields } from './style-properties.js';
+import { lineSpec, patchBorderFill } from './table-edit.js';
 export { replacementShapes, projectTextFormats } from './format-projection.js';
 
 const fail = (code, message) => { throw new EngineError(code, message); };
@@ -59,7 +61,12 @@ export function validateFormatSpec(spec) {
     }
   }
   if (spec.paragraph !== undefined) {
-    keys(spec.paragraph, PARA_KEYS, '문단모양'); out.paragraph = { ...spec.paragraph };
+    keys(spec.paragraph, [...PARA_KEYS, ...Object.keys(styleParagraphFields)], '문단모양'); out.paragraph = { ...spec.paragraph };
+    for (const [key, schema] of Object.entries(styleParagraphFields)) if (spec.paragraph[key] !== undefined) {
+      const result = schema.safeParse(spec.paragraph[key]);
+      if (!result.success) fail('FORMAT_SPEC', `${key}: ${result.error.issues[0].message}`);
+      out.paragraph[key] = result.data;
+    }
     if (spec.paragraph.align !== undefined && !ALIGN.includes(spec.paragraph.align)) fail('FORMAT_SPEC', '문단 정렬이 올바르지 않습니다');
     for (const k of PARA_KEYS.filter(k => k.endsWith('Pt'))) if (spec.paragraph[k] !== undefined) number(spec.paragraph[k], k === 'indentPt' ? -10000 : 0, 10000, k);
     if (spec.paragraph.oneLine !== undefined && typeof spec.paragraph.oneLine !== 'boolean') fail('FORMAT_SPEC', 'oneLine(한 줄로 입력)은 true/false입니다');
@@ -256,7 +263,144 @@ function charVariant(header, baseId, patch = {}) {
   if (patch.shadeColor !== undefined) xml = rootAttrs(xml, { shadeColor: patch.shadeColor });
   return xml === src ? String(baseId) : header.addItem('charProperties', 'charPr', xml);
 }
-function paraVariant(header, baseId, patch = {}, modern = true) {
+// 한/글 글머리표는 본문 글과 별도인 hh:bullet 정의다. 공유하는 다른 스타일·문단을 위해 복제한다.
+const INHERIT_CHAR = '4294967295';
+const levelPattern = level => `^${level === 10 ? ':' : level}.`;
+function numberingVariant(header, old, heading) {
+  const current = attrXml(old, 'type') === 'NUMBER';
+  const level = heading.level ?? (current ? Number(attrXml(old, 'level', '0')) + 1 : 1);
+  const newHead = n => `<hh:paraHead start="1" level="${n}" align="LEFT" useInstWidth="1" autoIndent="1" widthAdjust="0" textOffsetType="PERCENT" textOffset="50" numFormat="DIGIT" charPrIDRef="${INHERIT_CHAR}" checkable="0">${levelPattern(n)}</hh:paraHead>`;
+  const ref = attrXml(old, 'idRef', '0');
+  let xml = current && ref !== '0' ? shape(header, 'numbering', ref)
+    : `<hh:numbering id="1" start="0">${Array.from({ length: 10 }, (_, i) => newHead(i + 1)).join('')}</hh:numbering>`;
+  let head = elements(xml, 'hh:paraHead').find(t => Number(attrXml(t.xml, 'level')) === level);
+  if (!head) {
+    const at = elements(xml, 'hh:paraHead').find(t => Number(attrXml(t.xml, 'level')) > level)?.start ?? xml.indexOf('</hh:numbering>');
+    if (at < 0) fail('FORMAT_UNSUPPORTED', '문단 번호 정의에 수준을 추가할 수 없습니다');
+    const h = newHead(level);
+    xml = xml.slice(0, at) + h + xml.slice(at);
+    head = { start: at, blockEnd: at + h.length, xml: h };
+  }
+  const patch = {};
+  if (heading.format != null) patch.numFormat = heading.format;
+  if (heading.start != null) patch.start = heading.start;
+  if (heading.pattern !== undefined && attrXml(head.xml, 'text') !== null) patch.text = heading.pattern;
+  let h = rootAttrs(head.xml, patch);
+  if (heading.pattern !== undefined) {
+    const token = open(h);
+    h = h.slice(0, token.end).replace(/\/>$/, '>') + escapeText(heading.pattern) + '</hh:paraHead>';
+  }
+  xml = xml.slice(0, head.start) + h + xml.slice(head.blockEnd);
+  return { type: 'NUMBER', idRef: header.addItem('numberings', 'numbering', xml), level: level - 1 };
+}
+function headingVariant(header, para, heading, charId) {
+  if (heading.type === 'NONE') return { type: 'NONE', idRef: '0', level: '0' };
+  const old = elements(para, 'hh:heading')[0]?.xml;
+  if (heading.type === 'OUTLINE') return { type: 'OUTLINE', idRef: attrXml(old, 'type') === 'OUTLINE' ? attrXml(old, 'idRef', '0') : '0', level: heading.level - 1 };
+  if (heading.type === 'NUMBER') return numberingVariant(header, old, heading);
+  const src = attrXml(old, 'type') === 'BULLET' ? shape(header, 'bullet', attrXml(old, 'idRef')) : null;
+  if (!heading.char && (!src || attrXml(src, 'useImage') === '1')) fail('FORMAT_SPEC', '문자 글머리표를 새로 지정할 때는 char가 필요합니다');
+  const template = `<hh:bullet id="1" char="" useImage="0"><hh:paraHead level="0" align="LEFT" useInstWidth="0" autoIndent="1" widthAdjust="0" textOffsetType="PERCENT" textOffset="50" numFormat="DIGIT" charPrIDRef="${INHERIT_CHAR}" checkable="0"/></hh:bullet>`;
+  let xml = src || template;
+  if (heading.char !== undefined) {
+    xml = rootAttrs(xml, { char: heading.char, useImage: '0' });
+    const images = elements(xml, 'hc:img');
+    xml = apply(xml, images.map(t => ({ start: t.start, end: t.blockEnd, text: '' })));
+  }
+  if (heading.color != null || heading.sizePt != null) {
+    const head = elements(xml, 'hh:paraHead')[0]?.xml;
+    const marker = attrXml(head, 'charPrIDRef', INHERIT_CHAR);
+    const id = charVariant(header, marker === INHERIT_CHAR ? charId : marker, {
+      ...(heading.color ? { color: heading.color.toUpperCase() } : {}), ...(heading.sizePt ? { sizePt: heading.sizePt } : {}),
+    });
+    xml = patchElements(xml, 'hh:paraHead', { charPrIDRef: id });
+  }
+  return { type: 'BULLET', idRef: header.addItem('bullets', 'bullet', xml), level: '0' };
+}
+
+const paragraph2016 = 'http://www.hancom.co.kr/hwpml/2016/paragraph';
+function hpDeclaration(header) {
+  return /<hh:head\b[^>]*\sxmlns:hp\s*=/.test(header.xml) ? '' : ' xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"';
+}
+function writeStyleHeading(header, para, values) {
+  const heads = elements(para, 'hh:heading');
+  if (!heads.length) fail('FORMAT_UNSUPPORTED', '문단 머리(hh:heading)가 없습니다');
+  const high = values.type !== 'NONE' && Number(values.level) >= 7;
+  const h = heads[0];
+  const next = rootAttrs(h.xml, values);
+  if (heads.length === 1 && !high) return para.slice(0, h.start) + next + para.slice(h.blockEnd);
+  // 한/글 2022 개요 8~10과 rhwp의 hwpx_heading_switch. 2011 호환 갈래는 NONE/0/0이다.
+  const fallback = { type: 'NONE', idRef: '0', level: '0' };
+  const sw = elements(para, 'hp:switch').find(t => t.start < h.start && h.start < t.blockEnd);
+  if (!sw) {
+    if (heads.length !== 1) fail('FORMAT_UNSUPPORTED', '문단 머리 갈래를 식별할 수 없습니다');
+    const xml = `<hp:switch${hpDeclaration(header)}><hp:case hp:required-namespace="${paragraph2016}">${next}</hp:case><hp:default><hh:heading type="NONE" idRef="0" level="0"/></hp:default></hp:switch>`;
+    return para.slice(0, h.start) + xml + para.slice(h.blockEnd);
+  }
+  const branch = elements(sw.xml, 'hp:case').find(t => attrXml(t.xml, 'hp:required-namespace') === paragraph2016);
+  const def = elements(sw.xml, 'hp:default')[0];
+  const inBranch = (item, b) => b && sw.start + b.start < item.start && item.blockEnd < sw.start + b.blockEnd;
+  if (heads.length !== 2 || !inBranch(h, branch) || !inBranch(heads[1], def))
+    fail('FORMAT_UNSUPPORTED', '문단 머리의 확장 갈래를 안전하게 변경할 수 없습니다');
+  const tags = scan(sw.xml).filter(t => t.type === 'open' || t.type === 'selfclose').map(t => t.name);
+  if (!high && tags.join(' ') === 'hp:switch hp:case hh:heading hp:default hh:heading')
+    return para.slice(0, sw.start) + next + para.slice(sw.blockEnd);
+  return apply(para, [{ start: h.start, end: h.blockEnd, text: next },
+    { start: heads[1].start, end: heads[1].blockEnd, text: rootAttrs(heads[1].xml, high ? fallback : values) }]);
+}
+
+function tabVariant(header, para, tabs) {
+  const id = attrXml(para, 'tabPrIDRef', '0');
+  let xml = header.block('tabPr', id);
+  if (!xml && id !== '0') fail('NO_FORMAT', `탭 모양 ${id}가 없습니다`);
+  xml ??= '<hh:tabPr id="0" autoTabLeft="0" autoTabRight="0"/>';
+  const flags = {};
+  if (tabs.autoLeft != null) flags.autoTabLeft = Number(tabs.autoLeft);
+  if (tabs.autoRight != null) flags.autoTabRight = Number(tabs.autoRight);
+  xml = rootAttrs(xml, flags);
+  if (tabs.stops) {
+    // 한/글 표준서식 차례 탭은 같은 물리 위치를 case에 HWPUNIT(1pt=100), default에 그 두 배로 기록한다.
+    const stops = [...tabs.stops].sort((a, b) => a.posPt - b.posPt);
+    let previous = -1;
+    const items = stops.map(stop => {
+      const pos = Math.round(stop.posPt * 100);
+      if (pos === previous) fail('FORMAT_SPEC', '같은 위치에 두 개의 탭을 지정할 수 없습니다');
+      previous = pos;
+      const at = `type="${stop.type ?? 'LEFT'}" leader="${stop.leader ?? 'NONE'}"`;
+      return `<hp:switch><hp:case hp:required-namespace="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"><hh:tabItem pos="${pos}" ${at} unit="HWPUNIT"/></hp:case><hp:default><hh:tabItem pos="${pos * 2}" ${at}/></hp:default></hp:switch>`;
+    });
+    const tag = xml.slice(0, open(xml).end).replace(/\s*\/?>$/, '');
+    const ns = items.length && !attrXml(xml, 'xmlns:hp') ? hpDeclaration(header) : '';
+    xml = items.length ? tag + ns + '>' + items.join('') + '</hh:tabPr>' : tag + '/>';
+  }
+  return header.addItem('tabProperties', 'tabPr', xml);
+}
+
+function paragraphBorder(header, para, border) {
+  const old = elements(para, 'hh:border')[0]?.xml;
+  if (!old) fail('FORMAT_UNSUPPORTED', '문단 테두리(hh:border)가 없습니다');
+  const patch = {}; const sides = {};
+  for (const side of borderSides) {
+    if (border.all || border[side]) {
+      const l = { ...border.all, ...border[side] };
+      sides[side] = lineSpec({ type: l.type, width_mm: l.widthMm, color: l.color }, side);
+    }
+    if (border.offsetMm?.[side] != null) patch['offset' + side[0].toUpperCase() + side.slice(1)] = Math.round(border.offsetMm[side] * 7200 / 25.4);
+  }
+  if (border.connect != null) patch.connect = Number(border.connect);
+  if (border.ignoreMargin != null) patch.ignoreMargin = Number(border.ignoreMargin);
+  if (Object.keys(sides).length || border.fill != null) {
+    let id = attrXml(old, 'borderFillIDRef', '0');
+    if (id === '0' && !header.block('borderFill', id)) {
+      const none = { type: 'NONE', width: '0.1 mm', color: '#000000' };
+      id = header.borderFill(Object.fromEntries(borderSides.map(s => [s, none])));
+    }
+    patch.borderFillIDRef = patchBorderFill(header, id, { sides, fill: border.fill === 'none' ? 'none' : border.fill?.toUpperCase() });
+  }
+  return patchElements(para, 'hh:border', patch);
+}
+
+function paraVariant(header, baseId, patch = {}, modern = true, charId = '0', resolvedHeading = null) {
   const src = shape(header, 'paraPr', baseId); let xml = src;
   if (patch.align !== undefined) xml = patchElements(xml, 'hh:align', { horizontal: patch.align });
   const names = { spaceBeforePt: 'hc:prev', spaceAfterPt: 'hc:next', indentPt: 'hc:intent', leftMarginPt: 'hc:left', rightMarginPt: 'hc:right' };
@@ -272,6 +416,9 @@ function paraVariant(header, baseId, patch = {}, modern = true) {
     for (const t of es) edits.push({ start: t.start, end: t.end, text: setAttrs(xml.slice(t.start, t.end), { type: patch.lineSpacing.type, value: Math.round(patch.lineSpacing.value * (patch.lineSpacing.type === 'PERCENT' ? 1 : units(t))), unit: 'HWPUNIT' }) });
   }
   xml = apply(xml, edits);
+  if (patch.heading) xml = writeStyleHeading(header, xml, resolvedHeading || headingVariant(header, xml, patch.heading, charId));
+  if (patch.tabs) xml = rootAttrs(xml, { tabPrIDRef: tabVariant(header, xml, patch.tabs) });
+  if (patch.border) xml = paragraphBorder(header, xml, patch.border);
   if (patch.oneLine !== undefined) {
     const bs = elements(xml, 'hh:breakSetting');
     if (!bs.length) fail('FORMAT_UNSUPPORTED', '줄 나눔 설정(hh:breakSetting) 요소가 없습니다');
@@ -284,14 +431,110 @@ function paraVariant(header, baseId, patch = {}, modern = true) {
   return xml === src ? String(baseId) : header.addItem('paraProperties', 'paraPr', xml);
 }
 
+// [hwpx-cowork] 2026-11-18: 머리(header.xml)가 같으면 다시 훑지 않는다. 돌려주는 것은 부를 때마다 새 사본이다 — 받은 쪽이 목록을 고쳐도 다음 조회가 오염되지 않는다
+// (tests/formatting_engine.test.mjs '공개 목록 수정에 오염되지 않는다').
+// 문단 모양 301개·453KB 머리인 문서에서 한 번이 70ms 였고, 서식 제안 하나를 만들 때마다 두 번(스타일 번호 확인·사전 검사 사본) 불려
+// 칸 서식 200개 저장 53초 가운데 28초가 이 훑기였다(docs/MCP_REDESIGN_2026-11-16.md §15). 위 fontIndex 와 같은 꼴(머리 객체 + xml 견줌)
+const catalogs = new WeakMap();
+export function styleDefinitions(doc) {
+  return elements(doc.header.xml, 'hh:style').map(t => ({ id: attrXml(t.xml, 'id'), name: attrXml(t.xml, 'name'), engName: attrXml(t.xml, 'engName'), type: attrXml(t.xml, 'type', 'PARA'), charPrId: attrXml(t.xml, 'charPrIDRef', '0'), paraPrId: attrXml(t.xml, 'paraPrIDRef', '0') }));
+}
+export function namedStyle(doc, value, list = styleDefinitions(doc)) {
+  const name = String(value);
+  const exact = list.filter(s => s.name === name);
+  const hits = exact.length ? exact : list.filter(s => s.name.trim() === name.trim());
+  if (hits.length > 1) fail('NO_STYLE', `이름이 겹치는 스타일입니다: ${name}. read(view='styles')의 스타일 ID로 지정하세요`);
+  const direct = hits[0] || list.find(s => s.id === name);
+  if (direct || !['&□', '&■'].includes(name.trim())) return direct;
+  // 표준서식 안내에서 쓰는 두 표시 이름. 실제 이름(또는 ID)이 일치할 때는 항상 그 문단 스타일이 우선이다.
+  const candidates = list.filter(s => s.type === 'PARA' && styleKey(s.name) === styleKey(name));
+  if (candidates.length > 1) fail('NO_STYLE', `「${name}」와 기호만 다른 스타일이 여럿입니다. read(view='styles')의 실제 이름이나 ID를 지정하세요`);
+  if (candidates.length === 1 && [...candidates[0].name].some(privateStyleChar)) return candidates[0];
+}
+
+// 읽기의 사용 수와 변경 대상이 같은 문단이어야 한다. 메모 안의 자손·삭제된 개체·대체 XML 갈래를 제외한다.
+export function styleUsage(doc, ordinals = false) {
+  const uses = new Map();
+  for (const sec of doc.sections) {
+    const excluded = new Set(); let ordinal = 0;
+    for (const p of sec.paras) {
+      if (p.container === 'hp:fieldBegin' || excluded.has(p.parent) || !Section.visibleParagraph(p, 'final')) { excluded.add(p); continue; }
+      const id = attr(sec.xml, sec.tokens[p.openTok], 'styleIDRef') ?? '0';
+      if (!uses.has(id)) uses.set(id, []);
+      uses.get(id).push(ordinals ? [sec.index, ordinal, attr(sec.xml, sec.tokens[p.openTok], 'id') ?? ''] : p.ref);
+      ordinal++;
+    }
+  }
+  return uses;
+}
+
+export function styleDependencies(doc, watched) {
+  const list = styleDefinitions(doc);
+  const uses = styleUsage(doc, true);
+  return [...watched].map(([name, members]) => {
+    const s = namedStyle(doc, name, list);
+    return s ? [name, s.id, semanticShapeHash(doc, 'style', s.id), members ? uses.get(s.id) || [] : null] : [name, null];
+  });
+}
+
+export function styleHeading(doc, style) {
+  const head = elements(doc.header.block('paraPr', style.paraPrId) || '', 'hh:heading')[0]?.xml;
+  const type = attrXml(head, 'type', 'NONE');
+  if (type === 'BULLET') {
+    const b = doc.header.block('bullet', attrXml(head, 'idRef'));
+    if (!b) return { type, missing: true };
+    const markerId = attrXml(elements(b, 'hh:paraHead')[0]?.xml, 'charPrIDRef', INHERIT_CHAR);
+    const cp = markerId === INHERIT_CHAR ? null : doc.header.block('charPr', markerId);
+    return { type, char: attrXml(b, 'char'), ...(attrXml(b, 'useImage') === '1' ? { image: true } : {}),
+      ...(cp ? { color: attrXml(cp, 'textColor'), sizePt: Number(attrXml(cp, 'height')) / 100 } : {}) };
+  }
+  const level = Number(attrXml(head, 'level', '0')) + 1;
+  if (type === 'NUMBER') {
+    const num = doc.header.block('numbering', attrXml(head, 'idRef'));
+    const h = elements(num || '', 'hh:paraHead').find(t => Number(attrXml(t.xml, 'level')) === level);
+    if (h) return { type, level, format: attrXml(h.xml, 'numFormat', 'DIGIT'), start: Number(attrXml(h.xml, 'start', '1')),
+      pattern: decodeEntities(h.xml.slice(h.end - h.start, h.xml.indexOf('</hh:paraHead>'))) || attrXml(h.xml, 'text', '') };
+  }
+  return type === 'NONE' ? { type } : { type, level };
+}
+
+// 상세 조회를 명시한 스타일 하나에만 관련 정의를 풀어 준다. 문서 전체 목록·기본 도구 설명에는 싣지 않는다.
+export function styleDetail(doc, s) {
+  const header = doc.header; const para = shape(header, 'paraPr', s.paraPrId);
+  const tab = header.block('tabPr', attrXml(para, 'tabPrIDRef', '0')) || '';
+  const cases = elements(tab, 'hp:case').filter(t => attrXml(t.xml, 'hp:required-namespace', '').includes('HwpUnitChar'));
+  const defaults = elements(tab, 'hp:default');
+  const stops = elements(tab, 'hh:tabItem').filter(t => !cases.length || !defaults.some(d => t.start > d.start && t.start < d.blockEnd)).map(t => ({
+    posPt: Number(attrXml(t.xml, 'pos')) / (attrXml(t.xml, 'unit') === 'HWPUNIT' ? 100 : 200),
+    type: attrXml(t.xml, 'type', 'LEFT'), leader: attrXml(t.xml, 'leader', 'NONE'),
+  }));
+  const b = elements(para, 'hh:border')[0]?.xml;
+  const bf = header.block('borderFill', attrXml(b, 'borderFillIDRef')) || '';
+  const border = { offsetMm: {}, connect: attrXml(b, 'connect') === '1', ignoreMargin: attrXml(b, 'ignoreMargin') === '1' };
+  for (const side of borderSides) {
+    const line = elements(bf, `hh:${side}Border`)[0]?.xml;
+    if (line) border[side] = { type: attrXml(line, 'type'), widthMm: parseFloat(attrXml(line, 'width')), color: attrXml(line, 'color') };
+    const val = Number(attrXml(b, 'offset' + side[0].toUpperCase() + side.slice(1), '0'));
+    border.offsetMm[side] = Number((val * 25.4 / 7200).toFixed(3));
+  }
+  border.fill = attrXml(elements(bf, 'hc:winBrush')[0]?.xml, 'faceColor', 'none');
+  return { ...s, char: charProps(header, s.charPrId), paragraph: { ...paraProps(header, s.paraPrId, modernUnits(doc)),
+    heading: styleHeading(doc, s), tabs: { autoLeft: attrXml(tab, 'autoTabLeft') === '1', autoRight: attrXml(tab, 'autoTabRight') === '1', stops }, border } };
+}
+
 export function formattingCatalog(doc) {
-  const list = fonts(doc.header); const modern = modernUnits(doc);
-  return {
-    styles: elements(doc.header.xml, 'hh:style').map(t => ({ id: attrXml(t.xml, 'id'), name: attrXml(t.xml, 'name'), engName: attrXml(t.xml, 'engName'), type: attrXml(t.xml, 'type', 'PARA'), charPrId: attrXml(t.xml, 'charPrIDRef', '0'), paraPrId: attrXml(t.xml, 'paraPrIDRef', '0') })),
-    charProperties: elements(doc.header.xml, 'hh:charPr').map(t => { const id = attrXml(t.xml, 'id'); return { id, props: charProps(doc.header, id, list) }; }),
-    paragraphProperties: elements(doc.header.xml, 'hh:paraPr').map(t => { const id = attrXml(t.xml, 'id'); return { id, props: paraProps(doc.header, id, modern) }; }),
+  const header = doc.header; const modern = modernUnits(doc);
+  const previous = catalogs.get(header);
+  if (previous && previous.xml === header.xml && previous.modern === modern) return structuredClone(previous.value);
+  const list = fonts(header);
+  const value = {
+    styles: styleDefinitions(doc),
+    charProperties: elements(header.xml, 'hh:charPr').map(t => { const id = attrXml(t.xml, 'id'); return { id, props: charProps(header, id, list) }; }),
+    paragraphProperties: elements(header.xml, 'hh:paraPr').map(t => { const id = attrXml(t.xml, 'id'); return { id, props: paraProps(header, id, modern) }; }),
     fonts: list.map(font => ({ ...font })),
   };
+  if (header && typeof header === 'object') catalogs.set(header, { xml: header.xml, modern, value: structuredClone(value) });
+  return value;
 }
 
 export function inspectFormatting(doc, ref) {
@@ -400,6 +643,70 @@ export function formatRange(doc, ref, input) {
   commit(doc, sec, p, edits, header);
   const after = inspectFormatting(doc, ref); const changed = before.fingerprint !== after.fingerprint;
   return { changed, ref, start: spec.start, end: spec.end, before, after, undo: changed ? { ref, before, afterFingerprint: after.fingerprint } : null };
+}
+
+/**
+ * [hwpx-cowork] 여러 문단의 서식을 한 번에 바꾼다(2026-11-18 — 문단 전체에만: 스타일·글자 모양·문단 모양). formatRange 를 문단마다 부르면 문단마다
+ * 서식 목록을 읽고 구역을 다시 읽는다(문단 2,400개 구역에서 문단 하나에 90ms — 표 칸 2,500개면 4분). 여기서는 모양 변형을 바탕 번호마다 한 번만 만들고,
+ * 고칠 자리를 구역별로 모아 구역마다 한 번만 다시 읽는다. 문단 하나의 결과는 formatRange(문단 전체 범위)와 같다(시험 tests/format_paragraphs.test.mjs).
+ * refs: 문단 주소(본문·표 칸·글상자 안 — 겹쳐도 한 번만), input: { styleId?, char?, paragraph? }. 쪽 나눔(pageBreakBefore)·범위·모양 번호 직접 지정은 받지 않는다.
+ * 실패하면 문서는 그대로다(구역·머리를 모두 계산한 뒤에 바꿔 끼운다). → { changed(서식이 바뀐 문단 수), total }
+ */
+export function formatParagraphs(doc, refs, input, styleChange = null) {
+  // 스타일 교체·갱신에서는 지정한 속성만 바꾼다. 기존 format(styleId)의 전체 서식 적용 계약은 그대로 사용한다.
+  const spec = styleChange && !Object.keys(input).length ? {} : validateFormatSpec(input);
+  if (['start', 'end', 'expectedFingerprint', 'charPrId', 'paraPrId'].some(k => spec[k] !== undefined)) fail('FORMAT_SPEC', '여러 문단 서식은 스타일·글자모양·문단모양만 받습니다');
+  if (spec.paragraph?.pageBreakBefore !== undefined) fail('FORMAT_SPEC', '쪽 나눔(pageBreakBefore)은 문단 하나씩 주세요');
+  if (!Array.isArray(refs)) fail('FORMAT_SPEC', '문단 주소 목록이 필요합니다');
+  const header = new doc.header.constructor(doc.header.xml);
+  const style = spec.styleId === undefined ? null : formattingCatalog(doc).styles.find(s => s.id === spec.styleId);
+  if (spec.styleId !== undefined && !style) fail('NO_FORMAT', `스타일 ${spec.styleId}를 찾을 수 없습니다`);
+  const paraStyle = !!style && !['CHAR', 'CHARACTER'].includes(style.type);
+  const changesPara = paraStyle || !!styleChange || Object.keys(spec.paragraph || {}).length > 0;
+  const changesChar = !!style || Object.keys(spec.char || {}).length > 0;
+  if (!changesPara && !changesChar) fail('FORMAT_SPEC', '바꿀 서식(스타일·글자모양·문단모양)이 없습니다');
+  const modern = modernUnits(doc); const chars = new Map(); const paras = new Map();
+  const charOf = original => { const base = style?.charPrId ?? original; if (!chars.has(base)) chars.set(base, charVariant(header, base, spec.char)); return chars.get(base); };
+  const heading = styleChange && spec.paragraph?.heading ? elements(shape(header, 'paraPr', styleChange.paraPrId), 'hh:heading')[0]?.xml : null;
+  const resolvedHeading = heading ? Object.fromEntries(attrs(heading, open(heading))) : null;
+  const paraOf = original => {
+    if (styleChange && original === styleChange.baseParaPrId) return styleChange.paraPrId;
+    const base = paraStyle ? style.paraPrId : original;
+    if (!paras.has(base)) paras.set(base, paraVariant(header, base, spec.paragraph, modern, style?.charPrId, resolvedHeading));
+    return paras.get(base);
+  };
+  const bySec = new Map(); const seen = new Set();
+  for (const ref of refs) {
+    if (seen.has(ref)) continue; seen.add(ref);
+    const { sec, p } = doc.resolve(ref);
+    if (!bySec.has(sec)) bySec.set(sec, []);
+    bySec.get(sec).push(p);
+  }
+  let changed = 0; const next = [];
+  for (const [sec, list] of bySec) {
+    const edits = [];
+    for (const p of list) {
+      const mine = [];
+      if (changesChar) {
+        const fc = Section.visibleChars(p, 'final'); let emptyId = null;
+        if (!fc.length) {   // 빈 문단: inspectFormatting 의 emptyCharPrId 와 같은 run 의 모양을 바꾼다
+          const fr = Section.finalRuns(p);
+          emptyId = charOf(fr.find(r => !p.anchors.some(a => a.run === r && a.kind === 'ctrl'))?.charPr ?? fr.at(-1)?.charPr ?? '0');
+        }
+        mine.push(...characterShapeEdits(sec, p, fc.map(c => charOf(c.run?.charPr ?? '0')), emptyId));
+      }
+      if (changesPara) mine.push(...paragraphEdits(sec, p, { paraPrIDRef: paraOf(attr(sec.xml, sec.tokens[p.openTok], 'paraPrIDRef') ?? '0'), ...(paraStyle || styleChange ? { styleIDRef: styleChange?.id ?? style.id } : {}) }));
+      if (!mine.length) continue;
+      changed++;
+      for (const ls of Section.linesegs(p)) mine.push({ start: ls.start, end: ls.end, text: '' });   // 저장된 줄 정보는 서식이 바뀌면 맞지 않는다(commit 과 같다)
+      edits.push(...mine);
+    }
+    // 고칠 자리가 수천이라 조각을 한 번만 잇는다(applyDisjoint — 자리마다 구역 글 전체를 복사하지 않는다). 문단마다 자리가 겹치지 않는다
+    if (edits.length) next.push([sec, applyDisjoint(sec.xml, edits)]);
+  }
+  for (const [sec, xml] of next) if (xml !== sec.xml) sec.load(xml);
+  doc.header.xml = header.xml;
+  return { changed, total: seen.size };
 }
 
 /** 메모의 추가/수정은 허용하되 글·서식이 달라진 뒤에는 되돌리지 않는다. */
@@ -671,22 +978,46 @@ export function copyStyleDefinitionsFromSync(doc, source) {
 }
 
 /** 임의 XML 없이 기존 스타일을 바탕으로 이름 있는 문단/글자 스타일을 정의한다. */
-export function defineStyle(doc, { name, baseStyle, type = 'PARA', format = {} }) {
+export function defineStyle(doc, { name, baseStyle, type = 'PARA', format = {}, update = false, applyToBase = false }) {
   if (typeof name !== 'string' || !name.trim() || name.length > 160 || /[\x00-\x1f<>]/.test(name)) fail('FORMAT_SPEC', '스타일 이름을 확인하세요');
-  const catalog = formattingCatalog(doc);
-  if (catalog.styles.some(s => s.name === name)) fail('STYLE_EXISTS', `이미 있는 스타일입니다: ${name}`);
-  const base = catalog.styles.find(s => s.id === String(baseStyle) || s.name === baseStyle) || (baseStyle == null ? catalog.styles[0] : null);
-  if (!base) fail('NO_FORMAT', '기준 스타일을 찾지 못했습니다');
+  const list = styleDefinitions(doc);
+  if (!update && list.some(s => s.name.trim() === name.trim())) fail('STYLE_EXISTS', `이미 있는 스타일입니다: ${name}`);
+  if (applyToBase && !baseStyle) fail('FORMAT_SPEC', 'applyToBase에는 기준 문단 스타일(base)이 필요합니다');
+  const base = update ? namedStyle(doc, name, list) : baseStyle == null ? list.find(s => s.id === '0') || list[0] : namedStyle(doc, baseStyle, list);
+  if (!base) fail('NO_STYLE', `스타일 「${update ? name : baseStyle}」을 찾지 못했습니다. read(view='styles')에서 실제 이름을 확인하세요`);
+  if ((update || applyToBase) && (base.type !== 'PARA' || type !== 'PARA')) fail('FORMAT_SPEC', '스타일 전체 적용은 사용 문단을 식별할 수 있는 문단 스타일(PARA)에 씁니다');
   if (!['PARA', 'CHAR'].includes(type)) fail('FORMAT_SPEC', '스타일 종류는 PARA/CHAR입니다');
-  const spec = validateFormatSpec(format);
+  const spec = !update && !Object.keys(format).length ? {} : validateFormatSpec(format);
   if (spec.styleId != null || spec.charPrId != null || spec.paraPrId != null || spec.start != null || spec.end != null) fail('FORMAT_SPEC', '정의할 char/paragraph 값만 전달하세요');
   if (type === 'CHAR' && spec.paragraph) fail('FORMAT_SPEC', '글자 스타일에는 문단모양을 넣지 않습니다');
   const header = new doc.header.constructor(doc.header.xml);
   const charId = charVariant(header, base.charPrId, spec.char);
-  const paraId = paraVariant(header, base.paraPrId, spec.paragraph, modernUnits(doc));
-  const styleId = header.addItem('styles', 'style', `<hh:style id="0" type="${type}" name="${escapeAttr(name.trim())}" engName="" paraPrIDRef="${paraId}" charPrIDRef="${charId}" nextStyleIDRef="${base.id}" langID="1042" lockForm="0"/>`);
-  doc.header.xml = header.xml;
-  return { id: String(styleId), name: name.trim(), type };
+  const paraId = paraVariant(header, base.paraPrId, spec.paragraph, modernUnits(doc), charId);
+  let styleId = base.id;
+  if (update) {
+    const original = shape(header, 'style', base.id);
+    header.xml = header.xml.replace(original, () => rootAttrs(original, { paraPrIDRef: paraId, charPrIDRef: charId }));
+  } else if (applyToBase) {
+    // 기준 스타일이 다음 문단에서도 이어지는 목록이면 새 스타일도 이어진다. 장 제목 → 본문처럼 정해진 후속 스타일은 유지한다.
+    const original = shape(header, 'style', base.id);
+    const copy = rootAttrs(original, { name: name.trim(), engName: '', paraPrIDRef: paraId, charPrIDRef: charId });
+    styleId = header.addItem('styles', 'style', copy);
+    if (attrXml(original, 'nextStyleIDRef') === base.id) {
+      const added = shape(header, 'style', styleId);
+      header.xml = header.xml.replace(added, () => rootAttrs(added, { nextStyleIDRef: styleId }));
+    }
+  } else {
+    styleId = header.addItem('styles', 'style', `<hh:style id="0" type="${type}" name="${escapeAttr(name.trim())}" engName="" paraPrIDRef="${paraId}" charPrIDRef="${charId}" nextStyleIDRef="${base.id}" langID="1042" lockForm="0"/>`);
+  }
+  const out = { id: String(styleId), name: update ? base.name : name.trim(), type };
+  if (!update && !applyToBase) { doc.header.xml = header.xml; return out; }
+  const refs = styleUsage(doc).get(base.id) || [];
+  if (applyToBase && !refs.length) fail('NO_PARAGRAPH', `「${base.name}」을 쓰는 문단이 없습니다. 정의만 만들려면 applyToBase를 빼세요`);
+  return formattingTransaction(doc, () => {
+    doc.header.xml = header.xml;
+    const result = formatParagraphs(doc, refs, spec, { id: out.id, baseParaPrId: base.paraPrId, paraPrId: paraId });
+    return { ...out, ...result };
+  });
 }
 
 function formattingCopyEdits(doc, source, sourceRef, targetRef, sourceInfo, before, imported) {
@@ -825,7 +1156,7 @@ function formatImporter(doc, source) {
     }
     let xml = apply(original, edits); let destination;
     if (reserved !== null) {
-      xml = rootAttrs(xml, { id: reserved }); const placeholder = header.block('style', reserved); header.xml = header.xml.replace(placeholder, xml); destination = reserved;
+      xml = rootAttrs(xml, { id: reserved }); const placeholder = header.block('style', reserved); header.xml = header.xml.replace(placeholder, () => xml); destination = reserved;
     } else destination = header.addItem(LISTS[tag], tag, xml);
     const index = candidates.get(tag);
     if (index?.stable && appendStable(semantic) && !index.ids.has(wanted)) index.ids.set(wanted, destination);

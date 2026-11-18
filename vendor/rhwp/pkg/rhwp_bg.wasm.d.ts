@@ -49,6 +49,7 @@ export const hwpdocument_canvasMetricsActive: (a: number) => number;
 export const hwpdocument_captureDeleteRange: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const hwpdocument_capturePictureTransform: (a: number, b: number, c: number) => [number, number, number];
 export const hwpdocument_captureSectionRaw: (a: number, b: number) => [number, number, number];
+export const hwpdocument_cellComposeMemoStats: (a: number) => [number, number];
 export const hwpdocument_changeObjectZOrderH2022: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
 export const hwpdocument_changeParaNumberLevel: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_changePictureH2022: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];

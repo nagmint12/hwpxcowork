@@ -35,7 +35,7 @@ function windowsInstall(plan) {
   const app = releasePackages.find(p => p.target === 'windows-app' && p.file.endsWith('.exe'));
   const pkg = legacy || app;
   if (!pkg) return `<p class="note">다운로드 페이지에서 Windows 설치 파일과 안내를 확인하세요.</p>${downloadLink(null, 'Windows 다운로드 페이지', '/download#windows')}`;
-  const mode = deployment === 'personal' ? '혼자 쓰기' : '함께 쓰기';
+  const mode = deployment === 'personal' ? '혼자 쓰기' : '여러 사람과 함께 쓰기';
   const label = legacy ? 'Windows ZIP 다운로드' : 'Windows 설치 파일 다운로드';
   const steps = legacy ? plan.steps : [
     '받은 .exe 파일을 실행해 설치합니다.',
@@ -81,7 +81,7 @@ function render(focus = true) {
             ${command(plan.command, 'setup-command', 'Windows 터미널')}${command(plan.commandNode, 'setup-node-command', 'Mac·Linux · Node.js 22 이상')}
             <p id="copy-status" class="status" role="status"></p>
           </details>
-          <a class="detail-link" href="${plan.help}" target="_blank" rel="noopener">설치 설명서 ↗</a>
+          <a class="detail-link" href="${plan.help}-${installOs}" target="_blank" rel="noopener">설치 설명서 ↗</a>
         </section>
         <section class="launch" aria-labelledby="launch-title">
           <h2 id="launch-title">웹에서 사용해 보기</h2>
@@ -123,6 +123,7 @@ function refreshInstaller() {
   const hadFocus = area.contains(document.activeElement);
   const plan = setupPlan(deployment, subscription);
   area.innerHTML = installOs === 'windows' ? windowsInstall(plan) : macInstall(plan);
+  root.querySelector('.detail-link').href = `${plan.help}-${installOs}`;
   if (hadFocus) area.querySelector('a')?.focus();
 }
 

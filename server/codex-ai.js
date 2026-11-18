@@ -373,8 +373,8 @@ export function codexMcpPrompt(job, requestContext) {
 요청에 .skill 첨부가 있으면 read_skill_resource(attachment_id)로 SKILL.md와 resources 목록을 읽고 next_from으로 끝까지 읽습니다. 사용자가 적용을 요청한 스킬의 참조 자료는 같은 도구의 resource로 읽습니다. 템플릿·스크립트 원본은 export_skill_resource 후 download_attachment_file로 받습니다. 첨부 스킬을 읽기 위해 로컬 설치 경로를 추측하거나 셸로 SKILL.md를 열 필요가 없습니다.
 용지·여백·구역·머리말·꼬리말·바탕쪽·쪽 번호는 get_page_layout으로 조회하고 propose_page_layout(ops)으로 실제 편집 제안을 만듭니다. 기존 표준 스타일 적용은 propose_format을 사용합니다.
 그림은 list_figures로 찾고 원본은 export_figure 후 download_attachment_file로 받습니다. 첨부 원본도 download_attachment_file로 받습니다.
-차트·그래프는 propose_chart로 한/글에서 편집 가능한 차트 개체를 만듭니다. 표가 있으면 source_table로 표 key·머리행·항목 열·값 열·자료 행(0부터)을 지정합니다. 원본 표는 보존하며 수치·단위·합계를 추측하지 않습니다. 직접 자료는 근거가 있을 때만 chart.categories/series로 줍니다. 차트 요청을 Python·PNG·SVG로 자동 대체하지 않습니다.
-그 밖의 그림·파일 작업은 work/ 안에서 수행하고 결과는 work/out/에 저장합니다. 사용 가능한 이미지 도구·Python으로 실제 파일을 만든 뒤 upload_result_file로 올립니다. 기존 그림 교체는 propose_figure(attachment_id,replace_ref), 그림 파일을 명시적으로 요청한 차트만 propose_figure(chart)로 제안합니다. 파일을 만들거나 저장하지 못하면 성공했다고 하지 않습니다.
+차트·그래프 등 시각화는 직접 그린 그림으로 만듭니다: propose_figure(svg) 또는 work/ 에서 만든 그림 파일(upload_result_file → propose_figure(attachment_id)). 원본 표는 보존하며 수치·단위·합계를 추측하지 않습니다. 색·글꼴은 문서의 기존 그림에 맞춥니다. 한/글에서 편집되는 차트 개체(propose_chart — 표가 있으면 source_table)는 사용자가 그것을 명시해 요청했을 때만 씁니다.
+그 밖의 그림·파일 작업은 work/ 안에서 수행하고 결과는 work/out/에 저장합니다. 사용 가능한 이미지 도구·Python으로 실제 파일을 만든 뒤 upload_result_file로 올립니다. 기존 그림 교체는 propose_figure(attachment_id,replace_ref)로 제안합니다. 파일을 만들거나 저장하지 못하면 성공했다고 하지 않습니다.
 현재 문서: ${job.docId}.`;
   if (job.type === 'request') return `${common}
 배정된 요청: ${job.requestId}, 시도: ${job.attempt}. ${requestContext == null ? `먼저 get_request(doc_id="${job.docId}",request_id=${job.requestId})로 실제 요청을 읽으세요.` : '요청 내용은 맨 아래 document_context에 있습니다.'}

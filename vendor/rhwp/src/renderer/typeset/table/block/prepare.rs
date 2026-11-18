@@ -84,6 +84,8 @@ impl TypesetEngine {
         // 행 컷 측정도 같은 렌더링의 일부이므로 조판기와 동일한 표 출처를 사용한다.
         layout_engine
             .set_render_normalization_overlay(std::sync::Arc::clone(&self.render_normalization));
+        // [hwpx-cowork] 칸 유닛의 줄 구성도 문서의 기억을 쓴다(측정과 같은 결과를 다시 나누지 않는다).
+        layout_engine.set_cell_compose_memo(self.cell_compose_memo.clone());
         let _geometry_rows = layout_engine.table_rows_scope(row_geometry_table);
         let _host_rows = layout_engine.table_rows_scope(table);
         layout_engine.remember_stored_frame_rows(row_geometry_table, &mt.row_heights);

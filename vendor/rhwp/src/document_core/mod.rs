@@ -297,6 +297,14 @@ pub struct DocumentCore {
     pub(crate) deferred_pagination_descriptor: Option<DeferredPaginationDescriptor>,
     /// [#2424] 공개 pagination과 분리된 shadow continuation job.
     pub(crate) pending_pagination_job: Option<PendingPaginationJob>,
+    // [hwpx-cowork] 칸 문단 줄 구성 기억(`renderer::composer::cell_compose_memo`) — 측정·조판·쪽 나무가 함께 쓴다.
+    // 쪽 나눔 시작마다 비우고, 미룬 글 편집을 마무리하는 쪽 나눔만 남긴다(`flush_deferred_pagination`).
+    pub(crate) cell_compose_memo:
+        std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>,
+    // [hwpx-cowork] 지난 쪽 나눔 뒤에 바뀐 것이 글 편집(본문 한 문단의 짧은 글·표 칸의 미룬 글)뿐인가.
+    // 그 글 편집 경로만 켜고(`text_edit_trust_*`), 구역을 dirty 로 표시하거나 쪽 나무 캐시를 버리는 모든 경로가 끈다.
+    // 켜진 채 시작하는 쪽 나눔만 칸 문단 줄 구성 기억을 남긴다.
+    pub(crate) only_text_edits_pending: std::cell::Cell<bool>,
     pub(crate) progressive_open_page_budget: Option<usize>,
     pub(crate) progressive_open_job: Option<progressive_open::ProgressiveOpenJob>,
     /// [hwpx-cowork] 2026-11-10 P2: (구역 번호, 완주한 조판, 측정) — 여러 구역 문서의 점진 열기.
@@ -568,6 +576,8 @@ impl DocumentCore {
         // source revision이 같아도 스타일 재해소 뒤에는 이전 투영을 재사용하지 않는다.
         self.render_normalization.sections.fill_with(|| None);
         self.render_normalization.unprojected_revisions.clear();
+        // [hwpx-cowork] 글자·문단 모양 번호가 같아도 풀린 값이 달라질 수 있다 — 칸 문단 줄 구성 기억을 버린다.
+        self.cell_compose_memo.invalidate();
         self.styles = self.resolve_render_styles();
         self.styles.supplemental_metrics = self
             .canvas_metrics
@@ -652,6 +662,8 @@ impl DocumentCore {
             deferred_pagination_revision: 0,
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
+            cell_compose_memo: Default::default(),
+            only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,
             progressive_open_completed: None,

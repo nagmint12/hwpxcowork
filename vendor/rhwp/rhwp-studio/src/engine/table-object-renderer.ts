@@ -88,7 +88,7 @@ export class TableObjectRenderer {
   ) {
     this.layer = document.createElement('div');
     this.layer.className = 'table-object-layer';
-    this.layer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:7;';
+    this.layer.style.cssText = 'position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:7;';
     const scrollContent = container.querySelector('#scroll-content');
     if (scrollContent) {
       scrollContent.appendChild(this.layer);
@@ -328,7 +328,7 @@ export class TableObjectRenderer {
     if (!midPoint) {
       const svgEl = document.createElement('div');
       svgEl.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;';
-      const svg = createSvgRoot('100%', '100%');
+      const svg = createSvgRoot('1px', '1px');
       svg.appendChild(createSvgLine(sx, sy, ex, ey, '#000', 1, '4,2'));
       svgEl.appendChild(svg);
       this.layer.appendChild(svgEl);
@@ -382,7 +382,13 @@ export class TableObjectRenderer {
   }
 
   /** 모든 오버레이를 제거한다 */
+  /** [hwpx-cowork] 여러 쪽의 선택 표시를 한 번에 옮긴다. */
+  previewMove(dx: number, dy: number): void {
+    this.layer.style.transform = dx || dy ? `translate3d(${dx}px, ${dy}px, 0)` : '';
+  }
+
   clear(): void {
+    this.previewMove(0, 0);
     for (const b of this.borders) b.remove();
     this.borders = [];
     for (const h of this.handles) h.el.remove();
@@ -412,9 +418,13 @@ export class TableObjectRenderer {
     zoom: number,
     angleDeg: number = 0,
   ): void {
-    this.clearBordersOnly();
-    this.clearDragPreview();
-    this.ensureAttached();
+    if (!this.previewEl) {
+      this.clearBordersOnly();
+      this.ensureAttached();
+      this.previewEl = document.createElement('div');
+      this.previewEl.style.cssText = 'position:absolute;border:1px solid #000;box-sizing:border-box;pointer-events:none;';
+      this.layer.appendChild(this.previewEl);
+    }
 
     const scrollContent = this.container.querySelector('#scroll-content');
     const contentWidth = scrollContent?.clientWidth ?? 0;
@@ -426,17 +436,12 @@ export class TableObjectRenderer {
     const width = bbox.width * zoom;
     const height = bbox.height * zoom;
 
-    const el = document.createElement('div');
-    el.style.cssText =
-      `position:absolute;` +
-      `left:${left}px;top:${top}px;` +
-      `width:${width}px;height:${height}px;` +
-      `border:1px solid #000;box-sizing:border-box;pointer-events:none;`;
-    if (angleDeg !== 0) {
-      el.style.transform = `rotate(${angleDeg}deg)`;
-    }
-    this.layer.appendChild(el);
-    this.previewEl = el;
+    const style = this.previewEl.style;
+    style.left = `${left}px`;
+    style.top = `${top}px`;
+    style.width = `${width}px`;
+    style.height = `${height}px`;
+    style.transform = angleDeg ? `rotate(${angleDeg}deg)` : '';
   }
 
   /** 레이어가 DOM에 없으면 재부착한다 */

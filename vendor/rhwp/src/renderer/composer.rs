@@ -349,6 +349,8 @@ include!("composer/stored_cell_reflow.inc.rs");
 include!("composer/cell_line_breaking.inc.rs");
 include!("composer/pua_surface.inc.rs");
 
+// [hwpx-cowork] 칸 문단 줄 구성 기억(측정·칸 유닛·쪽 나무가 함께 쓴다).
+pub(crate) mod cell_compose_memo;
 mod empty_line_metrics;
 pub(crate) mod inline_box_rows;
 mod line_breaking;

@@ -4251,6 +4251,14 @@ pub struct LayoutEngine {
     /// `cell_units_uncached` 안에서 계산되어 52,694 셀 표에서 O(셀²)(≈28억) 로 폭증했다.
     /// `cell_units_cache` 와 동일 조판 경계에서 clear 한다.
     table_nested_text_flag_cache: std::cell::RefCell<std::collections::HashMap<usize, bool>>,
+    // [hwpx-cowork] 표 단위 불변량 "재조판 블록 호스트 칸이 하나라도 있는가"(`has_reflow_block_cell_host`
+    // 의 표 전체 스캔)를 표 포인터로 캐시한다. `measured_reflow_block_table` 이 칸마다 이 스캔을
+    // 다시 해 저장 줄 정보가 없는 큰 표(2,382칸 — 쪽 나눔 한 번 300ms 중 190ms)에서 O(칸²)였다
+    // (2026-11-18 실측, #2063 과 같은 꼴). 값 = (cells 버퍼 주소, 칸 수, 판정) — 표 구조가 바뀌어
+    // 버퍼가 달라지면 다시 센다. `cell_units_cache` 와 같은 조판 경계에서 clear 하고, 칸 글 편집
+    // 무효화(`invalidate_cell_units_after_text_edit`) 때 그 표 것을 버린다.
+    table_reflow_block_host_flag_cache:
+        std::cell::RefCell<std::collections::HashMap<usize, (usize, usize, bool)>>,
     /// 중첩 표 본체 높이 — (표 주소, 스타일 주소) 키. `cell_units_cache` 와 같은 경계에서
     /// 비우고, 셀 편집 무효화 때는 통째로 비운다.
     nested_table_body_height_cache:
@@ -4267,10 +4275,17 @@ pub struct LayoutEngine {
     /// cell width. This lives for the layout session and is cleared at the same
     /// source/style invalidation boundary as the other pointer-keyed caches.
     single_line_overflow_cache: super::composer::SingleLineOverflowCache,
+    // [hwpx-cowork] 문서가 쥔 칸 문단 줄 구성 기억(`composer::cell_compose_memo`). 없으면(진단·보조 엔진) 늘 새로 계산한다.
+    cell_compose_memo: std::cell::RefCell<
+        Option<std::sync::Arc<super::composer::cell_compose_memo::CellComposeMemo>>,
+    >,
     section_tab_key: std::cell::Cell<u64>,
     /// Issue #2214 test-only: cache miss가 실제 table-wide scan으로 이어진 횟수.
     #[cfg(test)]
     table_nested_text_flag_scan_count: std::cell::Cell<usize>,
+    // [hwpx-cowork] 시험 전용: 재조판 호스트 판정이 실제 표 전체 스캔으로 이어진 횟수.
+    #[cfg(test)]
+    table_reflow_block_host_scan_count: std::cell::Cell<usize>,
 }
 
 mod anchor_box_flow;
@@ -4446,16 +4461,45 @@ impl LayoutEngine {
             nested_table_ptrs: std::cell::RefCell::new(std::collections::HashSet::new()),
             stored_frame_row_plans: std::cell::RefCell::new(std::collections::HashMap::new()),
             table_nested_text_flag_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            table_reflow_block_host_flag_cache: std::cell::RefCell::new(
+                std::collections::HashMap::new(),
+            ),
             nested_table_body_height_cache: std::cell::RefCell::new(
                 std::collections::HashMap::new(),
             ),
             table_row_index_cache: Default::default(),
             cursor_probe_block_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             single_line_overflow_cache: Default::default(),
+            cell_compose_memo: std::cell::RefCell::new(None),
             section_tab_key: Default::default(),
             #[cfg(test)]
             table_nested_text_flag_scan_count: std::cell::Cell::new(0),
+            #[cfg(test)]
+            table_reflow_block_host_scan_count: std::cell::Cell::new(0),
         }
+    }
+
+    // [hwpx-cowork] 문서의 칸 문단 줄 구성 기억을 이 엔진에 건다(수명·무효화는 문서가 맡는다).
+    pub(crate) fn set_cell_compose_memo(
+        &self,
+        memo: Option<std::sync::Arc<super::composer::cell_compose_memo::CellComposeMemo>>,
+    ) {
+        *self.cell_compose_memo.borrow_mut() = memo;
+    }
+
+    // [hwpx-cowork] 편집을 거친 문서도 PDF 요청의 HWP 저장 예산으로 다시 들어올 수 있다.
+    // 저장 중에만 캐시를 떼고 오류로 돌아오는 경우에도 원래 편집 환경을 복구한다.
+    #[cfg(feature = "pdf-import")]
+    pub(crate) fn suspend_cell_compose_memo(&self) -> impl Drop + '_ {
+        use super::composer::cell_compose_memo::CellComposeMemo;
+        use std::sync::Arc;
+        struct Restore<'a>(&'a LayoutEngine, Option<Arc<CellComposeMemo>>);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set_cell_compose_memo(self.1.take());
+            }
+        }
+        Restore(self, self.cell_compose_memo.take())
     }
 
     /// [Task #1949] 셀 단위 레이아웃 캐시를 비운다. 문서 재조판 등 IR 이 바뀌는
@@ -4465,6 +4509,7 @@ impl LayoutEngine {
         self.nested_table_ptrs.borrow_mut().clear();
         self.stored_frame_row_plans.borrow_mut().clear();
         self.table_nested_text_flag_cache.borrow_mut().clear();
+        self.table_reflow_block_host_flag_cache.borrow_mut().clear();
         self.nested_table_body_height_cache.borrow_mut().clear();
         self.table_row_index_cache.clear();
         self.cursor_probe_block_cache.borrow_mut().clear();

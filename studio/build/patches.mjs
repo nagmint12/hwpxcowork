@@ -41,6 +41,22 @@ export const PATCHES = [
   // 2026-11-18 GitHub Pages(공개 주소)에서는 AI 도우미 API 키를 저장하지 않는다 — 그 밖의 배포에서는 동작이 바뀌지 않는다
   ...AI_KEY_STORAGE_PATCHES,
   {
+    // 2026-11-18 사용자 요청: 한글 조합 중인 글자를 덮던 검은 상자(흰 글자 — 0.5초마다 깜빡임)를 없앤다.
+    // 조합 글자는 이미 본문(canvas)에 보통 글자로 그려져 있다 — 그 뒤에 보통 캐럿만 둔다. 조합 처리(넣기·바꾸기·확정)는 그대로.
+    id: 'ime-composition-plain-caret',
+    file: 'src/engine/input-handler.ts',
+    why: '한글 조합 중에도 검은 상자 대신 보통 글자와 보통 캐럿으로 보인다',
+    anchor: '      if (this.isComposing && this.compositionAnchor && this.compositionLength > 0) {\n        try {\n          const anchor = this.compositionAnchor;',
+    replace: (a) => a.replace('if (this.isComposing', 'if (COWORK_IME_COMPOSITION_BOX && this.isComposing'),
+  },
+  {
+    id: 'ime-composition-plain-caret-flag',
+    file: 'src/engine/input-handler.ts',
+    why: '조합 상자를 끄는 상수(다시 켜려면 true)',
+    anchor: 'const DOCUMENT_PAGINATION_INITIAL_START_DELAY_MS = 100;',
+    replace: (a) => `// [hwpx-cowork] IME 조합 글자를 덮는 검은 상자(한/글 식 표시)를 쓰지 않는다(2026-11-18 사용자 결정).\nconst COWORK_IME_COMPOSITION_BOX: boolean = false;\n${a}`,
+  },
+  {
     id: 'allow-cowork-plugin',
     file: 'src/main.ts',
     why: '플러그인 allowlist 에 cowork 추가(번들 포함, 임의 URL 로드 없음)',

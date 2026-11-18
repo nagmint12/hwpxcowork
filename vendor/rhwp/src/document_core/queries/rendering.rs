@@ -1307,6 +1307,8 @@ impl DocumentCore {
     /// Exact registry의 한 immutable snapshot에서 W9와 Q2-B contexts를 함께
     /// 만든다. 둘 중 하나만 남는 부분 갱신은 허용하지 않는다.
     pub(crate) fn refresh_exact_font_measurement_contexts(&mut self) {
+        // [hwpx-cowork] 배치 안에서도 다음 쪽 나눔 전에 커서·칸 측정이 새 글꼴을 읽을 수 있다.
+        self.cell_compose_memo.invalidate();
         let (kerning, shaping) = self
             .layout_engine
             .exact_font_measurement_context_snapshots();
@@ -1370,6 +1372,8 @@ impl DocumentCore {
     /// 선등록한다. 개별 32 MiB·문서 layout owner 총 64 MiB 상한은 기존 page lowering과
     /// 동일하며, 초과·손상 source는 추측 없이 등록하지 않는다.
     pub(crate) fn rebuild_embedded_exact_font_sources(&mut self) {
+        // [hwpx-cowork] 새 문서에 내장 글꼴이 없으면 아래에서 바로 돌아간다.
+        self.cell_compose_memo.invalidate();
         self.layout_engine.clear_exact_font_sources();
         self.styles.kerning_measurement_context = None;
         self.styles.horizontal_shaping_context = None;
@@ -4731,6 +4735,8 @@ impl DocumentCore {
     /// 렌더 정규화의 section revision은 구조/기하 변경을 뜻하므로 여기서는 유지한다.
     /// 해당 path revision은 mutation 진입점에서 별도로 증가시킨다.
     pub(crate) fn mark_section_pagination_dirty(&mut self, section_idx: usize) {
+        // [hwpx-cowork] 무엇이 바뀌었는지 모르는 dirty — 글 편집 경로는 끝에서 다시 켠다(`text_edit_trust_after`).
+        self.only_text_edits_pending.set(false);
         if section_idx < self.dirty_sections.len() {
             self.dirty_sections[section_idx] = true;
         }
@@ -5008,6 +5014,7 @@ impl DocumentCore {
 
     /// 모든 구역을 dirty로 표시한다.
     pub(crate) fn mark_all_sections_dirty(&mut self) {
+        self.only_text_edits_pending.set(false); // [hwpx-cowork]
         for d in &mut self.dirty_sections {
             *d = true;
         }
@@ -5073,7 +5080,9 @@ impl DocumentCore {
                 page_count: self.page_count(),
             };
         };
+        // [hwpx-cowork] 재개형 작업은 첫 문단의 표만 받는다. 다른 문단은 정규화·측정 전에 기존 전체 쪽 나눔으로 보낸다.
         if !descriptor.cell_flow_changed
+            || descriptor.para_index != 0
             || self.deferred_pagination_target_status(&descriptor)
                 != DeferredPaginationTargetStatus::Current
             || self.document.sections.len() != 1
@@ -5107,6 +5116,21 @@ impl DocumentCore {
             Some(normalized) => &normalized.paragraphs[..],
             None => &section.paragraphs,
         };
+        // [hwpx-cowork] 재개할 수 없는 표를 미리 걸러, 뒤이은 동기 쪽 나눔과 같은 구역 측정을 두 번 하지 않는다.
+        let column_def = Self::find_initial_column_def(paragraphs);
+        if !TypesetEngine::resumable_table_pagination_shape_supported(
+            paragraphs,
+            &column_def,
+            descriptor.para_index,
+            descriptor.control_index,
+        ) {
+            return DeferredPaginationStepResult {
+                state: DeferredPaginationJobState::Fallback,
+                revision: descriptor.revision,
+                fragments_processed: 0,
+                page_count: self.page_count(),
+            };
+        }
         let composed: &[ComposedParagraph] = match normalized {
             Some(normalized) => &normalized.composed[..],
             None => match self.composed.get(section_index) {
@@ -5131,8 +5155,8 @@ impl DocumentCore {
             .with_hwp5_origin_hwpx(profile.hwp5_origin_hwpx())
             .with_session_edited(profile.session_edited())
             .with_hwp3_origin_flow_spacing_before(hwp3_origin_flow_spacing_before)
-            .with_section_column_spacing_hu(i32::from(section.section_def.column_spacing));
-        let column_def = Self::find_initial_column_def(paragraphs);
+            .with_section_column_spacing_hu(i32::from(section.section_def.column_spacing))
+            .with_cell_compose_memo(Some(std::sync::Arc::clone(&self.cell_compose_memo))); // [hwpx-cowork]
         let layout =
             PageLayoutInfo::from_page_def(&section.section_def.page_def, &column_def, self.dpi);
         let column_width = layout
@@ -5160,7 +5184,8 @@ impl DocumentCore {
         };
         let typesetter = TypesetEngine::new(self.dpi)
             .with_section_column_spacing_hu(i32::from(section.section_def.column_spacing))
-            .with_render_normalization(std::sync::Arc::clone(&self.render_normalization.overlay));
+            .with_render_normalization(std::sync::Arc::clone(&self.render_normalization.overlay))
+            .with_cell_compose_memo(Some(std::sync::Arc::clone(&self.cell_compose_memo))); // [hwpx-cowork]
         let Some(renderer_job) = typesetter.begin_resumable_table_pagination(
             paragraphs,
             composed,
@@ -5385,6 +5410,17 @@ impl DocumentCore {
         self.pending_pagination_job.take().is_some()
     }
 
+    // [hwpx-cowork] 글 편집을 시작할 때: 지금까지 밀린 변경이 없거나 글 편집뿐인가(일괄 편집 중이면 아니다).
+    pub(crate) fn text_edit_trust_before(&self) -> bool {
+        !self.batch_mode
+            && (self.only_text_edits_pending.get() || !self.dirty_sections.iter().any(|dirty| *dirty))
+    }
+
+    // [hwpx-cowork] 글 편집을 마칠 때(또는 그 편집의 쪽 나눔 직전): 편집 중에 꺼진 표시를 시작 때 값으로 되돌린다.
+    pub(crate) fn text_edit_trust_after(&self, before: bool) {
+        self.only_text_edits_pending.set(before && !self.batch_mode);
+    }
+
     /// 저장/인쇄/명시 flush용 동기 barrier. resumable job을 끝까지 drain하고,
     /// 시작 불가 또는 stale이면 기존 full pagination으로 복구한다.
     pub fn flush_deferred_pagination(&mut self) -> DeferredPaginationStepResult {
@@ -5480,9 +5516,40 @@ impl DocumentCore {
         force_breaks: &[std::collections::HashSet<usize>],
         storage: &S,
     ) -> Result<(), S::Error> {
+        // [hwpx-cowork] 이 쪽 나눔이 글 편집만 마무리하는가 — 아래 무효화들이 표시를 끄기 전에 읽는다.
+        // 밀린 변경이 아예 없는 쪽 나눔(되풀이 flush·경계 flush)도 남긴다 — 바뀐 것이 없다.
+        let keep_cell_compose_memo = self.only_text_edits_pending.replace(false)
+            || !self.dirty_sections.iter().any(|dirty| *dirty);
         // [#4968 R4C-3] 이번 pass의 모든 fresh-layout 경로가 동일한 exact-source
         // generation을 읽는다. 등록 source가 없으면 None으로 K0 fast path를 고정한다.
         self.ensure_exact_font_measurement_contexts();
+        // [hwpx-cowork] 한정된 Storage(PDF 들여오기)는 매 할당을 계수한다. 캐시에서 꺼낸
+        // 일반 clone과 캐시용 사본이 그 계수를 우회하므로 이 경로는 원래의 측정·배치를 쓴다.
+        let cell_compose_memo = S::UNBOUNDED.then(|| std::sync::Arc::clone(&self.cell_compose_memo));
+        // [hwpx-cowork] 칸 문단 줄 구성 기억: 글 편집만 마무리하는 쪽 나눔이고 측정 환경(dpi·글꼴 측정 문맥·
+        // 보충 측정값)이 그대로일 때만 남긴다. 그 밖에는 여기서 비운다(`composer::cell_compose_memo`).
+        if let Some(memo) = &cell_compose_memo {
+            use std::hash::{Hash, Hasher};
+            let mut environment = std::collections::hash_map::DefaultHasher::new();
+            self.dpi.to_bits().hash(&mut environment);
+            self.layout_engine
+                .exact_font_source_registry_counts()
+                .hash(&mut environment);
+            self.layout_engine
+                .horizontal_shaping_instance_request_counts()
+                .hash(&mut environment);
+            self.styles
+                .supplemental_metrics
+                .as_ref()
+                .map(|snapshot| std::sync::Arc::as_ptr(snapshot) as usize)
+                .hash(&mut environment);
+            self.hangul2024_compat.hash(&mut environment);
+            if keep_cell_compose_memo {
+                memo.keep_for_next_pass();
+            }
+            memo.begin_pass(environment.finish());
+        }
+        self.layout_engine.set_cell_compose_memo(cell_compose_memo.clone());
         // [hwpx-cowork] 나뉜 칸의 미룬 개체 띠 표: 이 문서 몫을 이번 조판이 새로 채운다.
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
         crate::renderer::layout::split_cell_deferred_bands_clear_doc(self.split_cell_doc_id);
@@ -5545,7 +5612,8 @@ impl DocumentCore {
             .with_hwp5_origin_hwpx(profile.hwp5_origin_hwpx())
             .with_session_edited(profile.session_edited())
             .with_hwp3_origin_flow_spacing_before(hwp3_origin_flow_spacing_before)
-            .with_render_normalization(std::sync::Arc::clone(&self.render_normalization.overlay));
+            .with_render_normalization(std::sync::Arc::clone(&self.render_normalization.overlay))
+            .with_cell_compose_memo(cell_compose_memo.clone()); // [hwpx-cowork]
 
         if self.document.sections.is_empty() {
             self.pagination.clear();
@@ -5926,7 +5994,9 @@ impl DocumentCore {
                 let typesetter = TypesetEngine::new_with_render_normalization(
                     self.dpi,
                     std::sync::Arc::clone(&self.render_normalization.overlay),
-                ).with_section_column_spacing_hu(i32::from(section.section_def.column_spacing));
+                ).with_section_column_spacing_hu(i32::from(section.section_def.column_spacing))
+                    // [hwpx-cowork] 표 컷의 칸 유닛도 측정과 같은 줄 구성 기억을 쓴다.
+                    .with_cell_compose_memo(cell_compose_memo.clone());
                 // [hwpx-cowork] 2026-11-10 P2: 여러 구역 문서는 앞 구역 쪽 수를 뺀 남은 예산으로 멈춘다. 앞 구역들이 이미
                 // 예산을 채웠으면(실문서A: 표지·차례 구역) 이 구역은 한 쪽만 짜고 멈춘다(step 의 쪽 예산은 최소 1).
                 // 미주를 앞 구역에서 모아 오는 마지막 구역(RenderAll)은 빌린 목록을 작업에 담을 수 없어 한 번에 짠다.
@@ -8494,6 +8564,8 @@ impl DocumentCore {
 
     /// 페이지 렌더 트리 캐시 전체 무효화.
     pub(crate) fn invalidate_page_tree_cache(&self) {
+        // [hwpx-cowork] 글 편집 밖의 변경도 이 경로를 지난다 — 칸 문단 줄 구성 기억의 신뢰 표시를 끈다.
+        self.only_text_edits_pending.set(false);
         self.page_tree_cache.borrow_mut().clear();
         self.header_footer_preview_tree_cache.borrow_mut().take();
         self.layer_tree_json_cache.borrow_mut().clear();

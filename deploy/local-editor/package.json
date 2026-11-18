@@ -1,7 +1,7 @@
 {
   "name": "hwpx-local-editor",
   "productName": "Hwpx Editor",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "type": "module",
   "main": "main.mjs"

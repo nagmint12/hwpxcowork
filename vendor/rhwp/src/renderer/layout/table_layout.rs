@@ -14378,6 +14378,11 @@ impl LayoutEngine {
         self.nested_table_body_height_cache.borrow_mut().clear();
         let edited_cell_key = edited_cell as *const crate::model::table::Cell as usize;
         let owner_table_key = owner_table as *const crate::model::table::Table as usize;
+        // [hwpx-cowork] 칸 글을 고치면 그 문단의 저장 줄 상태(재조판 호스트 판정의 입력)가 바뀔 수 있다 —
+        // 이 표의 재조판 호스트 판정은 버리고 다음에 한 번 다시 센다(표 전체 스캔 1회).
+        self.table_reflow_block_host_flag_cache
+            .borrow_mut()
+            .remove(&owner_table_key);
         let cached_owner_flag = self
             .table_nested_text_flag_cache
             .borrow()
@@ -14820,21 +14825,47 @@ impl LayoutEngine {
         inner_width: f64,
         styles: &ResolvedStyleSet,
     ) -> ComposedParagraph {
-        let mut comp = crate::renderer::composer::compose_paragraph_in_context(p, styles);
         if text_direction == 0 {
-            crate::renderer::composer::recompose_cell_lines_with_nested_tables(
-                &mut comp,
+            // [hwpx-cowork] 가로 글 칸 문단은 문서의 줄 구성 기억을 거친다(같은 내용·같은 폭이면 다시 나누지 않는다 —
+            // `composer::cell_compose_memo`). 기억이 없거나 기억하지 않는 문단이면 아래 계산을 그대로 한다.
+            let memo = self.cell_compose_memo.borrow().clone();
+            let policy = self.profile.get().stored_geometry_policy();
+            let native_hwp5 = self.profile.get().native_hwp5_layout();
+            let composed = crate::renderer::composer::cell_compose_memo::compose_cell_paragraph::<
+                std::convert::Infallible,
+            >(
+                memo.as_deref(),
                 p,
                 inner_width,
                 cell_line_wrap,
-                styles,
                 self.dpi,
-                self.profile.get().stored_geometry_policy(),
-                self.profile.get().native_hwp5_layout(),
-                &self.single_line_overflow_cache,
-                |nested| self.nested_table_body_height(nested, styles),
+                policy,
+                native_hwp5,
+                || {
+                    let mut comp =
+                        crate::renderer::composer::compose_paragraph_in_context(p, styles);
+                    crate::renderer::composer::recompose_cell_lines_with_nested_tables(
+                        &mut comp,
+                        p,
+                        inner_width,
+                        cell_line_wrap,
+                        styles,
+                        self.dpi,
+                        policy,
+                        native_hwp5,
+                        &self.single_line_overflow_cache,
+                        |nested| self.nested_table_body_height(nested, styles),
+                    );
+                    Ok(comp)
+                },
             );
-        } else {
+            return match composed {
+                Ok(comp) => comp,
+                Err(never) => match never {},
+            };
+        }
+        let mut comp = crate::renderer::composer::compose_paragraph_in_context(p, styles);
+        {
             crate::renderer::composer::recompose_cell_lines_in_frame(
                 &mut comp,
                 p,

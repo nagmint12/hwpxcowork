@@ -422,7 +422,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
 
   register('propose_chart', {
     title: '편집 가능한 한/글 차트 작성 제안',
-    description: '표·데이터를 한/글에서 다시 편집할 수 있는 실제 차트 개체로 만든다(rhwp 차트 API, PNG/Python 아님). 차트 요청의 기본 도구. after_ref 본문 문단 바로 뒤에 삽입한다. 수치 출처는 둘 중 하나: source_table(정확한 표 key·header_row·category_col·value_cols·data_rows, 모두 0부터 — 서버가 실제 표에서 읽음) 또는 chart.categories/series 직접 자료. source_table을 주면 categories/series는 생략한다. 합계·단위·주석을 추측하지 말고 표에서 사용할 행을 명시한다. 빈칸·결측은 현재 엔진 데이터 편집에서 지원하지 않아 오류로 안내한다(0으로 채우지 않음). pie/doughnut은 계열 하나. title은 차트 안 제목. 표 원본은 보존하며 표가 제안 뒤 바뀌면 적용을 막는다. 제목·범례·레이블·축 제목을 지원하고 지원하지 않는 옵션은 오류로 알린다. 그림이 필요하다는 명시적 요청만 propose_figure(chart)를 쓴다.',
+    description: '표·데이터를 한/글에서 다시 편집할 수 있는 실제 차트 개체로 만든다(rhwp 차트 API, PNG/Python 아님). 사용자가 한/글 차트 개체(한/글에서 편집되는 차트)를 명시해 요청했을 때만 쓴다 — 그 밖의 차트·그래프는 propose_figure(svg·chart)로 직접 그린 그림으로 만든다(2026-11-18). after_ref 본문 문단 바로 뒤에 삽입한다. 수치 출처는 둘 중 하나: source_table(정확한 표 key·header_row·category_col·value_cols·data_rows, 모두 0부터 — 서버가 실제 표에서 읽음) 또는 chart.categories/series 직접 자료. source_table을 주면 categories/series는 생략한다. 합계·단위·주석을 추측하지 말고 표에서 사용할 행을 명시한다. 빈칸·결측은 현재 엔진 데이터 편집에서 지원하지 않아 오류로 안내한다(0으로 채우지 않음). pie/doughnut은 계열 하나. title은 차트 안 제목. 표 원본은 보존하며 표가 제안 뒤 바뀌면 적용을 막는다. 제목·범례·레이블·축 제목을 지원하고 지원하지 않는 옵션은 오류로 알린다.',
     inputSchema: { doc_id: z.string(), after_ref: z.string(), chart: NativeChartSchema.partial({ categories: true, series: true }),
       source_table: ChartTableSourceSchema.optional(), width_mm: z.number().min(10).max(300).optional(), height_mm: z.number().min(10).max(300).optional(),
       reason: z.string().optional(), request_id: rid, expected_attempt: expectedAttempt },
@@ -439,7 +439,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
   });
   register('propose_figure', {
     title: '그림 삽입·교체 제안',
-    description: '본문 문단(after_ref) 뒤에 그림을 넣거나, replace_ref(list_figures 의 figure)의 문서 속 그림을 새 그림으로 바꾸자는 제안(교체는 캡션·번호·자리 그대로, 폭도 지금 폭 — width_mm 로 바꿀 수 있음). 그림 출처는 하나: svg(도식·흐름도·개념도·구조도·표를 옮긴 그림·아이콘 등 어떤 그림이든 SVG 문서로 직접 그림 — 서버가 300dpi PNG 로 그려 넣고 SVG 원문도 첨부로 남김) · chart(막대·선 차트를 자료로 PNG 생성) · attachment_id(PNG·JPEG·GIF·BMP·SVG 첨부 — Work 자체 도구로 만든 파일은 save_result_file로 저장한 aid) · image_base64(PNG·JPEG·GIF·BMP 파일, 10MB 이하). 위치: after_ref = 그 본문 문단 바로 뒤(표를 그림으로 옮기면 보통 그 표가 든 문단 뒤), 크기: width_mm = 문서에 보일 폭(본문 폭 이하 — get_page_layout 의 본문 폭, A4 보고서는 보통 150~165mm; 높이는 그림 비율대로, 한 쪽에 들어가게 줄임). svg 는 viewBox 로 가로세로 비율을 정하고 width_mm 를 생략하면 SVG 의 width(px, 96dpi) 폭. caption = 그림 제목 글만(번호 없이 — 문서에서 「[그림 N] 제목」 자동 번호). 그림 안에는 제목을 넣지 않는다. 수치는 문서·첨부에 근거가 있을 때만',
+    description: '본문 문단(after_ref) 뒤에 그림을 넣거나, replace_ref(list_figures 의 figure)의 문서 속 그림을 새 그림으로 바꾸자는 제안(교체는 캡션·번호·자리 그대로, 폭도 지금 폭 — width_mm 로 바꿀 수 있음). 그림 출처는 하나: svg(차트·그래프·도식·흐름도·개념도·구조도·표를 옮긴 그림·아이콘 등 어떤 그림이든 SVG 문서로 직접 그림 — 서버가 300dpi PNG 로 그려 넣고 SVG 원문도 첨부로 남김) · chart(막대·선 차트를 자료로 PNG 생성) · attachment_id(PNG·JPEG·GIF·BMP·SVG 첨부 — Work 자체 도구로 만든 파일은 save_result_file로 저장한 aid) · image_base64(PNG·JPEG·GIF·BMP 파일, 10MB 이하). 위치: after_ref = 그 본문 문단 바로 뒤(표를 그림으로 옮기면 보통 그 표가 든 문단 뒤), 크기: width_mm = 문서에 보일 폭(본문 폭 이하 — get_page_layout 의 본문 폭, A4 보고서는 보통 150~165mm; 높이는 그림 비율대로, 한 쪽에 들어가게 줄임). svg 는 viewBox 로 가로세로 비율을 정하고 width_mm 를 생략하면 SVG 의 width(px, 96dpi) 폭. caption = 그림 제목 글만(번호 없이 — 문서에서 「[그림 N] 제목」 자동 번호). 그림 안에는 제목을 넣지 않는다. 수치는 문서·첨부에 근거가 있을 때만',
     inputSchema: {
       doc_id: z.string(), after_ref: z.string().optional().describe('새 그림을 넣을 본문 문단(replace_ref 와 둘 중 하나)'),
       replace_ref: z.string().optional().describe('바꿀 문서 속 그림 주소(list_figures 의 figure, 예: s0/p12 · s0/p3#2) — 주면 새 그림을 넣지 않고 그 그림을 바꾼다(caption 은 쓰지 않음)'),
@@ -455,9 +455,13 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
 
   register('preview_figure', {
     title: '그림 미리보기',
-    description: 'propose_figure 에 줄 svg 또는 chart 를 서버가 문서에 넣을 때와 같은 글꼴·본문 폭으로 그려 그림으로 보여 준다(제안·첨부·기록은 만들지 않음, 미리보기는 150dpi). 그림을 제안하기 전에 보고 글자 겹침·잘림·글자 크기·빈 공간·색을 고친 뒤 같은 svg·chart 로 propose_figure 를 부른다. width_mm·after_ref·replace_ref 는 propose_figure 에 줄 값과 같게(replace_ref 에 width_mm 이 없으면 지금 그림 폭)',
+    // 새 연결(v2, 2026-11-18): 그림은 edit 의 figure op(svg·attachment_id)로 내고 차트·그래프도 svg 로 직접 그린다 — 설명을 그 이름으로 적고 svg 만 받는다(chart 자료 미리보기는 낼 길이 없다)
+    description: v2
+      ? "edit 의 figure op 에 줄 svg 를 서버가 문서에 넣을 때와 같은 글꼴·본문 폭으로 그려 그림으로 보여 준다(제안·첨부·기록은 만들지 않음, 미리보기는 150dpi). 차트·그래프·도식을 내기 전에 보고 글자 겹침·잘림·글자 크기·빈 공간·색을 고친 뒤 같은 svg 로 {op:'figure'} 를 낸다(그림마다 두 번까지 — 고칠 것이 없으면 바로 낸다). width_mm·after_ref·replace_ref 는 figure op 의 width_mm·after·replace 와 같게(replace_ref 에 width_mm 이 없으면 지금 그림 폭)"
+      : 'propose_figure 에 줄 svg 또는 chart 를 서버가 문서에 넣을 때와 같은 글꼴·본문 폭으로 그려 그림으로 보여 준다(제안·첨부·기록은 만들지 않음, 미리보기는 150dpi). 그림을 제안하기 전에 보고 글자 겹침·잘림·글자 크기·빈 공간·색을 고친 뒤 같은 svg·chart 로 propose_figure 를 부른다. width_mm·after_ref·replace_ref 는 propose_figure 에 줄 값과 같게(replace_ref 에 width_mm 이 없으면 지금 그림 폭)',
     inputSchema: {
-      doc_id: z.string(), svg: z.string().max(SVG_MAX_CHARS).optional().describe('propose_figure 의 svg 와 같음'), chart: ChartSchema.optional().describe('propose_figure 의 chart 와 같음'),
+      doc_id: z.string(), ...(v2 ? { svg: z.string().max(SVG_MAX_CHARS).describe('figure op 의 svg 와 같음') }
+        : { svg: z.string().max(SVG_MAX_CHARS).optional().describe('propose_figure 의 svg 와 같음'), chart: ChartSchema.optional().describe('propose_figure 의 chart 와 같음') }),
       width_mm: z.number().min(10).max(300).optional(), after_ref: z.string().optional(), replace_ref: z.string().optional(),
     },
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -465,7 +469,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
     const out = await service.previewFigure(doc_id, { svg, chart, widthMm: width_mm, afterRef: after_ref, replaceRef: replace_ref });
     const size = out.widthMm ? `문서에 보일 크기 ${out.widthMm}×${out.heightMm}mm` : '문서에 보일 폭은 본문 폭';
     return { content: [
-      { type: 'text', text: `미리보기(${out.kind === 'svg' ? 'SVG' : '차트'}) — ${size}, 미리보기 ${out.px.join('×')}px. 아직 문서에 넣지 않았다 — 고칠 것이 없으면 같은 ${out.kind} 로 propose_figure 를 부른다` },
+      { type: 'text', text: `미리보기(${out.kind === 'svg' ? 'SVG' : '차트'}) — ${size}, 미리보기 ${out.px.join('×')}px. 아직 문서에 넣지 않았다 — 고칠 것이 없으면 같은 ${out.kind} 로 ${v2 ? "edit 의 {op:'figure'} 를 낸다" : 'propose_figure 를 부른다'}` },
       { type: 'image', data: out.png.toString('base64'), mimeType: 'image/png' },
     ] };
   }));

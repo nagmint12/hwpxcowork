@@ -27,7 +27,7 @@
    - 서식: 서식 번호·값은 서식이 필요한 요청(선택 서식·지시에 굵게·글꼴·정렬·간격·스타일·서식 같은 낱말)에만 온다(`formatting`, 예전 서버는 `contextItems`·`formattingHeader`). 그 밖의 요청은 스타일 이름만 온다 — 글만 바꾸는 제안은 그 자리 서식을 그대로 쓰고, 서식을 바꾸거나 맞출 때만 `get_formatting(refs=[그 문단들])` 으로 그 문단만 읽는다. 표준서식 작성 지침(`get_writing_guide`)은 새 문단·표·서식을 만들 때 읽는다.
    - 새 문단 여럿은 `propose_insert` 의 `paragraphs` 로 한 번에 낸다.
    - 표·그림의 `caption` 은 제목 글만 쓴다(번호 없이 — `[표 N]`·`[그림 N]` 자동 번호가 붙는다).
-   - 차트는 기본으로 `propose_chart`로 한/글에서 편집 가능한 실제 차트 개체를 만든다. 표가 있으면 `source_table`로 표 key·머리행·항목 열·값 열·자료 행(0부터)을 지정해 서버가 실제 수치를 읽게 한다. 직접 자료는 근거가 있을 때만 `chart.categories/series`로 준다. 제목·범례·레이블·축 제목을 지정할 수 있다. 지원하지 않는 옵션을 그림으로 자동 대체하지 않는다. 사람이 PNG 등 그림 파일을 명시적으로 요청했을 때만 `propose_figure(chart)`를 쓴다.
+   - 차트·그래프 등 시각화는 기본으로 `propose_figure`(`svg` 로 직접 그리거나 `chart` 자료)의 그림으로 만든다. 값은 문서·첨부에 근거가 있는 것만 쓰고, 색·글꼴·폭은 문서의 기존 그림에 맞춘다. 한/글에서 편집되는 차트 개체(`propose_chart` — 표가 있으면 `source_table`로 표 key·머리행·항목 열·값 열·자료 행(0부터)을 지정)는 사람이 그것을 명시해 요청했을 때만 쓴다.
    - `chart`·`svg` 그림은 제안하기 전에 `preview_figure`(같은 chart·svg·width_mm)로 서버가 그린 모습을 보고, 글자 겹침·잘림·작은 글자·색을 고친 뒤 `propose_figure` 를 부른다.
    - 문서에 이미 있는 그림을 고치라는 지시나 `chart`·`svg` 로 못 그리는 그림은 `guides/figure-files.md` 를 먼저 읽는다.
 4. 끝내기: **마지막 쓰기 호출에 `complete="요약"` 을 함께 준다** — 저장한 뒤 요청이 완료된다(`complete_request` 를 따로 부르지 않는다). 응답의 `completed` 가 true 인지 본다(false 면 `completeNote`·`completeError` 대로 고치거나 `complete_request` 로 끝낸다). 쓰기를 여러 번 하는 일은 마지막 쓰기에만 준다.

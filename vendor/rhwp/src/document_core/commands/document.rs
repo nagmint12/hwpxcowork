@@ -495,6 +495,8 @@ fn from_bytes_inner(
             deferred_pagination_revision: 0,
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
+            cell_compose_memo: Default::default(),
+            only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,
             progressive_open_completed: None,

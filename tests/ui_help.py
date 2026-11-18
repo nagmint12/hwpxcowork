@@ -48,13 +48,13 @@ def main():
                 page = ctx.new_page(); page.on('pageerror', lambda e: errors.append(str(e)))
                 page.goto(base)
                 page.wait_for_selector('[data-testid="help-login"]')
-                ok(page.locator('[data-testid="help-login"]').get_attribute('href') == '/help.html#join', '로그인 전 사용 설명서 접근')
+                ok(page.locator('[data-testid="help-login"]').get_attribute('href') == '/help.html#start', '로그인 전 설명서 시작하기로 이동')
                 page.goto(base + '/help.html')
                 page.wait_for_function("document.querySelector('#codex-command').textContent.includes('--provider codex')")
-                ok(page.locator('h1').inner_text() == '한글 문서를 여럿이 함께 고치고, AI에게 도움을 받습니다.', '로그인 없이 참여자 설명서 읽기')
+                ok(page.locator('h1').inner_text() == '시작하기' and page.locator('#start [data-copy="agent-setup-prompt"]').is_visible(), '로그인 없이 시작하기에서 에이전트 설치 요청문에 접근')
                 order = page.evaluate("[...document.querySelectorAll('main > section:not([hidden])')].map(s => s.id)")
                 # 2026-11-13: 내 PC 의 AI(Codex·Claude Code, 기본) → ChatGPT 웹(고급) → API 키(유료) 순서
-                ok(order[:5] == ['start', 'join', 'library', 'review', 'ai'] and order.index('agents') < order.index('chatgpt-oauth') < order.index('personal-key'), '개요 → 문서함 → 연결(내 PC 의 AI → ChatGPT 웹 → API 키) 순서: ' + ','.join(order))
+                ok(order[:6] == ['start', 'install', 'join', 'library', 'review', 'ai'] and order.index('agents') < order.index('chatgpt-oauth') < order.index('personal-key'), '시작 → 설치·접속·문서함 → 연결(내 PC 의 AI → ChatGPT 웹 → API 키) 순서: ' + ','.join(order))
                 ok(page.locator('.method-grid a').count() == 3 and 'API' in page.locator('.method-grid').inner_text(), '연결 3가지 방법을 한눈에 비교하는 카드')
                 ok(all(page.locator('#' + a).count() == 1 for a in ['start', 'join', 'review', 'ai', 'automatic', 'worker', 'codex', 'chatgpt-oauth', 'personal-key']), '다른 화면이 거는 설명서 주소 유지')
                 # 2026-11-17: MCP 기본 연결이 새 연결(v2 — server/mcp2.js mcpSurface)이라 ChatGPT 프롬프트는 인자 없는 task 를 되풀이한다(claim_next_request 는 예전 연결에만)
@@ -67,7 +67,7 @@ def main():
                 for resource in ['/manual-resources/AGENT_SETUP.md', '/manual-resources/Caddyfile.example']:
                     with urllib.request.urlopen(base + resource, timeout=2) as response:
                         ok(response.status == 200 and bool(response.read()), '로그인 없이 보조 자료 읽기: ' + resource.rsplit('/', 1)[-1])
-                page.click('#download-worker')
+                page.click('#agent-commands > summary'); page.click('#download-worker')
                 ok('먼저 내 토큰으로 로그인' in page.locator('#worker-download-status').inner_text(), '실행기 다운로드는 로그인 안내')
 
                 participant = br.new_context(viewport={'width':1280,'height':900})
@@ -131,7 +131,7 @@ def main():
                 ok('GEMINI_API_KEY' in command and "--provider gemini --model 'models/test-gemini'" in command, 'Gemini 개인 worker 예제 생성')
                 ok(remote + '/mcp' in command and token not in command, 'worker 예제에 중앙 주소 사용·개인 토큰 노출 없음')
                 with pg.expect_download(timeout=15000) as dl:
-                    pg.click('#download-worker')
+                    pg.click('#agent-commands > summary'); pg.click('#download-worker')
                 download = dl.value
                 archive_path = tmp / 'worker.zip'; download.save_as(str(archive_path))
                 ok(download.suggested_filename == 'hwpx-cowork-worker.zip', '개인 AI 실행기 ZIP 다운로드')

@@ -13,7 +13,7 @@ import { startServer, uploadDoc, root } from './helpers/server.mjs';
 import { floatingDoc } from './helpers/floating-doc.mjs';
 import { MAX_SERVER_INSTRUCTIONS } from '../server/mcp.js';
 import { isV2Request, v2Toolset, v2Keeps, v2Instructions, V2_TOOLS } from '../server/mcp2.js';
-import { parseOps, prepareOps, OP_NAMES, opsGuide, OPS_BRIEF } from '../server/mcp2/ops.js';
+import { parseOps, prepareOps, OP_NAMES, HIDDEN_OPS, opsGuide, OPS_BRIEF } from '../server/mcp2/ops.js';
 import { rangePicker, pageLines } from '../server/mcp2/views.js';
 import { buildInstructions, CHANNEL_INSTRUCTIONS, CHANNEL_INSTRUCTIONS_V2, FALLBACK_INSTRUCTIONS_V2, instructionsBudget } from '../server/bridge.js';
 import { codexToolPolicy, validateCodexJob } from '../server/codex-mcp.js';
@@ -54,7 +54,11 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
   // 2026-11-17(작업 P): +97자(3,289) — format·insert 의 pageBreakBefore. 실제 Codex Y05 는 쪽 나눔 키가 없어 장 제목을 지우고 다시 넣었다(한도는 그대로)
   // 2026-11-17(objects_to_body 안전장치): +117자(3,429) — 쪽 배경 그림도 지운다는 것·background:'behind'(+29, 실제 24쪽 PDF 변환 문서에서 남긴 배경 그림이 옮긴 글
   // 16쪽을 덮었다)와 쪽을 넘는 표 잇기·되풀이 머리행을 버린 줄로 알림·join_pages:false(+88, 같은 실행에서 모델이 join_pages:false 로 표 24개를 냈다). 한도 = 3,429 + 여유 40
-  assert.ok(OPS_BRIEF.length < 3470, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
+  // 2026-11-18(사용자 결정 — 한/글 차트 개체는 숨긴 op, tests/mcp_v2_hidden_chart.test.mjs): chart 줄(−290)을 빼고 figure 줄에 직접 그리는 법(+215)을 실어 3,354자. 한도는 그대로
+  // 2026-11-18(여러 문단 서식·스타일 들여오기 — tests/mcp_v2_restyle.test.mjs, §15): +421자(3,775) — format 의 범위·표 대상(+206)과 styles 줄(+215).
+  // 실제 Codex 실행이 '표준서식에 맞춰줘'를 표 칸마다 format op 3,141개로 냈다(op 한도 오류 → 1,900개 미리 해 보기 120초 시간 초과 → 6분 뒤 칸 서식 포기):
+  // 표 전체를 한 op 로 주는 꼴과 스타일을 들여오는 길이 설명에 없었다. 한도 = 3,775 + 여유 45
+  assert.ok(OPS_BRIEF.length < 3820, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
   // 짧은 꼴(BRIEF)이 실제 꼴과 맞는지: 꼴 줄에 적힌 인자만으로 만든 op 가 꼴 검사(zod)를 지난다(2026-11-17 작업 I — 틀린 꼴 한 줄이 중복 제안을 남긴 일이 있다, §10.4 2차 T09)
   const briefExamples = [
     { op: 'replace', at: 's0/p1', find: '가', with: '나', occurrence: 2, style: '바탕글', reason: '까닭' }, { op: 'replace', at: 's0/p1', whole: true, with: '' }, { op: 'replace', at: { table: 's0/p3#t0', row: 0, col: 1 }, find: '', with: '값' },
@@ -62,6 +66,9 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
     { op: 'table', after: 's0/p1', rows: [['가', '나'], ['1', '2']], header_rows: 1, caption: '제목', unit: '명, %', notes: ['주: 가', '자료: 나'] }, { op: 'table', after: 's0/p1', rows: [['가']], notes: '주: 가' },
     { op: 'table_edit', table: 's0/p3#t0', ops: [{ op: 'insert_rows', row: 1, position: 'below', values: [['합계', '3']] }, { op: 'delete_rows', rows: [2] }, { op: 'fill', range: { row_from: 0, row_to: 0 }, color: '#FF0000' }] },
     { op: 'format', at: ['s0/p1', 's0/p2'], find: '가', style: '바탕글', char: { bold: true, italic: true, underline: true, sizePt: 12, font: '바탕', color: '#000000' }, paragraph: { align: 'CENTER', lineSpacing: { type: 'PERCENT', value: 160 }, indentPt: 10 } },
+    // 2026-11-18: format 의 여러 문단 대상(범위·구역·'*'·표·칸 범위·이들의 목록)과 styles
+    ...['s0/p3..p9', 's1', '*', 's0/p3#t0', { table: 's0/p3#t0', row_from: 0, row_to: 0, col_from: 1, col_to: 2 }, ['s0/p3..p9', 's0/p3#t0', { table: 's0/p3#t0' }, 's0/p1', { table: 's0/p3#t0', row: 0, col: 1 }]].map((a) => ({ op: 'format', at: a, style: '바탕글', char: { bold: true }, paragraph: { align: 'CENTER' } })),
+    { op: 'styles', import: 'standard', define: [{ name: '새 스타일', base: '바탕글', char: { bold: true }, paragraph: { align: 'CENTER' } }] }, { op: 'styles', import: 'standard' },
     ...['s0/p3', 's0/p3..p9', 's2', '*', ['s0/p3', 's0/p5']].map((a) => ({ op: 'delete_objects', at: a, kinds: ['table', 'figure', 'shape', 'chart'] })),
     ...['s1/p8', 's1/p8..p13', ['s1/p8', 's1/p9']].map((a) => ({ op: 'delete_paragraphs', at: a })),
     { op: 'move_paragraphs', at: 's1/p8..p9', after: 's1/p20' }, { op: 'move_paragraphs', at: 's1/p8', before: 's1/p2' },
@@ -79,8 +86,9 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
     { op: 'header', section: 0, text: '머리말' }, { op: 'footer', section: 0, clear: true }, { op: 'page_number', section: 0, position: 'BOTTOM_CENTER', start: 1 }, { op: 'page_number', section: 0, clear: true },
   ];
   assert.deepEqual(parseOps(briefExamples).errors, []);
-  for (const name of OP_NAMES) assert.ok(briefExamples.some((x) => x.op === name) || ['section', 'split_section', 'merge_section', 'master_page'].includes(name), `BRIEF 예시가 없는 op: ${name}`);
-  for (const name of OP_NAMES.filter((n) => !['section', 'split_section', 'merge_section', 'master_page', 'footer'].includes(n))) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), `OPS_BRIEF 에 없는 op: ${name}`);
+  for (const name of OP_NAMES) assert.ok(briefExamples.some((x) => x.op === name) || ['section', 'split_section', 'merge_section', 'master_page', 'restyle'].includes(name), `BRIEF 예시가 없는 op: ${name}`);
+  for (const name of OP_NAMES.filter((n) => !['section', 'split_section', 'merge_section', 'master_page', 'footer', ...HIDDEN_OPS].includes(n))) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), `OPS_BRIEF 에 없는 op: ${name}`);
+  for (const name of HIDDEN_OPS) assert.doesNotMatch(OPS_BRIEF, new RegExp(`op:'${name}'`), `숨긴 op 가 OPS_BRIEF 에 있다: ${name}`);
   assert.match(OPS_BRIEF, /section·split_section·merge_section·master_page/);
   assert.match(opsGuide(), /objects_to_body/); assert.match(opsGuide('table_edit'), /delete_rows/);
   // 범위 글
@@ -150,7 +158,10 @@ test('임시 서버: 예전 연결은 그대로이고 새 연결은 작업 도�
   // 2026-11-17(작업 P): 9,949자 — 위 OPS_BRIEF 의 pageBreakBefore 몫(+97)
   // 2026-11-17(작업 Q): 10,017자 — finish 의 부분 달성 규칙·paper orientation 값·빈 ops dry_run·sparse(+118), edit 설명 한 구절을 줄이고 ops 의 minItems 를 뺌(−50)
   // 2026-11-17(objects_to_body 안전장치): 10,134자 — 위 OPS_BRIEF 의 objects_to_body 줄 몫(+117). 한도 = 10,134 + 여유 40
-  assert.ok(size < 10175, `새 연결(core) 도구 정의 ${size}자`);
+  // 2026-11-18(한/글 차트 개체는 숨긴 op — tests/mcp_v2_hidden_chart.test.mjs): 8,773자(−1,361) — op 목록의 chart 줄을 빼고 figure 줄에 직접 그리는 법을 실음(−75),
+  // ops 의 이름 목록(enum)을 뺌(−330쯤 — 숨긴 이름을 드러내지 않게), preview_figure 를 새 연결 이름·svg 만으로(chart 자료 스키마 −950쯤). 한도 = 8,773 + 여유 47
+  // 2026-11-18(여러 문단 서식·스타일 들여오기): 9,254자(+481) — 위 OPS_BRIEF 몫(+421)과 read 의 styles 보기(+60). 한도 = 9,254 + 여유 46
+  assert.ok(size < 9300, `새 연결(core) 도구 정의 ${size}자`);
   assert.match(v2.client.getInstructions(), /task\(맡기/);
   const all = await connect(srv, 'a', { headers: { 'X-Hwpx-Mcp': '2' } }); open.push(all);
   const allNames = (await all.client.listTools()).tools.map((x) => x.name);
@@ -435,7 +446,8 @@ test('Codex 실행기: 새 연결의 도구 허용·고정과 첫 입력', async
   const hint = codexCodeModeHintV2(job);
   assert.equal(prompt.split(hint).length, 2);
   assert.ok(prompt.length - hint.length < 1200 + JSON.stringify(brief).length);
-  assert.ok(hint.length < 4000, `코드 모드 안내 ${hint.length}자`);
+  // 2026-11-18: 4,298자 — OPS_BRIEF 가 3,775자가 된 몫(위 한도와 같은 근거: format 의 범위·표 대상, styles). 한도 = 4,298 + 여유 52
+  assert.ok(hint.length < 4350, `코드 모드 안내 ${hint.length}자`);
 });
 
 test('개인 실행기(Codex): --mcp 2 는 짧은 요청 내용을 첫 입력에 싣고 작업 도구 넷으로 처리한다', { timeout: 60000 }, async (t) => {
@@ -617,7 +629,7 @@ test('실험에서 고친 것: 쪽 구성 op 의 reason · runs 만 준 문단 �
   assert.deepEqual(parsed.errors, []);
   assert.ok(parsed.ok.every((x) => !('reason' in x.op)));
   // 도구 설명의 op 목록에 모든 op 가 한 줄씩 있다(꼴만 보려고 read guide:ops 를 부르지 않게)
-  for (const name of ['alternatives', 'fill', 'toc', 'chart', 'figure', 'paper', 'page_number']) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), name);
+  for (const name of ['alternatives', 'fill', 'toc', 'figure', 'paper', 'page_number']) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), name);   // chart 는 숨긴 op(2026-11-18)
   assert.match(OPS_BRIEF, /occurrence 번째\(1부터/); assert.match(OPS_BRIEF, /runs:\[\{text, char/); assert.match(OPS_BRIEF, /문단째 지우기는 delete_paragraphs/);   // 2026-11-17 §10.4 나-1: '문단을 지우는 op 는 없다' → 새 op 안내
 
   const srv = await startServer({ ai: 'off' });

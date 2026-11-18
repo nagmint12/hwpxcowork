@@ -7,13 +7,14 @@ import { z } from 'zod';
 // 새 연결은 문단 앞 쪽 나눔(paragraph.pageBreakBefore)을 더 받는 꼴(2026-11-17 작업 P — Y05 는 그 키가 없어 장 제목을 지우고 다시 넣었다). 예전 연결의 꼴은 그대로
 import { FormatSchemaV2 as FormatSchema, RunsSchema, CharFormatSchema, ParagraphFormatSchemaV2 as ParagraphFormatSchema } from '../format-schema.js';
 import { TableOpSchema } from '../table-schema.js';
-import { StructureOpSchema } from '../page-layout-schema.js';
+import { StructureOpSchema, styleTarget } from '../page-layout-schema.js';
 import { NativeChartSchema, ChartTableSourceSchema } from '../native-chart.js';
 import { SVG_MAX_CHARS } from '../figure-svg.js';
 import { convertibleHosts } from '../../engine/layout.js';
-import { structureRefs } from '../../engine/page-layout.js';
+import { structureRefs, restyleRefs, standardStyleNames } from '../../engine/page-layout.js';
 import { planParagraphs, paragraphsPreview, paragraphLabel } from '../../engine/para-move.js';
 import { rangePicker } from './views.js';
+import { styleKey } from '../../engine/style-properties.js';
 
 const REF = /^s\d+\/p\d+(?:\/[nd]\d+)*$/;
 const BODY_REF = /^s\d+\/p\d+$/;
@@ -29,12 +30,14 @@ const KINDS = ['table', 'figure', 'shape', 'chart'];
 const STRUCTURE_OPS = StructureOpSchema.options.flatMap((o) => { const s = o.shape.op; return s.options ?? [...(s.values || [])]; });
 
 const paragraph = z.object({ text: text.optional(), style: z.string().max(160).optional(), format: FormatSchema.optional(), runs: RunsSchema.optional() }).strict();
-
-// 스타일 이름 견주기 열쇠(prepareOps styleId): 사설 영역 글자(U+E000–U+F8FF·U+F0000–U+FFFFD·U+100000–U+10FFFD)와 흔한 머리 기호를 같은 자리표로, 앞뒤 빈칸은 뗀다
-const STYLE_MARK = String.fromCharCode(0);   // 자리표(이름에 없는 글자)
-const STYLE_MARKS = new Set([...'■□▣◆◇◈●○◎◉▶►▷▸▹▪▫◼◻◾◽•❍❏❑★☆※➢➤']);
-const isPrivateUse = (cp) => (cp >= 0xE000 && cp <= 0xF8FF) || (cp >= 0xF0000 && cp <= 0xFFFFD) || (cp >= 0x100000 && cp <= 0x10FFFD);
-const styleKey = (name) => [...String(name ?? '').trim()].map((ch) => (STYLE_MARKS.has(ch) || isPrivateUse(ch.codePointAt(0)) ? STYLE_MARK : ch)).join('');
+// [hwpx-cowork] format 의 여러 문단 대상(2026-11-18 — docs/MCP_REDESIGN_2026-11-16.md §15): 범위 's0/p3..p9'·구역 's1'·'*'(본문 문단), 표 's0/p3#t0'(모든 칸),
+// { table, row_from?, row_to?, col_from?, col_to? }(칸 범위). 실제 Codex 실행이 표 칸마다 format op 를 내 3,141개(한도 2,000)가 됐다 — 표·범위를 한 op 로 받는다
+const RANGE_AT = /^(?:\*|s\d+|s\d+\/p\d+\.\.(?:s\d+\/)?p\d+|s\d+\/p\d+(?:\/[nd]\d+)*#t\d+.*)$/;
+const tableAt = z.object({ table: z.string().min(1).max(200), row_from: z.number().int().min(0).optional(), row_to: z.number().int().min(0).optional(), col_from: z.number().int().min(0).optional(), col_to: z.number().int().min(0).optional() }).strict();
+const formatAt = z.union([ref, cellAt, z.string().regex(RANGE_AT), tableAt, styleTarget]);
+// 한 호출의 서식 대상 문단이 이 수를 넘으면(또는 범위·표 꼴을 쓰거나 같은 호출에 styles 가 있으면) 문단마다 제안하지 않고 제안 하나(서식 일괄)로 낸다:
+// 문단마다의 제안은 제안 하나에 메모 하나·사전 검사 한 번이 따라 큰 문서에서 하나에 0.1초가 넘는다(칸 200개 저장 32초 — 같은 문서 §15.2)
+const BULK_FORMAT_MIN = 20;
 
 /** op 이름 → { schema, sig(한 줄 꼴 — 도구 설명·오류 글에 싣는다) } */
 export const OPS = {
@@ -46,8 +49,8 @@ export const OPS = {
     schema: z.object({ op: z.literal('table'), after: ref, rows: z.array(z.array(z.string().max(5000)).min(1).max(60)).min(1).max(1000), header_rows: z.number().int().min(0).max(20).optional(), caption: z.string().max(500).optional(), unit: z.string().max(200).optional(), notes, reason }).strict() },
   table_edit: { sig: "{op:'table_edit', table, ops:[{op:'delete_rows'|'insert_rows'|'delete_cols'|'insert_cols'|'merge'|'unmerge'|'border'|'fill'|'col_widths'|'row_height'|'cell_align'|'table', …}], reason?} — 있는 표의 줄·칸·합치기·테두리·너비. 줄 넣기 {op:'insert_rows', row, position:'below'|'above', values:[[칸 글…]]}(합계 줄처럼 새 줄과 글을 한 번에), 배경 {op:'fill', range:{row_from,row_to,col_from?,col_to?}, color:'#RRGGBB'}, 그 밖의 인자는 read view='guide' id='table_edit'",
     schema: z.object({ op: z.literal('table_edit'), table: z.string().min(1), ops: z.array(TableOpSchema).min(1).max(40), reason }).strict() },
-  format: { sig: "{op:'format', at, find?, style?, char?, paragraph?, reason?} — 글은 그대로 서식만. at 은 문단 하나나 목록, find 를 주면 그 글만. style = 스타일 이름, char {bold, italic, underline, sizePt, font, color:'#RRGGBB'…}, paragraph {align, lineSpacing, indentPt…, pageBreakBefore:true|false(이 문단 앞에서 새 쪽 — 쪽 나누기 켜기·끄기, 본문 문단만)}",
-    schema: z.object({ op: z.literal('format'), at: z.union([at, z.array(ref).min(1).max(2000)]), find: z.string().optional(), occurrence: z.number().int().min(1).optional(), start: z.number().int().min(0).optional(), end: z.number().int().min(0).optional(),
+  format: { sig: "{op:'format', at, find?, style?, char?, paragraph?, reason?} — 글은 그대로 서식만. at 은 문단 하나나 목록, find 를 주면 그 글만(문단 하나일 때). 여러 문단은 한 op 로: 범위 's0/p3..p9'·구역 's1'·'*'(본문 문단만 — 표 칸은 들지 않는다), 표 's0/p3#t0'(그 표의 모든 칸), {table, row_from?, row_to?, col_from?, col_to?}(칸 범위 — 머리행은 row_from:0,row_to:0, 0부터), {style:'기존 이름'}(해당 문단 스타일 전체), 이들의 목록. 칸·문단마다 op 를 내지 않는다 — 대상 문단이 20개를 넘거나 범위·표 꼴이면 문단마다의 제안 대신 제안 하나(서식 일괄 — 영수증의 structure)로 묶인다(뒤 op 가 앞 op 를 덮는다: 표 전체 → 머리행 차례로). style = 스타일 이름(같은 호출의 styles 가 들여온·정의한 이름도 된다), char {bold, italic, underline, sizePt, font, color:'#RRGGBB'…}, paragraph {align, lineSpacing, indentPt…, pageBreakBefore:true|false(이 문단 앞에서 새 쪽 — 쪽 나누기 켜기·끄기, 본문 문단 하나씩만)}",
+    schema: z.object({ op: z.literal('format'), at: z.union([formatAt, z.array(formatAt).min(1).max(2000)]), find: z.string().optional(), occurrence: z.number().int().min(1).optional(), start: z.number().int().min(0).optional(), end: z.number().int().min(0).optional(),
       style: z.string().max(160).optional(), char: CharFormatSchema.optional(), paragraph: ParagraphFormatSchema.optional(), reason }).strict() },
   delete_objects: { sig: "{op:'delete_objects', at, kinds?, reason?} — 표·그림·도형(글상자·선)·차트를 개체째 지운다(안의 글도 사라진다). at: 본문 문단 's0/p3' · 목록 · 범위 's0/p3..p9' · 구역 's2' · 문서 전체 '*'. kinds: ['table','figure','shape','chart'] 가운데(없으면 모두). objects_to_body 로 옮기는 문단에는 내지 않는다(옮긴 글상자·선은 그 op 가 지운다)",
     schema: z.object({ op: z.literal('delete_objects'), at: z.union([z.string().min(1).max(200), z.array(z.string().regex(BODY_REF)).min(1).max(1000)]), kinds: z.array(z.enum(KINDS)).min(1).optional(), reason }).strict() },
@@ -67,9 +70,10 @@ export const OPS = {
     schema: z.object({ op: z.literal('toc'), at: ref.optional(), after: ref.optional(), apply_now: z.boolean().optional(), apply_styles: z.boolean().optional(), one_line: z.boolean().optional(), create_if_missing: z.boolean().optional(),
       styles: z.object({ title: z.string().optional(), level1: z.string().optional(), level2: z.string().optional(), level3: z.string().optional(), captions: z.string().optional() }).strict().optional(),
       collect_styles: z.array(z.string()).optional(), reason }).strict() },
-  chart: { sig: "{op:'chart', after, chart:{type, title?, categories?, series?…}, source_table?:{table, header_row, category_col, value_cols, data_rows}, width_mm?, height_mm?, caption?, notes?} — 한/글에서 편집되는 차트. caption = 아래 '[그림 N] 제목'(번호 자동), notes = table 과 같음(자세히: read view='guide' id='chart')",
+  // [hwpx-cowork] 숨긴 op(2026-11-18 사용자 결정 — 아래 HIDDEN_OPS): 도구 설명·op 목록에는 싣지 않고, 사용자가 한/글 차트 개체를 명시해 요청했을 때만 쓴다
+  chart: { sig: "{op:'chart', after, chart:{type, title?, categories?, series?…}, source_table?:{table, header_row, category_col, value_cols, data_rows}, width_mm?, height_mm?, caption?, notes?} — 한/글에서 편집되는 차트 개체(사용자가 그것을 명시해 요청했을 때만 — 그 밖의 차트·그래프는 figure 로 직접 그린다). caption = 아래 '[그림 N] 제목'(번호 자동), notes = table 과 같음(자세히: read view='guide' id='chart')",
     schema: z.object({ op: z.literal('chart'), after: ref, chart: NativeChartSchema.partial({ categories: true, series: true }), source_table: ChartTableSourceSchema.optional(), width_mm: z.number().min(10).max(300).optional(), height_mm: z.number().min(10).max(300).optional(), caption: z.string().max(500).optional(), notes, reason }).strict() },
-  figure: { sig: "{op:'figure', after | replace, svg | attachment_id, caption?, notes?, width_mm?} — 그림 넣기·바꾸기(svg 는 서버가 PNG 로 그린다. 미리보기는 preview_figure). notes = table 과 같음(새 그림만)",
+  figure: { sig: "{op:'figure', after | replace, svg | attachment_id, caption?, notes?, width_mm?} — 그림 넣기·바꾸기. 차트·그래프·도식 등 시각화는 직접 그린다: svg(<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 W H\">…</svg> — 서버가 300dpi PNG 로 그린다. viewBox 로 비율, 글자는 viewBox 단위로 충분히 크게(본문 폭 160mm 에 viewBox 폭 1600 이면 글자 28~36), font-family 는 생략(서버의 한글 글꼴), 바탕 흰색, 외부 파일·주소·스크립트 없이) 또는 직접 만든 그림 파일의 attachment_id(PNG·JPEG·GIF·BMP·SVG). 값은 문서·첨부에 있는 것만 쓰고, 색·글꼴·꼴은 문서의 기존 그림에 맞춘다. 내기 전에 preview_figure(같은 svg·width_mm)로 글자 겹침·잘림을 본다(그림마다 두 번까지). width_mm = 문서에 보일 폭(본문 폭 이하, 생략하면 SVG 의 폭), caption = 그림 아래 '[그림 N] 제목'(제목 글만 — 번호 자동, 그림 안에는 제목을 넣지 않는다), notes = table 과 같음(새 그림만)",
     schema: z.object({ op: z.literal('figure'), after: ref.optional(), replace: z.string().max(200).optional(), svg: z.string().max(SVG_MAX_CHARS).optional(), attachment_id: z.string().max(100).optional(), caption: z.string().max(500).optional(), notes, width_mm: z.number().min(10).max(300).optional(), reason }).strict() },
   // 일괄 바꾸기(2026-11-17 — docs/MCP_REDESIGN_2026-11-16.md §10.4 나-6: T16 은 낱말 하나에 op 61개를 두 번 썼다). 일치마다 바꿈 제안(같은 문단 여럿은 occurrence) — 아래 findAll
   replace_all: { sig: "{op:'replace_all', find, with, at?, word?, ignore_case?, reason?} — at 범위(기본 문서 전체 '*' · 's1' · 's0/p3..p9')의 본문·표 칸·표와 그림 캡션·글상자·머리말·꼬리말·각주에서 find 를 모두 with 로(일치마다 제안). word:true = 앞뒤가 글자·숫자가 아닌 곳만(조사가 붙은 곳은 빠진다). 미리 보기는 read(view='text', find)",
@@ -79,6 +83,7 @@ export const OPS = {
     schema: z.object({ op: z.literal('withdraw'), pids: z.array(z.number().int().min(1)).min(1).max(2000).optional(), all: z.boolean().optional(), reason }).strict() },
 };
 const STRUCTURE_SIG = {
+  styles: "{op:'styles', import?:'standard', define?:[{name, base?, type?:'PARA'|'CHAR', char?, paragraph?, applyToBase?}], update?:[{name,char?,paragraph?}]} — 표준서식 들여오기·새 스타일 정의·기존 문단 스타일 수정. applyToBase:true는 기준 스타일을 쓰는 모든 문단을 새 스타일로 옮긴다. update는 기존 스타일과 사용 문단에서 준 속성만 바꾼다. 이미 만든 스타일로 전체 서식을 다시 입히기는 format(at:{style:'기존 이름'},style:'새 이름'). 이름·사용 수는 read view='styles', 자세한 예는 guide id='styles'.",
   objects_to_body: "{op:'objects_to_body', at?, join_pages?, keep_page_numbers?, drop?, header_rows?, margins?, remove_rest?, background?} — 떠 있는 글상자·괘선으로 그려진 쪽을 진짜 본문 문단·표로 옮기고 그 글상자·선을 지운다(좌표로 줄·칸·합친 칸·쪽을 넘는 표를 읽는다 — 글을 다시 치지 않는다). 이 op 하나로 옮기기와 지우기가 끝난다 — delete_objects 를 함께 내지 않는다. join_pages(기본 true): 다음 쪽의 첫 내용이 열 구조가 같은 표면 앞 쪽 표에 이어 한 표로 만든다 — 쪽마다 되풀이된 머리행은 넣지 않고 버린 줄(why '되풀이 머리행')로 알린다(글자 검사는 버린 글자로 센다). false = 쪽마다 따로 표. 옮길 글상자 밑에 깔린 쪽 크기 그림(쪽 배경)은 background:'remove'(기본)면 지운다(내용으로 보이는 그림은 지우지 않고 글 뒤로), 'behind' 면 모두 글 뒤로 남긴다(그 구역은 앞 구역에 합치지 않아 원래 쪽마다 새 쪽에서 시작). 옮긴 표는 쪽에서 나뉘고, 비게 된 구역은 앞 구역에 합친다(merge_sections 기본 true). 옮기지 못해 남는 개체(그림·표·회전한 도형 등)까지 지우려면 remove_rest:true(또는 종류 목록). 글자·숫자가 원문과 어긋나면(숫자가 붙거나 갈라짐) 적용하지 않는다. at 생략 = 문서 전체. 구조는 요청 내용의 배치 요약이나 read view='layout' 로 확인하고, 결과(쪽 수 pages.all_applied, 글 앞 그림에 가려진 쪽 pages.covered)를 미리 보려면 dry_run",
   paper: "{op:'paper', section, margins?:{left,right,top,bottom,header,footer}, width_mm?, height_mm?, orientation?:'portrait'|'landscape'} — 용지·여백(mm). section 은 0부터(화면의 '구역 2' = section 1 — read view='page')",
   section: "{op:'section', section, page_start?, hide_first_header?…}", split_section: "{op:'split_section', before_ref}", merge_section: "{op:'merge_section', section} — 다음 구역을 합침",
@@ -86,6 +91,29 @@ const STRUCTURE_SIG = {
 };
 
 export const OP_NAMES = [...Object.keys(OPS), ...STRUCTURE_OPS];
+/**
+ * [hwpx-cowork] 숨긴 op(2026-11-18 사용자 결정): 차트·그래프 등 시각화는 AI 가 직접 그린 그림(figure — svg·그림 파일)이 기본이고, 한/글 차트 개체(chart)는
+ * 사용자가 그것을 명시해 요청했을 때만 쓴다(한/글 차트의 모양이 좋지 않다). 그래서 chart 는 없는 것처럼 둔다 — 도구 설명의 op 목록(OPS_BRIEF)·Codex 첫 입력·
+ * 모르는 op 오류의 이름 목록·read view='guide' id='ops' 의 목록에 싣지 않는다. 꼴 검사·저장은 그대로다(내면 받는다).
+ * 안내는 두 길뿐: AI 가 물을 때(read view='guide' id='chart', id='ops' 끝의 한 줄)와 지시가 한/글 차트 개체를 명시했을 때(요청 내용 todo — nativeChartAsked).
+ * 근거: 2026-11-18 실제 Codex 실행('…통계를 작성하여 차트를 제시해줘')이 op 목록의 '한/글 차트'를 골라 한/글 차트 2개를 냈다. 기록 docs/MCP_REDESIGN_2026-11-16.md §14
+ */
+// 'restyle' 은 여러 문단 서식의 안쪽 이름이다(구조 op — server/page-layout-schema.js). 모델에게 보이는 꼴은 format 의 범위·표 대상이고, 서버가 restyle 로 푼다(직접 내도 받는다)
+export const HIDDEN_OPS = Object.freeze(['chart', 'restyle']);
+export const VISIBLE_OP_NAMES = OP_NAMES.filter((name) => !HIDDEN_OPS.includes(name));
+// 지시가 한/글 차트 개체를 가리켜 말했는가(요청 내용 todo 에 꼴 안내 한 줄을 더할지). 그냥 '차트·그래프·시각화'는 아니다 — 한/글·편집 가능·개체·기능을 함께 말했을 때만.
+// 맞아도 고르는 것은 AI 다(안내 글이 조건을 다시 적는다): 놓치면 figure 로 그려지고(기본), 잘못 맞으면 안내 한 줄이 더 실릴 뿐이다
+const HANGUL = '(?:한\\s*\\/?\\s*글|한컴|hwpx?)';
+const NATIVE_CHART_ASK = new RegExp([
+  `${HANGUL}\\s*(?:의|에서\\s*쓰는|용|문서의?|프로그램의?)?\\s*(?:자체|고유|기본|내장|전용)?\\s*(?:의\\s*)?(?:차트|chart)`,
+  '(?:차트|chart)\\s*(?:개체|객체|도구|object|기능(?!별))',
+  '(?:편집|수정)\\s*(?:이\\s*)?(?:가능한|할\\s*수\\s*있는|되는)\\s*(?:차트|그래프)',
+  '(?:네이티브|native|고유|내장|자체)\\s*(?:차트|chart)',
+  `${HANGUL}에서\\s*(?:다시\\s*|직접\\s*|바로\\s*)?(?:편집|수정|고칠)[^.\\n]{0,24}(?:차트|그래프)`,
+  `(?:차트|그래프)[^.\\n]{0,24}${HANGUL}에서\\s*(?:다시\\s*|직접\\s*|바로\\s*)?(?:편집|수정|고칠)`,
+].join('|'), 'i');
+export const nativeChartAsked = (instruction) => NATIVE_CHART_ASK.test(String(instruction ?? ''));
+export const NATIVE_CHART_TODO = "한/글 차트 개체(한/글에서 값·모양을 다시 편집하는 차트)를 새로 만들라는 지시면 edit 의 chart op 로 만든다 — 꼴은 read(view='guide', id='chart'). 그런 지시가 아니면 차트·그래프는 figure 로 직접 그린다.";
 export const isStructureOp = (name) => STRUCTURE_OPS.includes(name);
 const sigOf = (name) => OPS[name]?.sig || STRUCTURE_SIG[name] || '';
 
@@ -98,10 +126,13 @@ const sigOf = (name) => OPS[name]?.sig || STRUCTURE_SIG[name] || '';
  */
 const BRIEF = {
   replace: "{op:'replace', at, find|whole:true, with, occurrence?, style?, reason?} — find(그 문단에 그대로 있는 글)를 with 로. 같은 글이 여럿이면 occurrence 번째(1부터). 빈 문단·빈 칸에 넣기는 find:''. 글을 다 지워도 빈 문단은 남는다(문단째 지우기는 delete_paragraphs)",
-  insert: "{op:'insert', after, paragraphs:[{text|runs, style?, format?}…] | text, reason?} — after 뒤에 차례대로(빈 줄 text:''). 글 일부 서식은 runs:[{text, char:{bold:true}}, {text}]. 새 쪽 시작은 format:{paragraph:{pageBreakBefore:true}}. 같은 after 의 넣기(insert·table·figure·chart)는 낸 차례대로 놓인다",
+  insert: "{op:'insert', after, paragraphs:[{text|runs, style?, format?}…] | text, reason?} — after 뒤에 차례대로(빈 줄 text:''). 글 일부 서식은 runs:[{text, char:{bold:true}}, {text}]. 새 쪽 시작은 format:{paragraph:{pageBreakBefore:true}}. 같은 after 의 넣기(insert·table·figure)는 낸 차례대로 놓인다",
   table: "{op:'table', after, rows:[[칸 글…]…], header_rows?(기본 1), caption?, unit?, notes?, reason?} — caption 은 제목만(번호 자동). unit:'명, %' → 표 앞 단위 줄, notes:'주: …'|[…] → 표 아래 주석(insert 로 따로 넣지 않는다)",
   table_edit: "{op:'table_edit', table, ops:[…], reason?} — 있는 표 고치기. ops 항목: {op:'insert_rows', row, position?:'below'|'above', values?:[[칸 글…]]} · {op:'delete_rows', rows:[…]} · {op:'fill', range:{row_from,row_to,col_from?,col_to?}, color:'#RRGGBB'} · delete_cols·insert_cols·merge·unmerge·border·col_widths·row_height·cell_align·table(인자는 read view='guide' id='table_edit')",
-  format: "{op:'format', at(문단|목록), find?, style?, char?:{bold,italic,underline,sizePt,font,color:'#RRGGBB'…}, paragraph?:{align:'CENTER'…, lineSpacing:{type:'PERCENT',value}, indentPt…, pageBreakBefore:true|false(앞 쪽 나누기)}, reason?} — 글은 그대로 서식만(find = 그 글만)",
+  // 2026-11-18(+190자): 범위·표 대상 — 실제 Codex 실행이 칸마다 op 3,141개를 냈다(한도 초과·120초 시간 초과, §15)
+  format: "{op:'format', at, find?, style?, char?:{bold,italic,underline,sizePt,font,color:'#RRGGBB'…}, paragraph?:{align,lineSpacing:{type:'PERCENT',value},indentPt…,pageBreakBefore:true|false}, reason?} — at: 문단·칸 | 목록 | 범위 's0/p3..p9'·구역 's1'·'*'(본문 문단) | 표 's0/p3#t0'(모든 칸) | {table, row_from?, row_to?, col_from?, col_to?} | {style:'기존 스타일'}. find는 글 일부. 칸·문단마다 op 를 내지 않는다",
+  // 2026-11-18(+215자): 스타일 들여오기 — 같은 실행이 '새 스타일을 만들 도구가 없다'며 문단·칸마다 직접 서식을 줬다(§15)
+  styles: "{op:'styles', import?:'standard', define?:[{name,base?,char?,paragraph?,applyToBase?}], update?:[{name,char?,paragraph?}]} — 표준서식 들여오기·생성. applyToBase:true 또는 update로 동일 스타일 전체 적용. 글머리표 등은 read(view='guide',id='styles'), 이름은 read(view='styles')",
   delete_objects: "{op:'delete_objects', at, kinds?:['table'|'figure'|'shape'|'chart'], reason?} — 개체째 지운다(안의 글도). at: 's0/p3'·목록·'s0/p3..p9'·'s2'·'*'",
   delete_paragraphs: "{op:'delete_paragraphs', at, reason?} — 본문 문단을 통째로(안의 표·그림까지, 빈 줄 없이). at: 's1/p8'·'s1/p8..p13'·이어진 목록(한 구역, p0 제외)",
   move_paragraphs: "{op:'move_paragraphs', at, after|before, reason?} — 원본 그대로(표·서식째) 옮긴다. 같은 구역, 옮기기 전 주소",
@@ -112,24 +143,41 @@ const BRIEF = {
   alternatives: "{op:'alternatives', at, find, options:[{text, reason?}…]} — 여러 안(비교 요청 때만)",
   fill: "{op:'fill', fields:[{name, value, occurrence?}…], reason?} — 누름틀. name 만 주면 그 이름의 칸 모두, 한 칸만은 occurrence(0부터 — read view='fields' 차례). 값은 한 줄",
   toc: "{op:'toc', at?, after?, create_if_missing?, apply_styles?, one_line?, apply_now?} — 차례 새로 고침(없으면 create_if_missing:true + after). 다른 작업을 마친 뒤 마지막에. apply_now 는 지시받았을 때만",
+  // 숨긴 op(HIDDEN_OPS) — OPS_BRIEF 에는 싣지 않는다. read view='guide' id='chart' 가 이 줄을 앞에 보인다
   chart: "{op:'chart', after, chart:{type:'bar'|'line'|'pie'…, title?, categories?, series?:[{name, values}]}, source_table?:{table, header_row, category_col, value_cols, data_rows}, width_mm?, height_mm?, caption?, notes?} — 한/글 차트(값은 categories·series 또는 source_table). caption = 아래 [그림 N] 제목(번호 자동)",
-  figure: "{op:'figure', after|replace, svg|attachment_id, caption?, notes?, width_mm?} — 그림 넣기·바꾸기(svg 는 PNG 로 그린다). notes 는 새 그림만",
+  // 2026-11-18: 차트·그래프도 여기로 온다(chart 줄을 뺀 290자 가운데 +215자) — 직접 그리는 법(svg 의 비율·글자·글꼴, 미리보기)과 문서에 맞추기. 자세한 것은 sig(guide id='ops')
+  figure: "{op:'figure', after|replace, svg|attachment_id, caption?, notes?, width_mm?} — 그림 넣기·바꾸기. 차트·그래프·도식 등 시각화는 직접 그린다: svg(viewBox 로 비율, 글자는 viewBox 단위로 크게, font-family 생략 — 서버가 한글 글꼴 PNG 로 그린다) 또는 만든 그림 파일의 attachment_id. 값은 문서·첨부의 것만, 색·글꼴은 문서의 기존 그림에 맞추고 preview_figure 로 겹침·잘림을 본다. caption = 아래 [그림 N] 제목(번호 자동 — 그림 안에 제목을 넣지 않는다), notes 는 새 그림만",
   replace_all: "{op:'replace_all', find, with, at?, word?, ignore_case?, reason?} — 범위(기본 '*')의 본문·표 칸·캡션·글상자·머리말·꼬리말·각주에서 모두 바꾼다(바탕쪽·메모 제외). word:true = 낱말 단위(조사가 붙은 곳은 빠진다)",
   withdraw: "{op:'withdraw', pids:[12,13] | all:true} — 이 요청에서 낸 내 대기 제안을 거둔다(고쳐 다시 낼 때)",
 };
 const BRIEF_STRUCTURE = "쪽 구성(section 은 0부터 — 화면의 '구역 2' = 1): {op:'paper', section, margins?:{left,right,top,bottom,header,footer}, width_mm?, height_mm?, orientation?:'portrait'|'landscape'} · {op:'header'|'footer', section, text?|clear?} · {op:'page_number', section, position?:'BOTTOM_CENTER'…, start?|clear?} · section·split_section·merge_section·master_page — 인자는 read view='guide' id='ops'|'page'";
-export const OPS_BRIEF = ['replace', 'insert', 'table', 'table_edit', 'format', 'delete_objects', 'delete_paragraphs', 'move_paragraphs', 'objects_to_body', 'memo', 'alternatives', 'fill', 'toc', 'chart', 'figure', 'replace_all', 'withdraw'].map((k) => `· ${BRIEF[k]}`).join('\n')
+export const OPS_BRIEF = ['replace', 'insert', 'table', 'table_edit', 'format', 'styles', 'delete_objects', 'delete_paragraphs', 'move_paragraphs', 'objects_to_body', 'memo', 'alternatives', 'fill', 'toc', 'figure', 'replace_all', 'withdraw'].map((k) => `· ${BRIEF[k]}`).join('\n')
   + `\n· ${BRIEF_STRUCTURE}`;
 
-/** 모든 op 의 꼴(read view='guide' id='ops') */
+/**
+ * 모든 op 의 꼴(read view='guide' id='ops'). 숨긴 op(HIDDEN_OPS — chart)는 목록에 싣지 않고 끝에 한 줄로만 알린다(AI 가 op 를 찾아 물었을 때의 안내),
+ * id='chart' 는 쓰는 조건·꼴·JSON Schema 를 준다
+ */
 export function opsGuide(topic = 'ops') {
+  if (topic === 'styles') return [
+    STRUCTURE_SIG.styles,
+    "read(view='styles')에서 사용 수와 실제 글머리표를 본다. 대학혁신센터 표준서식의 빈 네모는 read(view='styles',id='&□')로 찾을 수 있다. 후보가 여럿이면 표시된 실제 이름이나 ID 문자열을 쓴다.",
+    "빈 네모 글머리표를 채운 네모로: {op:'styles',define:[{name:'채운 네모',base:'기존 이름',applyToBase:true,paragraph:{heading:{type:'BULLET',char:'■'}}}]}. 같은 이름 유지: {op:'styles',update:[{name:'기존 이름',paragraph:{heading:{type:'BULLET',char:'■'}}}]}. 한 제안에 사용 문단 수가 나온다.",
+    "paragraph.heading은 하나를 고른다. {type:'BULLET',char:'■',color?:'#RRGGBB',sizePt?:12}, {type:'NUMBER',level:1,format:'HANGUL_SYLLABLE',pattern:'(^1)',start:3}, {type:'OUTLINE',level:2}(구역 개요 번호 사용), {type:'NONE'}. 수준은 1~10. 번호 모양은 DIGIT·ROMAN_CAPITAL·LATIN_SMALL 등. 글에 직접 입력한 □는 글 바꾸기로 다룬다.",
+    "paragraph.tabs:{stops:[{posPt:72,type:'RIGHT',leader:'DOT'}],autoLeft?,autoRight?}. stops는 새 탭 위치 전체, []은 지정 탭 지우기. 종류 LEFT·RIGHT·CENTER·DECIMAL.",
+    "paragraph.border:{bottom:{type:'SOLID',widthMm:0.5,color:'#23547B'},fill?:'#RRGGBB'|'none',offsetMm?:{left?,right?,top?,bottom?},connect?,ignoreMargin?}. all 또는 각 변을 지정한다. 표 셀 테두리는 table_edit. 문단별 굵게·들여쓰기 등 나머지 속성은 define(applyToBase)·update에서 유지한다.",
+    "대상은 최종본 구역의 본문·표 칸·글상자·캡션·머리말·꼬리말·각주 등의 문단이다. 메모·삭제 개체·바탕쪽은 범위 밖이다. 글자 스타일(CHAR)은 정의 후 원하는 범위에 format으로 적용한다.",
+  ].join('\n');
   if (topic === 'table_edit') return `table_edit 의 ops 항목(JSON Schema):\n${JSON.stringify(z.toJSONSchema(TableOpSchema))}`;
-  if (topic === 'chart') return `chart op(JSON Schema):\n${JSON.stringify(z.toJSONSchema(OPS.chart.schema))}`;
-  if (topic === 'page') return `쪽 구성 op(JSON Schema):\n${JSON.stringify(z.toJSONSchema(StructureOpSchema))}`;
+  if (topic === 'chart') return ["chart op — 한/글에서 값·모양을 다시 편집하는 차트 개체. 사용자가 한/글 차트 개체를 명시해 요청했을 때만 쓴다. 그 밖의 차트·그래프·시각화는 figure 로 직접 그린다(기본).",
+    `· ${BRIEF.chart}`, `JSON Schema:\n${JSON.stringify(z.toJSONSchema(OPS.chart.schema))}`].join('\n');
+  // 숨긴 구조 op(restyle — 여러 문단 서식의 안쪽 이름)는 꼴에서 뺀다(모델에게 보이는 이름은 format 이다 — 2026-11-18 검증에서 이 JSON Schema 에 드러난 것을 고쳤다)
+  if (topic === 'page') return `쪽 구성 op(JSON Schema):\n${JSON.stringify(z.toJSONSchema(z.union(StructureOpSchema.options.filter((o) => { const v = o.shape.op; return !(v.options ?? [...(v.values || [])]).some((name) => HIDDEN_OPS.includes(name)); })), { reused: 'ref' }))}`;
   return ['edit 의 ops — 주소(at·after)는 read 가 보여 준 그대로 쓴다. 표 칸은 at:{table:\'s0/p3#t0\', row, col}(0부터).',
-    ...Object.keys(OPS).map((k) => `· ${OPS[k].sig}`), ...Object.keys(STRUCTURE_SIG).filter((k) => k !== 'footer').map((k) => `· ${STRUCTURE_SIG[k]}`),
-    '쪽 구성 op(paper·section·header·footer·page_number·master_page·split_section·merge_section)와 objects_to_body 는 한 호출의 것을 묶어 제안 하나(되돌리기 한 번)로 낸다.',
-    "더 자세한 인자: read view='guide' id='table_edit' | 'chart' | 'page'"].join('\n');
+    ...Object.keys(OPS).filter((k) => !HIDDEN_OPS.includes(k)).map((k) => `· ${OPS[k].sig}`), ...Object.keys(STRUCTURE_SIG).filter((k) => k !== 'footer').map((k) => `· ${STRUCTURE_SIG[k]}`),
+    '쪽 구성 op(paper·section·header·footer·page_number·master_page·split_section·merge_section)와 objects_to_body, styles 와 여러 문단 format 은 한 호출의 것을 묶어 제안 하나(되돌리기 한 번)로 낸다 — 그 안에서는 styles → 여러 문단 format → 나머지 차례로 반영된다.',
+    "더 자세한 인자: read view='guide' id='table_edit' | 'page'",
+    "목록에 없는 op: 한/글 차트 개체(한/글에서 다시 편집하는 차트)는 사용자가 그것을 명시해 요청했을 때만 — read view='guide' id='chart'. 그 밖의 차트·그래프는 figure 로 직접 그린다."].join('\n');
 }
 
 // 꼴 오류 글. 모르는 키(unrecognized_keys)면 그 자리 객체가 받는 키를 덧붙인다(2026-11-17 — artifacts/mcp-round3-20261117/codex/REPORT.md 문제 4:
@@ -175,7 +223,7 @@ export function parseOps(ops) {
   if (ops.length > 2000) return { ok, errors: [{ index: 0, error: 'ops 는 한 번에 2,000개까지입니다' }] };
   ops.forEach((raw, index) => {
     const name = raw && typeof raw === 'object' ? String(raw.op ?? '') : '';
-    if (!OP_NAMES.includes(name)) { errors.push({ index, error: `ops[${index}]: 모르는 op "${name}" — ${OP_NAMES.join(' · ')} 가운데 하나` }); return; }
+    if (!OP_NAMES.includes(name)) { errors.push({ index, error: `ops[${index}]: 모르는 op "${name}" — ${VISIBLE_OP_NAMES.join(' · ')} 가운데 하나` }); return; }
     // 쪽 구성 op 는 reason 을 받지 않는다(제안 하나로 묶인다) — 다른 op 처럼 붙여 낸 reason 때문에 전체를 다시 내지 않게 여기서 뺀다(2026-11-16 밤 실험)
     const body = isStructureOp(name) && raw && 'reason' in raw ? (({ reason, ...rest }) => rest)(raw) : raw;
     const schema = isStructureOp(name) ? StructureOpSchema : OPS[name].schema;
@@ -184,6 +232,13 @@ export function parseOps(ops) {
   });
   return { ok, errors };
 }
+
+// 문서에 없는 스타일 이름 오류에 붙이는 길잡이(2026-11-18): 실제 Codex 실행이 '&본문제목 이 문서에 없습니다'를 받고 스타일을 포기했다 — 들여오는 길을 알린다
+// format 은 같은 호출의 styles 가 더할 이름을 쓸 수 있다(서식 묶음 안에서 차례대로 반영). 새로 넣는 문단·바꾸는 글(insert·table·replace)의 style 은 문서에 이미 있는 스타일만이다
+const STANDARD_HINT = (name, opName = 'format') => {
+  const how = String(name).trim().startsWith('&') ? "표준서식 스타일은 {op:'styles', import:'standard'} 로 들여옵니다" : "새 스타일은 {op:'styles', define:[{name, base?, char?, paragraph?}]} 로 만듭니다";
+  return opName === 'format' ? ` — ${how}(같은 호출의 format 이 그 이름을 style 로 쓸 수 있다)` : ` — ${how}. 다만 새로 넣는 글의 style 은 문서에 이미 있는 스타일만 됩니다: 그 styles 제안이 반영된 뒤에 쓰거나, 지금은 style 없이 넣습니다`;
+};
 
 /**
  * 꼴 검사를 지난 ops 를 문서에 맞춰 서비스 입력으로 푼다(스타일 이름 → 번호, 표 칸 → 칸 문단 주소, 개체 지우기 범위 → 본문 문단들).
@@ -214,6 +269,38 @@ export function prepareOps(doc, parsed, { earlier = [] } = {}) {
     catch (e) { errors.push({ index: x.index, error: `ops[${x.index}] objects_to_body: ${e.message}` }); }
   }
   const styles = doc.formattingCatalog().styles;
+  // [hwpx-cowork] 이 호출의 styles op 가 더할 스타일 이름(들여오기 = 표준서식 세트에서 문서에 없는 이름, define = 새 이름) — 여러 문단 format 의 style 이 쓸 수 있다
+  const stylesOps = parsed.filter((x) => x.name === 'styles');
+  const coming = [];
+  if (stylesOps.some((x) => x.op.import === 'standard')) { try { for (const st of standardStyleNames(doc)) if (!styles.some((x) => x.name === st.name)) coming.push(st); } catch { /* 원본을 못 읽으면 반영 때 오류로 알린다 */ } }
+  for (const x of stylesOps) for (const d of x.op.define || []) coming.push({ name: d.name, type: d.type || 'PARA' });
+  // 여러 문단 서식(bulk): 문단 전체에 주는 format(find·범위 없음)을 모아 — 범위·표 꼴이 있거나, 같은 호출에 styles 가 있거나, 대상 문단이 BULK_FORMAT_MIN 을 넘으면
+  // 모두 구조 묶음의 restyle 로 낸다(제안 하나). 아니면 예전처럼 문단마다 서식 제안. bulk: op 번호 → { at(restyle 의 at) }
+  const bulk = new Map();
+  {
+    const whole = parsed.filter((x) => x.name === 'format' && x.op.find == null && x.op.start == null && x.op.end == null && x.op.occurrence == null);
+    const items = (x) => (Array.isArray(x.op.at) ? x.op.at : [x.op.at]);
+    const ranged = (v) => (typeof v === 'string' ? RANGE_AT.test(v) : !(v && 'row' in v));
+    // 칸 하나({table,row,col,para?})는 문단별 길(refOf)과 같은 문단만 — 그 칸의 para 번째(기본 첫) 문단 주소로 바꾼다. 못 찾으면 그대로 두어 아래에서 오류가 난다
+    let cellTables = null;
+    const normal = (v) => {
+      if (typeof v === 'string' || !('row' in v)) return v;
+      cellTables ??= doc.tables();
+      const t = cellTables.find((x) => x.key === v.table);
+      const cell = t?.cells.find((c) => v.row >= c.row && v.row < c.row + c.rowSpan && v.col >= c.col && v.col < c.col + c.colSpan);
+      return cell?.refs?.[v.para ?? 0] ?? `${v.table}@없는 칸(${v.row},${v.col})`;
+    };
+    let count = 0; const expanded = new Map(); let bad = false;
+    for (const x of whole) {
+      // 사용 문단은 앞의 스타일 정의·적용 뒤에 정해진다. 준비 단계에서 옛 문서에 고정하지 않는다.
+      if (items(x).some(a => a?.style)) { expanded.set(x.index, []); continue; }
+      try { const refs = restyleRefs(doc, items(x).map(normal)); expanded.set(x.index, refs); count += refs.length; }
+      catch (e) { if (!e?.code) throw e; bad = true; if (items(x).some(ranged)) errors.push(fail(x.index, 'format', e.message)); }
+    }
+    const want = whole.some((x) => items(x).some(ranged)) || (stylesOps.length > 0 && whole.length > 0) || count > BULK_FORMAT_MIN;
+    if (want) for (const x of whole) { if (expanded.has(x.index)) bulk.set(x.index, { at: items(x).map(normal) }); else if (!items(x).some(ranged) && !bad) bulk.set(x.index, { at: items(x).map(normal) }); }
+    // 대상을 못 푼 op(없는 문단·표)는 범위 꼴이면 위에서, 문단·칸 꼴이면 아래 문단별 길(refOf)에서 오류가 난다
+  }
   const fuzzyNoted = new Set();
   const styleId = (name, index, opName) => {
     let hit = styles.find((s) => s.name === name && s.type !== 'CHAR') || styles.find((s) => s.name === name) || styles.find((s) => s.name.trim() === String(name).trim());
@@ -227,8 +314,21 @@ export function prepareOps(doc, parsed, { earlier = [] } = {}) {
       hit = cands[0];
       if (hit && !fuzzyNoted.has(name)) { fuzzyNoted.add(name); notes.push({ op: index, note: `스타일 「${name}」 → 문서의 「${hit.name}」` }); }
     }
-    if (!hit) { errors.push(fail(index, opName, `스타일 「${name}」 이 문서에 없습니다(있는 스타일: ${styles.filter((s) => s.type !== 'CHAR').slice(0, 20).map((s) => s.name).join(' · ')})`)); return null; }
+    if (!hit) { errors.push(fail(index, opName, `스타일 「${name}」 이 문서에 없습니다(있는 스타일: ${styles.filter((s) => s.type !== 'CHAR').slice(0, 20).map((s) => s.name).join(' · ')})${STANDARD_HINT(name, opName)}`)); return null; }
     return String(hit.id);
+  };
+  // 여러 문단 서식의 스타일 이름 → 정확한 이름(문서의 스타일 + 이 호출의 styles 가 더할 이름). 번호는 반영 때 엔진이 찾는다(들여온 뒤에 정해진다)
+  const styleName = (name, index, opName) => {
+    const all = [...styles.filter((x) => x.type !== 'CHAR'), ...coming.filter((x) => x.type !== 'CHAR'), ...styles.filter((x) => x.type === 'CHAR'), ...coming.filter((x) => x.type === 'CHAR')];
+    let hit = all.find((x) => x.name === name) || all.find((x) => x.name.trim() === String(name).trim());
+    if (!hit) {
+      const key = styleKey(name); const cands = [...new Map(all.filter((x) => styleKey(x.name) === key).map((x) => [x.name, x])).values()];
+      if (cands.length > 1) { errors.push(fail(index, opName, `스타일 「${name}」 이 없고 기호만 다른 이름이 여럿입니다: ${cands.map((x) => `「${x.name}」`).join(' · ')}`)); return null; }
+      hit = cands[0];
+      if (hit && !fuzzyNoted.has(name)) { fuzzyNoted.add(name); notes.push({ op: index, note: `스타일 「${name}」 → 「${hit.name}」` }); }
+    }
+    if (!hit) { errors.push(fail(index, opName, `스타일 「${name}」 이 문서에 없습니다(있는 스타일: ${styles.filter((x) => x.type !== 'CHAR').slice(0, 20).map((x) => x.name).join(' · ')})${STANDARD_HINT(name, opName)}`)); return null; }
+    return hit.name;
   };
   let tables = null;
   const refOf = (a, index, opName) => {
@@ -280,10 +380,24 @@ export function prepareOps(doc, parsed, { earlier = [] } = {}) {
     } else if (name === 'table_edit') {
       proposals().push({ index, input: { type: 'table_edit', tableEdit: { table: op.table, ops: op.ops }, reason: op.reason } });
     } else if (name === 'format') {
+      // 여러 문단 서식(위 bulk): 구조 묶음의 restyle 로 — 스타일은 이름으로 싣는다(같은 호출의 styles 가 들여올 이름일 수 있다)
+      const bulkAt = bulk.get(index);
+      if (bulkAt) {
+        if (!op.char && !op.paragraph && op.style == null) { errors.push(fail(index, name, 'style·char·paragraph 가운데 하나가 필요합니다')); continue; }
+        if (op.paragraph?.pageBreakBefore != null) { errors.push(fail(index, name, '쪽 나눔(pageBreakBefore)은 본문 문단 하나씩 줍니다(여러 문단 서식에는 줄 수 없습니다)')); continue; }
+        let style;
+        if (op.style != null) { style = styleName(op.style, index, name); if (style == null) continue; }
+        if (!structure) { structure = { kind: 'structure', indexes: [], ops: [] }; steps.push(structure); }
+        structure.indexes.push(index);
+        structure.ops.push({ op: 'restyle', at: bulkAt.at, ...(style != null ? { style } : {}), ...(op.char ? { char: op.char } : {}), ...(op.paragraph ? { paragraph: op.paragraph } : {}) });
+        continue;
+      }
       const format = { ...(op.char ? { char: op.char } : {}), ...(op.paragraph ? { paragraph: op.paragraph } : {}) };
       if (op.style != null) { const id = styleId(op.style, index, name); if (id == null) continue; format.styleId = id; }
       if (!Object.keys(format).length) { errors.push(fail(index, name, 'style·char·paragraph 가운데 하나가 필요합니다')); continue; }
-      const targets = Array.isArray(op.at) ? op.at : [refOf(op.at, index, name)];
+      // 여기는 문단마다의 서식 제안(글 일부 find·부분 범위 포함). 범위·표 꼴은 문단 전체 서식(위 bulk)에만 쓴다
+      if ((Array.isArray(op.at) ? op.at : [op.at]).some((x) => (typeof x === 'string' ? RANGE_AT.test(x) : !('row' in x)))) { errors.push(fail(index, name, "find(글 일부)·부분 범위는 문단·칸 하나(또는 그 목록)에만 줍니다 — 범위 's0/p3..p9'·표 's0/p3#t0' 대상은 문단 전체 서식(find 없이)에 씁니다")); continue; }
+      const targets = (Array.isArray(op.at) ? op.at : [op.at]).map((x) => refOf(x, index, name));
       if (targets.some((x) => !x)) continue;
       for (const r of targets) {
         // 같은 호출에서 그 문단의 글 전체를 바꾸는(빈 문단에 넣는) replace 뒤에 스타일만 주는 서식: 따로 제안하면 글이 들어간 뒤 서식의 범위가 어긋나 반영되지 않는다
@@ -381,9 +495,55 @@ export function prepareOps(doc, parsed, { earlier = [] } = {}) {
     for (const { kinds, at } of byKinds.values()) { const list = [...at]; for (let i = 0; i < list.length; i += 1000) folded.push({ ...(kinds ? { kinds } : {}), at: list.slice(i, i + 1000) }); }
     m.op.remove_rest = [...own, ...folded];
   }
+  // [hwpx-cowork] 구조 묶음 안의 차례(2026-11-18): styles → 여러 문단 서식(restyle) → 나머지(준 차례). 서식은 주소를 옮기지 않으니 주소를 옮기는 op(objects_to_body·구역 나누기)보다
+  // 먼저 해야 읽은 주소 그대로 맞고, 스타일은 그것을 쓰는 서식보다 먼저 있어야 한다. 서식 값이 같은 restyle 은 합친다 — 한 문단에 서로 다른 서식이 겹치지 않으면 떨어져 있어도
+  // (칸마다 낸 op 수천 개가 값 종류만큼의 op 로), 겹치면(표 전체 → 머리행처럼 뒤가 앞을 덮는 꼴) 잇닿은 것끼리만(차례를 지킨다)
+  if (structure && structure.ops.some((op) => op.op === 'styles' || op.op === 'restyle')) {
+    const rank = (op) => (op.op === 'styles' ? 0 : op.op === 'restyle' ? 1 : 2);
+    const order = structure.ops.map((op, i) => ({ op, i })).sort((a, b) => rank(a.op) - rank(b.op) || a.i - b.i).map((x) => x.op);
+    const restyles = order.filter((op) => op.op === 'restyle');
+    const merged = [];
+    let fixed = [];
+    for (const op of restyles) {
+      if (op.at.some(a => a?.style)) {
+        merged.push(...mergeFixedFormats(doc, fixed), op);
+        fixed = [];
+      } else fixed.push(op);
+    }
+    merged.push(...mergeFixedFormats(doc, fixed));
+    structure.ops = [...order.filter((op) => op.op === 'styles'), ...merged, ...order.filter((op) => rank(op) === 2)];
+    structure.indexes = [...structure.indexes].sort((a, b) => a - b);
+    if (structure.ops.length > 200) errors.push({ index: structure.indexes[0], error: `ops[${structure.indexes[0]}]: 서식 종류가 너무 많습니다(${structure.ops.length}가지 — 200가지까지). 같은 서식은 표·범위 대상으로 한 op 에 모아 주세요` });
+  }
   textBeforeMoves(doc, steps, notes);
   markBundles(steps);
   return { steps, errors, notes, previews, summaries };
+}
+
+// 스타일을 고르는 op의 앞뒤에서 각각 합친다. 앞 op가 다음 op의 사용 문단을 바꿀 수 있다.
+function mergeFixedFormats(doc, group) {
+  if (group.length < 2) return group;
+  const key = op => JSON.stringify([op.style ?? null, op.char ?? null, op.paragraph ?? null]);
+  const owner = new Map();
+  let disjoint;
+  try {
+    disjoint = group.every(op => {
+      const k = key(op);
+      return restyleRefs(doc, op.at).every(ref => {
+        if (owner.has(ref) && owner.get(ref) !== k) return false;
+        owner.set(ref, k); return true;
+      });
+    });
+  } catch (e) { if (!e?.code) throw e; disjoint = false; }
+  const merged = [];
+  for (const op of group) {
+    const k = key(op);
+    const fits = other => other && key(other) === k && other.at.length + op.at.length <= 5000;
+    const into = disjoint ? merged.find(fits) : fits(merged.at(-1)) && merged.at(-1);
+    if (into) into.at.push(...op.at);
+    else merged.push({ ...op, at: [...op.at] });
+  }
+  return merged;
 }
 
 /**

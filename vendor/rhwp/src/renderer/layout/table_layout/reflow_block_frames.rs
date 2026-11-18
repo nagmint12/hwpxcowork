@@ -18,6 +18,33 @@ impl Drop for ReflowBlockHostScope<'_> {
 }
 
 impl LayoutEngine {
+    // [hwpx-cowork] 표에 재조판 블록 호스트 칸이 하나라도 있는가 — 표 전체 스캔 결과를 표 포인터로
+    // 한 번만 센다(`table_reflow_block_host_flag_cache`, 2026-11-18). 판정 자체는 그대로
+    // `has_reflow_block_cell_host` 이고 셈하는 횟수만 줄인다: 칸마다 부르는 `reflow_block_cell_flow_in_cell`
+    // → `measured_reflow_block_table` 이 매번 모든 칸을 훑어, 저장 줄 정보가 없는 2,382칸 표 문서의
+    // 쪽 나눔이 O(칸²)였다. cells 버퍼 주소·칸 수가 달라졌으면(줄·칸 넣기·지우기) 다시 센다.
+    pub(in crate::renderer::layout) fn table_has_reflow_block_cell_host(&self, table: &Table) -> bool {
+        let key = table as *const Table as usize;
+        let cells_ptr = table.cells.as_ptr() as usize;
+        let cells_len = table.cells.len();
+        if let Some(&(ptr, len, flag)) = self.table_reflow_block_host_flag_cache.borrow().get(&key)
+        {
+            if ptr == cells_ptr && len == cells_len {
+                return flag;
+            }
+        }
+        #[cfg(test)]
+        self.table_reflow_block_host_scan_count
+            .set(self.table_reflow_block_host_scan_count.get() + 1);
+        let flag = table.cells.iter().any(|cell| {
+            crate::renderer::float_placement::has_reflow_block_cell_host(&cell.paragraphs)
+        });
+        self.table_reflow_block_host_flag_cache
+            .borrow_mut()
+            .insert(key, (cells_ptr, cells_len, flag));
+        flag
+    }
+
     /// 전체 표·중첩 높이 조회가 같은 측정기의 부모 물리 프레임을 소비한다.
     /// 저장 문서 전체에 적용하지 않고 기존 혼합 재조판 호스트가 있는 표만 측정한다.
     pub(in crate::renderer::layout) fn measured_reflow_block_table(
@@ -25,11 +52,7 @@ impl LayoutEngine {
         table: &Table,
         styles: &ResolvedStyleSet,
     ) -> Option<crate::renderer::height_measurer::MeasuredTable> {
-        if self.profile.get().hwp3_layout()
-            || !table.cells.iter().any(|cell| {
-                crate::renderer::float_placement::has_reflow_block_cell_host(&cell.paragraphs)
-            })
-        {
+        if self.profile.get().hwp3_layout() || !self.table_has_reflow_block_cell_host(table) {
             return None;
         }
         let profile = self.profile.get();
@@ -307,5 +330,137 @@ impl LayoutEngine {
             Some(text_left + offset + margin_left),
             text_top + origin.top,
         ))
+    }
+}
+
+// [hwpx-cowork] 표 단위 재조판 호스트 판정 메모(`table_has_reflow_block_cell_host`, 2026-11-18)의 계약 시험.
+// 합성 입력으로 판정값이 `has_reflow_block_cell_host` 의 표 전체 스캔과 같은지, 스캔을 표마다 한 번만 하는지,
+// 판정이 바뀔 수 있는 경계(칸 글 편집 무효화·칸 수 변화·조판 경계 clear)에서 다시 세는지만 본다 — 조판 좌표는 다루지 않는다.
+#[cfg(test)]
+mod reflow_block_host_flag_tests {
+    use super::LayoutEngine;
+    use crate::model::control::Control;
+    use crate::model::paragraph::{LineSeg, Paragraph};
+    use crate::model::shape::{HorzAlign, HorzRelTo, TextWrap, VertAlign, VertRelTo};
+    use crate::model::table::{Cell, Table};
+    use crate::renderer::float_placement::has_reflow_block_cell_host;
+
+    /// 유효한 저장 줄 하나를 가진 글 문단.
+    fn stored_para() -> Paragraph {
+        Paragraph {
+            text: "가".to_string(),
+            char_count: 1,
+            line_segs: vec![LineSeg {
+                line_height: 1200,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// 저장 줄 정보가 없는 글 문단(개체 없음 — 호스트가 아니다).
+    fn no_ls_para() -> Paragraph {
+        Paragraph {
+            text: "가".to_string(),
+            char_count: 1,
+            ..Default::default()
+        }
+    }
+
+    fn cell(row: u16, col: u16, paragraphs: Vec<Paragraph>) -> Cell {
+        Cell {
+            row,
+            col,
+            row_span: 1,
+            col_span: 1,
+            width: 10000,
+            paragraphs,
+            ..Default::default()
+        }
+    }
+
+    fn table(cells: Vec<Cell>) -> Table {
+        let row_count = cells.iter().map(|c| c.row + 1).max().unwrap_or(1);
+        let col_count = cells.iter().map(|c| c.col + 1).max().unwrap_or(1);
+        Table {
+            row_count,
+            col_count,
+            cells,
+            ..Default::default()
+        }
+    }
+
+    /// 저장 줄 없는 문단에 문단 기준 자리차지 표 하나 — 재조판 블록 호스트.
+    fn host_para() -> Paragraph {
+        let mut child = table(vec![cell(0, 0, vec![stored_para()])]);
+        child.common.treat_as_char = false;
+        child.common.text_wrap = TextWrap::TopAndBottom;
+        child.common.vert_rel_to = VertRelTo::Para;
+        child.common.vert_align = VertAlign::Top;
+        child.common.horz_rel_to = HorzRelTo::Para;
+        child.common.horz_align = HorzAlign::Left;
+        child.caption = None;
+        let mut para = Paragraph::default();
+        para.controls.push(Control::Table(Box::new(child)));
+        para
+    }
+
+    fn direct_scan(table: &Table) -> bool {
+        table
+            .cells
+            .iter()
+            .any(|cell| has_reflow_block_cell_host(&cell.paragraphs))
+    }
+
+    #[test]
+    fn flag_matches_direct_scan_and_scans_each_table_once() {
+        let eng = LayoutEngine::new(96.0);
+        let plain = table(vec![
+            cell(0, 0, vec![stored_para()]),
+            cell(0, 1, vec![no_ls_para()]),
+        ]);
+        let host = table(vec![
+            cell(0, 0, vec![stored_para()]),
+            cell(0, 1, vec![host_para()]),
+        ]);
+        assert!(!direct_scan(&plain), "개체 없는 표는 호스트가 없다");
+        assert!(direct_scan(&host), "자리차지 표를 품은 저장 줄 없는 문단은 호스트다");
+        for _ in 0..5 {
+            assert_eq!(eng.table_has_reflow_block_cell_host(&plain), direct_scan(&plain));
+            assert_eq!(eng.table_has_reflow_block_cell_host(&host), direct_scan(&host));
+        }
+        assert_eq!(
+            eng.table_reflow_block_host_scan_count.get(),
+            2,
+            "표마다 한 번만 훑는다(칸마다 다시 훑으면 O(칸²))"
+        );
+    }
+
+    #[test]
+    fn flag_is_rescanned_after_text_edit_structure_change_and_layout_boundary() {
+        let eng = LayoutEngine::new(96.0);
+        let mut owner = table(vec![
+            cell(0, 0, vec![stored_para()]),
+            cell(0, 1, vec![stored_para()]),
+        ]);
+        assert!(!eng.table_has_reflow_block_cell_host(&owner));
+        assert_eq!(eng.table_reflow_block_host_scan_count.get(), 1);
+
+        // 칸 문단이 재조판 호스트로 바뀌어도 cells 버퍼·칸 수는 그대로다 — 칸 글 편집 무효화가 판정을 버려야 한다.
+        owner.cells[1].paragraphs[0] = host_para();
+        eng.invalidate_cell_units_after_text_edit(&owner.cells[1], &owner, false, false, false);
+        assert!(eng.table_has_reflow_block_cell_host(&owner));
+        assert_eq!(eng.table_reflow_block_host_scan_count.get(), 2);
+
+        // 칸 수가 바뀌면(줄·칸 넣기·지우기) 무효화 호출 없이도 다시 센다.
+        owner.cells.truncate(1);
+        assert!(!eng.table_has_reflow_block_cell_host(&owner));
+        assert_eq!(eng.table_reflow_block_host_scan_count.get(), 3);
+
+        // 조판 경계에서는 다른 포인터 키 캐시와 함께 비운다.
+        eng.clear_layout_caches();
+        assert!(eng.table_reflow_block_host_flag_cache.borrow().is_empty());
+        assert!(!eng.table_has_reflow_block_cell_host(&owner));
+        assert_eq!(eng.table_reflow_block_host_scan_count.get(), 4);
     }
 }

@@ -403,6 +403,79 @@ ${a}`,
     anchor: '        if (this.shouldUsePageLocalRefresh(commandType, beforePos, afterPos, pageLocalOptions)) {\n          this.afterPageLocalEdit();',
     replace: (a) => a.replace('this.afterPageLocalEdit();', 'this.afterPageLocalEdit(afterPos);'),
   },
+  // 2026-11-18 쪽 나눔이 비싼 문서의 타이핑(운영 문서 실측: 20쪽·표 칸 2,382개 — 저장 줄 정보 없음, 전체 쪽 나눔 한 번 300ms).
+  // 원본은 30쪽 이하 문서에서 입력이 120ms 쉴 때마다 동기 전체 쪽 나눔(idle-auto flush)을 한다 — 쪽 수가 비용의 어림이라
+  // 쪽 수는 적어도 쪽 나눔이 비싼 문서는 글자마다 화면이 멈췄다. 지난 쪽 나눔에 실제로 걸린 시간을 재서, 한 프레임(16ms)을
+  // 넘으면 그 8배만큼(최대 1.5초) 쉰 뒤에 한다. 싼 문서(16ms 이하)는 지금과 같은 120ms. 쪽 나눔을 미루는 동안은 원본의
+  // 큰 문서(30쪽 초과 — 쉼 flush 없음)와 같은 길이다: 친 문단은 그 쪽만 다시 그리고, 줄 수가 바뀌면 재개형 작업·대체 flush 가,
+  // 캐럿 옮기기·되돌리기·저장·포커스 잃음은 그 자리에서 flush 한다.
+  {
+    id: 'typing-idle-flush-cost-constants',
+    file: 'src/engine/input-handler.ts',
+    why: '쉼 flush 간격을 지난 쪽 나눔 시간에 맞추는 상수',
+    anchor: 'const DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS = 120;',
+    replace: (a) => `${a}
+// [hwpx-cowork] 전체 쪽 나눔이 이 시간(한 프레임)을 넘는 문서는 쉼 flush 를 더 오래 쉰 뒤에 한다.
+const COWORK_PAGINATION_CHEAP_FLUSH_MS = 16;
+const COWORK_PAGINATION_IDLE_COST_FACTOR = 8;
+const COWORK_PAGINATION_IDLE_FLUSH_MAX_DELAY_MS = 1500;`,
+  },
+  {
+    id: 'typing-idle-flush-cost-delay',
+    file: 'src/engine/input-handler.ts',
+    why: '쪽 나눔이 비싼 문서는 입력이 충분히 쉰 뒤에만 전체 쪽 나눔을 한다(글자마다 멈추지 않게)',
+    anchor: `  private scheduleDeferredPaginationFlush(): void {
+    this.cancelDeferredPaginationFlush();
+    this.deferredPaginationPending = true;
+    if (!this.shouldAutoFlushDeferredPagination()) return;
+    this.deferredPaginationFlushTimer = setTimeout(() => {
+      this.flushDeferredPaginationIfNeeded('idle-auto');
+    }, DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS);
+  }`,
+    replace: () => `  // [hwpx-cowork] 지난 전체 쪽 나눔(동기 flush)에 걸린 시간(ms) — 아직 재지 않았으면 0(원본 간격 그대로).
+  private coworkPaginationFlushCostMs = 0;
+
+  private coworkIdleFlushDelayMs(): number {
+    const cost = this.coworkPaginationFlushCostMs;
+    if (!(cost > COWORK_PAGINATION_CHEAP_FLUSH_MS)) return DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS;
+    return Math.min(
+      COWORK_PAGINATION_IDLE_FLUSH_MAX_DELAY_MS,
+      Math.max(DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS, Math.round(cost * COWORK_PAGINATION_IDLE_COST_FACTOR)),
+    );
+  }
+
+  private coworkTimedPaginationFlush(): void {
+    const started = performance.now();
+    try {
+      this.wasm.flushDeferredPagination();
+    } finally {
+      this.coworkPaginationFlushCostMs = performance.now() - started;
+    }
+  }
+
+  private scheduleDeferredPaginationFlush(): void {
+    this.cancelDeferredPaginationFlush();
+    this.deferredPaginationPending = true;
+    if (!this.shouldAutoFlushDeferredPagination()) return;
+    this.deferredPaginationFlushTimer = setTimeout(() => {
+      this.flushDeferredPaginationIfNeeded('idle-auto');
+    }, this.coworkIdleFlushDelayMs());
+  }`,
+  },
+  {
+    id: 'typing-idle-flush-cost-measure',
+    file: 'src/engine/input-handler.ts',
+    why: '경계·쉼 flush 의 전체 쪽 나눔 시간을 잰다',
+    anchor: '      this.deferredPaginationRunner.cancel();\n      this.wasm.flushDeferredPagination();',
+    replace: () => '      this.deferredPaginationRunner.cancel();\n      this.coworkTimedPaginationFlush();',
+  },
+  {
+    id: 'typing-idle-flush-cost-measure-cell-overflow',
+    file: 'src/engine/input-handler.ts',
+    why: '칸 넘침 flush 의 전체 쪽 나눔 시간도 같은 값으로 잰다',
+    anchor: '    try {\n      this.wasm.flushDeferredPagination();\n      this.deferredPaginationPending = false;\n      this.cursor.invalidateFocusedCellCursorGeometry();\n      this.lastCellKey = null;',
+    replace: (a) => a.replace('this.wasm.flushDeferredPagination();', 'this.coworkTimedPaginationFlush();'),
+  },
   {
     id: 'toolbar-preserve-unchanged-toggle',
     file: 'src/ui/toolbar.ts',

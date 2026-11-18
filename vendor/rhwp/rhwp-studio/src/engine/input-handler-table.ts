@@ -760,79 +760,35 @@ export function moveSelectedPicture(this: any, key: 'ArrowUp' | 'ArrowDown' | 'A
 }
 
 export function updateMoveDrag(this: any, e: MouseEvent): void {
-  if (!this.moveDragState) return;
-  const zoom = this.viewportManager.getZoom();
-  const sc = this.container.querySelector('#scroll-content');
-  if (!sc) return;
-  const cr = sc.getBoundingClientRect();
-  const cx = e.clientX - cr.left;
-  const cy = e.clientY - cr.top;
-  const pi = this.virtualScroll.getPageAtPoint(cx, cy);
-  const po = this.virtualScroll.getPageOffset(pi);
-  const pw = this.virtualScroll.getPageWidth(pi);
-  const pl = this.virtualScroll.getPageLeftResolved(pi, sc.clientWidth);
-  const px = (cx - pl) / zoom;
-  const py = (cy - po) / zoom;
-
-  if (!this.moveDragState.hasMoved) {
-    const threshold = 3 / Math.max(zoom, 0.1);
-    const dxFromStart = px - this.moveDragState.startPageX;
-    const dyFromStart = py - this.moveDragState.startPageY;
-    if (Math.hypot(dxFromStart, dyFromStart) < threshold) return;
-    this.moveDragState.hasMoved = true;
-  }
-
-  // 이전 위치와의 차이를 HWPUNIT으로 변환 (1px = 7200/96 = 75 HWPUNIT)
-  const deltaXpx = px - this.moveDragState.lastPageX;
-  const deltaYpx = py - this.moveDragState.lastPageY;
-  const deltaH = Math.round(deltaXpx * 75);
-  const deltaV = Math.round(deltaYpx * 75);
-
-  if (deltaH === 0 && deltaV === 0) return;
-
-  try {
-    const ref = this.moveDragState.tableRef;
-    const result = this.wasm.moveTableOffset(ref.sec, ref.ppi, ref.ci, deltaH, deltaV);
-    if (result.ppi !== ref.ppi || result.ci !== ref.ci) {
-      this.moveDragState.tableRef = { sec: ref.sec, ppi: result.ppi, ci: result.ci };
-      this.cursor.updateSelectedTableRef(ref.sec, result.ppi, result.ci);
-    }
-    this.moveDragState.lastPageX = px;
-    this.moveDragState.lastPageY = py;
-    this.moveDragState.totalDeltaH += deltaH;
-    this.moveDragState.totalDeltaV += deltaV;
-    this.eventBus.emit('document-changed');
-    this.renderTableObjectSelection();
-  } catch (err) {
-    console.warn('[InputHandler] 표 이동 드래그 실패:', err);
-  }
+  if (this.moveDragState) this.updateObjectMovePreview(this.moveDragState, this.tableObjectRenderer, e, 3);
 }
 
 export function finishMoveDrag(this: any): void {
   const state = this.moveDragState;
-
-  // Undo 기록: 드래그 전체를 하나의 명령으로 기록
-  if (state) {
-    const { totalDeltaH, totalDeltaV, startPpi, tableRef } = state;
-    if (totalDeltaH !== 0 || totalDeltaV !== 0) {
-      this.executeOperation({ kind: 'record', command:
-        new MoveTableCommand(
-          tableRef.sec, startPpi, tableRef.ci,
-          totalDeltaH, totalDeltaV,
-          tableRef.ppi, tableRef.ci,
-        ),
-      });
-    }
-  }
   this.isMoveDragging = false;
   this.moveDragState = null;
-  if (this.dragRafId) {
-    cancelAnimationFrame(this.dragRafId);
-    this.dragRafId = 0;
-  }
+  this.tableObjectRenderer?.previewMove(0, 0);
   this.container.style.cursor = '';
+  if (!state) return;
 
-  if (state?.pendingEnterCellHit && !state.hasMoved && state.totalDeltaH === 0 && state.totalDeltaV === 0) {
+  // [hwpx-cowork] moveTableOffset은 문서 조판을 동반하므로 놓을 때만 호출한다.
+  const { tableRef: ref, totalDeltaH, totalDeltaV } = state;
+  if (totalDeltaH || totalDeltaV) {
+    try {
+      const result = this.wasm.moveTableOffset(ref.sec, ref.ppi, ref.ci, totalDeltaH, totalDeltaV);
+      if (result.ppi !== ref.ppi || result.ci !== ref.ci) {
+        this.cursor.updateSelectedTableRef(ref.sec, result.ppi, result.ci);
+      }
+      this.executeOperation({ kind: 'record', command:
+        new MoveTableCommand(ref.sec, ref.ppi, ref.ci, totalDeltaH, totalDeltaV, result.ppi, result.ci),
+      });
+      this.eventBus.emit('document-changed');
+    } catch (err) {
+      console.warn('[InputHandler] 표 이동 드래그 실패:', err);
+    }
+  }
+
+  if (state.pendingEnterCellHit && !state.hasMoved) {
     this.cursor.exitTableObjectSelection();
     this.tableObjectRenderer?.clear();
     this.eventBus.emit('table-object-selection-changed', false);
