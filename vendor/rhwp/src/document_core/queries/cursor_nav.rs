@@ -1853,6 +1853,32 @@ impl DocumentCore {
         cell_target: Option<SelectionCellTarget<'_>>,
         page_hints: Option<(u32, u32)>,
     ) -> Result<String, HwpError> {
+        self.selection_rects_for_target(
+            section_idx,
+            start_para_idx,
+            start_char_offset,
+            end_para_idx,
+            end_char_offset,
+            cell_target,
+            page_hints,
+            true,
+        )
+    }
+
+    /// [hwpx-cowork] `narrow_cell_pages`: 쪽 힌트가 없는 셀 선택을 셀이 실제로 놓인 쪽으로 좁힐지.
+    /// 좁힌 후보에서 줄 조각을 모두 찾지 못하면 `false` 로 다시 불러 종전 전체 후보로 되돌린다.
+    #[allow(clippy::too_many_arguments)]
+    fn selection_rects_for_target(
+        &self,
+        section_idx: usize,
+        start_para_idx: usize,
+        start_char_offset: usize,
+        end_para_idx: usize,
+        end_char_offset: usize,
+        cell_target: Option<SelectionCellTarget<'_>>,
+        page_hints: Option<(u32, u32)>,
+        narrow_cell_pages: bool,
+    ) -> Result<String, HwpError> {
         use crate::renderer::render_tree::{RenderNode, RenderNodeType};
 
         // ── 커서 위치를 pre-built tree에서 직접 찾는 헬퍼 ──
@@ -2374,6 +2400,62 @@ impl DocumentCore {
             SelectionPagePlan::Hinted(pages) => (pages, true),
             SelectionPagePlan::FullFallback(pages) => (pages, false),
         };
+        // [hwpx-cowork] 2026-11-19 — 쪽 힌트 없는 셀 선택(편집기 플러그인의 강조·캐럿 자리 질의)은 표가 걸친
+        // 모든 쪽의 렌더 트리를 새로 지었다(642행 표 = 18쪽, 질의 한 번 약 90ms — 칸 글을 칠 때마다 든다).
+        // 셀 위치 질의(#4128 `find_pages_for_cell_position`, 행/블록 겹침 수준)로 셀이 실제로 놓인 쪽만 남긴다.
+        // 아래 줄 조각 탐색은 쪽 차례의 첫 일치를 쓰고, 셀 글은 그 행을 담은 조각 쪽에만 그려진다(반복 머리행
+        // 사본은 원본 행 쪽보다 뒤라 첫 일치가 아니다). 그래서 종전 후보 차례를 지킨 부분집합에서 모든 조각을
+        // 찾으면 결과가 종전과 같다. 하나라도 못 찾으면 끝에서 종전 전체 후보로 다시 계산한다.
+        let narrowed_pages = if !used_hints && narrow_cell_pages {
+            cell_target
+                .and_then(|target| {
+                    let (control_idx, cell_idx) = match target {
+                        SelectionCellTarget::Flat {
+                            control_idx,
+                            cell_idx,
+                            ..
+                        } => (control_idx, cell_idx),
+                        SelectionCellTarget::Path { path, .. } => {
+                            let (control_idx, cell_idx, _) = *path.first()?;
+                            (control_idx, cell_idx)
+                        }
+                    };
+                    // 한 행짜리 표는 좁힐 것이 없다. 투명 1×1 래퍼는 조각의 행 번호가 안쪽 표 기준
+                    // (`row_cursor_is_nested`)이라 바깥 칸의 행 겹침으로 고르면 안 된다 — 둘 다 종전대로 둔다.
+                    let multi_row_table = self
+                        .document
+                        .sections
+                        .get(section_idx)
+                        .and_then(|section| section.paragraphs.get(target.parent_para_idx()))
+                        .and_then(|para| para.controls.get(control_idx))
+                        .is_some_and(|control| {
+                            matches!(control, Control::Table(table) if table.row_count > 1)
+                        });
+                    if !multi_row_table {
+                        return None;
+                    }
+                    self.find_pages_for_cell_position(
+                        section_idx,
+                        target.parent_para_idx(),
+                        control_idx,
+                        cell_idx,
+                        None,
+                    )
+                    .ok()
+                })
+                .map(|cell_pages| {
+                    page_nums
+                        .iter()
+                        .copied()
+                        .filter(|page| cell_pages.contains(page))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|pages| !pages.is_empty() && pages.len() < page_nums.len())
+        } else {
+            None
+        };
+        let narrowed = narrowed_pages.is_some();
+        let page_nums = narrowed_pages.unwrap_or(page_nums);
 
         let selection_tree = |pn| {
             if used_hints {
@@ -2679,6 +2761,19 @@ impl DocumentCore {
                 None,
             );
         }
+        // [hwpx-cowork] 좁힌 쪽에서 조각을 다 찾지 못했으면 종전 전체 후보로 다시 계산한다(결과 불변).
+        if narrowed && rendered_segments != expected_segments {
+            return self.selection_rects_for_target(
+                section_idx,
+                start_para_idx,
+                start_char_offset,
+                end_para_idx,
+                end_char_offset,
+                cell_target,
+                None,
+                false,
+            );
+        }
 
         Ok(format!("[{}]", rects.join(",")))
     }
@@ -2866,5 +2961,143 @@ mod issue_2215_selection_page_plan_tests {
             plan_selection_pages(&[2, 4, 9, 10], Some(4), Some(10)),
             SelectionPagePlan::Hinted(vec![4, 9, 10])
         );
+    }
+}
+
+/// [hwpx-cowork] 2026-11-19 쪽 힌트 없는 셀 선택의 쪽 좁히기 — 결과는 종전 전체 후보와 같고,
+/// 여러 쪽에 걸친 표에서 질의 한 번이 짓는 렌더 트리는 셀이 놓인 쪽뿐이다.
+/// 관계형(좁힌 결과 = 종전 전체 후보의 결과). 시각 측정 없음 — 출력 불변 계약만 본다.
+#[cfg(test)]
+mod hwpx_cowork_cell_selection_page_narrowing_tests {
+    use super::SelectionCellTarget;
+    use crate::diagnostics::perf_counters;
+    use crate::document_core::DocumentCore;
+
+    fn idx(json: &str, key: &str) -> usize {
+        let at = json.find(&format!("\"{key}\":")).expect(key) + key.len() + 3;
+        json[at..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .expect(key)
+    }
+
+    /// 여러 쪽에 걸치는 rows×2 표(쪽에 걸친 줄은 나눈다 — RowBreak). 칸마다 글 길이가 달라 한 줄·여러 줄 칸이 섞여
+    /// 쪽 경계에서 행이 잘리는 조각도 생긴다. `repeat_header` 면 첫 행이 이어지는 쪽마다 다시 그려진다.
+    fn multi_page_table(rows: u16, repeat_header: bool) -> (DocumentCore, usize, usize) {
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+        let made = core.create_table_native(0, 0, 0, rows, 2).expect("table");
+        let (para, control) = (idx(&made, "paraIdx"), idx(&made, "controlIdx"));
+        match &mut core.document.sections[0].paragraphs[para].controls[control] {
+            crate::model::control::Control::Table(table) => {
+                table.page_break = crate::model::table::TablePageBreak::RowBreak;
+                table.repeat_header = repeat_header;
+                if repeat_header {
+                    for cell in table.cells.iter_mut().filter(|cell| cell.row == 0) {
+                        cell.is_header = true;
+                    }
+                }
+            }
+            _ => panic!("표가 아니다"),
+        }
+        core.rebuild_derived_state();
+        for cell in 0..usize::from(rows) * 2 {
+            let text = format!("칸 {cell} ").repeat(1 + cell % 7);
+            core.insert_text_in_cell_native(0, para, control, cell, 0, 0, &text)
+                .expect("cell text");
+        }
+        core.paginate_if_needed();
+        (core, para, control)
+    }
+
+    fn rects(core: &DocumentCore, para: usize, control: usize, cell: usize, end: usize, narrow: bool) -> String {
+        core.selection_rects_for_target(
+            0,
+            0,
+            0,
+            0,
+            end,
+            Some(SelectionCellTarget::Flat {
+                parent_para_idx: para,
+                control_idx: control,
+                cell_idx: cell,
+            }),
+            None,
+            narrow,
+        )
+        .expect("selection rects")
+    }
+
+    #[test]
+    fn narrowed_cell_selection_matches_the_full_page_scan() {
+        for repeat_header in [false, true] {
+            assert_narrowed_matches_full(repeat_header);
+        }
+    }
+
+    fn assert_narrowed_matches_full(repeat_header: bool) {
+        let (core, para, control) = multi_page_table(150, repeat_header);
+        let host_pages = core.find_pages_for_paragraph(0, para).unwrap().len();
+        assert!(host_pages >= 3, "표가 여러 쪽에 걸쳐야 한다: {host_pages}");
+        let mut compared = 0;
+        for cell in 0..300 {
+            let len = core
+                .get_cell_paragraph_ref(0, para, control, cell, 0)
+                .map(|p| p.text.chars().count())
+                .unwrap_or(0);
+            for end in [1, len / 2, len] {
+                if end == 0 {
+                    continue;
+                }
+                let narrowed = rects(&core, para, control, cell, end, true);
+                let full = rects(&core, para, control, cell, end, false);
+                assert_eq!(narrowed, full, "repeat_header {repeat_header} cell {cell} end {end}");
+                assert!(narrowed.contains("pageIndex"), "cell {cell} end {end}: {narrowed}");
+                compared += 1;
+            }
+        }
+        assert!(compared >= 600);
+    }
+
+    #[test]
+    fn narrowed_cell_selection_builds_only_the_cells_pages() {
+        let (core, para, control) = multi_page_table(150, false);
+        let host_pages = core.find_pages_for_paragraph(0, para).unwrap().len() as u64;
+        assert!(host_pages >= 3, "표가 여러 쪽에 걸쳐야 한다: {host_pages}");
+        // 마지막 칸(마지막 쪽)과 가운데 칸 — 표가 걸친 쪽 수와 무관하게 셀이 놓인 쪽(컷 경계면 2쪽)만 짓는다.
+        for cell in [299, 150] {
+            let len = core.get_cell_paragraph_ref(0, para, control, cell, 0).unwrap().text.chars().count();
+            perf_counters::reset_thread_page_tree_builds();
+            let narrowed = rects(&core, para, control, cell, len, true);
+            let narrowed_builds = perf_counters::thread_page_tree_builds();
+            perf_counters::reset_thread_page_tree_builds();
+            let full = rects(&core, para, control, cell, len, false);
+            let full_builds = perf_counters::thread_page_tree_builds();
+            assert_eq!(narrowed, full);
+            assert!(narrowed_builds <= 2, "cell {cell}: {narrowed_builds} builds");
+            assert_eq!(full_builds, host_pages, "종전 경로는 표가 걸친 모든 쪽을 짓는다");
+        }
+    }
+
+    #[test]
+    fn single_row_tables_keep_the_full_scan() {
+        // 한 행짜리 표(투명 래퍼 꼴 포함)는 좁히지 않는다 — 결과·빌드 수가 종전과 같다.
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+        let made = core.create_table_native(0, 0, 0, 1, 1).expect("table");
+        let (para, control) = (idx(&made, "paraIdx"), idx(&made, "controlIdx"));
+        core.insert_text_in_cell_native(0, para, control, 0, 0, 0, &"긴 칸 글 ".repeat(400))
+            .unwrap();
+        core.paginate_if_needed();
+        let len = core.get_cell_paragraph_ref(0, para, control, 0, 0).unwrap().text.chars().count();
+        perf_counters::reset_thread_page_tree_builds();
+        let narrowed = rects(&core, para, control, 0, len, true);
+        let narrowed_builds = perf_counters::thread_page_tree_builds();
+        perf_counters::reset_thread_page_tree_builds();
+        let full = rects(&core, para, control, 0, len, false);
+        assert_eq!(narrowed, full);
+        assert_eq!(narrowed_builds, perf_counters::thread_page_tree_builds());
     }
 }

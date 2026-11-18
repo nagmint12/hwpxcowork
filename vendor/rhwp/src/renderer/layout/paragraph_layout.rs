@@ -5266,23 +5266,79 @@ impl LayoutEngine {
         );
         (inner > 0.0)
             .then(|| {
-                crate::renderer::composer::recompose_stored_lines_in_frame_with_known_square_band(
+                self.recompose_body_frame(
                     comp,
                     para,
                     frame,
+                    frame_width,
                     inner,
                     styles,
-                    self.dpi,
-                    self.profile.get().stored_geometry_policy(),
-                    crate::renderer::composer::StoredRowMissPolicy::Reflow,
-                    &self.body_float_carve_evidence.borrow(),
                     wrap_anchor.is_some(),
-                    self.profile.get().hwpx_stored_layout(),
-                    self.uniform_filler_ladder.get(),
-                    &[],
                 )
             })
             .flatten()
+    }
+
+    /// [hwpx-cowork] 본문 문단의 프레임 재구성 — 내용·구성·프레임 폭·문맥이 같은 문단은 문서의 기억을 쓴다
+    /// (`composer::frame_memo`). 편집으로 쪽이 밀려 보이는 쪽을 다시 그릴 때, 바뀌지 않은 문단의 줄을 다시 짜지 않는다.
+    /// `frame`·`inner` 는 `frame_width` 와 문단 모양에서 만든 것이어야 한다(열쇠는 폭만 담는다).
+    #[allow(clippy::too_many_arguments)]
+    fn recompose_body_frame(
+        &self,
+        comp: &ComposedParagraph,
+        para: &Paragraph,
+        frame: crate::renderer::composer::ParagraphBox,
+        frame_width: f64,
+        inner: f64,
+        styles: &ResolvedStyleSet,
+        known_square_band: bool,
+    ) -> Option<ComposedParagraph> {
+        let memo = self.frame_memo();
+        let policy = self.profile.get().stored_geometry_policy();
+        let hwpx_stored_layout = self.profile.get().hwpx_stored_layout();
+        let stored_rows_untrusted = self.uniform_filler_ladder.get();
+        let evidence = self.body_float_carve_evidence.borrow();
+        let recomposed = crate::renderer::composer::frame_memo::recompose::<std::convert::Infallible>(
+            memo.as_deref(),
+            || {
+                crate::renderer::composer::frame_memo::key(
+                    para,
+                    comp,
+                    styles,
+                    frame_width,
+                    self.dpi,
+                    policy,
+                    &evidence,
+                    known_square_band,
+                    hwpx_stored_layout,
+                    stored_rows_untrusted,
+                )
+            },
+            para,
+            || {
+                Ok(
+                    crate::renderer::composer::recompose_stored_lines_in_frame_with_known_square_band(
+                        comp,
+                        para,
+                        frame,
+                        inner,
+                        styles,
+                        self.dpi,
+                        policy,
+                        crate::renderer::composer::StoredRowMissPolicy::Reflow,
+                        &evidence,
+                        known_square_band,
+                        hwpx_stored_layout,
+                        stored_rows_untrusted,
+                        &[],
+                    ),
+                )
+            },
+        );
+        match recomposed {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
     }
 
     /// 문단 일부를 레이아웃하여 단 노드에 추가
@@ -5397,20 +5453,15 @@ impl LayoutEngine {
                 // NO_LS 와 저장분할 both go to the frame: no stored record means
                 // the rebuild case outright, and the frame's fill owns it.
                 if !accepted_composition && column_inner_width > 0.0 {
-                    crate::renderer::composer::recompose_stored_lines_in_frame_with_known_square_band(
+                    // [hwpx-cowork] 같은 내용·같은 프레임의 문단은 문서의 기억을 쓴다.
+                    self.recompose_body_frame(
                         comp,
                         para,
                         paragraph_box,
+                        frame_width,
                         column_inner_width,
                         styles,
-                        self.dpi,
-                        self.profile.get().stored_geometry_policy(),
-                        crate::renderer::composer::StoredRowMissPolicy::Reflow,
-                        &self.body_float_carve_evidence.borrow(),
                         wrap_anchor.is_some(),
-                        self.profile.get().hwpx_stored_layout(),
-                        self.uniform_filler_ladder.get(),
-                        &[],
                     )
                 } else {
                     None

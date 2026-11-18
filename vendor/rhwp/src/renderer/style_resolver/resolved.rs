@@ -615,6 +615,89 @@ pub struct ResolvedStyleSet {
 }
 
 impl ResolvedStyleSet {
+    /// [hwpx-cowork] 2026-11-19: `old` 스타일로 계산한 조판 기억(`renderer::layout_memo`)을 이 스타일에서도 쓸 수 있는가.
+    ///
+    /// 글자·문단 모양을 새로 적용하면(진하게·줄 간격 …) 모양 표 **끝에 새 번호가 붙을 뿐** 기존 번호의 풀린 값은
+    /// 그대로다. 기억의 열쇠는 문단이 가리키는 모양 번호를 담으므로(문단 지문), 기존 번호의 값과 문서 전체에 걸리는
+    /// 값이 모두 같으면 기억한 결과는 새 스타일에서도 같다. 하나라도 다르면 거짓 — 호출부가 기억을 비운다
+    /// (스타일 정의 고치기·dpi·글꼴 환경·호환 정책이 바뀐 경우).
+    /// 필드를 `..` 없이 풀어 쓴다 — 스타일 묶음에 필드가 늘면 여기서 컴파일이 멈춘다.
+    /// 측정 문맥 셋(`supplemental_metrics`·`kerning_measurement_context`·`horizontal_shaping_context`)과
+    /// 구역 탭 폭은 여기서 보지 않는다: 앞의 셋은 바뀌는 자리마다 기억을 비우고 쪽 나눔 시작의 환경 표지로도 견주며,
+    /// 탭 폭은 기억의 열쇠에 들어 있다.
+    pub(crate) fn keeps_layout_of(&self, old: &Self) -> bool {
+        fn debug_eq<T: std::fmt::Debug + ?Sized>(a: &T, b: &T) -> bool {
+            format!("{a:?}") == format!("{b:?}")
+        }
+        fn prefix_debug_eq<T: std::fmt::Debug>(new: &[T], old: &[T]) -> bool {
+            new.len() >= old.len() && old.iter().zip(new).all(|(old, new)| debug_eq(old, new))
+        }
+        let Self {
+            hangul2024_missing_glyphs,
+            section_tab_width_bits: _,
+            source_hwp3_native,
+            source_program_projection_slots,
+            script_metrics,
+            native_pua_fonts,
+            display_only_otf_slots,
+            char_overlap_size_bounds,
+            source_char_shapes,
+            resolved_dpi,
+            isolated_jamo_font,
+            page_number_char_style_id,
+            page_number_font_is_hft,
+            supplemental_metrics: _,
+            style_char_shapes,
+            char_styles,
+            para_styles,
+            border_styles,
+            numberings,
+            bullets,
+            hwp3_variant,
+            hft_ascii_halfwidth,
+            kerning_measurement_context: _,
+            horizontal_shaping_context: _,
+        } = self;
+        let old_char_count = old.char_styles.len();
+        let known_slot = |key: &(u32, usize)| (key.0 as usize) < old_char_count;
+        *hangul2024_missing_glyphs == old.hangul2024_missing_glyphs
+            && *source_hwp3_native == old.source_hwp3_native
+            && debug_eq(script_metrics, &old.script_metrics)
+            && std::sync::Arc::ptr_eq(native_pua_fonts, &old.native_pua_fonts)
+            && *char_overlap_size_bounds == old.char_overlap_size_bounds
+            && resolved_dpi.map(f64::to_bits) == old.resolved_dpi.map(f64::to_bits)
+            && debug_eq(isolated_jamo_font, &old.isolated_jamo_font)
+            && *page_number_char_style_id == old.page_number_char_style_id
+            && *page_number_font_is_hft == old.page_number_font_is_hft
+            && *hwp3_variant == old.hwp3_variant
+            && *hft_ascii_halfwidth == old.hft_ascii_halfwidth
+            // 기존 번호의 풀린 값(새 번호가 끝에 붙는 것은 괜찮다)
+            && char_styles.len() >= old_char_count
+            && char_styles[..old_char_count] == old.char_styles[..]
+            && style_char_shapes.len() >= old.style_char_shapes.len()
+            && style_char_shapes[..old.style_char_shapes.len()] == old.style_char_shapes[..]
+            && prefix_debug_eq(para_styles, &old.para_styles)
+            && prefix_debug_eq(border_styles, &old.border_styles)
+            && prefix_debug_eq(numberings, &old.numberings)
+            && prefix_debug_eq(bullets, &old.bullets)
+            && prefix_debug_eq(source_char_shapes, &old.source_char_shapes)
+            // 기존 글자 모양 번호에 걸린 대체 프로그램·표시 전용 슬롯이 그대로인가
+            && old
+                .source_program_projection_slots
+                .iter()
+                .all(|(key, value)| source_program_projection_slots.get(key) == Some(value))
+            && source_program_projection_slots
+                .keys()
+                .all(|key| !known_slot(key) || old.source_program_projection_slots.contains_key(key))
+            && old
+                .display_only_otf_slots
+                .iter()
+                .all(|key| display_only_otf_slots.contains(key))
+            && display_only_otf_slots
+                .iter()
+                .all(|key| !known_slot(key) || old.display_only_otf_slots.contains(key))
+    }
+
     pub(crate) fn section_tab_scope(&self, spacing: u32, dpi: f64) -> SectionTabScope {
         // HWPX tabStop 8000 = tabStopVal 4000 = 40pt. 정의가 없는 0은
         // 기존 기본값 4000 HWPUNIT을 사용한다. u32 전 범위를 f64로 정확히 읽는다.

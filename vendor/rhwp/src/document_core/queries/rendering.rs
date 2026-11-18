@@ -1308,7 +1308,7 @@ impl DocumentCore {
     /// 만든다. 둘 중 하나만 남는 부분 갱신은 허용하지 않는다.
     pub(crate) fn refresh_exact_font_measurement_contexts(&mut self) {
         // [hwpx-cowork] 배치 안에서도 다음 쪽 나눔 전에 커서·칸 측정이 새 글꼴을 읽을 수 있다.
-        self.cell_compose_memo.invalidate();
+        self.invalidate_layout_memos();
         let (kerning, shaping) = self
             .layout_engine
             .exact_font_measurement_context_snapshots();
@@ -1372,9 +1372,15 @@ impl DocumentCore {
     /// 선등록한다. 개별 32 MiB·문서 layout owner 총 64 MiB 상한은 기존 page lowering과
     /// 동일하며, 초과·손상 source는 추측 없이 등록하지 않는다.
     pub(crate) fn rebuild_embedded_exact_font_sources(&mut self) {
-        // [hwpx-cowork] 새 문서에 내장 글꼴이 없으면 아래에서 바로 돌아간다.
-        self.cell_compose_memo.invalidate();
-        self.layout_engine.clear_exact_font_sources();
+        // [hwpx-cowork] 실제 글꼴 등록이나 그 측정 문맥이 있었다면 여기서 사라진다 — 측정 환경이 바뀌므로 조판 기억을
+        // 버린다. 아무것도 없던 문서(보통의 문서)는 환경이 그대로이므로 남긴다: 이 함수는 조판을 통째로 다시 하는
+        // 경로(`rebuild_derived_state` — 보충 측정을 켜고 끌 때마다)가 늘 부른다. 아래에서 내장 글꼴을 등록하면 그때 버린다.
+        let had_exact_font_contexts = self.styles.kerning_measurement_context.is_some()
+            || self.styles.horizontal_shaping_context.is_some();
+        let cleared_exact_font_sources = self.layout_engine.clear_exact_font_sources();
+        if cleared_exact_font_sources || had_exact_font_contexts {
+            self.invalidate_layout_memos();
+        }
         self.styles.kerning_measurement_context = None;
         self.styles.horizontal_shaping_context = None;
         let has_embedded_source = self
@@ -1392,6 +1398,8 @@ impl DocumentCore {
         if !has_embedded_source {
             return;
         }
+        // [hwpx-cowork] 내장 글꼴을 실제 글꼴로 등록한다 — 측정 환경이 바뀐다.
+        self.invalidate_layout_memos();
 
         let mut slot_set = std::collections::HashSet::new();
         let mut remaining_work_units = 1_000_000usize;
@@ -5516,40 +5524,45 @@ impl DocumentCore {
         force_breaks: &[std::collections::HashSet<usize>],
         storage: &S,
     ) -> Result<(), S::Error> {
-        // [hwpx-cowork] 이 쪽 나눔이 글 편집만 마무리하는가 — 아래 무효화들이 표시를 끄기 전에 읽는다.
-        // 밀린 변경이 아예 없는 쪽 나눔(되풀이 flush·경계 flush)도 남긴다 — 바뀐 것이 없다.
-        let keep_cell_compose_memo = self.only_text_edits_pending.replace(false)
-            || !self.dirty_sections.iter().any(|dirty| *dirty);
+        // [hwpx-cowork] 2026-11-19: 칸 문단 줄 구성 기억은 이제 구조·서식 편집의 쪽 나눔에도 남긴다.
+        // 처음(11-18)에는 글 편집만 마무리하는 쪽 나눔에서만 남겼다 — 열쇠가 빠뜨린 입력이 있을까 봐 둔 여유다.
+        // 열쇠(문단 지문·폭·한 줄로 입력·dpi·저장 줄 정책·HWP5 여부)가 그 줄 구성의 입력을 모두 담고,
+        // 스타일 값·글꼴 측정 환경이 바뀌면 따로 비우므로(`rebuild_resolved_styles`·`invalidate_layout_memos`·
+        // 아래 환경 표지), 문단 나누기·그림 넣기·진하게 같은 편집에서 바뀌지 않은 칸을 다시 줄 나눔할 까닭이 없다.
+        // 검증 모드(`setLayoutMemoVerify`)로 찾은 결과마다 새 계산과 견줄 수 있다.
+        // 글 편집 표시는 종전처럼 여기서 끈다.
+        self.only_text_edits_pending.set(false);
+        let keep_cell_compose_memo = true;
         // [#4968 R4C-3] 이번 pass의 모든 fresh-layout 경로가 동일한 exact-source
         // generation을 읽는다. 등록 source가 없으면 None으로 K0 fast path를 고정한다.
         self.ensure_exact_font_measurement_contexts();
         // [hwpx-cowork] 한정된 Storage(PDF 들여오기)는 매 할당을 계수한다. 캐시에서 꺼낸
         // 일반 clone과 캐시용 사본이 그 계수를 우회하므로 이 경로는 원래의 측정·배치를 쓴다.
         let cell_compose_memo = S::UNBOUNDED.then(|| std::sync::Arc::clone(&self.cell_compose_memo));
-        // [hwpx-cowork] 칸 문단 줄 구성 기억: 글 편집만 마무리하는 쪽 나눔이고 측정 환경(dpi·글꼴 측정 문맥·
-        // 보충 측정값)이 그대로일 때만 남긴다. 그 밖에는 여기서 비운다(`composer::cell_compose_memo`).
+        // [hwpx-cowork] 칸 문단 줄 구성 기억: 측정 환경(dpi·글꼴 측정 문맥·보충 측정값·호환 정책)이 그대로이면
+        // 남긴다. 달라졌으면 여기서 비운다(`composer::cell_compose_memo`).
+        let layout_environment = self.layout_environment_stamp();
         if let Some(memo) = &cell_compose_memo {
-            use std::hash::{Hash, Hasher};
-            let mut environment = std::collections::hash_map::DefaultHasher::new();
-            self.dpi.to_bits().hash(&mut environment);
-            self.layout_engine
-                .exact_font_source_registry_counts()
-                .hash(&mut environment);
-            self.layout_engine
-                .horizontal_shaping_instance_request_counts()
-                .hash(&mut environment);
-            self.styles
-                .supplemental_metrics
-                .as_ref()
-                .map(|snapshot| std::sync::Arc::as_ptr(snapshot) as usize)
-                .hash(&mut environment);
-            self.hangul2024_compat.hash(&mut environment);
             if keep_cell_compose_memo {
                 memo.keep_for_next_pass();
             }
-            memo.begin_pass(environment.finish());
+            memo.begin_pass(layout_environment);
         }
         self.layout_engine.set_cell_compose_memo(cell_compose_memo.clone());
+        // [hwpx-cowork] 문단 구성 기억: 구조 편집 뒤에도 남긴다 — 환경이 달라졌을 때만 비운다(`renderer::layout_memo`).
+        let paragraph_format_memo =
+            S::UNBOUNDED.then(|| std::sync::Arc::clone(&self.paragraph_format_memo));
+        if let Some(memo) = &paragraph_format_memo {
+            memo.begin_pass(layout_environment);
+        }
+        // [hwpx-cowork] 측정의 프레임 재구성 기억도 같은 수명이다.
+        let measure_frame_memo =
+            S::UNBOUNDED.then(|| std::sync::Arc::clone(&self.measure_frame_memo));
+        if let Some(memo) = &measure_frame_memo {
+            memo.begin_pass(layout_environment);
+        }
+        // 쪽 나무의 본문 문단 배치도 같은 기억을 쓴다(`composer::frame_memo`).
+        self.layout_engine.set_frame_memo(measure_frame_memo.clone());
         // [hwpx-cowork] 나뉜 칸의 미룬 개체 띠 표: 이 문서 몫을 이번 조판이 새로 채운다.
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
         crate::renderer::layout::split_cell_deferred_bands_clear_doc(self.split_cell_doc_id);
@@ -5613,7 +5626,8 @@ impl DocumentCore {
             .with_session_edited(profile.session_edited())
             .with_hwp3_origin_flow_spacing_before(hwp3_origin_flow_spacing_before)
             .with_render_normalization(std::sync::Arc::clone(&self.render_normalization.overlay))
-            .with_cell_compose_memo(cell_compose_memo.clone()); // [hwpx-cowork]
+            .with_cell_compose_memo(cell_compose_memo.clone()) // [hwpx-cowork]
+            .with_measure_frame_memo(measure_frame_memo.clone()); // [hwpx-cowork]
 
         if self.document.sections.is_empty() {
             self.pagination.clear();
@@ -5996,7 +6010,9 @@ impl DocumentCore {
                     std::sync::Arc::clone(&self.render_normalization.overlay),
                 ).with_section_column_spacing_hu(i32::from(section.section_def.column_spacing))
                     // [hwpx-cowork] 표 컷의 칸 유닛도 측정과 같은 줄 구성 기억을 쓴다.
-                    .with_cell_compose_memo(cell_compose_memo.clone());
+                    .with_cell_compose_memo(cell_compose_memo.clone())
+                    // [hwpx-cowork] 바뀌지 않은 문단의 구성은 문서의 기억에서 찾는다.
+                    .with_paragraph_format_memo(paragraph_format_memo.clone());
                 // [hwpx-cowork] 2026-11-10 P2: 여러 구역 문서는 앞 구역 쪽 수를 뺀 남은 예산으로 멈춘다. 앞 구역들이 이미
                 // 예산을 채웠으면(실문서A: 표지·차례 구역) 이 구역은 한 쪽만 짜고 멈춘다(step 의 쪽 예산은 최소 1).
                 // 미주를 앞 구역에서 모아 오는 마지막 구역(RenderAll)은 빌린 목록을 작업에 담을 수 없어 한 번에 짠다.
@@ -6588,6 +6604,11 @@ impl DocumentCore {
         storage: &S,
     ) -> Result<(), S::Error> {
         let sec_count = self.document.sections.len();
+        // [hwpx-cowork] 저장 줄 투영 기억: 환경이 달라졌으면 여기서 비운다(이 정규화는 쪽 나눔 밖에서도 돈다).
+        let stored_rows_memo = S::UNBOUNDED.then(|| std::sync::Arc::clone(&self.stored_rows_memo));
+        if let Some(memo) = &stored_rows_memo {
+            memo.sync_environment(self.layout_environment_stamp());
+        }
         let collapsed_hosts: Vec<Vec<usize>> = self.document.sections.iter()
             .map(|s| self.hangul2024_collapsed_table_hosts(s)).collect();
         let profile = self.effective_layout_profile();
@@ -6758,6 +6779,7 @@ impl DocumentCore {
                     refresh_markers,
                     self.dpi,
                     previous_margins.as_ref(),
+                    stored_rows_memo.as_deref(),
                     storage,
                 )?
             } else {

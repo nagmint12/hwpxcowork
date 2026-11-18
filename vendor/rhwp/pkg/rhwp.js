@@ -10445,6 +10445,24 @@ export class HwpDocument {
         return ret !== 0;
     }
     /**
+     * [hwpx-cowork] 조판 중간 결과 기억의 상태(시험·진단용):
+     * `{"paragraphFormat":{entries,bytes,hits,misses,uncached,unstored,passes,environmentChanges,evictions,verifyChecks,verifyMismatches,firstMismatch},"storedRows":{…}}`.
+     * hits = 내용·폭·조판 문맥이 같아 다시 계산하지 않은 횟수(문서를 연 뒤 누적).
+     * @returns {string}
+     */
+    layoutMemoStats() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_layoutMemoStats(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * [#4694] 문서의 모든 차트를 문서 순서로 열거한다.
      *
      * 반환: JSON `[{ index, section, paragraph, control, container?, zipPart?, nestedCopy? }]`
@@ -13965,6 +13983,21 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
+    }
+    /**
+     * [hwpx-cowork] 조판 기억을 끄거나 켠다(견줌·되돌림용). 끄면 종전처럼 늘 새로 계산한다.
+     * @param {boolean} enabled
+     */
+    setLayoutMemoEnabled(enabled) {
+        wasm.hwpdocument_setLayoutMemoEnabled(this.__wbg_ptr, enabled);
+    }
+    /**
+     * [hwpx-cowork] 조판 기억의 검증 모드(시험·진단용): 켜면 찾은 결과마다 새로 계산해 견주고
+     * 다른 횟수를 `layoutMemoStats` 의 `verifyMismatches` 로 센다(결과는 새로 계산한 값을 쓴다).
+     * @param {boolean} enabled
+     */
+    setLayoutMemoVerify(enabled) {
+        wasm.hwpdocument_setLayoutMemoVerify(this.__wbg_ptr, enabled);
     }
     /**
      * 메모 본문을 바꾼다. 작성자·날짜·서식은 그대로다.

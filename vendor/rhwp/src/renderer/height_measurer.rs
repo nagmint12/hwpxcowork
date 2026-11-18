@@ -1858,7 +1858,15 @@ pub struct HeightMeasurer {
     single_line_overflow_cache: SingleLineOverflowCache,
     // [hwpx-cowork] 문서가 쥔 칸 문단 줄 구성 기억(`composer::cell_compose_memo`). 쪽 나눔의 측정만 건다 — 없으면 늘 새로 계산한다.
     cell_compose_memo: Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
+    // [hwpx-cowork] 문서가 쥔 측정용 프레임 재구성 기억(`MeasureFrameMemo`). 쪽 나눔의 측정만 건다 — 없으면 늘 새로 계산한다.
+    measure_frame_memo: Option<std::sync::Arc<MeasureFrameMemo>>,
 }
+
+/// [hwpx-cowork] 2026-11-19: 측정이 문단마다 하는 프레임 재구성(`recompose_stored_lines_in_frame`) 결과의 기억 —
+/// 쪽 나무와 함께 쓰는 `composer::frame_memo` 의 것이다. 서식을 적용하거나 쪽을 나누면 구역의 모든 문단을 다시 재는데
+/// (`measure_section_incremental`), 바뀌지 않은 문단은 줄을 다시 짜지 않는다. 줄 높이를 정하는 나머지 계산은
+/// 기억하지 않고 늘 지금 문단으로 다시 한다.
+pub(crate) use super::composer::frame_memo::FrameMemo as MeasureFrameMemo;
 
 /// [#6299] 이 저장 seg 가 **앞 줄의 가로 조각**인가 — 같은 물리 줄의 오른쪽 조각.
 ///
@@ -1963,6 +1971,7 @@ impl HeightMeasurer {
             float_carve_evidence: Vec::new(),
             single_line_overflow_cache: SingleLineOverflowCache::default(),
             cell_compose_memo: None,
+            measure_frame_memo: None,
         }
     }
 
@@ -2040,6 +2049,15 @@ impl HeightMeasurer {
         memo: Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
     ) -> Self {
         self.cell_compose_memo = memo;
+        self
+    }
+
+    // [hwpx-cowork] 문서의 측정용 프레임 재구성 기억을 건다(수명·무효화는 문서가 맡는다).
+    pub(crate) fn with_measure_frame_memo(
+        mut self,
+        memo: Option<std::sync::Arc<MeasureFrameMemo>>,
+    ) -> Self {
+        self.measure_frame_memo = memo;
         self
     }
 
@@ -2374,17 +2392,41 @@ impl HeightMeasurer {
                     cw, para_style, self.dpi,
                 );
                 if inner > 0.0 {
-                    crate::renderer::composer::recompose_stored_lines_in_frame_with_storage(
-                        c,
+                    let compute = || {
+                        crate::renderer::composer::recompose_stored_lines_in_frame_with_storage(
+                            c,
+                            para,
+                            paragraph_box,
+                            inner,
+                            styles,
+                            self.dpi,
+                            self.stored_geometry_policy,
+                            crate::renderer::composer::StoredRowMissPolicy::Reflow,
+                            &self.float_carve_evidence,
+                            storage,
+                        )
+                    };
+                    // [hwpx-cowork] 내용·구성·폭·측정 문맥이 같은 문단은 문서의 기억을 쓴다(`composer::frame_memo` —
+                    // 상자와 안쪽 폭은 위에서 단 폭과 문단 모양으로 만들었다). 이 호출은 세 표지를 모두 끈 재구성이다.
+                    // 한정된 Storage(PDF 들여오기)는 할당을 계수하므로 종전 계산을 그대로 한다.
+                    crate::renderer::composer::frame_memo::recompose(
+                        self.measure_frame_memo.as_deref().filter(|_| S::UNBOUNDED),
+                        || {
+                            crate::renderer::composer::frame_memo::key(
+                                para,
+                                c,
+                                styles,
+                                cw,
+                                self.dpi,
+                                self.stored_geometry_policy,
+                                &self.float_carve_evidence,
+                                false,
+                                false,
+                                false,
+                            )
+                        },
                         para,
-                        paragraph_box,
-                        inner,
-                        styles,
-                        self.dpi,
-                        self.stored_geometry_policy,
-                        crate::renderer::composer::StoredRowMissPolicy::Reflow,
-                        &self.float_carve_evidence,
-                        storage,
+                        compute,
                     )?
                 } else {
                     None

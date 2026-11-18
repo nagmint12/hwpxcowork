@@ -496,6 +496,12 @@ fn from_bytes_inner(
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
             cell_compose_memo: Default::default(),
+            paragraph_format_memo: Default::default(),
+            stored_rows_memo: std::sync::Arc::new(
+                crate::renderer::render_normalization::stored_word_tail::new_stored_rows_memo(),
+            ),
+            measure_frame_memo: Default::default(),
+            metric_request_memo: Default::default(),
             only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,

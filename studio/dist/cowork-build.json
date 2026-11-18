@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-18T11:05:57.720Z",
-  "enginePackage": "artifacts\\public-build-20261118-rel\\engine-pkg",
+  "builtAt": "2026-11-18T22:58:54.921Z",
+  "enginePackage": "artifacts\\public-build-20261119\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "4c50a5a5307e65cc8a1a2a5410c5313f4e17e3d3"
+    "commit": "dbf5972e3d4facad0bbe986c8b257bf3245aa292"
   },
   "patches": [
     {
@@ -192,6 +192,16 @@
       "id": "typing-idle-flush-cost-measure-cell-overflow",
       "file": "src/engine/input-handler.ts",
       "why": "칸 넘침 flush 의 전체 쪽 나눔 시간도 같은 값으로 잰다"
+    },
+    {
+      "id": "typing-idle-flush-refresh-cost-event",
+      "file": "src/view/canvas-view.ts",
+      "why": "편집 뒤 보이는 쪽을 다시 그리는 데 걸린 시간을 완료 알림에 싣는다"
+    },
+    {
+      "id": "typing-idle-flush-refresh-cost-listener",
+      "file": "src/engine/input-handler.ts",
+      "why": "다시 그리기 시간을 쉼 flush 간격 셈에 넣는다"
     },
     {
       "id": "toolbar-preserve-unchanged-toggle",

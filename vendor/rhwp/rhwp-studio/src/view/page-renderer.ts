@@ -96,6 +96,11 @@ export class PageRenderer {
   private layerSummaryCache = new Map<number, LayerSummaryCacheEntry>();
   /** zoom과 무관한 페이지별 Canvas surface 상한. 문서/revision 경계에서만 무효화한다. */
   private surfaceLayerCountCache = new Map<number, number>();
+  /**
+   * [hwpx-cowork] 지난 revision 에서 알던 쪽별 surface 수. 보이지 않는 보존 쪽의 예산 어림에만 쓴다
+   * (`getCanvasSurfaceLayerCountEstimate`). 문서·backend·profile 경계에서 비운다.
+   */
+  private staleSurfaceLayerCounts = new Map<number, number>();
   private canvaskitDiagnosticsByPage = new Map<number, CanvasKitRenderDiagnostics>();
   /**
    * prefetch 를 끝낸 페이지의 그림 서명 (Task #3315).
@@ -149,6 +154,7 @@ export class PageRenderer {
     if (!preserveCanvasKitDiagnostics) this.releaseAllPageDiagnostics();
     this.layerSummaryCache.clear();
     this.surfaceLayerCountCache.clear();
+    this.staleSurfaceLayerCounts.clear();
     this.backend = backend;
     this.renderProfile = renderProfile;
     this.canvaskitRenderer = canvaskitRenderer;
@@ -194,6 +200,7 @@ export class PageRenderer {
     this.imageRetryCounts.clear();
     this.prefetchedImageSignatures.clear();
     this.surfaceLayerCountCache.clear();
+    this.staleSurfaceLayerCounts.clear();
     // 신원을 모르면(`digest === null`) 항목이 어느 문서 것인지 표시할 수 없다. 그 상태에서는
     // `buildImageRetryKey` 도 서명 기록도 멈추므로 지킬 것이 없다 — 범위를 비워 둔다.
     this.documentScope = identity.digest === null ? null : identity;
@@ -203,6 +210,10 @@ export class PageRenderer {
     this.cancelAll();
     this.releaseAllPageDiagnostics();
     this.layerSummaryCache.clear();
+    // [hwpx-cowork] 지난 값은 보이지 않는 쪽의 어림으로 남긴다(편집으로 쪽이 밀려도 쪽 번호별 값은 가깝다).
+    for (const [pageIdx, count] of this.surfaceLayerCountCache) {
+      this.staleSurfaceLayerCounts.set(pageIdx, count);
+    }
     this.surfaceLayerCountCache.clear();
     // [#3315] object URL 캐시는 여기서 비우지 않는다. 이 메서드는 renderer decision key 에
     // 묶여 있어 같은 문서를 편집할 때마다 불리므로, 여기서 비우면 캐시가 매 키 입력에 수 MB 를
@@ -332,6 +343,22 @@ export class PageRenderer {
     const layerCount = this.canvasSurfaceLayerCount(layers);
     this.surfaceLayerCountCache.set(pageIdx, layerCount);
     return layerCount;
+  }
+
+  /**
+   * [hwpx-cowork] 보이지 않는 보존(prefetch) 쪽의 surface 수 어림 — 엔진에 묻지 않는다.
+   *
+   * 편집 뒤의 예산 계획(`CanvasView.refreshRenderSurfacePlan`)이 보존 쪽마다 정확한 수를 물으면, 아직 그리지 않을
+   * 쪽의 쪽 나무·그리기 나무까지 편집 응답 안에서 지어야 한다(59쪽 보고서의 칸에서 Enter 한 번:
+   * 주 스레드 95ms 가운데 약 21ms 가 이 물음이었다). 이번 revision 에서 이미 아는 값 → 지난 revision 의 값 →
+   * 기본 1 순으로 준다. 그 쪽을 실제로 그릴 때 `renderPage` 가 정확한 값을 적고 다음 계획이 그 값을 쓴다 —
+   * 어림이 다르면 그 쪽의 offscreen 예산만 한 계획 동안 조금 다르다(보이는 쪽은 늘 정확한 값으로 계획한다).
+   */
+  getCanvasSurfaceLayerCountEstimate(pageIdx: number): number {
+    if (this.backend === 'canvaskit') return 1;
+    return this.surfaceLayerCountCache.get(pageIdx)
+      ?? this.staleSurfaceLayerCounts.get(pageIdx)
+      ?? 1;
   }
 
   private canvasSurfaceLayerCount(layers: LayerPlaneSummary): number {

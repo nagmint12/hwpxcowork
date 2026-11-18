@@ -445,6 +445,7 @@ export const hwpdocument_insertTextInHeaderFooter: (a: number, b: number, c: num
 export const hwpdocument_insertTextLogical: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const hwpdocument_isEmptyDocument: (a: number) => number;
 export const hwpdocument_isObjectLockedH2022: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const hwpdocument_layoutMemoStats: (a: number) => [number, number];
 export const hwpdocument_listCharts: (a: number) => [number, number, number, number];
 export const hwpdocument_listTablesOfContents: (a: number) => [number, number];
 export const hwpdocument_logicalToTextOffset: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -590,6 +591,8 @@ export const hwpdocument_setFormValueInCell: (a: number, b: number, c: number, d
 export const hwpdocument_setFormValueInCellEx: (a: number, b: number, c: number) => [number, number, number, number];
 export const hwpdocument_setHangul2024Compat: (a: number, b: number) => void;
 export const hwpdocument_setHeaderFooterPictureProperties: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+export const hwpdocument_setLayoutMemoEnabled: (a: number, b: number) => void;
+export const hwpdocument_setLayoutMemoVerify: (a: number, b: number) => void;
 export const hwpdocument_setMemoText: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_setNewNumber: (a: number, b: number, c: number) => [number, number, number, number];
 export const hwpdocument_setNoteEquationProperties: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];

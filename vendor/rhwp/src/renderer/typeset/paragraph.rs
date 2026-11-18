@@ -21,6 +21,8 @@ pub(super) mod flow;
 mod forced_boundary;
 pub(super) use forced_boundary::prepare_forced_page_boundary;
 pub(super) mod format;
+// [hwpx-cowork] 문단 구성 결과의 기억(열쇠·보관 꼴).
+pub(super) mod format_memo;
 pub(super) mod line_queries;
 pub(super) mod metrics;
 pub(super) mod overflow;

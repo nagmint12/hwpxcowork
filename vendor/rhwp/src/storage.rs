@@ -60,15 +60,16 @@ pub(crate) trait Storage {
     fn string(&self, text: &str) -> Result<String, Self::Error>;
     fn join(&self, values: &[String], separator: &str) -> Result<String, Self::Error>;
     fn reserve<T>(&self, values: &mut Vec<T>, additional: usize) -> Result<(), Self::Error>;
-    fn reserve_map<K: Eq + std::hash::Hash, V>(
+    // [hwpx-cowork] 해시 종류(`H`)에 일반화했다 — 작은 정수 열쇠 표가 빠른 해시를 쓸 수 있게(동작은 같다).
+    fn reserve_map<K: Eq + std::hash::Hash, V, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashMap<K, V>,
+        values: &mut std::collections::HashMap<K, V, H>,
         additional: usize,
     ) -> Result<(), Self::Error>;
 
-    fn insert_map<K: Eq + std::hash::Hash, V>(
+    fn insert_map<K: Eq + std::hash::Hash, V, H: std::hash::BuildHasher>(
         &self,
-        out: &mut std::collections::HashMap<K, V>,
+        out: &mut std::collections::HashMap<K, V, H>,
         key: K,
         value: V,
     ) -> Result<Option<V>, Self::Error> {
@@ -90,14 +91,14 @@ pub(crate) trait Storage {
         Ok(out.insert(key, value))
     }
 
-    fn reserve_set<T: Eq + std::hash::Hash>(
+    fn reserve_set<T: Eq + std::hash::Hash, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashSet<T>,
+        values: &mut std::collections::HashSet<T, H>,
         additional: usize,
     ) -> Result<(), Self::Error>;
-    fn insert_set<T: Eq + std::hash::Hash>(
+    fn insert_set<T: Eq + std::hash::Hash, H: std::hash::BuildHasher>(
         &self,
-        out: &mut std::collections::HashSet<T>,
+        out: &mut std::collections::HashSet<T, H>,
         value: T,
     ) -> Result<bool, Self::Error> {
         if !out.contains(&value) {
@@ -264,9 +265,9 @@ impl Storage for Unbounded {
     ) -> Result<crate::model::document::SectionDef, Self::Error> {
         Ok(value.clone())
     }
-    fn reserve_set<T: Eq + std::hash::Hash>(
+    fn reserve_set<T: Eq + std::hash::Hash, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashSet<T>,
+        values: &mut std::collections::HashSet<T, H>,
         additional: usize,
     ) -> Result<(), Self::Error> {
         values.reserve(additional);
@@ -307,9 +308,9 @@ impl Storage for Unbounded {
     fn join(&self, values: &[String], separator: &str) -> Result<String, Infallible> {
         Ok(values.join(separator))
     }
-    fn reserve_map<K: Eq + std::hash::Hash, V>(
+    fn reserve_map<K: Eq + std::hash::Hash, V, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashMap<K, V>,
+        values: &mut std::collections::HashMap<K, V, H>,
         additional: usize,
     ) -> Result<(), Infallible> {
         values.reserve(additional);

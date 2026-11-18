@@ -44,6 +44,8 @@ pub(crate) mod hft_ttf;
 pub(crate) mod missing_glyph_policy;
 // [hwpx-cowork] 쪽 나눔 결정 기록(getLayoutDecisions)
 pub mod layout_trace_log;
+// [hwpx-cowork] 문단 내용 지문으로 찾는 조판 중간 결과 기억.
+pub(crate) mod layout_memo;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod font_paths;
 #[path = "font_rule_projections/layout_metric.rs"]
@@ -1851,6 +1853,18 @@ pub(crate) fn composed_line_reference_font_size(
     para: &crate::model::paragraph::Paragraph,
     styles: &style_resolver::ResolvedStyleSet,
 ) -> f64 {
+    // [hwpx-cowork] 각주·미주가 없는 문단은 아래 훑기가 고를 것이 없다(결과 0.0) — 줄마다 문단 글 전체를
+    // 세고 개체 자리 목록을 새로 만들던 것을 건너뛴다(긴 문단은 줄 수 × 글자 수: 2만 자 한 문단의 쪽 나눔
+    // 155ms 중 73ms 가 여기였다). 각주·미주가 있는 문단의 계산은 그대로다.
+    if !para.controls.iter().any(|control| {
+        matches!(
+            control,
+            crate::model::control::Control::Footnote(_)
+                | crate::model::control::Control::Endnote(_)
+        )
+    }) {
+        return 0.0;
+    }
     let end = line.char_start
         + line
             .runs

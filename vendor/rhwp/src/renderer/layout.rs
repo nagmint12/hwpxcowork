@@ -4279,6 +4279,8 @@ pub struct LayoutEngine {
     cell_compose_memo: std::cell::RefCell<
         Option<std::sync::Arc<super::composer::cell_compose_memo::CellComposeMemo>>,
     >,
+    // [hwpx-cowork] 문서가 쥔 문단 프레임 재구성 기억(`composer::frame_memo`). 없으면 늘 새로 계산한다.
+    frame_memo: std::cell::RefCell<Option<std::sync::Arc<super::composer::frame_memo::FrameMemo>>>,
     section_tab_key: std::cell::Cell<u64>,
     /// Issue #2214 test-only: cache miss가 실제 table-wide scan으로 이어진 횟수.
     #[cfg(test)]
@@ -4471,6 +4473,7 @@ impl LayoutEngine {
             cursor_probe_block_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             single_line_overflow_cache: Default::default(),
             cell_compose_memo: std::cell::RefCell::new(None),
+            frame_memo: std::cell::RefCell::new(None),
             section_tab_key: Default::default(),
             #[cfg(test)]
             table_nested_text_flag_scan_count: std::cell::Cell::new(0),
@@ -4487,19 +4490,40 @@ impl LayoutEngine {
         *self.cell_compose_memo.borrow_mut() = memo;
     }
 
+    // [hwpx-cowork] 문서의 문단 프레임 재구성 기억을 이 엔진에 건다(수명·무효화는 문서가 맡는다).
+    pub(crate) fn set_frame_memo(
+        &self,
+        memo: Option<std::sync::Arc<super::composer::frame_memo::FrameMemo>>,
+    ) {
+        *self.frame_memo.borrow_mut() = memo;
+    }
+
+    /// [hwpx-cowork] 지금 걸린 문단 프레임 재구성 기억(쪽 나무의 본문 문단 배치가 쓴다).
+    pub(crate) fn frame_memo(
+        &self,
+    ) -> Option<std::sync::Arc<super::composer::frame_memo::FrameMemo>> {
+        self.frame_memo.borrow().clone()
+    }
+
     // [hwpx-cowork] 편집을 거친 문서도 PDF 요청의 HWP 저장 예산으로 다시 들어올 수 있다.
-    // 저장 중에만 캐시를 떼고 오류로 돌아오는 경우에도 원래 편집 환경을 복구한다.
+    // 저장 중에만 캐시를 떼고 오류로 돌아오는 경우에도 원래 편집 환경을 복구한다(칸 문단·프레임 재구성 기억 둘 다).
     #[cfg(feature = "pdf-import")]
     pub(crate) fn suspend_cell_compose_memo(&self) -> impl Drop + '_ {
         use super::composer::cell_compose_memo::CellComposeMemo;
+        use super::composer::frame_memo::FrameMemo;
         use std::sync::Arc;
-        struct Restore<'a>(&'a LayoutEngine, Option<Arc<CellComposeMemo>>);
+        struct Restore<'a>(
+            &'a LayoutEngine,
+            Option<Arc<CellComposeMemo>>,
+            Option<Arc<FrameMemo>>,
+        );
         impl Drop for Restore<'_> {
             fn drop(&mut self) {
                 self.0.set_cell_compose_memo(self.1.take());
+                self.0.set_frame_memo(self.2.take());
             }
         }
-        Restore(self, self.cell_compose_memo.take())
+        Restore(self, self.cell_compose_memo.take(), self.frame_memo.take())
     }
 
     /// [Task #1949] 셀 단위 레이아웃 캐시를 비운다. 문서 재조판 등 IR 이 바뀌는

@@ -89,15 +89,74 @@ pub struct NestedTableWidthProjection {
     table_pointer: usize,
 }
 
+/// [hwpx-cowork] 표 포인터·칸 좌표처럼 작은 정수 열쇠의 해시(2026-11-19).
+///
+/// 표 조판은 칸마다 "이 칸의 글줄이 다시 짜였는가"를 여러 번 묻는다(`cell_frame_reflowed` —
+/// 2,382칸 표의 쪽 나눔 한 번에 수만 번). 기본 해시(SipHash)는 정수 하나를 섞는 데도 수십 ns 가 들어
+/// 그 물음이 표 조판의 1/6 이었다. 열쇠가 프로세스 안의 포인터와 행·열 번호뿐이라 충돌 공격을 막을 일이
+/// 없으므로 곱-회전 한 번으로 섞는다. 표의 내용과 조회 결과는 그대로다.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SmallKeyHasher(u64);
+
+impl SmallKeyHasher {
+    #[inline]
+    fn add(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(23) ^ value).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+impl std::hash::Hasher for SmallKeyHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        // 버킷 번호는 낮은 비트를 쓴다 — 곱셈이 섞어 올린 위쪽 비트를 접어 내린다.
+        self.0 ^ (self.0 >> 32)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.add(u64::from(byte));
+        }
+    }
+
+    #[inline]
+    fn write_u8(&mut self, value: u8) {
+        self.add(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u16(&mut self, value: u16) {
+        self.add(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u32(&mut self, value: u32) {
+        self.add(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+}
+
+type SmallKeyBuild = std::hash::BuildHasherDefault<SmallKeyHasher>;
+type PointerSet = HashSet<usize, SmallKeyBuild>;
+type CellSet = HashSet<(u16, u16), SmallKeyBuild>;
+
 #[derive(Clone, Debug, Default)]
 pub struct RenderNormalizationOverlay {
     nested_table_widths_by_path: HashMap<RenderPath, Arc<NestedTableWidthProjection>>,
     nested_table_widths_by_pointer: HashMap<usize, Arc<NestedTableWidthProjection>>,
-    text_reflowed_tables_by_pointer: HashSet<usize>,
-    rendered_cell_frame_changes: HashMap<usize, HashSet<(u16, u16)>>,
-    rebased_table_frames_by_pointer: HashSet<usize>,
-    expanded_inline_host_tables_by_pointer: HashSet<usize>,
-    nested_tables_with_reflowed_hosts: HashSet<usize>,
+    text_reflowed_tables_by_pointer: PointerSet,
+    rendered_cell_frame_changes: HashMap<usize, CellSet, SmallKeyBuild>,
+    rebased_table_frames_by_pointer: PointerSet,
+    expanded_inline_host_tables_by_pointer: PointerSet,
+    nested_tables_with_reflowed_hosts: PointerSet,
     stored_nested_text_frames_by_pointer: HashMap<usize, Arc<StoredNestedTextFrames>>,
     // [hwpx-cowork] Cache-coordinate invalidation must not erase whether a
     // source host owns a real trailing line or is covered by its block object.
@@ -693,10 +752,23 @@ impl RenderNormalizationOverlay {
 
     /// 물리 행을 덮는 셀만 그 행의 저장 프레임을 무효화할 수 있다.
     pub(crate) fn row_frame_reflowed(&self, table: &Table, row: usize) -> bool {
+        // [hwpx-cowork] 2026-11-19: 표 전체에 걸리는 판정(`cell_frame_reflowed` 가 읽는 세 표)을 먼저 본다.
+        // 예전에는 행 하나를 물을 때마다 표의 모든 칸을 돌며 칸마다 해시 표 셋을 찾았다(행 수 × 칸 수 —
+        // 642행·2,382칸 표의 쪽 나눔마다 150만 번). 칸별 판정 `P(칸)` 은
+        //   옮겨진 표면 참 · 칸 범위가 없으면 표의 글 재조판 여부 · 있으면 그 범위에 든 칸
+        // 이므로, 이 표에 재조판된 칸이 하나도 없으면 칸을 돌 필요가 없다. 결과는 종전과 같다.
+        let pointer = table as *const Table as usize;
+        let scoped_cells = self.rendered_cell_frame_changes.get(&pointer);
+        let every_cell = self.rebased_table_frames_by_pointer.contains(&pointer)
+            || (scoped_cells.is_none() && self.text_reflowed_tables_by_pointer.contains(&pointer));
+        if !every_cell && scoped_cells.is_none_or(|cells| cells.is_empty()) {
+            return false;
+        }
         table.cells.iter().any(|cell| {
             usize::from(cell.row) <= row
                 && row < usize::from(cell.row) + usize::from(cell.row_span)
-                && self.cell_frame_reflowed(table, cell)
+                && (every_cell
+                    || scoped_cells.is_some_and(|cells| cells.contains(&(cell.row, cell.col))))
         })
     }
 

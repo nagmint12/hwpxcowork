@@ -392,6 +392,8 @@ pub struct TypesetEngine {
     // [hwpx-cowork] 문서가 쥔 칸 문단 줄 구성 기억 — 표 컷을 재는 배치 엔진에 넘긴다(`composer::cell_compose_memo`).
     cell_compose_memo:
         Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
+    // [hwpx-cowork] 문서가 쥔 문단 구성 기억(`paragraph::format_memo`). 없으면(진단·보조 엔진) 늘 새로 계산한다.
+    paragraph_format_memo: Option<std::sync::Arc<ParagraphFormatMemo>>,
 }
 
 /// 조판 중 현재 페이지/단 상태
@@ -3281,6 +3283,8 @@ mod inline_flow;
 mod notes;
 pub(crate) use notes::endnotes::content::endnote_first_para_render_offset;
 mod paragraph;
+// [hwpx-cowork] 문서가 쥐는 문단 구성 기억의 꼴.
+pub(crate) use paragraph::format_memo::ParagraphFormatMemo;
 mod section;
 // [hwpx-cowork] 초기 열기의 불변 입력과 소유된 조판 이어받기 상태.
 pub(crate) use section::{SectionTypesetInput, SectionTypesetJob};
@@ -3475,6 +3479,7 @@ impl TypesetEngine {
             render_normalization,
             endnote_measure_memo: Default::default(),
             cell_compose_memo: None,
+            paragraph_format_memo: None,
         }
     }
 
@@ -3503,6 +3508,15 @@ impl TypesetEngine {
         memo: Option<std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>>,
     ) -> Self {
         self.cell_compose_memo = memo;
+        self
+    }
+
+    // [hwpx-cowork] 문서의 문단 구성 기억을 건다(수명·무효화는 문서가 맡는다).
+    pub(crate) fn with_paragraph_format_memo(
+        mut self,
+        memo: Option<std::sync::Arc<ParagraphFormatMemo>>,
+    ) -> Self {
+        self.paragraph_format_memo = memo;
         self
     }
 
@@ -3979,7 +3993,28 @@ impl TypesetEngine {
             &self.float_carve_evidence,
             self.format_next_stored_vpos.get(),
         );
-        paragraph::format::format_paragraph_for_flow_with_storage(
+        let compute = || {
+            paragraph::format::format_paragraph_for_flow_with_storage(
+                &context,
+                para,
+                composed,
+                styles,
+                column_width_px,
+                hwp3_body_reflow,
+                known_square_band,
+                storage,
+            )
+        };
+        // [hwpx-cowork] 내용·구성·폭·조판 문맥이 같은 문단은 문서의 기억을 쓴다(`paragraph::format_memo`).
+        // 한정된 Storage(PDF 들여오기)는 매 할당을 세므로 기억을 거치지 않는다.
+        let Some(memo) = self
+            .paragraph_format_memo
+            .as_deref()
+            .filter(|memo| S::UNBOUNDED && memo.enabled())
+        else {
+            return compute();
+        };
+        let Some(key) = paragraph::format_memo::key(
             &context,
             para,
             composed,
@@ -3987,8 +4022,34 @@ impl TypesetEngine {
             column_width_px,
             hwp3_body_reflow,
             known_square_band,
-            storage,
-        )
+        ) else {
+            memo.note_uncached();
+            return compute();
+        };
+        if let Some(found) = memo.lookup(&key) {
+            let restored = found.into_formatted();
+            if memo.verify_enabled() {
+                let fresh = compute()?;
+                memo.record_verify(format!("{fresh:?}") == format!("{restored:?}"), || {
+                    format!(
+                        "paragraph format: chars={} lines={} width={:?} fresh_total={} memo_total={}",
+                        para.text.chars().count(),
+                        para.line_segs.len(),
+                        column_width_px,
+                        fresh.total_height,
+                        restored.total_height
+                    )
+                });
+                return Ok(fresh);
+            }
+            return Ok(restored);
+        }
+        let fresh = compute()?;
+        match paragraph::format_memo::StoredFormat::from_formatted(&fresh) {
+            Some((stored, bytes)) => memo.store(key, stored, bytes),
+            None => memo.note_unstored(),
+        }
+        Ok(fresh)
     }
 
     // ========================================================

@@ -15,6 +15,71 @@ use crate::renderer::{
     style_resolver::ResolvedStyleSet,
 };
 
+/// [hwpx-cowork] 저장 줄 투영 결과의 기억(2026-11-19, `renderer::layout_memo`).
+///
+/// 이 정규화는 쪽 나눔마다 구역의 모든 문단(표 칸 문단 포함)에 줄 투영을 다시 돌렸다 — 문단마다 현재
+/// 글꼴 측정으로 줄을 새로 짜 저장 줄과 견준다(59쪽 보고서: 쪽 나눔 154ms 중 81ms). 투영은 문단 내용과
+/// 상자(폭·문단 모양·본문/칸)·dpi·갱신 정책의 함수라 그 입력을 열쇠로 기억한다. 저장 줄의 세로 좌표는
+/// 결과 줄에 실리므로 절대값 그대로 열쇠에 넣는다(`FingerprintScope::FlowExact`).
+pub(crate) type StoredRowsMemo = crate::renderer::layout_memo::ContentMemo<StoredRows>;
+
+/// [hwpx-cowork] 문서가 쥘 저장 줄 투영 기억. 열쇠가 저장 줄의 세로 좌표를 그대로 담으므로 저장 줄 없는 문서에서는
+/// 구조 편집마다 뒤 문단의 항목이 새로 생기고 옛 항목은 쓰이지 않는다 — 다른 기억보다 상한을 작게 두어
+/// 낡은 항목이 일찍 버려지게 한다(항목 하나는 70바이트 안팎).
+pub(crate) fn new_stored_rows_memo() -> StoredRowsMemo {
+    StoredRowsMemo::with_budget(120_000, 6 * 1024 * 1024)
+}
+
+/// 문단 하나의 투영 결과.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum StoredRows {
+    /// 본문 상자 투영이 줄을 바꾸는가 — 흐름의 간격 축을 다시 세울지 정하는 탐침.
+    BodyBoxProbe(bool),
+    /// 새 줄과 공백 규칙(바꿀 것이 없으면 `None`).
+    Rows(Option<(Vec<LineSeg>, Vec<(u32, crate::model::paragraph::SpaceMetric)>)>),
+}
+
+const KIND_BODY_BOX_PROBE: u8 = 2;
+const KIND_FLOW_ROWS: u8 = 3;
+
+fn stored_rows_key(
+    kind: u8,
+    paragraph: &Paragraph,
+    styles: &ResolvedStyleSet,
+    width: f64,
+    body: bool,
+    dpi: f64,
+    flags: u32,
+) -> Option<crate::renderer::layout_memo::MemoKey> {
+    if !width.is_finite() {
+        return None;
+    }
+    let content = crate::renderer::composer::cell_compose_memo::paragraph_fingerprint(
+        paragraph,
+        crate::renderer::composer::cell_compose_memo::FingerprintScope::FlowExact,
+    )?;
+    Some(crate::renderer::layout_memo::MemoKey {
+        kind,
+        content,
+        a: width.to_bits(),
+        b: dpi.to_bits(),
+        c: styles.section_tab_key(),
+        flags: u32::from(body) | flags << 1,
+    })
+}
+
+fn stored_rows_bytes(rows: &StoredRows) -> Option<usize> {
+    let base = std::mem::size_of::<(crate::renderer::layout_memo::MemoKey, StoredRows)>();
+    Some(match rows {
+        StoredRows::BodyBoxProbe(_) | StoredRows::Rows(None) => base,
+        StoredRows::Rows(Some((lines, spaces))) => {
+            base
+                + std::mem::size_of_val(lines.as_slice())
+                + std::mem::size_of_val(spaces.as_slice())
+        }
+    })
+}
+
 fn uniform_column_width(page: &PageDef, columns: &ColumnDef, dpi: f64) -> Option<f64> {
     let layout = PageLayoutInfo::from_page_def(page, columns, dpi);
     let width = layout.column_areas.first()?.width;
@@ -130,6 +195,8 @@ struct NormalizationPolicy<'a> {
     previous_margin_styles: Option<&'a ResolvedStyleSet>,
     // [hwpx-cowork] 2026-11-10 P1 성능: 이 흐름(같은 `styles`)의 대체 프로그램 스타일 작업본.
     source_program_scratch: &'a crate::renderer::composer::SourceProgramScratch,
+    // [hwpx-cowork] 문서가 쥔 저장 줄 투영 기억(없으면 늘 새로 계산한다).
+    rows_memo: Option<&'a StoredRowsMemo>,
 }
 
 pub(crate) fn normalize(
@@ -149,6 +216,7 @@ pub(crate) fn normalize(
         refresh_markers,
         dpi,
         previous_margin_styles,
+        None,
         &crate::storage::Unbounded,
     ) {
         Ok(value) => value,
@@ -164,6 +232,8 @@ pub(crate) fn normalize_with_storage<S: crate::storage::Storage>(
     refresh_markers: bool,
     dpi: f64,
     previous_margin_styles: Option<&ResolvedStyleSet>,
+    // [hwpx-cowork] 문서가 쥔 저장 줄 투영 기억. 한정된 Storage 와 옛 여백 투영 경로에서는 쓰지 않는다.
+    rows_memo: Option<&StoredRowsMemo>,
     storage: &S,
 ) -> Result<Option<Vec<Paragraph>>, S::Error> {
     let source_program_scratch = crate::renderer::composer::SourceProgramScratch::new(None);
@@ -177,6 +247,8 @@ pub(crate) fn normalize_with_storage<S: crate::storage::Storage>(
             refresh_markers,
             previous_margin_styles,
             source_program_scratch: &source_program_scratch,
+            rows_memo: rows_memo
+                .filter(|memo| S::UNBOUNDED && previous_margin_styles.is_none() && memo.enabled()),
         },
         dpi,
         storage,
@@ -223,6 +295,7 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
             refresh_markers,
             previous_margin_styles,
             source_program_scratch,
+            rows_memo,
         } = policy;
         // 본문 상자의 모순과 실제 문자 경계 이동이 함께 확인된 흐름만 현재
         // 문단 간격 축을 발행한다. 유효한 저장 상자는 더 적게 채워져도 유지한다.
@@ -238,14 +311,42 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
                 if let Some(width) = probe_width {
                     let style = styles.para_styles.get(paragraph.para_shape_id as usize);
                     let box_ = ParagraphBox::body_for_style(width, style, dpi);
-                    if crate::storage::optional(
-                        crate::renderer::composer::project_current_body_box_rows_with_storage(
-                            paragraph, &box_, styles, dpi, storage,
-                        ),
-                        failure,
-                    )?
-                    .is_some()
-                    {
+                    let probe = || -> Result<bool, S::Error> {
+                        Ok(
+                            crate::renderer::composer::project_current_body_box_rows_with_storage(
+                                paragraph, &box_, styles, dpi, storage,
+                            )?
+                            .is_some(),
+                        )
+                    };
+                    // [hwpx-cowork] 같은 문단·같은 상자의 탐침 결과는 문서의 기억을 쓴다.
+                    let changes_rows = match rows_memo {
+                        Some(memo) => memo
+                            .get_or_compute(
+                                stored_rows_key(
+                                    KIND_BODY_BOX_PROBE,
+                                    paragraph,
+                                    styles,
+                                    width,
+                                    true,
+                                    dpi,
+                                    0,
+                                ),
+                                stored_rows_bytes,
+                                |found, fresh| found == fresh,
+                                || {
+                                    format!(
+                                        "stored rows probe: chars={} lines={} width={width}",
+                                        paragraph.text.chars().count(),
+                                        paragraph.line_segs.len()
+                                    )
+                                },
+                                || probe().map(StoredRows::BodyBoxProbe),
+                            )
+                            .map(|found| matches!(found, StoredRows::BodyBoxProbe(true))),
+                        None => probe(),
+                    };
+                    if crate::storage::optional(changes_rows, failure)? {
                         rebuild_body_spacing = true;
                         break;
                     }
@@ -445,54 +546,81 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
                 // 현재 측정으로 더 적은 줄에 들어간다는 사실만으로 정상 저장 줄을
                 // 무효화하지 않는다. 원문 문자에 없는 목록 마커는 문서 순서에서
                 // 해소한 실제 기하를 갱신해야 하며, 같은 결과가 채움·높이에 참여한다.
-                let spans_physical_frames =
-                    crate::renderer::composer::stored_rows_cross_physical_frame(&paragraph);
-                let mut current_rows = if body_page.is_some() {
-                    crate::storage::optional(
+                // [hwpx-cowork] 아래 투영 순서·선택은 종전 그대로다 — 한 문단의 결과를 한 값으로 모아
+                // 문서의 기억(`StoredRowsMemo`)에 넣을 수 있게 닫힘으로 묶었다.
+                let project = || -> Result<
+                    Option<(Vec<LineSeg>, Vec<(u32, crate::model::paragraph::SpaceMetric)>)>,
+                    S::Error,
+                > {
+                    let spans_physical_frames =
+                        crate::renderer::composer::stored_rows_cross_physical_frame(&paragraph);
+                    let mut current_rows = if body_page.is_some() {
                         crate::renderer::composer::project_current_body_box_rows_with_storage(
                             &paragraph, &box_, styles, dpi, storage,
-                        ),
-                        failure,
-                    )?
-                } else {
-                    None
-                };
-                if current_rows.is_none() {
-                    current_rows = crate::storage::optional(
-                        crate::renderer::composer::project_current_source_program_rows_with_scratch(
-                            &paragraph, &box_, styles, source_program_scratch, dpi, storage,
-                        ),
-                        failure,
-                    )?;
-                }
-                if current_rows.is_none() {
-                    current_rows = crate::storage::optional(
-                        crate::renderer::composer::project_current_marker_height_rows_with_storage(
-                            &paragraph, &box_, styles, dpi, storage,
-                        ),
-                        failure,
-                    )?;
-                }
-                let selected_program_rows = crate::storage::optional(crate::renderer::composer::project_stored_rows_with_selected_program_with_storage(&paragraph, &box_, styles, dpi, storage), failure)?;
-                let marker_rows = || {
+                        )?
+                    } else {
+                        None
+                    };
+                    if current_rows.is_none() {
+                        current_rows =
+                            crate::renderer::composer::project_current_source_program_rows_with_scratch(
+                                &paragraph, &box_, styles, source_program_scratch, dpi, storage,
+                            )?;
+                    }
+                    if current_rows.is_none() {
+                        current_rows =
+                            crate::renderer::composer::project_current_marker_height_rows_with_storage(
+                                &paragraph, &box_, styles, dpi, storage,
+                            )?;
+                    }
+                    let selected_program_rows = crate::renderer::composer::project_stored_rows_with_selected_program_with_storage(&paragraph, &box_, styles, dpi, storage)?;
+                    if let Some(rows) = selected_program_rows.or(current_rows) {
+                        return Ok(Some(rows));
+                    }
                     if !refresh_markers
                         || !(refresh_text || spans_physical_frames)
                         || !projects_current_marker_geometry(&paragraph, &box_, styles)
                     {
-                        return None;
+                        return Ok(None);
                     }
                     let first = paragraph.line_segs[0].vertical_pos;
                     let frame = box_.frame(first);
-                    crate::storage::optional(
-                        crate::renderer::composer::project_stored_soft_wraps_with_storage(
-                            &paragraph, &frame, styles, dpi, false, storage,
-                        ),
-                        failure,
-                    )?
+                    crate::renderer::composer::project_stored_soft_wraps_with_storage(
+                        &paragraph, &frame, styles, dpi, false, storage,
+                    )
                 };
-                if let Some((lines, spaces)) =
-                    selected_program_rows.or(current_rows).or_else(marker_rows)
-                {
+                let projected = match rows_memo {
+                    Some(memo) => memo
+                        .get_or_compute(
+                            stored_rows_key(
+                                KIND_FLOW_ROWS,
+                                &paragraph,
+                                styles,
+                                width,
+                                body_page.is_some(),
+                                dpi,
+                                u32::from(refresh_markers) | u32::from(refresh_text) << 1,
+                            ),
+                            stored_rows_bytes,
+                            |found, fresh| found == fresh,
+                            || {
+                                format!(
+                                    "stored rows: chars={} lines={} width={width} body={}",
+                                    paragraph.text.chars().count(),
+                                    paragraph.line_segs.len(),
+                                    body_page.is_some()
+                                )
+                            },
+                            || project().map(StoredRows::Rows),
+                        )
+                        .and_then(|found| match found {
+                            StoredRows::Rows(rows) => Ok(rows),
+                            // 열쇠의 종류가 달라 올 수 없는 값 — 그대로 계산한다.
+                            StoredRows::BodyBoxProbe(_) => project(),
+                        }),
+                    None => project(),
+                };
+                if let Some((lines, spaces)) = crate::storage::optional(projected, failure)? {
                     let old_advance = frame_advance(&paragraph.line_segs)?;
                     let new_advance = frame_advance(&lines)?;
                     shift = shift.checked_add(new_advance.checked_sub(old_advance)?)?;

@@ -146,6 +146,42 @@ impl LayoutCompatibilityProfile {
         self.session_edited
     }
 
+    /// [hwpx-cowork] 조판 중간 결과 기억(`renderer::layout_memo`)의 열쇠에 넣는 표지 — 모든 정책 값을 담는다.
+    /// 필드를 `..` 없이 풀어 쓰므로 정책이 늘면 여기서 컴파일이 멈춘다.
+    pub(crate) fn memo_stamp(&self) -> u64 {
+        let Self {
+            hwp3_layout,
+            hwp3_native_layout,
+            hwp3_password_layout,
+            hwp3_external_realign,
+            hwpx_stored_layout,
+            hwpx_container,
+            hwp5_origin_hwpx,
+            native_hwp5_layout,
+            hwp5_container,
+            hangul2024_layout,
+            stored_rows_before_hancom_2020,
+            session_edited,
+        } = *self;
+        [
+            hwp3_layout,
+            hwp3_native_layout,
+            hwp3_password_layout,
+            hwp3_external_realign,
+            hwpx_stored_layout,
+            hwpx_container,
+            hwp5_origin_hwpx,
+            native_hwp5_layout,
+            hwp5_container,
+            hangul2024_layout,
+            stored_rows_before_hancom_2020,
+            session_edited,
+        ]
+        .iter()
+        .enumerate()
+        .fold(1_u64 << 63, |bits, (index, on)| bits | (u64::from(*on) << index))
+    }
+
     /// HWP3 좌표 호환 경로 적용 여부. 실제 HWP5 컨테이너는 자체 저장 계약을 쓴다.
     /// 변환 계보를 보존하는 SourceProvenance::hwp3_lineage와 구분한다.
     pub fn hwp3_layout(&self) -> bool {

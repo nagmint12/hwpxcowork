@@ -56,8 +56,12 @@ impl DocumentCore {
             prepared_requests: None,
             next_request: 0,
         }); // dropping the old owner invalidates retained TextStyles too
-        self.styles.supplemental_metrics = None;
-        self.cell_compose_memo.invalidate(); // [hwpx-cowork] 측정 환경이 바뀜
+        // [hwpx-cowork] 보충 측정값을 쓰고 있었다면 그 값을 읽은 조판 기억을 버린다(요청 기억은 측정값을 읽지 않는다).
+        // 쓰지 않던 문서(스타일에 측정값 없음)는 조판 환경이 그대로다 — 문서를 연 직후 화면이 측정 세션을 처음 열 때
+        // 여는 동안 채운 기억을 버리면, 첫 편집의 쪽 나눔이 문서 전체를 다시 계산한다(59쪽 보고서 135ms).
+        if self.styles.supplemental_metrics.take().is_some() {
+            self.invalidate_measured_layout_memos();
+        }
         if was_active {
             self.rebuild_derived_state();
         }

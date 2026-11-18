@@ -1272,7 +1272,11 @@ export class CanvasView {
           pageIndex,
           width: page.width,
           height: page.height,
-          layerCount: this.pageRenderer.getCanvasSurfaceLayerCount(pageIndex),
+          // [hwpx-cowork] 보이는 쪽만 정확한 수를 묻는다(쪽 나무를 짓는다). 보존 쪽은 아는 값으로 어림한다 —
+          // 편집 응답 안에서 보이지 않는 쪽까지 조판 나무를 짓지 않는다(`getCanvasSurfaceLayerCountEstimate`).
+          layerCount: visibleSet.has(pageIndex)
+            ? this.pageRenderer.getCanvasSurfaceLayerCount(pageIndex)
+            : this.pageRenderer.getCanvasSurfaceLayerCountEstimate(pageIndex),
           visible: visibleSet.has(pageIndex),
           focused: this.editingPageIndex === pageIndex,
           distanceFromFocus: Math.abs(pageIndex - focusPage),

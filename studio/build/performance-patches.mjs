@@ -434,9 +434,19 @@ const COWORK_PAGINATION_IDLE_FLUSH_MAX_DELAY_MS = 1500;`,
   }`,
     replace: () => `  // [hwpx-cowork] 지난 전체 쪽 나눔(동기 flush)에 걸린 시간(ms) — 아직 재지 않았으면 0(원본 간격 그대로).
   private coworkPaginationFlushCostMs = 0;
+  // [hwpx-cowork] 2026-11-19 지난 편집 뒤 보이는 쪽을 다시 그리는 데 걸린 시간(ms) — CanvasView 가 알린다.
+  // 쉼 flush 는 쪽 나눔 뒤에 보이는 쪽을 모두 다시 그리게 한다. 쪽 나눔이 싸도(조판 기억) 그리기가 한 프레임을 넘으면
+  // 120ms 쉴 때마다 그 그리기가 다음 글자를 막는다(8쪽 글 문서: 글자마다 주 스레드 공백 21 → 41ms).
+  private coworkLayoutRefreshCostMs = 0;
+
+  private coworkNoteLayoutRefreshCost(payload: unknown): void {
+    const ms = (payload as { durationMs?: unknown } | null | undefined)?.durationMs;
+    if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) this.coworkLayoutRefreshCostMs = ms;
+  }
 
   private coworkIdleFlushDelayMs(): number {
-    const cost = this.coworkPaginationFlushCostMs;
+    // 쉼 flush 한 번의 값 = 쪽 나눔 + 그 뒤의 다시 그리기.
+    const cost = (this.coworkPaginationFlushCostMs || 0) + (this.coworkLayoutRefreshCostMs || 0);
     if (!(cost > COWORK_PAGINATION_CHEAP_FLUSH_MS)) return DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS;
     return Math.min(
       COWORK_PAGINATION_IDLE_FLUSH_MAX_DELAY_MS,
@@ -475,6 +485,29 @@ const COWORK_PAGINATION_IDLE_FLUSH_MAX_DELAY_MS = 1500;`,
     why: '칸 넘침 flush 의 전체 쪽 나눔 시간도 같은 값으로 잰다',
     anchor: '    try {\n      this.wasm.flushDeferredPagination();\n      this.deferredPaginationPending = false;\n      this.cursor.invalidateFocusedCellCursorGeometry();\n      this.lastCellKey = null;',
     replace: (a) => a.replace('this.wasm.flushDeferredPagination();', 'this.coworkTimedPaginationFlush();'),
+  },
+  // 2026-11-19 쉼 flush 간격에 '다시 그리기' 시간도 넣는다. 조판 기억으로 쪽 나눔이 2~10ms 가 되자 싼 문서 규칙(120ms)이
+  // 걸려, 글자마다 120ms 뒤에 쉼 flush → 보이는 쪽 전체 다시 그리기(8쪽 글 문서 약 40ms)가 돌고 다음 글자가 그 뒤로 밀렸다.
+  {
+    id: 'typing-idle-flush-refresh-cost-event',
+    file: 'src/view/canvas-view.ts',
+    why: '편집 뒤 보이는 쪽을 다시 그리는 데 걸린 시간을 완료 알림에 싣는다',
+    anchor: `    this.refreshPages();
+    // InputHandler의 mutation 직후 caret 갱신보다 VirtualScroll 재계산이 늦다.
+    // 새 page offset을 소비할 수 있는 완료 경계를 별도 이벤트로 알린다.
+    this.eventBus.emit('document-layout-refreshed', { source: 'mutation' });`,
+    replace: () => `    const coworkRefreshStarted = performance.now();
+    this.refreshPages();
+    // InputHandler의 mutation 직후 caret 갱신보다 VirtualScroll 재계산이 늦다.
+    // 새 page offset을 소비할 수 있는 완료 경계를 별도 이벤트로 알린다.
+    this.eventBus.emit('document-layout-refreshed', { source: 'mutation', durationMs: performance.now() - coworkRefreshStarted });`,
+  },
+  {
+    id: 'typing-idle-flush-refresh-cost-listener',
+    file: 'src/engine/input-handler.ts',
+    why: '다시 그리기 시간을 쉼 flush 간격 셈에 넣는다',
+    anchor: "    eventBus.on('document-layout-refreshed', () => {\n      const revealCaret = this.caretLayoutReveal.consume();",
+    replace: () => "    eventBus.on('document-layout-refreshed', (payload: unknown) => {\n      this.coworkNoteLayoutRefreshCost(payload);\n      const revealCaret = this.caretLayoutReveal.consume();",
   },
   {
     id: 'toolbar-preserve-unchanged-toggle',

@@ -46,6 +46,17 @@ pub(crate) fn supports_table_text_rows_with_storage<S: crate::storage::Storage>(
     para: &Paragraph,
     storage: &S,
 ) -> Result<bool, S::Error> {
+    // [hwpx-cowork] 글자처럼 취급 표가 없는 문단은 아래 판정이 늘 거짓이다(마지막 식의 `any(… treat_as_char)`).
+    // 조판은 모든 문단에 이 판정을 묻는데, 그때마다 문단 글 전체를 PUA 표시 글로 펼쳐 훑었다(글 문서의 쪽 나눔
+    // 4.5ms 중 1ms). 결과가 같으므로 먼저 돌려준다. 한정된 Storage(PDF 들여오기)는 할당 셈을 그대로 둔다.
+    if S::UNBOUNDED
+        && !para
+            .controls
+            .iter()
+            .any(|c| matches!(c, Control::Table(t) if t.common.treat_as_char))
+    {
+        return Ok(false);
+    }
     // 현재 단에 들어가는 전체 물리 줄은 같은 계획으로 측정·배치한다.
     // 분할이 필요하면 호출자가 기존 행 분할 소유자에게 반환한다.
     // 이미 구성한 합성 개체 줄의 소유는 유지한다.

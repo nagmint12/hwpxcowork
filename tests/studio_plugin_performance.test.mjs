@@ -220,3 +220,48 @@ test('프로그램으로 선택을 보정하면 열린 미니 도구 막대도 �
   selection = previous; cw.emitSelection();
   assert.equal(updates, 2, '닫힌 도구 막대를 자동으로 열지 않음');
 });
+
+// 2026-11-19 칸 짝짓기(pairNested)의 값: 칸 문단을 하나 넣거나 지우면(Enter·합치기) 표의 칸 목록 길이가 달라져 lcsPairs 가
+// 두 목록의 모든 쌍을 견준다 — 칸 1,936개 표에서 375만 번이고 그때마다 표 순번 정규식을 돌려 편집 뒤의 정렬이 0.2초였다.
+// 견줌에 쓰는 값은 항목마다 한 번만 구하고, 앞에서부터 같은 항목은 표를 만들지 않고 짝짓는다. 짝은 전과 같아야 한다.
+const pairing = load('align.ts', 'pairNested, lcsPairsAfterCommonPrefix', { planBody, charOps, foldOwners, alignOffsets, lcsPairs, rhwpNestedList, ...util });
+
+test('칸 짝짓기: 같은 앞부분을 건너뛴 LCS 는 lcsPairs 와 같은 짝을 같은 차례로 낸다', () => {
+  let seed = 20261119;
+  const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const pick = (n) => Math.floor(rand() * n);
+  const list = () => Array.from({ length: pick(14) }, () => 'abca'[pick(4)]);   // 같은 값이 겹치는 목록
+  const eq = (x, y) => x === y;
+  for (let n = 0; n < 4000; n++) {
+    const a = list();
+    // 절반은 앞부분이 같은 목록(문단 하나를 넣거나 지운 꼴), 절반은 아무 목록
+    const b = n % 2 ? list() : (() => { const copy = a.slice(); const at = pick(copy.length + 1); if (rand() < 0.5) copy.splice(at, 0, 'abca'[pick(4)]); else copy.splice(at, 1); return copy; })();
+    assert.deepEqual(plain(pairing.lcsPairsAfterCommonPrefix(a, b, eq)), plain(lcsPairs(a, b, eq)), `${a.join('')} / ${b.join('')}`);
+  }
+});
+
+test('칸 짝짓기: 큰 표의 칸에 문단을 넣어도 모든 쌍을 견주지 않고 같은 자리 짝을 낸다', () => {
+  const cells = 400;
+  const base = Array.from({ length: cells }, (_, c) => ({ ref: `s0/p3/n${c}`, text: `칸 ${c % 7}`, parent: 's0/p3', container: 'hp:tbl', cell: { table: 's0/p3#t0', row: Math.floor(c / 4), col: c % 4, rowSpan: 1, colSpan: 1 } }));
+  const itemsAfter = (at) => {
+    const out = [];
+    for (let c = 0; c < cells; c++) {
+      const shape = { kind: 'cell', tableOrd: 0, row: Math.floor(c / 4), col: c % 4, rowSpan: 1, colSpan: 1 };
+      out.push({ pos: { sec: 0, parentPara: 3, controlIdx: 0, cellIdx: c, cellParaIdx: 0 }, text: `칸 ${c % 7}`, ...shape });
+      if (c === at) out.push({ pos: { sec: 0, parentPara: 3, controlIdx: 0, cellIdx: c, cellParaIdx: 1 }, text: '새 문단', ...shape });
+    }
+    return out;
+  };
+  for (const at of [cells - 1, cells / 2, 0]) {
+    const items = itemsAfter(at);
+    let reads = 0;
+    // 표 순번을 읽는 횟수 = 모양 견줌 횟수의 어림. 전에는 두 목록의 모든 쌍(n×m — 여기서는 16만 번)마다 읽었다.
+    const counted = items.map((item) => ({ ...item, get tableOrd() { reads++; return item.tableOrd; } }));
+    const result = pairing.pairNested(base, counted);
+    assert.equal(result.structure, false);
+    assert.equal(result.pairs.length, cells);
+    // 기준 칸 c 는 넣은 문단 뒤에서 한 칸씩 밀린 항목과 짝이다(넣은 문단은 짝 없음)
+    assert.deepEqual(plain(result.pairs), Array.from({ length: cells }, (_, c) => [c, c > at ? c + 1 : c]));
+    assert.ok(reads <= items.length * 8, `표 순번 읽기 ${reads}회(항목 ${items.length}개) — 쌍마다 읽지 않는다`);
+  }
+});

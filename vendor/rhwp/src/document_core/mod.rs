@@ -298,12 +298,25 @@ pub struct DocumentCore {
     /// [#2424] 공개 pagination과 분리된 shadow continuation job.
     pub(crate) pending_pagination_job: Option<PendingPaginationJob>,
     // [hwpx-cowork] 칸 문단 줄 구성 기억(`renderer::composer::cell_compose_memo`) — 측정·조판·쪽 나무가 함께 쓴다.
-    // 쪽 나눔 시작마다 비우고, 미룬 글 편집을 마무리하는 쪽 나눔만 남긴다(`flush_deferred_pagination`).
+    // 스타일 값·글꼴 측정 환경이 바뀔 때만 비운다(2026-11-19 — 그 전에는 글 편집을 마무리하는 쪽 나눔만 남겼다).
     pub(crate) cell_compose_memo:
         std::sync::Arc<crate::renderer::composer::cell_compose_memo::CellComposeMemo>,
+    // [hwpx-cowork] 조판 중간 결과 기억(`renderer::layout_memo`) — 문단 내용 지문이 열쇠다.
+    // 문단 구성(`typeset::paragraph::format_memo`)과 저장 줄 투영(`render_normalization::stored_word_tail`).
+    // 구조 편집 뒤에도 남기고, 스타일 값·글꼴 측정 환경이 바뀔 때만 비운다
+    // (`invalidate_layout_memos`·`layout_environment_stamp`·`ResolvedStyleSet::keeps_layout_of`).
+    pub(crate) paragraph_format_memo: std::sync::Arc<crate::renderer::typeset::ParagraphFormatMemo>,
+    pub(crate) stored_rows_memo:
+        std::sync::Arc<crate::renderer::render_normalization::stored_word_tail::StoredRowsMemo>,
+    // 측정의 문단 프레임 재구성(`height_measurer::MeasureFrameMemo`) — 구역을 통째로 다시 재는 쪽 나눔(서식·쪽 나누기)용.
+    pub(crate) measure_frame_memo:
+        std::sync::Arc<crate::renderer::height_measurer::MeasureFrameMemo>,
+    // 보충 측정 요청 모으기의 문단별 기억(`canvas_metric_requests::MetricRequestMemo`) — 보충 측정값이 바뀌어도 남긴다.
+    pub(crate) metric_request_memo: std::sync::Arc<canvas_metric_requests::MetricRequestMemo>,
     // [hwpx-cowork] 지난 쪽 나눔 뒤에 바뀐 것이 글 편집(본문 한 문단의 짧은 글·표 칸의 미룬 글)뿐인가.
     // 그 글 편집 경로만 켜고(`text_edit_trust_*`), 구역을 dirty 로 표시하거나 쪽 나무 캐시를 버리는 모든 경로가 끈다.
-    // 켜진 채 시작하는 쪽 나눔만 칸 문단 줄 구성 기억을 남긴다.
+    // 2026-11-18 에는 켜진 채 시작하는 쪽 나눔만 칸 문단 줄 구성 기억을 남겼다. 2026-11-19 부터는 기억을 늘
+    // 남기므로 이 표시는 쪽 나눔이 읽지 않는다(편집 경로의 기록으로만 남는다).
     pub(crate) only_text_edits_pending: std::cell::Cell<bool>,
     pub(crate) progressive_open_page_budget: Option<usize>,
     pub(crate) progressive_open_job: Option<progressive_open::ProgressiveOpenJob>,
@@ -552,6 +565,64 @@ impl DocumentCore {
             .with_hangul2024_layout(self.hangul2024_compat)
     }
 
+    /// [hwpx-cowork] 스타일·글꼴 측정 환경이 바뀜 — 문단 내용으로 찾는 조판 기억을 모두 버린다
+    /// (칸 문단 줄 구성·문단 구성·저장 줄 투영). 글자·문단 모양 번호가 같아도 풀린 값이 달라질 수 있다.
+    pub(crate) fn invalidate_layout_memos(&self) {
+        self.invalidate_measured_layout_memos();
+        self.metric_request_memo.invalidate();
+    }
+
+    /// [hwpx-cowork] 보충 측정값(화면 글꼴 실측)만 바뀜 — 그 값을 읽는 조판 기억을 버린다.
+    /// 보충 측정 요청의 기억은 측정값을 읽지 않으므로 남긴다.
+    pub(crate) fn invalidate_measured_layout_memos(&self) {
+        self.cell_compose_memo.invalidate();
+        self.paragraph_format_memo.invalidate();
+        self.stored_rows_memo.invalidate();
+        self.measure_frame_memo.invalidate();
+    }
+
+    /// [hwpx-cowork] 글꼴 측정 환경의 표지에서 보충 측정값을 뺀 것 — dpi·실제 글꼴 등록 세대·호환 정책.
+    pub(crate) fn font_environment_stamp(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut environment = std::collections::hash_map::DefaultHasher::new();
+        self.dpi.to_bits().hash(&mut environment);
+        self.layout_engine
+            .exact_font_source_registry_counts()
+            .hash(&mut environment);
+        self.layout_engine
+            .horizontal_shaping_instance_request_counts()
+            .hash(&mut environment);
+        self.hangul2024_compat.hash(&mut environment);
+        self.effective_layout_profile()
+            .memo_stamp()
+            .hash(&mut environment);
+        environment.finish()
+    }
+
+    /// [hwpx-cowork] 조판 기억이 믿는 측정 환경의 표지 — dpi·글꼴 측정 문맥의 세대·보충 측정값·호환 정책.
+    /// 달라지면 기억을 비운다(쪽 나눔 시작과 정규화 시작에서 견준다).
+    pub(crate) fn layout_environment_stamp(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut environment = std::collections::hash_map::DefaultHasher::new();
+        self.dpi.to_bits().hash(&mut environment);
+        self.layout_engine
+            .exact_font_source_registry_counts()
+            .hash(&mut environment);
+        self.layout_engine
+            .horizontal_shaping_instance_request_counts()
+            .hash(&mut environment);
+        self.styles
+            .supplemental_metrics
+            .as_ref()
+            .map(|snapshot| std::sync::Arc::as_ptr(snapshot) as usize)
+            .hash(&mut environment);
+        self.hangul2024_compat.hash(&mut environment);
+        self.effective_layout_profile()
+            .memo_stamp()
+            .hash(&mut environment);
+        environment.finish()
+    }
+
     /// Rebuild the resolved-style aggregate with the document format's style
     /// normalization. Layout provenance remains in `Document::layout_profile`
     /// and is passed separately to cache-admission consumers.
@@ -576,13 +647,34 @@ impl DocumentCore {
         // source revision이 같아도 스타일 재해소 뒤에는 이전 투영을 재사용하지 않는다.
         self.render_normalization.sections.fill_with(|| None);
         self.render_normalization.unprojected_revisions.clear();
-        // [hwpx-cowork] 글자·문단 모양 번호가 같아도 풀린 값이 달라질 수 있다 — 칸 문단 줄 구성 기억을 버린다.
-        self.cell_compose_memo.invalidate();
-        self.styles = self.resolve_render_styles();
-        self.styles.supplemental_metrics = self
+        let styles = self.resolve_render_styles();
+        let supplemental_metrics = self
             .canvas_metrics
             .as_ref()
             .and_then(canvas_metrics::CanvasMetricSession::active_snapshot);
+        // [hwpx-cowork] 글자·문단 모양 번호가 같아도 풀린 값이 달라질 수 있다 — 그때는 문단 내용으로 찾는 조판 기억을
+        // 모두 버린다. 기존 모양 번호의 값과 문서 전체 값이 그대로면 남긴다: 서식을 새로 적용하면 모양 표 끝에
+        // 새 번호가 붙을 뿐이다(`ResolvedStyleSet::keeps_layout_of`). 진하게 한 번에 59쪽 보고서의 모든 문단과
+        // 표의 모든 칸을 다시 줄 나눔하던 것을 바뀐 문단만 하게 한다.
+        // 보충 측정값(화면 글꼴 실측)이 바뀐 경우도 여기서 버린다 — 쪽 나눔 시작의 환경 표지가 다시 걸러 내지만,
+        // 칸 문단 기억은 쪽 나눔 밖(커서·쪽 나무)에서도 읽으므로 바뀐 자리에서 바로 비운다.
+        let same_supplemental_metrics =
+            match (&self.styles.supplemental_metrics, &supplemental_metrics) {
+                (Some(old), Some(new)) => std::sync::Arc::ptr_eq(old, new),
+                (None, None) => true,
+                _ => false,
+            };
+        // 실제 글꼴 측정 문맥(kerning·shaping)을 쥔 문서는 새 스타일이 그 문맥 없이 시작하고 다음 쪽 나눔이 다시 건다
+        // (`ensure_exact_font_measurement_contexts`). 그 사이의 계산은 문맥 없는 값이므로 기억을 남기지 않는다.
+        let had_exact_font_contexts = self.styles.kerning_measurement_context.is_some()
+            || self.styles.horizontal_shaping_context.is_some();
+        if had_exact_font_contexts || !styles.keeps_layout_of(&self.styles) {
+            self.invalidate_layout_memos();
+        } else if !same_supplemental_metrics {
+            self.invalidate_measured_layout_memos();
+        }
+        self.styles = styles;
+        self.styles.supplemental_metrics = supplemental_metrics;
         // [#7436] 번호 문자열은 문단 모양·번호 정의에서 정해지므로 스타일과 함께 다시 계산한다.
         // 문서를 열 때의 재조판(저장 줄 없는 문단)도 번호 폭을 알고 줄을 나눈다.
         crate::renderer::layout::assign_numbering_markers(
@@ -663,6 +755,12 @@ impl DocumentCore {
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
             cell_compose_memo: Default::default(),
+            paragraph_format_memo: Default::default(),
+            stored_rows_memo: std::sync::Arc::new(
+                crate::renderer::render_normalization::stored_word_tail::new_stored_rows_memo(),
+            ),
+            measure_frame_memo: Default::default(),
+            metric_request_memo: Default::default(),
             only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,

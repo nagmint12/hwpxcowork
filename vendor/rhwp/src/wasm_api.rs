@@ -2057,9 +2057,44 @@ impl HwpDocument {
     pub fn cell_compose_memo_stats(&self) -> String {
         let (entries, hits, misses) = self.core.cell_compose_memo.stats();
         let (passes, kept, environment_changes) = self.core.cell_compose_memo.pass_stats();
+        let (verify_checks, verify_mismatches) = self.core.cell_compose_memo.verify_stats();
         format!(
-            "{{\"entries\":{entries},\"hits\":{hits},\"misses\":{misses},\"passes\":{passes},\"keptPasses\":{kept},\"environmentChanges\":{environment_changes}}}"
+            "{{\"entries\":{entries},\"hits\":{hits},\"misses\":{misses},\"passes\":{passes},\"keptPasses\":{kept},\"environmentChanges\":{environment_changes},\"verifyChecks\":{verify_checks},\"verifyMismatches\":{verify_mismatches}}}"
         )
+    }
+
+    /// [hwpx-cowork] 조판 중간 결과 기억의 상태(시험·진단용):
+    /// `{"paragraphFormat":{entries,bytes,hits,misses,uncached,unstored,passes,environmentChanges,evictions,verifyChecks,verifyMismatches,firstMismatch},"storedRows":{…}}`.
+    /// hits = 내용·폭·조판 문맥이 같아 다시 계산하지 않은 횟수(문서를 연 뒤 누적).
+    #[wasm_bindgen(js_name = layoutMemoStats)]
+    pub fn layout_memo_stats(&self) -> String {
+        format!(
+            "{{\"paragraphFormat\":{},\"storedRows\":{},\"measureFrame\":{},\"metricRequests\":{}}}",
+            self.core.paragraph_format_memo.stats().to_json(),
+            self.core.stored_rows_memo.stats().to_json(),
+            self.core.measure_frame_memo.stats().to_json(),
+            self.core.metric_request_memo.stats().to_json()
+        )
+    }
+
+    /// [hwpx-cowork] 조판 기억의 검증 모드(시험·진단용): 켜면 찾은 결과마다 새로 계산해 견주고
+    /// 다른 횟수를 `layoutMemoStats` 의 `verifyMismatches` 로 센다(결과는 새로 계산한 값을 쓴다).
+    #[wasm_bindgen(js_name = setLayoutMemoVerify)]
+    pub fn set_layout_memo_verify(&mut self, enabled: bool) {
+        self.core.paragraph_format_memo.set_verify(enabled);
+        self.core.stored_rows_memo.set_verify(enabled);
+        self.core.cell_compose_memo.set_verify(enabled);
+        self.core.measure_frame_memo.set_verify(enabled);
+        self.core.metric_request_memo.set_verify(enabled);
+    }
+
+    /// [hwpx-cowork] 조판 기억을 끄거나 켠다(견줌·되돌림용). 끄면 종전처럼 늘 새로 계산한다.
+    #[wasm_bindgen(js_name = setLayoutMemoEnabled)]
+    pub fn set_layout_memo_enabled(&mut self, enabled: bool) {
+        self.core.paragraph_format_memo.set_enabled(enabled);
+        self.core.stored_rows_memo.set_enabled(enabled);
+        self.core.measure_frame_memo.set_enabled(enabled);
+        self.core.metric_request_memo.set_enabled(enabled);
     }
 
     /// 지연된 페이지네이션을 동기 barrier로 flush하고 최신 페이지 수를 반환한다.

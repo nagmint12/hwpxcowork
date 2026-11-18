@@ -789,9 +789,9 @@ impl crate::renderer::style_resolver::storage::Storage for Allocation<'_> {
         }
         self.clone_record(value)
     }
-    fn reserve_set<T: Eq + std::hash::Hash>(
+    fn reserve_set<T: Eq + std::hash::Hash, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashSet<T>,
+        values: &mut std::collections::HashSet<T, H>,
         additional: usize,
     ) -> Result<(), Self::Error> {
         self.0.check().map_err(PdfImportError::backend)?;
@@ -869,9 +869,9 @@ impl crate::renderer::style_resolver::storage::Storage for Allocation<'_> {
     fn string(&self, text: &str) -> Result<String, Self::Error> {
         Allocation::string(*self, text)
     }
-    fn reserve_map<K: Eq + std::hash::Hash, V>(
+    fn reserve_map<K: Eq + std::hash::Hash, V, H: std::hash::BuildHasher>(
         &self,
-        values: &mut std::collections::HashMap<K, V>,
+        values: &mut std::collections::HashMap<K, V, H>,
         additional: usize,
     ) -> Result<(), Self::Error> {
         self.0.check().map_err(PdfImportError::backend)?;

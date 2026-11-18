@@ -8,8 +8,10 @@
 //! 1. 열쇠 = 문단의 모든 필드 지문(`fingerprint` — 필드를 빠짐없이 풀어 쓰므로 필드가 늘면 컴파일이 멈춘다)
 //!    + 폭·한 줄로 입력·dpi·저장 줄 정책·HWP5 여부. 주소가 아니라 내용이 열쇠라 문단이 옮겨지거나 사본이어도 맞다.
 //! 2. 기억하는 문단은 좁게: 개체·누름틀·번호 머리·탭이 없는 가로 글 문단만(그 밖은 늘 새로 계산).
-//! 3. 수명: 같은 문서에서 변경이 없거나 글 편집만 마무리하는 쪽 나눔에 걸쳐 보존한다.
-//!    스타일이나 글꼴 측정 환경이 바뀌면 비운다. 보관할 사본의 수와 데이터 크기도 제한한다.
+//! 3. 수명: 스타일 값이나 글꼴 측정 환경이 바뀌면 비운다. 보관할 사본의 수와 데이터 크기도 제한한다.
+//!    2026-11-18 에는 글 편집만 마무리하는 쪽 나눔에서만 남겼고, 2026-11-19 부터 구조·서식 편집의 쪽 나눔에도
+//!    남긴다(문단 나누기·그림 넣기·진하게 뒤에 바뀌지 않은 칸을 다시 줄 나눔하지 않는다 — 열쇠가 줄 구성의 입력을
+//!    모두 담는다). 검증 모드(`set_verify`)는 찾은 결과마다 새로 계산해 견준다.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -48,6 +50,10 @@ struct State {
     passes: u64,
     kept_passes: u64,
     environment_changes: u64,
+    /// [hwpx-cowork] 검증 모드: 찾은 결과마다 새로 계산해 견준다(다르면 세고 새 결과를 쓴다).
+    verify: bool,
+    verify_checks: u64,
+    verify_mismatches: u64,
 }
 
 impl State {
@@ -155,6 +161,17 @@ impl CellComposeMemo {
         (state.passes, state.kept_passes, state.environment_changes)
     }
 
+    /// [hwpx-cowork] 검증 모드(시험·진단용): 찾은 결과마다 새로 계산해 견준다.
+    pub(crate) fn set_verify(&self, enabled: bool) {
+        self.lock().verify = enabled;
+    }
+
+    /// (검증 모드에서 견준 횟수, 그중 달랐던 횟수)
+    pub(crate) fn verify_stats(&self) -> (u64, u64) {
+        let state = self.lock();
+        (state.verify_checks, state.verify_mismatches)
+    }
+
     /// 가로 글 칸 문단의 줄 구성. 기억할 수 있는 문단이고 같은 열쇠가 있으면 그 사본을, 아니면 `compute` 결과를 돌려준다.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn compose<E>(
@@ -190,12 +207,26 @@ impl CellComposeMemo {
                 | u8::from(hwpx_cell_geometry) << 3
                 | u8::from(stored_rows_before_hancom_2020) << 4,
         };
-        {
+        let (found, verify) = {
             let mut state = self.lock();
-            if let Some(found) = state.entries.get(&key).cloned() {
+            let found = state.entries.get(&key).cloned();
+            if found.is_some() {
                 state.hits += 1;
-                return Ok(found);
             }
+            (found, state.verify)
+        };
+        if let Some(found) = found {
+            if verify {
+                let fresh = compute()?;
+                let same = format!("{fresh:?}") == format!("{found:?}");
+                let mut state = self.lock();
+                state.verify_checks += 1;
+                if !same {
+                    state.verify_mismatches += 1;
+                }
+                return Ok(fresh);
+            }
+            return Ok(found);
         }
         // 계산하는 동안은 잠그지 않는다(중첩 호출·오래 걸리는 줄 나눔).
         let composed = compute()?;
@@ -241,34 +272,144 @@ pub(crate) fn compose_cell_paragraph<E>(
     }
 }
 
-/// 두 개의 독립 해시(충돌 여유).
-struct Fingerprint(
-    std::collections::hash_map::DefaultHasher,
-    std::collections::hash_map::DefaultHasher,
-);
+/// 두 개의 독립 64비트 상태를 한 번에 섞는 지문 해시(충돌 여유 128비트, 암호용 아님).
+///
+/// [hwpx-cowork] 2026-11-19: 예전에는 `DefaultHasher`(SipHash) 둘에 값을 따로 넣었다. 지문은 작은 값을 수없이
+/// 이어 쓰는데 SipHash 는 기록마다 버퍼를 챙기는 값이 커서, 조판 기억을 쓴 쪽 나눔의 1/5 이 이 해시였다
+/// (59쪽 보고서 17ms 중 3ms). 값 하나를 64비트 낱말 하나로 바로 섞는다. 두 상태는 서로 다른 섞기를 쓴다
+/// (a: xxHash64 의 누산 단계, b: xor-곱-xorshift) — 한쪽의 우연한 충돌이 다른 쪽에서도 날 일은 사실상 없다.
+/// 지문은 한 실행 안에서만 견주므로 값이 판마다 달라져도 된다.
+struct Fingerprint {
+    a: u64,
+    b: u64,
+    words: u64,
+}
 
 impl Fingerprint {
     fn new() -> Self {
-        let mut second = std::collections::hash_map::DefaultHasher::new();
-        0x9E37_79B9_7F4A_7C15_u64.hash(&mut second);
-        Self(std::collections::hash_map::DefaultHasher::new(), second)
+        Self {
+            a: 0x243F_6A88_85A3_08D3,
+            b: 0x1319_8A2E_0370_7344,
+            words: 0,
+        }
+    }
+
+    #[inline]
+    fn mix(&mut self, word: u64) {
+        self.a = self
+            .a
+            .wrapping_add(word.wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+            .rotate_left(31)
+            .wrapping_mul(0x9E37_79B1_85EB_CA87);
+        let b = (self.b ^ word).wrapping_mul(0xD6E8_FEB8_6659_FD93);
+        self.b = b ^ (b >> 32);
+        self.words = self.words.wrapping_add(1);
     }
 
     fn put<T: Hash + ?Sized>(&mut self, value: &T) {
-        value.hash(&mut self.0);
-        value.hash(&mut self.1);
+        value.hash(self);
     }
 
-    fn finish(self) -> (u64, u64) {
-        (self.0.finish(), self.1.finish())
+    /// 마지막 눈사태(murmur3 fmix64) — 낱말 수도 섞는다.
+    fn digest(self) -> (u64, u64) {
+        fn avalanche(mut h: u64) -> u64 {
+            h ^= h >> 33;
+            h = h.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+            h ^= h >> 33;
+            h = h.wrapping_mul(0xC4CE_B9FE_1A85_EC53);
+            h ^ (h >> 33)
+        }
+        (
+            avalanche(self.a ^ self.words),
+            avalanche(self.b.wrapping_add(self.words.wrapping_mul(0x9E37_79B9_7F4A_7C15))),
+        )
     }
 }
 
-/// 문단 내용 지문. 기억하지 않는 문단(개체·누름틀·번호 머리·탭·특수 표지)은 `None`.
+impl Hasher for Fingerprint {
+    fn finish(&self) -> u64 {
+        // `Hash` 구현이 부르지 않는다(지문은 `digest` 로 읽는다) — 트레이트 계약만 채운다.
+        self.a ^ self.b.rotate_left(32)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for chunk in &mut chunks {
+            let mut word = [0_u8; 8];
+            word.copy_from_slice(chunk);
+            self.mix(u64::from_le_bytes(word));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut word = [0_u8; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.mix(u64::from_le_bytes(word));
+        }
+        // 길이를 따로 섞는다 — 이어 쓴 두 바이트열의 경계가 달라지면 다른 지문이다.
+        self.mix(bytes.len() as u64 ^ 0x5851_F42D_4C95_7F2D);
+    }
+
+    #[inline]
+    fn write_u8(&mut self, value: u8) {
+        self.mix(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u16(&mut self, value: u16) {
+        self.mix(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u32(&mut self, value: u32) {
+        self.mix(u64::from(value));
+    }
+
+    #[inline]
+    fn write_u64(&mut self, value: u64) {
+        self.mix(value);
+    }
+
+    #[inline]
+    fn write_u128(&mut self, value: u128) {
+        self.mix(value as u64);
+        self.mix((value >> 64) as u64);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, value: usize) {
+        self.mix(value as u64);
+    }
+}
+
+/// [hwpx-cowork] 지문을 쓰는 자리. 무엇을 기억하지 않을지와 저장 줄의 세로 좌표를 어떻게 읽을지가 다르다.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum FingerprintScope {
+    /// 칸 문단의 줄 구성(이 파일의 기억). 번호 머리·탭·영역 표지가 있는 문단은 기억하지 않는다.
+    Cell,
+    /// 본문·칸 흐름의 저장 줄 투영(`render_normalization::stored_word_tail`). 번호 머리·탭·표지는 값으로 넣고
+    /// 저장 줄의 세로 좌표는 그대로(절대값) 넣는다 — 결과 줄이 그 좌표를 싣는다.
+    FlowExact,
+    /// 조판의 문단 구성(`typeset::paragraph::format`). `FlowExact` 와 같되, **합성 줄만 가진 문단**
+    /// (저장 줄 없음 — `para_has_no_stored_line_segs`)은 세로 좌표를 문단 첫 줄 기준 상대값으로 넣는다.
+    /// 그 문단의 구성은 줄을 비운 사본으로 다시 짜고(`recompose_stored_lines_in_frame…` 의 `fresh_body`),
+    /// 줄 메트릭의 저장 좌표 판정은 원본 줄(합성 표시 없음)에만 걸리므로 합성 좌표는 결과에 쓰이지 않는다.
+    /// 앞 문단이 한 줄 늘어 뒤 문단의 합성 좌표가 모두 밀려도(`recalculate_section_vpos`) 같은 결과를 찾는다.
+    FlowFormat,
+}
+
+/// 문단 내용 지문(칸 문단 줄 구성용). 기억하지 않는 문단(개체·누름틀·번호 머리·탭·특수 표지)은 `None`.
+fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
+    paragraph_fingerprint(para, FingerprintScope::Cell)
+}
+
+/// 문단 내용 지문. 기억하지 않는 문단은 `None`(무엇이 해당하는지는 `scope` 가 정한다).
 ///
 /// 필드를 하나도 빠뜨리지 않게 `..` 없이 풀어 쓴다 — `Paragraph` 에 필드가 생기면 여기서 컴파일이 멈춘다.
 /// 줄 구성과 무관해 보이는 필드도 넣는다(무관한지 따지다 틀리는 것보다 덜 맞는 편이 안전하다).
-fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
+pub(crate) fn paragraph_fingerprint(
+    para: &Paragraph,
+    scope: FingerprintScope,
+) -> Option<(u64, u64)> {
     let Paragraph {
         char_count,
         control_mask,
@@ -314,15 +455,24 @@ fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
         stored_flow_shifted,
         numbering_marker,
     } = para;
-    // 개체·누름틀·동적 필드 값·원고지 격자·영역 표지·제목/형광펜 표지·번호 머리·탭이 있으면 기억하지 않는다
-    // (쪽 소속·번호·탭 자리 같은 문단 밖 상태를 읽을 수 있는 것들).
+    // 개체·누름틀·동적 필드 값·원고지 격자가 있으면 어느 자리에서도 기억하지 않는다
+    // (쪽 소속·개체 크기 같은 문단 밖 상태를 읽을 수 있는 것들).
     if !controls.is_empty()
         || !ctrl_data_records.is_empty()
         || !field_ranges.is_empty()
         || !orphan_field_ends.is_empty()
         || !layout_field_values.is_empty()
         || layout_cell_grid.is_some()
-        || !range_tags.is_empty()
+    {
+        return None;
+    }
+    let flow = scope != FingerprintScope::Cell;
+    if flow {
+        // 번호를 아직 정하지 않은 문단은 배치가 자기 계수기로 번호를 만든다(문단 밖 상태).
+        if matches!(numbering_marker, NumberingMarker::Unresolved) {
+            return None;
+        }
+    } else if !range_tags.is_empty()
         || !title_marks.is_empty()
         || !markpen_marks.is_empty()
         || !tab_extended.is_empty()
@@ -330,11 +480,75 @@ fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
         || matches!(numbering_marker, NumberingMarker::Text(..))
         || text.contains('\t')
     {
+        // 칸 문단 줄 구성: 영역 표지·제목/형광펜 표지·번호 머리·탭이 있으면 기억하지 않는다(종전 그대로).
         return None;
     }
     let mut fp = Fingerprint::new();
     // 번호 머리가 없는 두 상태(아직 안 정함·번호 문단 아님)는 구별해 둔다.
     fp.put(&matches!(numbering_marker, NumberingMarker::Absent));
+    // 합성 줄만 가진 문단의 세로 좌표는 조판의 문단 구성에 쓰이지 않는다 — 첫 줄 기준 상대값으로 넣는다.
+    let relative_vpos = scope == FingerprintScope::FlowFormat
+        && !line_segs.is_empty()
+        && line_segs.iter().all(|seg| {
+            seg.tag & crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY != 0
+        })
+        && !*layout_source_text_partition
+        && source_line_seg_vertical_pos.is_none();
+    let vpos_base = if relative_vpos {
+        line_segs[0].vertical_pos
+    } else {
+        0
+    };
+    if flow {
+        // 흐름 지문은 칸 지문과 섞이지 않게 하고, 칸 지문이 거절하던 값들을 내용으로 넣는다.
+        fp.put(&(1_u8, relative_vpos));
+        fp.put(&range_tags.len());
+        for tag in range_tags {
+            let crate::model::paragraph::RangeTag { start, end, tag } = tag;
+            fp.put(&(*start, *end, *tag));
+        }
+        fp.put(&title_marks.len());
+        for mark in title_marks {
+            let crate::model::paragraph::TitleMark { char_idx, ignore } = mark;
+            fp.put(&(*char_idx, *ignore));
+        }
+        fp.put(&markpen_marks.len());
+        for mark in markpen_marks {
+            let crate::model::paragraph::MarkpenMark {
+                char_idx,
+                color,
+                utf16_pos,
+            } = mark;
+            fp.put(char_idx);
+            fp.put(color);
+            fp.put(utf16_pos);
+        }
+        fp.put(tab_extended);
+        match numbering_restart {
+            None => fp.put(&0_u8),
+            Some(crate::model::paragraph::NumberingRestart::ContinuePrevious) => fp.put(&1_u8),
+            Some(crate::model::paragraph::NumberingRestart::NewStart(start)) => {
+                fp.put(&(2_u8, *start))
+            }
+        }
+        if let NumberingMarker::Text(marker, head) = numbering_marker {
+            let crate::model::paragraph::MarkerHead {
+                attr,
+                width_adjust,
+                text_distance,
+                char_shape_id,
+                reference_width_em,
+            } = head;
+            fp.put(marker.as_str());
+            fp.put(&(
+                *attr,
+                *width_adjust,
+                *text_distance,
+                *char_shape_id,
+                *reference_width_em,
+            ));
+        }
+    }
     fp.put(char_count);
     fp.put(control_mask);
     fp.put(para_shape_id);
@@ -372,7 +586,8 @@ fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
         } = seg;
         fp.put(&(
             *text_start,
-            *vertical_pos,
+            // 합성 줄만 가진 문단(`FlowFormat`)은 첫 줄 기준 상대 좌표, 그 밖은 저장 좌표 그대로.
+            vertical_pos.wrapping_sub(vpos_base),
             *line_height,
             *text_height,
             *baseline_distance,
@@ -402,7 +617,169 @@ fn fingerprint(para: &Paragraph) -> Option<(u64, u64)> {
     fp.put(cell_format_vpos_dirty);
     fp.put(cell_vpos_reset);
     fp.put(stored_flow_shifted);
-    Some(fp.finish())
+    Some(fp.digest())
+}
+
+/// [hwpx-cowork] 기억에 넣을 줄 구성의 데이터 크기. 별도 복합 데이터를 가진 구성은 `None`(기억하지 않는다).
+pub(crate) fn composed_payload_bytes(composed: &ComposedParagraph) -> Option<usize> {
+    payload_bytes(composed)
+}
+
+/// [hwpx-cowork] 줄 구성의 요약 지문 — 문단 지문과 함께 조판 기억(`renderer::layout_memo`)의 열쇠가 된다.
+///
+/// 구성은 문단과 스타일에서 나오므로 문단 지문이 같으면 같아야 하지만, 호출부가 다른 구성을 넘기는
+/// 경로(정규화본·임시 구성)를 열쇠에서 갈라 두려고 줄·런의 값을 모두 넣는다. 필드는 `..` 없이 풀어 쓴다.
+pub(crate) fn composed_digest(composed: &ComposedParagraph) -> u64 {
+    let ComposedParagraph {
+        cell_line_wrap_squeeze,
+        lines,
+        para_style_id,
+        inline_controls,
+        numbering_text,
+        tac_controls,
+        footnote_positions,
+        tab_extended,
+        frame_geometry,
+        horizontal_shaping,
+    } = composed;
+    let mut hasher = Fingerprint::new();
+    cell_line_wrap_squeeze.hash(&mut hasher);
+    para_style_id.hash(&mut hasher);
+    inline_controls.len().hash(&mut hasher);
+    for control in inline_controls {
+        let super::InlineControl {
+            line_index,
+            control_index,
+            control_type,
+        } = control;
+        (*line_index, *control_index, std::mem::discriminant(control_type)).hash(&mut hasher);
+    }
+    match numbering_text {
+        None => 0_u8.hash(&mut hasher),
+        Some((text, head)) => {
+            let crate::model::paragraph::MarkerHead {
+                attr,
+                width_adjust,
+                text_distance,
+                char_shape_id,
+                reference_width_em,
+            } = head;
+            (1_u8, text.as_str()).hash(&mut hasher);
+            (
+                *attr,
+                *width_adjust,
+                *text_distance,
+                *char_shape_id,
+                *reference_width_em,
+            )
+                .hash(&mut hasher);
+        }
+    }
+    tac_controls.hash(&mut hasher);
+    footnote_positions.hash(&mut hasher);
+    tab_extended.hash(&mut hasher);
+    match frame_geometry {
+        None => 0_u8.hash(&mut hasher),
+        Some(frame) => {
+            let super::frame_geometry::FrameGeometry {
+                line_segs,
+                space_metrics,
+                inline_table_heights,
+                stored_partition,
+            } = frame.as_ref();
+            (1_u8, line_segs.len(), *stored_partition).hash(&mut hasher);
+            for seg in line_segs {
+                let crate::model::paragraph::LineSeg {
+                    text_start,
+                    vertical_pos,
+                    line_height,
+                    text_height,
+                    baseline_distance,
+                    line_spacing,
+                    column_start,
+                    segment_width,
+                    tag,
+                } = seg;
+                (
+                    *text_start,
+                    *vertical_pos,
+                    *line_height,
+                    *text_height,
+                    *baseline_distance,
+                    *line_spacing,
+                    *column_start,
+                    *segment_width,
+                    *tag,
+                )
+                    .hash(&mut hasher);
+            }
+            space_metrics.len().hash(&mut hasher);
+            for (start, metric) in space_metrics {
+                (*start, std::mem::discriminant(metric)).hash(&mut hasher);
+            }
+            inline_table_heights.hash(&mut hasher);
+        }
+    }
+    horizontal_shaping.is_some().hash(&mut hasher);
+    lines.len().hash(&mut hasher);
+    for line in lines {
+        let super::ComposedLine {
+            runs,
+            line_height,
+            baseline_distance,
+            segment_width,
+            column_start,
+            line_spacing,
+            has_line_break,
+            char_start,
+        } = line;
+        (
+            *line_height,
+            *baseline_distance,
+            *segment_width,
+            *column_start,
+            *line_spacing,
+            *has_line_break,
+            *char_start,
+            runs.len(),
+        )
+            .hash(&mut hasher);
+        for run in runs {
+            let super::ComposedTextRun {
+                literal_soft_hyphen,
+                literal_figure_space,
+                text,
+                char_style_id,
+                lang_index,
+                neutral_space_origin,
+                char_overlap,
+                footnote_marker,
+                display_text,
+                supplemental_metrics_blocked,
+                inserted_control_text,
+                space_metric,
+                regenerated_font_metrics,
+            } = run;
+            text.as_str().hash(&mut hasher);
+            (
+                *literal_soft_hyphen,
+                *literal_figure_space,
+                *char_style_id,
+                *lang_index,
+                *neutral_space_origin,
+                char_overlap.is_some(),
+                *footnote_marker,
+                *supplemental_metrics_blocked,
+                *inserted_control_text,
+                std::mem::discriminant(space_metric),
+                *regenerated_font_metrics,
+            )
+                .hash(&mut hasher);
+            display_text.hash(&mut hasher);
+        }
+    }
+    let (first, second) = hasher.digest();
+    first ^ second.rotate_left(32)
 }
 
 #[cfg(test)]

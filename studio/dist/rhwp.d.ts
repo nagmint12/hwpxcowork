@@ -2186,6 +2186,12 @@ export class HwpDocument {
      */
     isObjectLockedH2022(sec: number, ppi: number, cell_path_json: string, ci: number): boolean;
     /**
+     * [hwpx-cowork] 조판 중간 결과 기억의 상태(시험·진단용):
+     * `{"paragraphFormat":{entries,bytes,hits,misses,uncached,unstored,passes,environmentChanges,evictions,verifyChecks,verifyMismatches,firstMismatch},"storedRows":{…}}`.
+     * hits = 내용·폭·조판 문맥이 같아 다시 계산하지 않은 횟수(문서를 연 뒤 누적).
+     */
+    layoutMemoStats(): string;
+    /**
      * [#4694] 문서의 모든 차트를 문서 순서로 열거한다.
      *
      * 반환: JSON `[{ index, section, paragraph, control, container?, zipPart?, nestedCopy? }]`
@@ -2884,6 +2890,15 @@ export class HwpDocument {
      * [Task #825] 머리말/꼬리말 안 그림 속성 변경.
      */
     setHeaderFooterPictureProperties(section_idx: number, outer_para_idx: number, outer_control_idx: number, inner_para_idx: number, inner_control_idx: number, props_json: string): string;
+    /**
+     * [hwpx-cowork] 조판 기억을 끄거나 켠다(견줌·되돌림용). 끄면 종전처럼 늘 새로 계산한다.
+     */
+    setLayoutMemoEnabled(enabled: boolean): void;
+    /**
+     * [hwpx-cowork] 조판 기억의 검증 모드(시험·진단용): 켜면 찾은 결과마다 새로 계산해 견주고
+     * 다른 횟수를 `layoutMemoStats` 의 `verifyMismatches` 로 센다(결과는 새로 계산한 값을 쓴다).
+     */
+    setLayoutMemoVerify(enabled: boolean): void;
     /**
      * 메모 본문을 바꾼다. 작성자·날짜·서식은 그대로다.
      */
@@ -3766,6 +3781,7 @@ export interface InitOutput {
     readonly hwpdocument_insertTextLogical: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_isEmptyDocument: (a: number) => number;
     readonly hwpdocument_isObjectLockedH2022: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly hwpdocument_layoutMemoStats: (a: number) => [number, number];
     readonly hwpdocument_listCharts: (a: number) => [number, number, number, number];
     readonly hwpdocument_listTablesOfContents: (a: number) => [number, number];
     readonly hwpdocument_logicalToTextOffset: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -3911,6 +3927,8 @@ export interface InitOutput {
     readonly hwpdocument_setFormValueInCellEx: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_setHangul2024Compat: (a: number, b: number) => void;
     readonly hwpdocument_setHeaderFooterPictureProperties: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+    readonly hwpdocument_setLayoutMemoEnabled: (a: number, b: number) => void;
+    readonly hwpdocument_setLayoutMemoVerify: (a: number, b: number) => void;
     readonly hwpdocument_setMemoText: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_setNewNumber: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_setNoteEquationProperties: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];

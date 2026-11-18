@@ -186,6 +186,17 @@ test('idle pagination flush waits in proportion to the measured full-pagination 
     assert.equal(f.fixture.deferredPaginationPending, false);
     assert.equal(next(), delay, `쪽 나눔 ${cost}ms → 쉼 ${delay}ms`);
   }
+  // 2026-11-19 쉼 flush 뒤의 '보이는 쪽 다시 그리기' 시간도 쉼 간격에 든다 — 쪽 나눔이 싸도(조판 기억) 그리기가
+  // 한 프레임을 넘으면 120ms 쉴 때마다 그 그리기가 다음 글자를 막는다. CanvasView 가 완료 알림에 걸린 시간을 싣는다.
+  f.setCost(2);
+  assert.equal(f.fixture.flushDeferredPaginationIfNeeded('manual'), true);
+  assert.equal(next(), 120, '쪽 나눔 2ms, 다시 그리기 시간 모름 → 원본 간격');
+  f.fixture.coworkNoteLayoutRefreshCost({ source: 'mutation', durationMs: 40 });
+  assert.equal(next(), 336, '쪽 나눔 2ms + 다시 그리기 40ms → 쉼 336ms');
+  for (const bad of [undefined, null, {}, { durationMs: Number.NaN }, { durationMs: -1 }, { durationMs: '40' }]) f.fixture.coworkNoteLayoutRefreshCost(bad);
+  assert.equal(next(), 336, '시간이 없거나 이상한 알림은 지난 값을 바꾸지 않는다');
+  f.fixture.coworkNoteLayoutRefreshCost({ durationMs: 5 });
+  assert.equal(next(), 120, '둘을 더해도 한 프레임 이하면 원본 간격');
   // 쉼 timer 가 실제로 flush 하고 문서 바뀜을 알린다(원본 동작 그대로)
   f.setCost(115);
   f.fire();

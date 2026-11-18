@@ -351,6 +351,8 @@ include!("composer/pua_surface.inc.rs");
 
 // [hwpx-cowork] 칸 문단 줄 구성 기억(측정·칸 유닛·쪽 나무가 함께 쓴다).
 pub(crate) mod cell_compose_memo;
+// [hwpx-cowork] 문단 프레임 재구성 기억(측정·쪽 나무가 함께 쓴다).
+pub(crate) mod frame_memo;
 mod empty_line_metrics;
 pub(crate) mod inline_box_rows;
 mod line_breaking;

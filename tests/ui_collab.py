@@ -126,6 +126,10 @@ def start_server(tmp):
         json.dump(cfg, f, ensure_ascii=False, indent=1)
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('HWPX_COWORK_')}
     env.update(HWPX_COWORK_CONFIG=cfg_path, HWPX_COWORK_DATA_DIR=data, HWPX_COWORK_AI_MOCK='1', HWPX_COWORK_PORT=str(PORT), HWPX_COWORK_HOST='127.0.0.1')
+    # 비교할 편집기 번들(후보 빌드)만 그대로 넘긴다 — tests/ui_studio.py 와 같다(다른 HWPX_COWORK_* 는 위에서 지운다)
+    if os.environ.get('HWPX_COWORK_STUDIO_DIR'):
+        env['HWPX_COWORK_STUDIO_DIR'] = os.path.abspath(os.environ['HWPX_COWORK_STUDIO_DIR'])
+        print(f'편집기 번들: {env["HWPX_COWORK_STUDIO_DIR"]}', flush=True)
     log = open(f'{OUT}/collab_server.log', 'w', encoding='utf-8', newline='')
     srv = subprocess.Popen(['node', 'server/index.js'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     conf = None

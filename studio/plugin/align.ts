@@ -841,23 +841,55 @@ function pairNested(base: EngineParagraph[], items: RhItem[]): { pairs: Array<[n
   const B = bi.map((i) => base[i]); const R = ri.map((j) => items[j]);
   const out: Array<[number, number]> = [];
   if (!B.length || !R.length) return { pairs: out, structure };
-  if (!shifted && B.length === R.length && B.every((e, k) => shapeEq(e, R[k]))) {
+  // 2026-11-19 견줌에 쓰는 값(표 순번 — 정규식, 보이는 글 — normText)은 항목마다 한 번만 구한다. 판정은 shapeEq·normText 와 같다.
+  // 칸 문단을 하나 넣거나 지우면(Enter·합치기) 아래 lcsPairs 가 두 목록의 모든 쌍을 견준다 — 칸 1,936개 표에서 375만 번이고,
+  // 그때마다 정규식을 돌려 편집 뒤의 정렬 한 번이 0.2초였다(22쪽 문서 마지막 칸에서 Enter: 주 스레드 공백 약 200ms).
+  const Bs: PairShape[] = B.map((e) => (e.cell
+    ? { cell: true, ord: tableOrdOf(e.cell.table), row: e.cell.row, col: e.cell.col, text: normText(e.text) }
+    : { cell: false, ord: NaN, row: undefined, col: undefined, text: normText(e.text) }));
+  const Rs: PairShape[] = R.map((r) => ({ cell: r.kind === 'cell', ord: r.tableOrd, row: r.row, col: r.col, text: normText(r.text) }));
+  // shapeEq(B[i], R[k]) 와 같은 값
+  const sameShape = (b: PairShape, r: PairShape): boolean => (b.cell ? r.cell && b.ord === r.ord && b.row === r.row && b.col === r.col : !r.cell);
+  if (!shifted && Bs.length === Rs.length && Bs.every((b, k) => sameShape(b, Rs[k]))) {
     for (let k = 0; k < B.length; k++) out.push([bi[k], ri[k]]);
     return { pairs: out, structure };
   }
-  const strong = lcsPairs(B, R, (e: EngineParagraph, r: RhItem) => shapeEq(e, r) && normText(e.text) === normText(r.text)) as Array<[number, number]>;
+  const strong = lcsPairsAfterCommonPrefix(Bs, Rs, (b, r) => sameShape(b, r) && b.text === r.text);
   let pi = 0; let pj = 0;
   // 남은 틈은 같은 자리끼리(표 순번이 밀렸으면 하지 않는다 — 글이 같은 것만)
   const fill = (i2: number, j2: number) => {
     if (shifted) return;
     let j = pj;
     for (let i = pi; i < i2 && j < j2; i++) {
-      for (let k = j; k < j2; k++) if (shapeEq(B[i], R[k])) { out.push([bi[i], ri[k]]); j = k + 1; break; }
+      for (let k = j; k < j2; k++) if (sameShape(Bs[i], Rs[k])) { out.push([bi[i], ri[k]]); j = k + 1; break; }
     }
   };
   for (const [i, j] of strong) { fill(i, j); out.push([bi[i], ri[j]]); pi = i + 1; pj = j + 1; }
   fill(B.length, R.length);
   return { pairs: out, structure };
+}
+
+/** pairNested 가 견줄 때 쓰는 값 — 기준 문단·rhwp 항목을 같은 꼴로 한 번만 풀어 둔다 */
+interface PairShape { cell: boolean; ord: number | undefined; row: unknown; col: unknown; text: string }
+
+/**
+ * lcsPairs 와 같은 짝을 같은 차례로 낸다(2026-11-19). 앞에서부터 차례로 같은 항목은 표를 만들지 않고 바로 짝짓는다.
+ * lcsPairs 의 되짚기는 지금 자리의 두 항목이 같으면 늘 그 둘을 짝짓고 넘어간다(같을 때 L[i][j] = L[i+1][j+1] + 1 이므로) —
+ * 그래서 같은 앞부분은 (0,0)…(p-1,p-1) 로 짝지어지고 그 뒤는 남은 목록끼리의 결과와 같다.
+ * 뒤에서부터 같은 부분은 미리 짝짓지 않는다(되짚기가 앞에서부터 가므로 같은 글이 겹치면 다른 짝이 될 수 있다).
+ * 끝 칸에 문단을 넣는 보통의 편집에서 견줄 쌍이 n×m 에서 몇 개로 준다.
+ */
+function lcsPairsAfterCommonPrefix<A, B>(a: A[], b: B[], eq: (x: A, y: B) => boolean): Array<[number, number]> {
+  const limit = Math.min(a.length, b.length);
+  let p = 0;
+  while (p < limit && eq(a[p], b[p])) p++;
+  if (p === 0) return lcsPairs(a, b, eq) as Array<[number, number]>;
+  const out: Array<[number, number]> = [];
+  for (let k = 0; k < p; k++) out.push([k, k]);
+  if (p < a.length && p < b.length) {
+    for (const [i, j] of lcsPairs(a.slice(p), b.slice(p), eq) as Array<[number, number]>) out.push([i + p, j + p]);
+  }
+  return out;
 }
 
 interface CellText { row: number; col: number; text: string }
