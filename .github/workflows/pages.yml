@@ -40,6 +40,9 @@ jobs:
         with:
           node-version: 22
       - name: Build site
+        # HWPX_SERVER_URL(저장소 변수): 첫 화면이 보여 줄 hwpx-cowork 서버 — 없으면 소개 쪽이 첫 화면
+        env:
+          HWPX_SERVER_URL: ${{ vars.HWPX_SERVER_URL }}
         run: node deploy/github-pages/build-site.mjs _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -4,6 +4,7 @@ import {ICON} from './icons.js';
 import {driveImportTargets,defaultDriveImportTarget,driveDocumentChoices} from './drive-library.js';
 import {canImportDriveFile,driveRows,driveTree,folderKey,importSpaceTargets} from './drive-explorer-model.js';
 import {SideSplitter,useSideWidth} from './side-splitter.js';
+import {PAGES_HOST,PAGES_NO_SECRET} from './pages-host.js';
 
 // 2026-11-17 두레이 서비스 API 방식: 사용자가 두레이에서 직접 만든 개인 API 인증 토큰을 한 번 등록하면 서버가 내 개인 드라이브를 다룬다(확장프로그램 없음).
 // 2026-11-18 프로젝트 드라이브: 왼쪽 드라이브 목록 = 내 드라이브 + 사용자가 [프로젝트 추가]로 허용한 프로젝트(서버 status.drives — 없는 옛 서버면 내 드라이브만)
@@ -207,7 +208,8 @@ export const DriveTab={
     // 두레이 토큰 등록·확인·해제 — 토큰 원문은 등록 요청 한 번에만 서버로 보내고 화면에 남기지 않는다
     function openDooray(site,path=''){const home=doorayHome(site);if(!home){error.value='두레이 사이트 주소를 확인하세요(예: https://회사.dooray.com).';return;}window.open(home+path,'_blank','noopener');}
     async function pasteToken(){try{const t=(await navigator.clipboard.readText()).trim();if(t)tokenInput.value=t;else error.value='클립보드가 비어 있습니다.';}catch{error.value='클립보드를 읽지 못했습니다. 토큰 칸에 직접 붙여 넣으세요(Ctrl+V).';}}
-    const connectDooray=()=>action(async()=>{if(!siteInput.value||!tokenInput.value.trim())throw Error('두레이 사이트 주소와 토큰을 넣으세요.');progress.value='두레이에서 토큰을 확인하는 중…';const s=await api('/api/drive/connection',{method:'PUT',body:{site:siteInput.value,token:tokenInput.value}});tokenInput.value='';replacing.value=false;status.value=s;resetFolders();toast('두레이 '+(s.account?.name||'')+' 계정의 개인 드라이브를 연결했습니다.');dialog.value?.close();modal.value='';await readFolder();});
+    // GitHub 페이지에 끼워 연 화면(web/pages-host.js)에서는 두레이 토큰을 저장하지 않는다(2026-11-18 — 서버도 거절한다)
+    const connectDooray=()=>action(async()=>{if(PAGES_HOST)throw Error(PAGES_NO_SECRET);if(!siteInput.value||!tokenInput.value.trim())throw Error('두레이 사이트 주소와 토큰을 넣으세요.');progress.value='두레이에서 토큰을 확인하는 중…';const s=await api('/api/drive/connection',{method:'PUT',body:{site:siteInput.value,token:tokenInput.value}});tokenInput.value='';replacing.value=false;status.value=s;resetFolders();toast('두레이 '+(s.account?.name||'')+' 계정의 개인 드라이브를 연결했습니다.');dialog.value?.close();modal.value='';await readFolder();});
     const checkConnection=()=>action(async()=>{progress.value='두레이 연결을 확인하는 중…';status.value=await api('/api/drive/connection/check',{method:'POST'});toast('두레이 연결이 정상입니다.');});
     function startReplace(){replacing.value=true;tokenInput.value='';siteInput.value=status.value.account?.site||siteInput.value;}
     const disconnect=()=>action(async()=>{if(!confirm('두레이 드라이브 연결을 해제할까요?\ncowork 서버에 저장한 토큰을 지웁니다. 두레이의 토큰 자체는 두레이 개인 설정에서 삭제하세요.'))return;await api('/api/drive/connection',{method:'DELETE'});await refresh();resetFolders();});

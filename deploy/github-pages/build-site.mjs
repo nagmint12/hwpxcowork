@@ -26,8 +26,22 @@ if (!fs.existsSync(path.join(dist, 'index.html'))) fail('studio/dist/index.html 
 if (fs.existsSync(out) && fs.readdirSync(out).length) fail(`출력 폴더가 비어 있지 않습니다: ${out}`);
 fs.mkdirSync(out, { recursive: true });
 
-// ── 소개 쪽 ──
-for (const f of ['index.html', 'site.css']) fs.copyFileSync(path.join(here, f), path.join(out, f));
+// ── 첫 화면 ──
+// HWPX_SERVER_URL(저장소 변수 — .github/workflows/pages.yml)이 있으면 첫 화면은 그 서버의 화면을 그대로 보여 주는 입구(app.html)이고
+// 소개 쪽은 about.html 이 된다(2026-11-18 사용자 요청 — "기존 페이지와 다른 게 없게": 로그인·문서함·Codex/Claude 연결·튜토리얼은 그 서버가 처리).
+// 없으면 첫 화면은 소개 쪽(index.html)이다. 서버 주소는 저장소 글에 적지 않고 배포할 때만 넣는다.
+const serverUrl = (process.env.HWPX_SERVER_URL || '').trim();
+if (serverUrl) {
+  let u; try { u = new URL(serverUrl); } catch { fail(`HWPX_SERVER_URL 이 주소가 아닙니다: ${serverUrl}`); }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) fail('HWPX_SERVER_URL 은 경로·쿼리 없는 https 서버 주소여야 합니다');
+  const shell = fs.readFileSync(path.join(here, 'app.html'), 'utf8');
+  if (shell.split('__HWPX_SERVER__').length !== 2) fail('app.html 의 __HWPX_SERVER__ 자리가 하나가 아닙니다');
+  fs.writeFileSync(path.join(out, 'index.html'), shell.replace('__HWPX_SERVER__', () => JSON.stringify(u.origin + '/')));
+  fs.copyFileSync(path.join(here, 'index.html'), path.join(out, 'about.html'));
+} else {
+  fs.copyFileSync(path.join(here, 'index.html'), path.join(out, 'index.html'));
+}
+fs.copyFileSync(path.join(here, 'site.css'), path.join(out, 'site.css'));
 fs.copyFileSync(path.join(root, 'web/icons/icon-256.png'), path.join(out, 'icon.png'));
 fs.copyFileSync(path.join(root, 'web/favicon.ico'), path.join(out, 'favicon.ico'));
 fs.writeFileSync(path.join(out, '.nojekyll'), '');

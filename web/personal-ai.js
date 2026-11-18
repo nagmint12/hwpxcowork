@@ -7,6 +7,7 @@
 import { ref, reactive, computed, onMounted } from '/vendor/vue.esm-browser.prod.js';
 import { state, api, toast, toastError, fmt } from './util.js';
 import { AdminCreditsPanel } from './admin-credits.js';
+import { PAGES_HOST } from './pages-host.js';
 
 // 연결 고르기: 연결 방식·제공자와 처음 넣어 둘 모델(API는 API 모델 목록의 ID)·추론 강도. 첫 항목이 기본
 export const PERSONAL_AI_CHOICES = [
@@ -27,7 +28,8 @@ export const PersonalAiPanel = {
   <details v-else class="personal-ai" data-testid="personal-ai">
     <summary>내 AI 키 <span class="muted" title="기본은 내 PC의 Codex·Claude Code(구독 — 추가 비용 없음)입니다. 내 AI 키는 사용료가 따로 듭니다">· 선택 · 사용료 별도 — {{ summary }}</span></summary>
     <p class="muted">기본은 <b>내 PC의 Codex·Claude Code</b>(구독 — 추가 비용 없음)입니다. 그 PC를 켜 두기 어려우면 <b>API·제공업체 API 키 또는 로컬 AI 주소</b>를 등록해 서버가 바로 처리하게 할 수 있습니다. API는 크레딧이 차감되고 제공업체 API는 해당 요금이 적용됩니다. 키는 서버에 암호로 잠가 보관하며 다시 보여 주지 않습니다.</p>
-    <div class="pai-form">
+    <p v-if="pagesHost" class="muted" data-testid="personal-ai-pages">GitHub 페이지에서는 API 키를 저장하지 않습니다. <a :href="serverUrl" target="_blank" rel="noopener">서버 주소에서 열기</a></p>
+    <div v-else class="pai-form">
       <label>연결<select v-model="f.choice" @change="pick" aria-label="AI 연결 방식"><optgroup label="API"><option v-for="c in gatewayChoices" :key="c.id" :value="c.id">{{ c.label }}</option></optgroup><optgroup label="제공업체·로컬 API 직접"><option v-for="c in directChoices" :key="c.id" :value="c.id">{{ c.label }}</option></optgroup></select></label>
       <label v-if="current.gateway === 'local'">로컬 API 주소<input v-model.trim="f.baseUrl" placeholder="http://localhost:1234/v1" spellcheck="false" autocomplete="off" aria-label="로컬 API 주소"/></label>
       <label>모델 ID<span class="pai-model"><input v-model.trim="f.model" list="pai-model-list" :placeholder="current.gateway === 'local' ? '예: qwen/qwen3.8-27b' : current.gateway === 'baze' ? '예: gpt-6.1-sol (API 모델 목록의 ID)' : '제공업체에서 확인한 모델 ID'" spellcheck="false" autocomplete="off" aria-label="모델 ID"/>
@@ -37,9 +39,9 @@ export const PersonalAiPanel = {
       <label>추론 강도<select v-model="f.effort" aria-label="추론 강도"><option value="">모델 기본값</option><option v-for="e in EFFORTS" :key="e" :value="e">{{ e }}</option></select></label>
       <label>{{ current.gateway === 'local' ? 'API 키(선택)' : 'API 키' }}<input v-model="f.key" type="password" :placeholder="current.gateway === 'local' ? (st.gateway === 'local' && st.keyHint ? '바꿀 때만 입력 (지금 ' + st.keyHint + ')' : '키가 없는 로컬 서버는 비워 두세요') : st.configured && st.gateway === current.gateway && st.keyHint ? '바꿀 때만 입력 (지금 ' + st.keyHint + ')' : (current.gateway === 'baze' ? 'API 제공업체에서 발급한 키' : '제공업체 API 키')" autocomplete="new-password" spellcheck="false" aria-label="API 키"/></label>
     </div>
-    <p v-if="current.gateway === 'local'" class="muted">localhost는 이 웹 서비스의 서버가 실행되는 PC입니다. 같은 PC의 LM Studio 등에서 OpenAI 호환 API 서버를 켜 두세요. 별도 개인 실행기는 필요 없습니다. 모델 ID를 저장한 뒤 목록·연결 확인을 사용할 수 있습니다.</p>
+    <p v-if="current.gateway === 'local' && !pagesHost" class="muted">localhost는 이 웹 서비스의 서버가 실행되는 PC입니다. 같은 PC의 LM Studio 등에서 OpenAI 호환 API 서버를 켜 두세요. 별도 개인 실행기는 필요 없습니다. 모델 ID를 저장한 뒤 목록·연결 확인을 사용할 수 있습니다.</p>
     <div class="row pai-actions">
-      <button class="primary small" :disabled="busy" @click="save" data-testid="personal-ai-save">저장</button>
+      <button v-if="!pagesHost" class="primary small" :disabled="busy" @click="save" data-testid="personal-ai-save">저장</button>
       <button class="small" v-if="st.configured" :disabled="busy" @click="check" data-testid="personal-ai-check">연결 확인</button>
       <button class="small" v-if="st.configured" :disabled="busy" @click="remove" data-testid="personal-ai-remove">키 삭제</button>
       <span class="muted" v-if="st.lastCheck" :class="st.lastCheck.ok ? 'ok' : 'err'">{{ st.lastCheck.ok ? '✓' : '✗' }} {{ st.lastCheck.message }}</span>
@@ -82,7 +84,9 @@ export const PersonalAiPanel = {
     }, '저장했습니다. 연결 확인으로 키와 모델을 확인하세요.');
     const check = () => run(() => api('/api/me/ai/check', { method: 'POST' }), '키와 모델을 확인했습니다');
     const remove = () => { if (confirm('등록한 내 AI 키를 서버에서 지울까요?')) run(() => api('/api/me/ai', { method: 'DELETE' }), '내 AI 키를 지웠습니다'); };
-    return { st, f, current, busy, summary, sharedLabel, models, loadModels, EFFORTS: ['low', 'medium', 'high', 'xhigh', 'max'], choices: PERSONAL_AI_CHOICES, gatewayChoices: PERSONAL_AI_CHOICES.filter((c) => c.group === 'gateway'), directChoices: PERSONAL_AI_CHOICES.filter((c) => c.group === 'direct'), pick, save, check, remove };
+    // GitHub 페이지에 끼워 연 화면(web/pages-host.js)에서는 키를 저장하지 않는다 — 서버 주소로 직접 열어 저장한다(2026-11-18)
+    const serverUrl = location.origin + '/';
+    return { pagesHost: PAGES_HOST, serverUrl, st, f, current, busy, summary, sharedLabel, models, loadModels, EFFORTS: ['low', 'medium', 'high', 'xhigh', 'max'], choices: PERSONAL_AI_CHOICES, gatewayChoices: PERSONAL_AI_CHOICES.filter((c) => c.group === 'gateway'), directChoices: PERSONAL_AI_CHOICES.filter((c) => c.group === 'direct'), pick, save, check, remove };
   },
 };
 

@@ -119,6 +119,15 @@ RAW_ROUTES.push(/^\/api\/drive\/files\/?$/);
 app.use((req, res, next) => req.path === '/api/clipboard/import' ? nativeImportParser(req, res, next) : req.path === '/api/clipboard/native' ? clipboardParser(req, res, next)
   : ((req.method === 'POST' || req.method === 'PUT') && RAW_ROUTES.some((re) => re.test(req.path)) ? next() : jsonParser(req, res, next)));
 app.use(oauth.middleware);
+// GitHub Pages 에 끼워 연 화면(web/pages-host.js 가 X-Hwpx-Host: github-pages 를 붙인다 — deploy/github-pages/app.html)에서는
+// 개인 API 키·두레이 토큰을 저장하지 않는다(2026-11-18 사용자 결정 — 누구나 여는 공개 페이지라 위험, GitHub 페이지에만 적용). 서버 주소로 직접 연 화면은 그대로
+const PAGES_SECRET_ROUTES = [['PUT', '/api/me/ai'], ['PUT', '/api/drive/connection']];
+app.use((req, res, next) => {
+  if (String(req.get('x-hwpx-host') || '').toLowerCase() === 'github-pages' && PAGES_SECRET_ROUTES.some(([m, p]) => req.method === m && req.path === p)) {
+    return res.status(403).set('Cache-Control', 'no-store').json({ error: 'PAGES_NO_SECRETS', message: 'GitHub 페이지에서는 API 키·토큰을 저장하지 않습니다. 서버 주소에서 직접 열어 저장하세요.' });
+  }
+  next();
+});
 
 // ── 인증 ──
 function auth(req, res, next) {
