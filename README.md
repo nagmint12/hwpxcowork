@@ -23,7 +23,7 @@ Windows 앱이나 GitHub에서 개인 서버 또는 공동 서버를 설치한 �
 
 Windows 10·11(64비트)용입니다. 관리자 권한이 필요 없습니다.
 
-1. 이 저장소의 **Releases**에서 `HwpxCowork-Setup-<판>.exe`를 받습니다.
+1. [GitHub Releases](https://github.com/nagmint12/hwpxcowork/releases)에서 원하는 버전의 `HwpxCowork-Setup-<판>.exe`를 받습니다.
 2. 받은 파일을 두 번 누릅니다. **"Windows의 PC 보호"** 창이 뜨면 **[추가 정보] → [실행]**을 누릅니다.
    이 설치 파일에는 아직 코드 서명 인증서가 없어서 Windows가 처음 보는 프로그램으로 알리는 것입니다.
 3. 설치 마법사에서 **[다음] → [설치] → [마침]**을 누릅니다. 바탕화면과 시작 메뉴에 **Hwpx Cowork** 아이콘이 생깁니다.

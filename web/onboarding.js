@@ -81,7 +81,8 @@ function render(focus = true) {
             ${command(plan.command, 'setup-command', 'Windows 터미널')}${command(plan.commandNode, 'setup-node-command', 'Mac·Linux · Node.js 22 이상')}
             <p id="copy-status" class="status" role="status"></p>
           </details>
-          <a class="detail-link" href="${plan.help}-${installOs}" target="_blank" rel="noopener">설치 설명서 ↗</a>
+          <a class="detail-link" id="install-help" href="${plan.help}-${installOs}" target="_blank" rel="noopener">설치 설명서 ↗</a>
+          <a class="detail-link" href="https://github.com/nagmint12/hwpxcowork/releases" target="_blank" rel="noopener">GitHub에서 설치 파일 받기 ↗</a>
         </section>
         <section class="launch" aria-labelledby="launch-title">
           <h2 id="launch-title">웹에서 사용해 보기</h2>
@@ -123,7 +124,7 @@ function refreshInstaller() {
   const hadFocus = area.contains(document.activeElement);
   const plan = setupPlan(deployment, subscription);
   area.innerHTML = installOs === 'windows' ? windowsInstall(plan) : macInstall(plan);
-  root.querySelector('.detail-link').href = `${plan.help}-${installOs}`;
+  root.querySelector('#install-help').href = `${plan.help}-${installOs}`;
   if (hadFocus) area.querySelector('a')?.focus();
 }
 
