@@ -68,6 +68,7 @@ export function tutorialConfig(cfg) {
       : t.shareAgent === true ? true : typeof t.shareAgent === 'string' && t.shareAgent.trim() ? t.shareAgent.trim() : null,
     everyone,
     autoStart: has && t.autoStart !== false,
+    introOnLogin: t.introOnLogin !== false,
     doc: path.resolve(root, t.doc || path.join('tutorial', '결과보고서.hwpx')),
     title: String(t.title || '결과보고서').trim() || '결과보고서',
     // 변경 추적을 켠 채 연습(문서 설정 track·exportKind tracked + 한/글 변경 내용 추적 켬). 2026-11-04 기본은 끔 — 켜면 반영 오류가 있었다
@@ -168,7 +169,7 @@ export function createTutorial({ service, config }) {
       }
     } catch (e) { console.error('[튜토리얼] 이전 연습 문서를 토큰에 연결하지 못했습니다:', e.message); }
   })();
-  const introFor = user => { const item = entryCourse(); return canUse(user?.name) && !!item && !completion(user, item.id); };
+  const introFor = user => { const item = entryCourse(); return conf().introOnLogin && canUse(user?.name) && !!item && !completion(user, item.id); };
   function recordCompletion(user, meta) {
     const all = readState(); const key = tutorialOwnerKey(user);
     all[key] ||= { completed: {} };
@@ -198,6 +199,7 @@ export function createTutorial({ service, config }) {
   function status(user) {
     if (!canUse(user?.name)) return { enabled: false };
     return { enabled: true, apiOnly: true, api: service.tutorialAiStatus(user.name), autoStart: autoFor(user.name), introRequired: introFor(user),
+      teaser: fs.existsSync(path.join(root, 'web', 'teaser', 'index.html')),
       items: catalog().map(({ file, attachments, ...item }, i) => ({ ...item, number: i + 1 })),
       sessions: service.store.listSessions().filter(m => ownsTutorial(user, m)).map(m => ({ docId: m.id, tutorialId: m.tutorialId, title: m.title, updatedAt: m.updatedAt, guided: !!m.tutorialGuided })) };
   }

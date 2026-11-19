@@ -89,6 +89,20 @@ test('다시 보기도 teaser 부터 열고 teaser3 를 이어 튼다', () => {
   assert.equal(following.searchParams.get('next'), '/?teaser=0');
 });
 
+test('튜토리얼에서 소개 영상 두 편을 보거나 건너뛰면 설치 안내를 거치지 않고 실습 목록으로 간다', () => {
+  const first = playIntro('teaser', '?intro=1&return=tutorial');
+  first.options.onEnd(); first.timers.shift()();
+  const second = new URL(first.redirects[0], 'https://example.test');
+  assert.equal(second.pathname, '/teaser3/');
+  assert.equal(second.searchParams.get('return'), 'tutorial');
+  const after = playIntro('teaser3', second.search);
+  after.options.onEnd(); after.timers.shift()();
+  assert.deepEqual(after.redirects, ['/?teaser=0&welcome=tutorial']);
+  const skipped = playIntro('teaser', '?intro=1&return=tutorial');
+  skipped.events.click({ stopPropagation() {} });
+  assert.deepEqual(skipped.redirects, after.redirects);
+});
+
 test('단독으로 열면 teaser → teaser3 → teaser 로 번갈아 되풀이하고(주소 옵션 유지·시작 시각은 뺀다), ?loop=0 이면 끝에서 멈춘다', () => {
   const a = playIntro('teaser', '?controls=0&t=7.5');
   assert.equal(a.options.loop, false);

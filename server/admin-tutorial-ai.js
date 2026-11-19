@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import { ServiceError } from './service.js';
 import { readConfigFile, checkConfigRevision, writeConfigFile } from './admin-settings.js';
+import { installedTutorialConfig } from './config.js';
 import { TUTORIAL_AI_PROVIDERS, tutorialConfig, shareAgentMatches } from './tutorial.js';
 
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -82,7 +83,8 @@ export function createAdminTutorialAi({ config, service, fsImpl = fs }) {
       if (examples === true) delete t.examples; else if (examples === false) t.examples = false;
       return t;
     };
-    const tutorial = apply({ ...(object(current.raw.tutorial) ? current.raw.tutorial : {}) });
+    const loadedTutorial = installedTutorialConfig(current.raw, config.root || process.cwd());
+    const tutorial = apply({ ...(object(loadedTutorial) ? loadedTutorial : {}) });
     const written = writeConfigFile(file, { ...current.raw, tutorial }, revision, fsImpl);
     // 실행 중인 설정에도 바로 반영(tutorialConfig 는 요청마다 config.tutorial 을 읽는다)
     config.tutorial = apply({ ...(object(config.tutorial) ? config.tutorial : {}) });

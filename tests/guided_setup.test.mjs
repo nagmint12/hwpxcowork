@@ -120,6 +120,12 @@ test('개인·공동 서버: 충돌 회피·로그인 후 연결·반복실행�
       // 실제 모델 대신 20초 대기하는 가짜 native CLI를 요청에 붙여 정상 종료 때 자식까지 취소되는지 확인한다.
       const headers = { Authorization: `Bearer ${config.users[0].token}` };
       const base = `http://127.0.0.1:${config.port}`;
+      const me = await (await fetch(`${base}/api/me`, { headers })).json();
+      assert.equal(me.tutorial, true);
+      assert.equal(me.tutorialIntroRequired, false);
+      const catalog = await (await fetch(`${base}/api/tutorial`, { headers })).json();
+      assert.equal(catalog.teaser, true);
+      assert.ok(catalog.items.some(item => item.id === 'report'));
       const uploaded = await fetch(`${base}/api/docs`, { method: 'POST', headers: { ...headers, 'x-file-name': 'guided-test.hwpx' }, body: await fs.readFile(path.join(ROOT, 'tests', 'fixtures', 'tool_memo_tracked.hwpx')) });
       assert.equal(uploaded.status, 200); const doc = await uploaded.json();
       const paragraphs = await (await fetch(`${base}/api/docs/${doc.id}/paragraphs`, { headers })).json();

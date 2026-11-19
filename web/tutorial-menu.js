@@ -7,7 +7,7 @@ import { TUTORIAL_MODULES } from './tutorial-definition.js';
 export const TutorialMenu = {
   components: { TutorialEditor },
   template: `<main class="tutorial-menu" data-testid="tutorial-menu">
-    <div class="row"><a class="btnlike" href="#/">← 문서함</a><h1>튜토리얼</h1><span class="spacer"></span><button v-if="canEdit && !showEditor" @click="showEditor = true" data-testid="tutorial-edit-definition">구성 편집</button></div>
+    <div class="row"><a class="btnlike" href="#/">← 문서함</a><h1>튜토리얼</h1><span class="spacer"></span><a v-if="data.teaser" class="btnlike" href="/teaser/?intro=1&amp;return=tutorial" data-testid="tutorial-teaser">소개 영상</a><button v-if="canEdit && !showEditor" @click="showEditor = true" data-testid="tutorial-edit-definition">구성 편집</button></div>
     <TutorialEditor v-if="canEdit && showEditor" @saved="load" @close="showEditor = false"/>
     <p>새 임시 문서에서 연습합니다. <b>완료하고 문서함에 저장</b>을 누르면 연습한 문서만 내 문서함에 저장됩니다.</p>
     <p class="muted">처음부터 시작하면 새 연습 문서가 열립니다. 완료한 문서는 그대로 보관됩니다.</p>

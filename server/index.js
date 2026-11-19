@@ -622,7 +622,7 @@ function staticDir(dir, opts = {}) {
 app.use('/vendor/rhwp-editor', staticDir(path.join(root, 'vendor/rhwp/npm/editor'), { setHeaders: staticHeaders }));
 app.use('/vendor/rhwp-core', staticDir(cfg.enginePkgDir, { setHeaders: staticHeaders }));
 app.use('/vendor/vue.esm-browser.prod.js', express.static(path.join(root, 'node_modules/vue/dist/vue.esm-browser.prod.js')));
-// 배포 묶음에는 소개 화면(web/teaser·teaser3)을 넣지 않는다(2026-11-16, scripts/package-portable.mjs) —
+// 소개 화면(web/teaser·teaser3)이 빠진 배포 묶음에서는
 // 첫 방문 이동(web/intro.js)과 '소개 영상' 링크는 next 주소(같은 사이트 경로만)로 바로 넘긴다
 for (const intro of ['teaser', 'teaser3']) {
   if (fs.existsSync(path.join(root, 'web', intro, 'index.html'))) continue;

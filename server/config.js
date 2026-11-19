@@ -29,6 +29,17 @@ export function normalizeSelfIssue(v) {
   };
 }
 
+export function installedTutorialConfig(config, root) {
+  const tutorial = config.tutorial;
+  const installedApp = config.installation?.guided === true || process.env.HWPX_COWORK_DESKTOP_MANAGED === '1';
+  // 예전 설치 도우미가 남긴 기본 설정을 실행 시 갱신한다. 별도 옵션을 둔 관리자의 설정은 그대로 읽는다.
+  if (installedApp && tutorial?.enabled === false && Object.keys(tutorial).length === 1 &&
+      fs.existsSync(path.join(root, 'tutorial', '결과보고서.hwpx'))) {
+    return { enabled: true, autoStart: false, introOnLogin: false, examples: true };
+  }
+  return tutorial;
+}
+
 /**
  * 설정 읽기. 환경 변수(모두 선택):
  *   HWPX_COWORK_CONFIG       다른 config 파일 경로(시험·체험용 임시 config). 주면 그 파일이 꼭 있어야 한다 —
@@ -60,6 +71,7 @@ export function loadConfig(root) {
   } catch (e) { throw new Error(`config 파일을 읽지 못했습니다: ${file} — ${e.message}`); }
   cfg.root = root;
   cfg.configFile = file;
+  cfg.tutorial = installedTutorialConfig(cfg, root);
   cfg.dataDir = process.env.HWPX_COWORK_DATA_DIR ? path.resolve(root, process.env.HWPX_COWORK_DATA_DIR) : path.resolve(path.dirname(file), cfg.dataDir || 'data');
   cfg.host = process.env.HWPX_COWORK_HOST || cfg.host || '127.0.0.1';
   cfg.port = Number(process.env.HWPX_COWORK_PORT || (cfg.port ?? 8787));

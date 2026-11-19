@@ -44,8 +44,9 @@
     const intro = q.get('intro') === '1';
     const raw = q.get('next') || '/';
     const next = raw.startsWith('/') && !/[\\\u0000-\u0020]/.test(raw) && new URL(raw, location.origin).origin === location.origin ? raw : '/';
-    const welcome = new URL('/onboarding.html', location.origin);
-    welcome.searchParams.set('next', next);
+    const returnToTutorial = q.get('return') === 'tutorial';
+    const welcome = new URL(returnToTutorial ? '/?teaser=0&welcome=tutorial' : '/onboarding.html', location.origin);
+    if (!returnToTutorial) welcome.searchParams.set('next', next);
     let left = false;
     const leave = (url) => { if (!left) { left = true; location.replace(url); } };
     const go = () => leave(`${welcome.pathname}${welcome.search}`);

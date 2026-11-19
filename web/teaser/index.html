@@ -44,14 +44,19 @@
     const intro = q.get('intro') === '1';
     const raw = q.get('next') || '/';
     const next = raw.startsWith('/') && !/[\\\u0000-\u0020]/.test(raw) && new URL(raw, location.origin).origin === location.origin ? raw : '/';
-    const welcome = new URL('/onboarding.html', location.origin);
-    welcome.searchParams.set('next', next);
+    const returnToTutorial = q.get('return') === 'tutorial';
+    const welcome = new URL(returnToTutorial ? '/?teaser=0&welcome=tutorial' : '/onboarding.html', location.origin);
+    if (!returnToTutorial) welcome.searchParams.set('next', next);
     let left = false;
     const leave = (url) => { if (!left) { left = true; location.replace(url); } };
     const go = () => leave(`${welcome.pathname}${welcome.search}`);
     const following = () => {
       const url = new URL('/teaser3/', location.origin);
-      if (intro) { url.searchParams.set('intro', '1'); url.searchParams.set('next', next); }
+      if (intro) {
+        url.searchParams.set('intro', '1');
+        if (returnToTutorial) url.searchParams.set('return', 'tutorial');
+        else url.searchParams.set('next', next);
+      }
       else for (const [key, value] of q) if (!['t', 'intro', 'next'].includes(key)) url.searchParams.set(key, value);
       return `${url.pathname}${url.search}`;
     };

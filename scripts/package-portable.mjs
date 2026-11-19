@@ -22,6 +22,7 @@ import { WORKER_PACKAGE_FILES } from '../server/worker-package.js';
 import { removeFile } from '../server/fs-safe.js';
 import { findNpmCli } from '../deploy/portable/common/npm-location.mjs';
 import { assertFontDistributionBundle } from './rhwp-original-font-policy.mjs';
+import { inspectPublicBytes, publicOnboardingText } from './public-export-safety.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoots = new Map();
@@ -47,9 +48,8 @@ const MACOS_COMPAT_NODE_VERSION = '22.23.5';
 // 서버가 실제로 import 하는 외부 패키지(server/launcher.js·index.js 부터 따라간 결과). vue 는 브라우저용 파일 하나만 내보낸다.
 const SERVER_DEPENDENCIES = ['@modelcontextprotocol/sdk', '@resvg/resvg-wasm', 'diff', 'exceljs', 'express', 'ipaddr.js', 'jszip', 'standardwebhooks', 'unpdf', 'ws', 'zod'];
 const WORKER_DEPENDENCIES = ['@modelcontextprotocol/sdk', 'zod'];   // Claude API 는 SDK 없이 fetch(api-messages-agent)
-// 2026-11-16 사용자 지시: 배포물에 기관 자료·개인정보를 넣지 않는다. 첫 실행 설명서(docs/manuals)·튜토리얼 연습 문서(tutorial/)·
-// 체험 소개 화면(web/teaser*)은 묶지 않는다. 설명서는 manuals.seed=false 라 읽지 않고, 튜토리얼은 설치 도우미 설정에서 꺼져 있으며
-// (tutorial.enabled=false) 연습 파일이 없으면 메뉴에서 빠진다. 묶은 뒤 auditPrivate 가 글·압축 문서 안·로고 해시를 다시 검사한다.
+// 배포물에 기관 자료·개인정보를 넣지 않는다. Windows 앱의 바탕인 personal-lite에 공개용 소개 영상과 실습 자료를 추가한다.
+// 설명서는 문서함에 미리 복사하지 않고, 묶은 뒤 auditPrivate가 글·압축 문서 안·로고 해시를 검사한다.
 const SERVER_TREES = ['server', 'engine', 'web', 'studio/dist'];   // 2026-11-17 두레이 확장(extensions/drive-bridge)은 두레이 API 방식으로 바꾸며 뺐다
 const SERVER_FILES = [
   // 웹 설명서(/manual.md·/manual-resources)·실행기 ZIP 이 읽는 안내
@@ -78,7 +78,7 @@ const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/s
 // 트리 안에서 빼는 것: 편집기 빌드의 rhwp 예제 문서·쓰지 않는 옛 사본, 파이썬 캐시
 // web/quick/ = 운영 주소에 올리는 조사 보고 페이지(2026-11-12 한/글 2022 기능 대조 등) — 제품 묶음에는 넣지 않는다.
 // web/tutorial-media/ = 예전 복사 튜토리얼 촬영 영상 — 2026-11-12 웹 그림 장면(web/tutorial-scenes.js)으로 바뀌어 부르지 않는다(원본은 개발 폴더에만 보관)
-// web/teaser·teaser3 = 공모전 소개 화면(연습 문서 화면 포함) — 없으면 서버가 /teaser/ 를 바로 다음 주소로 넘긴다(server/index.js).
+// 소개 화면은 personal-lite에만 따로 추가한다. 다른 묶음에서 경로를 열면 서버가 다음 주소로 보낸다.
 // server/run-watchdog-silent.vbs·install-watchdog.js = 개발 PC 전용 감시 도우미(이 PC 경로가 들어 있다), server/templates/README.md = 개발 메모
 // web/icons/hwpx-cowork.icns = Mac 앱 아이콘(scripts/make-icons.mjs) — Mac 묶음이 개발 폴더에서 바로 읽고, 서버·Windows 묶음에는 필요 없다
 const TREE_EXCLUDE = [/^web\/icons\/hwpx-cowork\.icns$/, /^web\/quick\//, /^web\/tutorial-media\//, /^web\/teaser3?\//, /^server\/run-watchdog-silent\.vbs$/, /^server\/install-watchdog\.js$/, /^server\/templates\/README\.md$/,/^studio\/dist\/samples\//, /^studio\/dist\/rhwp(\.js|\.d\.ts|_bg\.wasm\.d\.ts)$/, /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.DS_Store$/];
@@ -153,6 +153,27 @@ function copyTrees(stage, trees, files) {
     }
   }
   for (const relative of files) copyInto(stage, relative);
+}
+
+async function personalOnboardingEntries() {
+  const entries = [];
+  for (const tree of ['web/teaser', 'web/teaser3', 'tutorial', 'docs/manuals']) {
+    for (const name of walk(sourceFile(tree))) {
+      if (name === 'README.md') continue;
+      const relative = `${tree}/${name}`;
+      const src = sourceFile(relative);
+      let data = fs.readFileSync(src);
+      if (relative.endsWith('.hwpx')) {
+        const inspected = await inspectPublicBytes(data, { scrubAuthors: true }, relative);
+        if (inspected.findings.length) throw new Error(`실습 문서를 읽을 수 없습니다: ${relative}`);
+        data = inspected.data;
+      } else if (relative.endsWith('.json')) {
+        data = Buffer.from(publicOnboardingText(relative, data.toString('utf8')));
+      }
+      entries.push({ path: `app/${relative}`, data });
+    }
+  }
+  return entries;
 }
 
 /** 루트 node_modules 에서 Node 해석 규칙대로 운영 의존성 닫힘을 찾는다 → 맨 위 패키지 폴더(node_modules/<이름>) 목록 */
@@ -712,7 +733,8 @@ async function main() {
     } else if (target === 'personal-lite') {
       // 개인용 앱: 서버 묶음과 같은 app/(편집기·엔진·의존성) + 개인용 시작 파일. 런타임 없음(설치된 Node 를 쓰거나 처음 켤 때 받는다)
       const entries = [t('personal/personal-app.bat', 'personal-app.bat'), t('personal/personal-app.sh', 'personal-app.sh'), t('personal/README.txt', 'README.txt'),
-        ...nodeHelpers, ...dirEntries(serverApp.stage, 'app/'), ...noticeEntries(serverApp.stage, rhwpNotices), { path: 'BUILD-INFO.json', data: Buffer.from(buildInfo(target, `system >=22 또는 install-node(${o.nodeVersion})`)) }];
+        ...nodeHelpers, ...dirEntries(serverApp.stage, 'app/'), ...await personalOnboardingEntries(),
+        ...noticeEntries(serverApp.stage, rhwpNotices), { path: 'BUILD-INFO.json', data: Buffer.from(buildInfo(target, `system >=22 또는 install-node(${o.nodeVersion})`)) }];
       builds.push({ target, entries, top: 'hwpx-cowork-personal', format: 'zip', unix: true, file: `hwpx-cowork-personal-${version}-${stamp}-lite.zip` });
     } else {
       const win = target === 'worker-win';

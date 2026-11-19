@@ -113,6 +113,26 @@ try {
   // Seeing the HTML title alone does not mean its module scripts have run.
   await poll(() => js("import('/util.js').then(m=>m.state.me?.role==='admin'&&!location.hash.startsWith('#/t/'))"), 'automatic personal sign-in');
   pass('native-launch-and-private-library', { title: await js('document.title') });
+  if (process.argv.includes('--onboarding')) {
+    const click = selector => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.click(); return true; })()`);
+    await poll(() => click('[data-testid="tutorial-nav"]'), 'tutorial menu entry');
+    const catalog = await api('/api/tutorial');
+    assert.equal(catalog.introRequired, false);
+    assert.equal(catalog.teaser, true);
+    assert.ok(catalog.items.some(item => item.id === 'report'));
+    for (const teaser of ['teaser', 'teaser3']) {
+      const response = await fetch(`${origin}/${teaser}/film/scenes.json`);
+      assert.equal(response.status, 200);
+      assert.ok(await response.json());
+    }
+    await poll(() => click('[data-testid="tutorial-teaser"]'), 'tutorial teaser link');
+    await poll(() => js("location.pathname === '/teaser/' && !!document.querySelector('#teaser').children.length"), 'teaser player loaded');
+    await poll(() => click('.tz-skip:not([hidden])'), 'skip teaser');
+    await poll(() => click('[data-tutorial="report"] button'), 'start practice report from returned menu');
+    const practice = await poll(async () => (await api('/api/tutorial')).sessions.find(item => item.tutorialId === 'report'), 'practice session');
+    await poll(() => js(`location.hash === ${JSON.stringify('#/doc/' + practice.docId)}`), 'practice document route');
+    pass('bundled-teaser-and-tutorial', { courses: catalog.items.length });
+  }
   const build = await (await fetch(origin + '/studio/cowork-build.json')).json();
   assert.equal(build.plugin.id, 'cowork');
   pass('cowork-build-included', { patchCount: build.patches.length });
