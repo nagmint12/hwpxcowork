@@ -213,3 +213,11 @@ npm test            # 단위·API·MCP 시험(임시 data 폴더·빈 포트, �
 
 MIT — [`LICENSE`](LICENSE) (Copyright (c) 2026 nagmint12). 제3자 고지: [`NOTICE.md`](NOTICE.md).
 제3자 구성 요소: rhwp(MIT, `vendor/rhwp/LICENSE`·`THIRD_PARTY*.md`), 편집기 글꼴(`studio/dist/fonts/FONTS.md` — 각 글꼴의 라이선스), npm 의존성(각 패키지 라이선스).
+
+### 한글과컴퓨터 권리 고지
+
+본 제품은 한컴의 HWP 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다. [한컴 HWP·OWPML 문서 형식 공개](https://www.hancom.com/support/downloadCenter/hwpOwpml)
+
+한컴오피스 한/글 프로그램의 저작권은 주식회사 한글과컴퓨터(Hancom Inc.)에 있습니다. [한/글 사용권](https://help.hancom.com/hoffice/multi/ko_kr/hwp/rights/rights.htm)
+
+‘한글’, ‘한컴’, ‘HWP’, ‘HWPX’는 주식회사 한글과컴퓨터의 상표입니다. HWPX는 OWPML(KS X 6101)을 따르는 개방형 문서 형식입니다. [한컴의 HWPX 형식 설명](https://tech.hancom.com/hwpxformat/)
