@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { validateImage } from './image-integrity.js';
 import { imageInfo } from '../engine/picture.js';
 import { mcpOutput } from './api-mcp-tools.js';
+import { isTaskSurface } from './tool-profiles.js';
 import { runToolLoop, toolRules, fail, responseFailure, V2_CONTINUE } from './api-tool-loop.js';
 
 const MAX_BYTES = 10 * 1048576;
@@ -13,7 +14,7 @@ const replayItem = o => (o.type === 'image_generation_call' && o.id ? { type: o.
  * 새 MCP 연결(toolContext.surface 'v2'): 도구 규칙은 시스템 지시(server/ai.js runV2)에 이미 있고 최종 JSON 형식이 없다. 만든 파일은 edit 의 figure op(attachment_id)로 넣게 알린다.
  */
 export async function runResponsesAgent(ai, input, body, { signal, toolContext, parse, allowHosted = true, imageGeneration = false, singleTurn = false, fileOnly = false }) {
-  const v2 = toolContext?.surface === 'v2';
+  const v2 = isTaskSurface(toolContext?.surface);
   const tools = (toolContext?.tools || []).map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters, strict: false }));
   const hosted = allowHosted && ai.cfg.workspace === 'hosted';
   if (hosted) tools.push({ type: 'code_interpreter', container: { type: 'auto' } });

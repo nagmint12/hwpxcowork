@@ -5,7 +5,8 @@ import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount, nex
 import { state, api, toast, toastError, fmtShort, fmtSize, clip, kinds, presets, kindLabel, presetLabel, STATUS_LABEL, fileKind, KIND_ICON, copyText, adopterNames, progressText, resolvedText, workEnv, docWorkEnv, routeOptions, agentEnvName, serverEnvName, josa, tocNote, deleteNote, bundleLabel, CONNECT_HELP, SUB_AI_TIP, NO_AI_TIP } from './util.js';
 import { diffHtml } from './diff.js';
 import { ICON } from './icons.js';
-import { requestWait } from './request-wait.js';
+import { requestWait, requestRunLabel } from './request-wait.js';
+import { useRequestModel } from './request-model.js';
 import { activityRows, secText } from './activity-rows.js';
 import { proposalPlace, refWords, placeNote } from './proposal-place.js';
 import { agentPrompt as agentPromptText, groupChanges } from './menumodel.js';
@@ -214,7 +215,7 @@ export const Composer = {
   components: { AttachChips, DropZone, Hint, ResultView: null },
   props: { model: Object, docked: Boolean },
   emits: ['close'],
-  template: `<div class="composer" :class="{docked}" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send" @paste="paste"
+  template: `<div class="composer" :class="{docked}" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send" @keydown.esc="closeRun" @paste="paste"
       @dragenter.prevent="dragOver=true" @dragover.prevent="dragOver=true" @dragleave="onLeave" @drop.prevent="drop">
     <template v-if="m.phase !== 'result'">
       <div class="cmp-target" v-if="m.target?.scope==='document'" title="문서 전체가 대상입니다 — 본문에서 범위를 고르면 그 범위로 바뀝니다"><span class="pill k">문서 전체</span></div>
@@ -239,15 +240,43 @@ export const Composer = {
       </div>
       <div class="muted warn" v-if="warn">{{ warn }}</div>
       <div class="muted cmp-noai" v-if="noAi" :title="NO_AI_TIP" data-testid="cmp-noai">연결된 AI 없음 — 내 PC의 Codex·Claude Code 실행기를 켜면 바로 처리 <Hint :text="NO_AI_TIP + ' — 누르면 연결 방법'" :href="CONNECT_HELP"/></div>
+      <div v-show="canChooseRun && runOpen" :id="runId" class="cmp-run" role="group" aria-label="이 요청의 모델 설정">
+        <div class="muted" v-if="runLoading" role="status">모델 목록 불러오는 중…</div>
+        <div class="muted" v-else-if="runLoadError" role="alert">{{ runLoadError }} <button class="small" type="button" @click="loadRuns">다시 불러오기</button></div>
+        <template v-else-if="runKind">
+          <div class="cmp-run-fields">
+            <label>실행기<select ref="runSelect" :value="runDraft.kind" :disabled="m.phase==='sending'" @change="chooseRunKind($event.target.value)">
+              <option v-for="k in runKinds" :key="k.id" :value="k.id">{{ requestRunLabel(k.id) }}{{ k.id === 'api' ? ' (사용료 별도)' : '' }}</option>
+            </select></label>
+            <label>모델<select :value="runDraft.custom ? '*' : runDraft.model" :disabled="m.phase==='sending'" @change="chooseRunModel($event.target.value)">
+              <option value="">연결 기본값{{ runDefault.model ? ' · ' + runDefault.model : '' }}</option>
+              <option v-for="item in runKind.models" :key="item.id" :value="item.id">{{ item.label || item.id }}</option>
+              <option value="*">직접 입력…</option>
+            </select></label>
+            <label v-if="runEfforts.length">추론 강도<select v-model="runDraft.effort" :disabled="m.phase==='sending'">
+              <option value="">기본값{{ runDraft.model && runModel?.defaultEffort ? ' · ' + runModel.defaultEffort : '' }}</option>
+              <option v-for="effort in runEfforts" :key="effort" :value="effort">{{ effort }}</option>
+            </select></label>
+          </div>
+          <label v-if="runDraft.custom">모델 ID<input v-model.trim="runDraft.model" :disabled="m.phase==='sending'" maxlength="200" autocomplete="off" spellcheck="false" @input="runDraft.effort=''"/></label>
+          <div v-if="runError" class="warn" role="alert">{{ runError }}</div>
+          <div v-else class="muted">{{ runSettings && !runOnline ? '지정한 실행기가 연결되면 처리합니다.' : '이 요청에만 적용합니다.' }}</div>
+        </template>
+      </div>
       <div class="cmp-foot">
         <select v-model="m.route" class="mini route-sel" aria-label="보낼 곳" :title="routeTip">
           <option v-for="o in routeOpts" :key="o.value" :value="o.value">{{ o.label }}</option></select>
         <Hint :text="routeHelp" :href="CONNECT_HELP"/>
         <span class="spacer"></span>
         <button v-if="!docked" class="small" @click="$emit('close')">닫기</button>
-        <button v-if="route==='queue'" class="small cmp-copy" :disabled="!canSend" :title="COPY_TIP + ' — 대기열에 넣고 복사'" @click="sendAndCopy">프롬프트 복사</button>
-        <button class="small primary ai-send cmp-send" :data-route="route" :disabled="!canSend" :title="sendTip" @click="send()">
-          <span v-if="m.phase==='sending'" class="spin"></span>{{ sendLabel }}</button>
+        <button v-if="route==='queue' && !runSettings" class="small cmp-copy" :disabled="!canSend" :title="COPY_TIP + ' — 대기열에 넣고 복사'" @click="sendAndCopy">프롬프트 복사</button>
+        <div class="cmp-submit">
+          <button v-if="canChooseRun" ref="runToggle" class="small cmp-run-toggle" type="button" :class="{chosen: runSettings}" :aria-controls="runId" :aria-expanded="runOpen" :disabled="m.phase==='sending'" :title="runTip" @click="toggleRun">
+            모델<span class="cmp-run-chevron" aria-hidden="true"></span>
+          </button>
+          <button class="small primary ai-send cmp-send" :data-route="route" :disabled="!canSend" :title="sendTip" @click="send()">
+            <span v-if="m.phase==='sending'" class="spin"></span>{{ sendLabel }}</button>
+        </div>
       </div>
     </template>
     <template v-else>
@@ -271,19 +300,27 @@ export const Composer = {
     const agent = computed(() => myAgent(d));
     const env = computed(() => docWorkEnv(d.s, { agentName: agent.value.agent }));
     const aiOn = computed(() => env.value.serverOn);
-    const route = computed(() => effectiveRoute(m.route || 'auto', agent.value.online, aiOn.value, env.value.ownAi));
-    const routeOpts = computed(() => routeOptions(env.value));
+    const canChooseRun = computed(() => !!state.config?.features?.requestRunSettings && !env.value.apiOnly && !env.value.ownAi && m.route !== 'server');
+    const requestModel = useRequestModel(canChooseRun, () => d.s.agentMe?.sessions || []);
+    const { runSettings, runName, runOnline, runError, runOpen, resetRun } = requestModel;
+    const route = computed(() => runSettings.value ? (m.route !== 'queue' && runOnline.value ? 'agent' : 'queue')
+      : effectiveRoute(m.route || 'auto', agent.value.online, aiOn.value, env.value.ownAi));
+    const routeOpts = computed(() => routeOptions(env.value).map(opt => {
+      if (!runSettings.value || !['auto', 'agent'].includes(opt.value)) return opt;
+      return { ...opt, label: `${opt.value === 'auto' ? '자동 · ' : ''}${runName.value}${runOnline.value ? '' : ' 대기'}` };
+    }));
     // 고른 환경이 끊기면(선택 칸에서 빠짐) 자동으로 — 빈 선택 칸을 남기지 않는다
     watch(routeOpts, (opts) => { if (m.phase !== 'sending' && !opts.some((o) => o.value === (m.route || 'auto'))) m.route = 'auto'; }, { immediate: true });
-    const routeTip = computed(() => `보낼 곳 — 자동: ${env.value.connected || '연결된 AI'}, 없으면 대기열`);
+    const routeTip = computed(() => runSettings.value ? `${runName.value} 실행기가 처리합니다` : `보낼 곳 — 자동: ${env.value.connected || '연결된 AI'}, 없으면 대기열`);
     // 연결 안내는 내 PC 의 구독 AI 먼저(util.js 'AI 연결 차례' — 2026-11-13): 내 AI 키·ChatGPT 앱은 그다음 선택
     const routeHelp = `보낼 곳: 자동은 연결된 AI로 보냅니다 — 내 PC의 Codex·Claude Code 실행기(구독, 추가 비용 없음)가 먼저, 다음 내 AI 키(사용료 별도). 연결이 없으면 대기열에 두었다가 실행기를 켜면 처리합니다. ChatGPT 앱에서는 [프롬프트 복사] 뒤 붙여 넣으면 처리됩니다 — 누르면 연결 방법`;
     // 연결된 AI 가 하나도 없을 때만 한 줄(체험 계정·예시 답변 문서·공용 서버 AI 가 받는 때는 숨김)
-    const noAi = computed(() => !env.value.apiOnly && !env.value.ownAi && env.value.autoRoute === 'queue' && !agent.value.online);
-    const routeName = computed(() => (route.value === 'agent' ? env.value.agent || agent.value.agent : route.value === 'server' ? env.value.server || 'AI' : route.value === 'example' ? '예시 답변' : '대기열'));
+    const noAi = computed(() => !runSettings.value && !env.value.apiOnly && !env.value.ownAi && env.value.autoRoute === 'queue' && !agent.value.online);
+    const routeName = computed(() => (route.value === 'agent' ? (runSettings.value ? runName.value : env.value.agent || agent.value.agent)
+      : route.value === 'server' ? env.value.server || 'AI' : route.value === 'example' ? '예시 답변' : '대기열'));
     // 보낼 곳은 선택 칸이 이미 보인다(§1-2 한 번만) — 단추는 '보내기', 어디로 가는지는 title
     const sendLabel = computed(() => (m.phase === 'sending' ? (route.value === 'server' ? 'AI 작업 중…' : '보내는 중…') : '보내기'));
-    const sendTip = computed(() => `${route.value === 'queue' ? (noAi.value ? `대기열에 넣습니다 — ${SUB_AI_TIP}` : '대기열에 넣습니다') : `${routeName.value}에 보냅니다`} (Ctrl+Enter)`);
+    const sendTip = computed(() => `${route.value === 'queue' ? (runSettings.value ? `${runName.value} 실행기 대기열에 넣습니다` : noAi.value ? `대기열에 넣습니다 — ${SUB_AI_TIP}` : '대기열에 넣습니다') : `${routeName.value}에 보냅니다`} (Ctrl+Enter)`);
     const isCell = computed(() => !!m.target && (d.isCellRef(m.target.ref) || !!m.target.tableKey));
     const tableOk = computed(() => isCell.value || (!!m.target && d.hasTable(m.target.ref)));
     const ctxKind = computed(() => {
@@ -306,6 +343,7 @@ export const Composer = {
     // 대상 문제(store targetProblem): 지금 문서에 없는 문단·바뀐 글(최신으로 맞추기 전), 내 수정본에서만 고친 글(AI 는 공유 문서 글만 본다) — 보내지 않는다
     const problem = computed(() => (typeof d.targetProblem === 'function' ? d.targetProblem(m.target, m.kind) : ''));
     const warn = computed(() => {
+      if (runError.value && !runOpen.value) return runError.value;
       if (problem.value) return problem.value;
       if (multiSuggest.value) return '문장 제안은 한 문단 안에서 골라 주세요';
       if (needsInstr.value) return '무엇을 쓸지 적어 주세요';
@@ -314,7 +352,7 @@ export const Composer = {
       return '';
     });
     const busyNames = computed(() => [...uploading.value, ...(m.pending || [])]);
-    const canSend = computed(() => !!m.target && m.phase !== 'sending' && !m.tutorialTyping && !needsInstr.value && !multiSuggest.value && !problem.value && !busyNames.value.length);
+    const canSend = computed(() => !!m.target && m.phase === 'edit' && !m.tutorialTyping && !needsInstr.value && !multiSuggest.value && !problem.value && !busyNames.value.length && !runError.value);
     watch(() => m.target?.scope, (sc) => { if (sc === 'document' && !DOC_KINDS.includes(m.kind)) m.kind = 'review'; });
     const bodyRef = (ref_) => (/^(s\d+\/p\d+)/.exec(ref_ || '') || [])[1] || ref_;
     function setKind(id) {
@@ -341,7 +379,7 @@ export const Composer = {
       const wanted = typeof forceRoute === 'string' ? forceRoute : (m.route || 'auto');
       m.phase = 'sending'; m.error = '';
       try {
-        const r = await d.createRequest({ ...m, kind, target, route: wanted });
+        const r = await d.createRequest({ ...m, kind, target, route: wanted, runSettings: runSettings.value });
         m.rid = r.request?.rid ?? null;
         if (r.failed) { m.error = `AI 처리 실패: ${r.message}`; }
         if (m.rid != null) m.phase = 'result';
@@ -359,11 +397,11 @@ export const Composer = {
       if (!req) return;
       toast(await copyText(agentPrompt(d, req)) ? '대기열에 넣고 프롬프트를 복사했습니다 — AI 대화창에 붙여 넣으세요' : '대기열에 넣었습니다');
     }
-    function again() { m.phase = 'edit'; m.rid = null; m.instruction = ''; m.count = 1; m.error = ''; nextTick(() => focusEditingInput(ta.value)); }
+    function again() { m.phase = 'edit'; m.rid = null; m.instruction = ''; m.count = 1; m.error = ''; resetRun(); nextTick(() => focusEditingInput(ta.value)); }
     onMounted(() => { if (m.pickFile) { m.pickFile = false; dz.value?.pick(); } else if (!props.docked) focusEditingInput(ta.value); });
     // [D] AI 빠른 작업 바로 보내기(store openComposer 의 autoSend — 문서 설정 aiQuick 'send'): 열리자마자 [보내기]와 같은 길로 한 번. 보낼 수 없으면 보내지 않고 창에 경고(warn)만
     onMounted(() => { if (m.autoSend) { m.autoSend = false; if (canSend.value) send(); } });
-    return { m, ta, dz, uploading, busyNames, dragOver, aiOn, memoEnabled, showInstrOpt, workspaceEnabled, isCell, kindList, presetList, placeholder, afterNote, pickable, problem, warn, canSend, clip, setKind, addFiles, pickExisting, removeAtt, paste, drop, onLeave, send, sendAndCopy, again, agent, env, route, routeOpts, routeTip, routeHelp, noAi, NO_AI_TIP, CONNECT_HELP, sendLabel, sendTip, COPY_TIP };
+    return { m, ta, dz, uploading, busyNames, dragOver, aiOn, memoEnabled, showInstrOpt, workspaceEnabled, isCell, kindList, presetList, placeholder, afterNote, pickable, problem, warn, canSend, clip, setKind, addFiles, pickExisting, removeAtt, paste, drop, onLeave, send, sendAndCopy, again, agent, env, route, routeOpts, routeTip, routeHelp, noAi, NO_AI_TIP, CONNECT_HELP, sendLabel, sendTip, COPY_TIP, canChooseRun, ...requestModel };
   },
 };
 
@@ -376,7 +414,7 @@ const ADOPT_TIP = '내 수정본에 넣습니다(검토 요청 뒤 문서에 들
 const LIVE_TIP = '공유 문서에 바로 반영합니다(모두에게 보임)';
 const DIRECT_TIP = '공유 문서에 바로 적용합니다(변경 추적으로 남음)';
 /** 결과 창의 항목 하나(여러 안 묶음 또는 제안 하나)와 그 단추 */
-const ResultItem = {
+export const ResultItem = {
   components: { TablePreview, MemoEditor, FormatPreview },
   props: { it: Object, req: Object, ro: Boolean },
   template: `<div class="rs-item" :class="'st-' + (it.state || 'open')" :data-gid="it.gid != null ? it.gid : null">
@@ -591,7 +629,7 @@ export const ResultView = {
       <template v-if="r.status==='working'"><span class="ph-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>처리 중</span><span class="muted" v-if="badge.who">· {{ badge.who }}</span></template>
       <template v-else><span class="ph-wait-dot" aria-hidden="true"></span><span v-if="wait">{{ wait.text }}</span><span v-else-if="r.delivery">{{ deliveredTo }}에 전달됨</span><span v-else>대기열에 있습니다</span><span class="muted" v-if="badge.phase === 'late'">· 응답 없음</span></template>
       <span class="spacer"></span>
-      <template v-if="r.status==='pending'"><Hint :text="wait?.hint || WAIT_HINT" :href="wait ? '/help.html#chatgpt-oauth' : CONNECT_HELP"/><button v-if="!wait || wait.manualCopy" class="small rs-copy" :title="COPY_TIP" @click="copyAgent">프롬프트 복사</button></template>
+      <template v-if="r.status==='pending'"><Hint :text="wait?.hint || WAIT_HINT" :href="r.automation?.method === 'mcp-events' ? '/help.html#chatgpt-oauth' : CONNECT_HELP"/><button v-if="!wait || wait.manualCopy" class="small rs-copy" :title="COPY_TIP" @click="copyAgent">프롬프트 복사</button></template>
       <button v-if="canEdit" class="small rs-cancel" @click="cancel">취소</button></div>
     <div v-if="r.status==='failed'" class="rs-fail"><span class="rs-fail-msg">실패: {{ r.error || '알 수 없음' }}</span><span class="spacer"></span>
       <button v-if="canEdit" class="small ai-send rs-retry" :disabled="retrying" :title="retryTip(d, r)" @click="retry"><span v-if="retrying" class="spin dark"></span>다시</button></div>
@@ -604,7 +642,7 @@ export const ResultView = {
 
     <div v-if="sec.open.length" class="rs-sec rs-open"><div class="rs-sec-h">남은 제안 {{ sec.open.length }}건</div>
       <template v-for="it in sec.open" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></div>
-    <div v-if="sec.accepted.length" class="rs-sec rs-accepted"><div class="rs-sec-h">반영한 제안 {{ sec.accepted.length }}건</div>
+    <div v-if="sec.accepted.length" class="rs-sec rs-accepted"><div class="rs-sec-h">반영한 제안 {{ sec.accepted.length }}{{ acceptedMembers > sec.accepted.length ? '항목' : '건' }}<span v-if="acceptedMembers > sec.accepted.length"> · 개별 반영 {{ acceptedMembers }}건</span></div>
       <template v-for="it in sec.accepted" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></div>
     <details v-if="sec.declined.length" class="rs-sec rs-declined"><summary class="rs-sec-h" title="다시 열어 고를 수 있습니다">{{ r.recoveredBy ? '거절·이전 제안 보관' : '거절' }} {{ sec.declined.length }}건</summary>
       <template v-for="it in sec.declined" :key="itKey(it)"><BundleItem v-if="it.bundle != null" :it="it" :req="r" :ro="ro"/><ResultItem v-else :it="it" :req="r" :ro="ro"/></template></details>
@@ -634,6 +672,7 @@ export const ResultView = {
       const e = g.value?.entries || [];
       return { open: e.filter((x) => x.state === 'open'), accepted: e.filter((x) => x.state === 'accepted'), declined: e.filter((x) => x.state === 'declined') };
     });
+    const acceptedMembers = computed(() => sec.value.accepted.reduce((n, it) => n + it.list.filter(p => p.status === 'applied').length, 0));
     const itKey = (it) => (it.gid != null ? `g${it.gid}` : it.bundle != null ? `b${it.bundle}` : `p${it.list[0]?.pid}`);
     const comments = computed(() => d.commentsOf(r.value));
     const log = computed(() => (Array.isArray(r.value?.log) ? r.value.log : []));
@@ -662,7 +701,7 @@ export const ResultView = {
     const retrying = ref(false);
     async function retry() { retrying.value = true; try { await d.retryRequest(r.value); } catch (e) { toastError(e, '다시 요청 실패: '); await d.refresh(['requests', 'memos']); } finally { retrying.value = false; } }
     async function cancel() { try { await d.cancelRequest(r.value); } catch (e) { toastError(e); } }
-    return { d, r, g, sec, itKey, comments, log, showMemo, summary, dirty, canEdit, memoText, memoEnabled, summaryByLabel, saveSummary, toggleInstr, copyAgent, go, retry, cancel, retrying, retryTip, wait,
+    return { d, r, g, sec, acceptedMembers, itKey, comments, log, showMemo, summary, dirty, canEdit, memoText, memoEnabled, summaryByLabel, saveSummary, toggleInstr, copyAgent, go, retry, cancel, retrying, retryTip, wait,
       clip, fmtShort, badge, kindTitle, mineReq, deliveredTo, ro, roWhy, roTip, COPY_TIP, WAIT_HINT, CONNECT_HELP };
   },
 };
@@ -941,6 +980,7 @@ export function effectiveRoute(want, agentOnline, aiOn, ownAi = false) {
  * 'Claude Code로 다시 보냅니다'·'대기열에 다시 넣습니다'(단추는 AI 보라 ai-send — docs/UI_TERMS.md §4)
  */
 export function retryTip(d, r) {
+  if (r?.options?.runSettings) return `같은 모델 설정으로 ${josa(requestRunLabel(r.options.runSettings.kind), '으로/로')} 다시 요청합니다`;
   const agent = myAgent(d);
   const env = docWorkEnv(d?.s, { agentName: agent.agent });
   const route = effectiveRoute(r?.routeWanted || 'auto', agent.online, env.serverOn, env.ownAi);

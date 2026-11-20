@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { apiBaseFrom, createSseParser, eventsUrlFrom } from './bridge.js';
+import { isTaskSurface } from './tool-profiles.js';
 import { requestedFormat, requestedRuns } from './format-schema.js';
 import { createApiToolContext } from './api-mcp-tools.js';
 import { validateImage } from './image-integrity.js';
@@ -83,22 +84,32 @@ class ApiWorker {
     this.statsValue = { completed: 0, failed: 0, cancelled: 0, reconnects: 0, duplicated: 0 };
     // 웹의 연결별 모델·추론 강도(server/ai-run.js): 실행할 때 준 값(--model·--effort)을 기본으로 두고, 요청마다 웹 값으로 바꿔 끼운다
     this.runKind = ai.runKind || null; this.baseRun = ai.runSettings ? { ...ai.runSettings } : null; this.lastRun = null;
+    this.webRun = {};
+    this.requestRunKind = this.baseRun && typeof ai.setRunSettings === 'function' ? this.runKind : null;
   }
 
-  /** 웹에서 정한 이 연결의 모델·추론 강도(GET /api/me/ai-run)를 AI 에 적용한다 — 읽지 못하면 지금 값 그대로 */
-  async applyRunSettings(signal) {
-    if (!this.runKind || !this.baseRun || typeof this.ai.setRunSettings !== 'function') return;
-    let web = {};
+  /** 요청 설정이 우선한다. 통신 오류가 나도 직전 요청의 임시 설정을 다음 요청에 재사용하지 않는다. */
+  async applyRunSettings(signal, requested = null) {
+    const invalid = () => Object.assign(new Error('지정한 모델·추론 강도를 이 실행기에 적용할 수 없습니다'), { code: 'BAD_REQUEST_RUN' });
+    if (requested && (requested.kind !== this.requestRunKind || (this.runKind === 'api' && this.ai.provider === 'gemini' && requested.effort))) throw invalid();
+    if (!this.requestRunKind) return;
     try {
       const res = await this.fetch(`${apiBaseFrom(this.url)}/api/me/ai-run`, { headers: { Authorization: `Bearer ${this.token}` }, signal, redirect: 'error' });
-      if (!res.ok) return;
-      web = (await res.json())?.settings?.[this.runKind] || {};
-    } catch { return; }
-    const run = { model: web.model || this.baseRun.model || null, effort: web.effort || this.baseRun.effort || null };
-    if (this.runKind === 'codex') run.modelSelection = web.modelSelection || this.baseRun.modelSelection || 'manual';
-    try { this.ai.setRunSettings(run); } catch { return; }
+      if (res.ok) this.webRun = (await res.json())?.settings?.[this.runKind] || {};
+    } catch { /* 마지막으로 읽은 계정 설정으로 돌아간다 */ }
+    checkSignal(signal);
+    let web = this.webRun;
+    let run = { model: requested?.model || web.model || this.baseRun.model || null,
+      effort: requested ? requested.effort || null : web.effort || this.baseRun.effort || null };
+    if (this.runKind === 'codex') run.modelSelection = requested ? 'manual' : web.modelSelection || this.baseRun.modelSelection || 'manual';
+    try { this.ai.setRunSettings(run); }
+    catch {
+      if (requested) throw invalid();
+      web = {}; run = this.baseRun;
+      try { this.ai.setRunSettings(run); } catch { throw invalid(); }
+    }
     const sig = `${run.model || ''}|${run.effort || ''}|${run.modelSelection || ''}`;
-    if (sig !== this.lastRun) { this.lastRun = sig; this.say(`모델 ${run.model || '기본'} · 추론 강도 ${run.effort || '기본'}${run.modelSelection === 'auto' ? ' · Codex 자동 선택' : ''}${web.model || web.effort || web.modelSelection ? '(웹 설정)' : ''}`); }
+    if (sig !== this.lastRun) { this.lastRun = sig; this.say(`모델 ${run.model || '기본'} · 추론 강도 ${run.effort || '기본'}${run.modelSelection === 'auto' ? ' · Codex 자동 선택' : ''}${requested ? ' (요청 설정)' : web.model || web.effort || web.modelSelection ? ' (웹 설정)' : ''}`); }
   }
 
   /** 이 계정으로 쓸 수 있는 모델 목록을 웹에 알린다(PUT /api/me/ai-run/catalog — 목록 조회만, 모델 호출 없음) */
@@ -220,7 +231,7 @@ class ApiWorker {
     do {
       this.wakeRequested = false;
       while (!this.stopped) {
-        const req = await this.callJson('claim_next_request', { ...(this.tutorialOnly ? { tutorial_only: true } : {}), workflows: ['content_format'] });
+        const req = await this.callJson('claim_next_request', { ...(this.tutorialOnly ? { tutorial_only: true } : {}), workflows: ['content_format'], ...(this.requestRunKind ? { run_kind: this.requestRunKind } : {}) });
         if (req.none) break;
         await this.process(req);
       }
@@ -231,7 +242,7 @@ class ApiWorker {
     let attempts = 0;
     while (!this.stopped) {
       const controller = new AbortController(); this.sseController = controller;
-      const url = eventsUrlFrom(this.url, { channel: '1', session: this.session, agent: this.agent, client: this.clientName });
+      const url = eventsUrlFrom(this.url, { channel: '1', session: this.session, agent: this.agent, client: this.clientName, run_kind: this.requestRunKind });
       let watchdog; const arm = (ms) => { clearTimeout(watchdog); watchdog = setTimeout(() => controller.abort(), ms); };
       const connectedAt = Date.now();
       try {
@@ -308,10 +319,11 @@ class ApiWorker {
 
   /** 새 MCP 연결의 요청 내용(GET /api/docs/:id/requests/:rid/brief — server/mcp2/service.js agentBrief). 옛 서버면 SERVER_UPDATE_REQUIRED */
   async brief(request, signal) {
-    const res = await this.fetch(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/brief`, { headers: this.headers(), signal, redirect: 'error' });
+    const res = await this.fetch(`${apiBaseFrom(this.url)}/api/docs/${encodeURIComponent(request.docId)}/requests/${request.rid}/brief`, { headers: { ...this.headers(), 'X-Hwpx-Mcp': this.ai.mcpSurface?.slice(1) || '2' }, signal, redirect: 'error' });
     if (res.status === 404) throw Object.assign(new Error('중앙 서버가 새 MCP 연결을 지원하지 않습니다'), { code: 'SERVER_UPDATE_REQUIRED' });
     if (!res.ok) throw Object.assign(new Error('요청 내용을 읽지 못했습니다'), { code: 'TOOL_FAILED' });
     const brief = await res.json();
+    if (this.ai.mcpSurface === 'v3' && brief.surface !== 'v3') throw Object.assign(new Error('서버가 v3 TSV 요청 내용을 반환하지 않았습니다'), { code: 'SERVER_UPDATE_REQUIRED' });
     if (brief.doc_id !== request.docId || brief.request_id !== request.rid || Number(brief.attempt ?? 1) !== Number(request.attempt ?? 1)) throw Object.assign(stopError(), { code: 'ATTEMPT_CHANGED' });
     return brief;
   }
@@ -320,7 +332,7 @@ class ApiWorker {
    * API 모델(server/ai.js AiProposer)을 새 MCP 연결(v2)로 돌리는가 — 생성 인자 ai.mcp 'v2'(scripts/ai-worker.mjs --mcp 2, 기본)일 때 AiProposer.mcpSurface 가 'v2'.
    * CLI 실행기(runMcp)는 따로 고른다(job.surface)
    */
-  get apiV2() { return typeof this.ai.runMcp !== 'function' && this.ai.mcpSurface === 'v2' && typeof this.ai.runV2 === 'function'; }
+  get apiV2() { return typeof this.ai.runMcp !== 'function' && isTaskSurface(this.ai.mcpSurface) && typeof this.ai.runV2 === 'function'; }
 
   /** 요청의 선점 상태만(REST …/claim — server/mcp2/service.js agentClaimState, 문서를 읽지 않는다) → { attempt, status, mine, expired }. 시도가 바뀌었으면 ATTEMPT_CHANGED */
   async claimState(request, signal) {
@@ -341,11 +353,11 @@ class ApiWorker {
     const live = (s) => AbortSignal.any([s || signal, this.shutdown.signal]);
     const url = new URL(this.url); url.searchParams.set('agent', this.agent);
     const client = new Client({ name: this.clientName, version: '0.4.1' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(url, { fetch: this.fetch, requestInit: { headers: { ...this.headers(), 'X-Hwpx-Mcp': '2', 'X-Hwpx-Tools': 'core' }, redirect: 'error' } });
+    const transport = new StreamableHTTPClientTransport(url, { fetch: this.fetch, requestInit: { headers: { ...this.headers(), 'X-Hwpx-Mcp': this.ai.mcpSurface.slice(1), 'X-Hwpx-Tools': 'core' }, redirect: 'error' } });
     await client.connect(transport, { timeout: this.timing.connectTimeoutMs, signal: live(signal) });
     try {
       const context = await createApiToolContext({
-        surface: 'v2', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
+        surface: this.ai.mcpSurface, docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
         listTools: async () => { const tools = []; let cursor; do { const page = await client.listTools(cursor ? { cursor } : undefined, { signal: live(signal) }); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor); return tools; },
         callTool: (name, args, toolSignal) => client.callTool({ name, arguments: args }, undefined, { timeout: this.timing.callTimeoutMs, signal: live(toolSignal) }),
         assertCurrent: async (toolSignal) => {
@@ -413,7 +425,7 @@ class ApiWorker {
     schedule(request.claim);
     try {
       const current = await this.current(request, signal);
-      await this.applyRunSettings(signal);
+      await this.applyRunSettings(signal, current.options?.runSettings);
       if (current.options?.workflow === 'content_format') {
         nativeResult = await runEditWorkflow({ ai: this.ai, docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1,
           url: this.url.href, token: this.token, session: this.session, signal,
@@ -435,11 +447,11 @@ class ApiWorker {
       }
       if (typeof this.ai.runMcp === 'function') {
         // 새 MCP 연결(--mcp 2 — server/mcp2.js): 짧은 요청 내용(brief)을 받아 모델의 첫 입력에 싣고, 모델은 작업 도구 넷(task·read·edit·finish)으로 처리한다
-        const v2 = this.ai.mcpSurface === 'v2';
+        const v2 = isTaskSurface(this.ai.mcpSurface);
         this.say(v2 ? `${this.who()}가 작업 도구(task·read·edit·finish)로 필요한 범위만 읽고 결과를 직접 등록합니다.`
           : `${this.who()}가 MCP로 요청 전문·전체 문서와 서식을 읽고 결과를 직접 등록합니다.`);
         const brief = v2 ? await this.brief(request, signal) : null;
-        const completed = nativeResult = await this.ai.runMcp({ type: 'request', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1, ...(v2 ? { surface: 'v2' } : {}) },
+        const completed = nativeResult = await this.ai.runMcp({ type: 'request', docId: request.docId, requestId: request.rid, attempt: request.attempt ?? 1, ...(v2 ? { surface: this.ai.mcpSurface } : {}) },
           { url: this.url.href, token: this.token, session: this.session, signal, requestContext: current, ...(v2 ? { brief } : {}) });
         this.reportModelSelection(completed);
         this.reportUsage(completed?.usage, completed?.execution);
@@ -521,6 +533,7 @@ class ApiWorker {
           : e?.code?.startsWith('EDIT_') ? String(e.message).slice(0, 450)
           : e?.code?.startsWith('API_FILE_') ?'API에서 생성한 파일을 회수·저장하지 못했습니다. 게이트웨이의 파일 다운로드 지원을 확인해 주세요.'
           : e?.code === 'SERVER_UPDATE_REQUIRED' ? '개인 AI 자동 처리에는 최신 중앙 서버가 필요합니다.'
+          : e?.code === 'BAD_REQUEST_RUN' ? '지정한 모델·추론 강도를 이 실행기에 적용할 수 없습니다. 실행기에서 지원하는 값을 골라 주세요.'
           : ['ATTACHMENT_UNREADABLE', 'ATTACHMENT_DELETED', 'UNSUPPORTED_ATTACHMENT'].includes(e?.code) ? '첨부 자료를 읽지 못했습니다. 텍스트를 추출할 수 있는 자료로 바꾼 뒤 다시 요청해 주세요.'
             : '개인 AI 처리에 실패했습니다. 개인 PC의 AI 로그인(Codex·Claude Code) 또는 API 키·모델·연결 상태를 확인한 뒤 다시 요청해 주세요.';
         try { await this.current(request, signal); await this.callJson('fail_request', { ...args, error: message,

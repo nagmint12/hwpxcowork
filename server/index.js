@@ -14,7 +14,7 @@ import { Service, ServiceError } from './service.js';
 import { AiProposer } from './ai.js';
 import { createMcpServer, agentFromRequest, cleanName } from './mcp.js';
 import { isLeanRequest } from './lean.js';
-import { mcpSurface, v2Toolset } from './mcp2.js';
+import { mcpSurface, requestedSurface, v2Toolset } from './mcp2.js';
 import { KINDS, PRESETS, fmtTime } from './memotext.js';
 import { installAgentRoutes } from './routes/agents.js';
 import { installCollabRoutes } from './routes/collab.js';
@@ -67,6 +67,7 @@ service.personalAi = personalAi;
 const tutorial = createTutorial({ service, config: cfg });
 // 연결별 모델·추론 강도(웹에서 정하고 내 PC 실행기·채널 에이전트가 읽는다 — server/ai-run.js)
 const aiRun = createAiRun({ config: cfg });
+service.aiRun = aiRun;
 service.workFiles = createWorkFiles({ config: cfg, service });
 const mcpEvents = createMcpEvents({ config: cfg, service, hub, oauth });
 service.tutorialChatGPTReady = () => mcpEvents.hasTutorialSubscriber();
@@ -217,7 +218,7 @@ app.get('/api/config', (req, res) => {
     // contentFormatWorkflow: 내용·형식 나눠 처리(실험)를 받는가 — config.experiments.contentFormat(기본 끔, 2026-11-16). 꺼져 있으면 편집기가 그 선택 칸을 보이지 않는다
     // mcpDefault: 머리글·주소로 밝히지 않은 MCP 연결을 무엇으로 여는가('v2' 기본 | 'v1' — config.mcp.defaultSurface, 2026-11-17). 연결 안내 화면이 기본·예전 연결 주소를 고를 때 본다
     // adminFeatures: 관리자 [기능 설정] 탭(GET/PATCH /api/admin/features)을 이 서버가 안다(2026-11-18 — 옛 서버면 탭을 숨긴다)
-    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true, mcpDefault: cfg.mcp.defaultSurface, adminFeatures: true },
+    features: { contentFormatWorkflow: cfg.experiments?.contentFormat === true, mcp2: true, mcp3: true, mcpDefault: cfg.mcp.defaultSurface, adminFeatures: true, requestRunSettings: true },
     // 로그인 화면의 [개인 토큰 발급받기](POST /api/self-token) — 관리자가 [기능 설정]에서 켰을 때만(config.accounts.selfIssue, 바로 적용)
     selfIssue: cfg.accounts?.selfIssue?.enabled === true,
     local: !!service.local,   // PC 폴더 연결(개인용 앱)이 켜져 있는가
@@ -384,6 +385,16 @@ app.post('/api/docs/:id/attachments', auth, rawAttachment, wrap(async (req, res)
   res.json(await service.addAttachment(req.params.id, { name, bytes: bodyBytes(req) }, req.user));
 }));
 app.get('/api/docs/:id/attachments/:aid', auth, wrap(async (req, res) => {
+  // MCP v3 실험(2026-11-20 — docs/MCP_REDESIGN_2026-11-16.md §21): 'template' = 이 문서의 스타일·쪽 설정만 가진 빈 서식, 'document' = 이 문서 사본(최종본).
+  // 개인 브리지의 download_attachment_file 이 그대로 받는다(첨부 aid 는 a1·a2… 이라 겹치지 않는다). 읽기 권한은 위 /api/docs/:id 문이 본다
+  if (req.params.aid === 'template' || req.params.aid === 'document') {
+    const f = await service.documentFile(req.params.id, req.params.aid);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    return res.send(f.bytes);
+  }
   const { entry, bytes } = await service.getAttachment(req.params.id, req.params.aid);
   const inline = entry.kind === 'image' || entry.kind === 'pdf';
   res.setHeader('Content-Type', inline ? entry.mime : 'application/octet-stream');
@@ -451,7 +462,7 @@ app.get('/api/docs/:id/requests/:rid/activity', auth, wrap(async (req, res) => r
 app.get('/api/docs/:id/requests/:rid/brief', auth, wrap(async (req, res) => {
   service.assertDocRead(req.params.id, req.user);
   const session = /^[A-Za-z0-9_-]{1,64}$/.test(String(req.headers['x-hwpx-agent-session'] || '')) ? String(req.headers['x-hwpx-agent-session']) : null;
-  res.set('Cache-Control', 'no-store').json(await service.agentBrief(req.params.id, Number(req.params.rid), req.user, { session }));
+  res.set('Cache-Control', 'no-store').json(await service.agentBrief(req.params.id, Number(req.params.rid), req.user, { session, surface: requestedSurface(req) === 'v3' ? 'v3' : 'v2' }));
 }));
 // 요청의 선점 상태만(문서를 읽지 않는다 — server/mcp2/service.js agentClaimState): 새 연결의 실행기 도구 연결(server/codex-mcp.js)이 쓰기 직전에 본다
 app.get('/api/docs/:id/requests/:rid/claim', auth, wrap(async (req, res) => {
@@ -531,7 +542,7 @@ async function handleMcp(req, res, pathToken, pathAgent) {
     // 연결 종류(새 연결 v2 | 예전 연결 — lean 이면 얇은 흐름, server/lean.js)는 initialize 때 정해 그 세션 내내 쓴다(server/mcp2.js mcpSurface).
     // clientInfo 이름이 'hwpx-' 인 옛 실행기·브리지는 밝히지 않으면 예전 연결이다(업데이트하지 않은 참여자 PC 가 대기열 도구를 잃지 않게)
     const surface = mcpSurface(req, { config: cfg, clientName: req.body?.params?.clientInfo?.name });
-    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req), surface: surface === 'v2' ? 'v2' : null, toolset: v2Toolset(req) });
+    const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimSession, trackOperation, lean: isLeanRequest(req), surface, toolset: v2Toolset(req) });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => id,
       onsessionclosed: () => { mcpSessions.delete(id); },
@@ -549,7 +560,7 @@ async function handleMcp(req, res, pathToken, pathAgent) {
   // initialize 없는 기존 단발 tools/call은 응답이 닫히면 정리한다.
   // 이 길은 예전 도구를 이름으로 부르는 스크립트용 옛 길이라(표준 MCP 클라이언트는 initialize 한다) 밝히지 않으면 예전 연결이다 — 새 연결은 X-Hwpx-Mcp: 2·?v=2
   const surface = mcpSurface(req, { config: cfg, legacyCall: true });
-  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface: surface === 'v2' ? 'v2' : null, toolset: v2Toolset(req) });
+  const server = createMcpServer({ service, user, version: pkg.version, agentName: agentFromRequest(req, pathAgent), agentSession: claimOwner, trackOperation, lean: isLeanRequest(req), surface, toolset: v2Toolset(req) });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { transport.close().catch(() => {}); server.close().catch(() => {}); });
   await server.connect(transport);

@@ -62,24 +62,25 @@ fn make_pattern_shader(pattern: &PatternFillInfo) -> Option<skia_safe::Shader> {
     foreground.set_stroke_width(1.0);
     foreground.set_color(colorref_to_skia(pattern.pattern_color, 1.0));
 
+    // [hwpx-cowork] Match the HWPX hatch directions used by SVG and Canvas.
     match pattern.pattern_type {
-        0 => {
+        1 => {
             canvas.draw_line((0.0, 3.0), (6.0, 3.0), &foreground);
         }
-        1 => {
-            canvas.draw_line((3.0, 0.0), (3.0, 6.0), &foreground);
-        }
         2 => {
-            canvas.draw_line((6.0, 0.0), (0.0, 6.0), &foreground);
+            canvas.draw_line((3.0, 0.0), (3.0, 6.0), &foreground);
         }
         3 => {
             canvas.draw_line((0.0, 0.0), (6.0, 6.0), &foreground);
         }
         4 => {
+            canvas.draw_line((6.0, 0.0), (0.0, 6.0), &foreground);
+        }
+        5 => {
             canvas.draw_line((3.0, 0.0), (3.0, 6.0), &foreground);
             canvas.draw_line((0.0, 3.0), (6.0, 3.0), &foreground);
         }
-        5 => {
+        6 => {
             canvas.draw_line((0.0, 0.0), (6.0, 6.0), &foreground);
             canvas.draw_line((6.0, 0.0), (0.0, 6.0), &foreground);
         }

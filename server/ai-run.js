@@ -47,6 +47,14 @@ export const RUN_MODEL_RE = /^[A-Za-z0-9._:/@-]{1,200}$/;
 const MODELS_MAX = 300;
 const bad = (message) => new ServiceError('BAD_AI_RUN', message, 400);
 
+function cleanRunSettings(kind, body) {
+  const model = body.model == null ? '' : String(body.model).trim();
+  if (model && (!RUN_MODEL_RE.test(model) || model.startsWith('-'))) throw bad('모델 ID는 영문·숫자와 . _ : / @ - 만 쓸 수 있고 -로 시작할 수 없습니다(200자 이내)');
+  const effort = body.effort == null ? '' : String(body.effort).trim().toLowerCase();
+  if (effort && !kind.efforts.includes(effort)) throw bad(kind.efforts.length ? `${kind.label}의 추론 강도는 ${kind.efforts.join('·')} 중 하나입니다` : `${kind.label}은 추론 강도를 정할 수 없습니다`);
+  return { model, effort };
+}
+
 /** 실행기가 알려 준 모델 목록 정리 → [{ id, label?, efforts?, defaultEffort? }] */
 function cleanModels(kind, list) {
   if (!Array.isArray(list)) throw bad('models 는 목록이어야 합니다');
@@ -104,10 +112,7 @@ export function createAiRun({ config }) {
   /** PUT /api/me/ai-run { kind, model?, effort?, modelSelection? } — 관리자 Codex만 auto/manual 선택 */
   function saveFor(user, body = {}) {
     const k = kindOr400(body.kind);
-    const model = body.model == null ? '' : String(body.model).trim();
-    if (model && !RUN_MODEL_RE.test(model)) throw bad('모델 ID는 영문·숫자와 . _ : / @ - 만 쓸 수 있습니다(200자 이내)');
-    const effort = body.effort == null ? '' : String(body.effort).trim().toLowerCase();
-    if (effort && !k.efforts.includes(effort)) throw bad(k.efforts.length ? `${k.label}의 추론 강도는 ${k.efforts.join('·')} 중 하나입니다` : `${k.label}은 추론 강도를 정할 수 없습니다`);
+    const { model, effort } = cleanRunSettings(k, body);
     if (body.modelSelection != null && (k.id !== 'codex' || user.role !== 'admin' || !MODEL_SELECTION_MODES.includes(body.modelSelection))) {
       throw bad('관리자 Codex의 모델 선택 방식은 manual·auto 중 하나입니다');
     }
@@ -120,6 +125,21 @@ export function createAiRun({ config }) {
     return view(user);
   }
 
+  /** 요청에 저장할 실행기 설정. 계정 기본값은 실행기가 처리 시 읽는다. */
+  function requestSettings(user, body) {
+    if (body == null) return null;
+    const k = kindOr400(body.kind);
+    if (k.applies !== 'request') throw bad('요청에서 설정을 바꿀 수 없는 실행기입니다');
+    const { model, effort } = cleanRunSettings(k, body);
+    if (!model && !effort) return null;
+    const savedModel = data().users[user.name]?.[k.id]?.model;
+    const reported = data().catalogs[user.name]?.[k.id]?.models;
+    const models = reported?.length ? reported : k.models;
+    const allowed = models?.find(m => m.id === (model || savedModel))?.efforts;
+    if (effort && allowed?.length && !allowed.includes(effort)) throw bad(`이 모델의 추론 강도는 ${allowed.join('·')} 중 하나입니다`);
+    return { kind: k.id, model: model || null, effort: effort || null };
+  }
+
   /** PUT /api/me/ai-run/catalog { kind, models } — 실행기가 그 사람 계정으로 쓸 수 있는 모델 목록을 알린다 */
   function report(user, body = {}) {
     const k = kindOr400(body.kind);
@@ -130,5 +150,5 @@ export function createAiRun({ config }) {
     return { kind: k.id, count: models.length };
   }
 
-  return { view, save: saveFor, report };
+  return { view, save: saveFor, report, requestSettings };
 }

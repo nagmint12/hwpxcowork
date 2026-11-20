@@ -318,6 +318,10 @@ fs.writeFileSync(OUT_JSON, JSON.stringify({
     names: names.filter(([, v]) => v.face === f).map(([, v]) => v.display) })),
 }, null, 1) + '\n');
 console.log(`[gen-font-metrics] 글꼴 ${used.length}개 · 이름 ${names.length}개 → ${path.relative(root, OUT_RS)} (${(rs.length / 1024).toFixed(0)} KB)`);
+const wordMetrics = spawnSync(process.execPath, [
+  path.join(root, 'vendor', 'rhwp', 'scripts', 'gen-word-font-metrics.mjs'),
+], { cwd: root, stdio: 'inherit' });
+if (wordMetrics.status !== 0) throw new Error('Word line metrics regeneration failed');
 // [hwpx-cowork] FontDB styles refer to this exact face inventory. Keep the
 // generated index/style metadata synchronized when fonts are installed/removed.
 if (fs.existsSync(path.join(root, 'FontDB', 'fontinfo.dat'))) {

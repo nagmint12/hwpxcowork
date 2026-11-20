@@ -257,7 +257,7 @@ export function createMcpEvents({ config, service, hub, oauth, now = () => Date.
     // surface 'v2' = 새 MCP 연결로 물었다(설명의 처리 순서만 그 연결의 도구 이름으로) — server/mcp-modern.js 가 요청마다 넘긴다
     list(user, { surface = null } = {}) {
       if (!enabled()) throw err(-32026, 'MCP Events is disabled', { feature: 'events' });
-      const v2 = surface === 'v2';
+      const v2 = surface === 'v2' || surface === 'v3';
       return { events: [v2 ? EVENT_DEFINITION_V2 : EVENT_DEFINITION, ...(service.tutorialChatGPTUser?.(user) ? [v2 ? TUTORIAL_EVENT_DEFINITION_V2 : TUTORIAL_EVENT_DEFINITION] : [])] };
     },
     hasTutorialSubscriber() { return Object.values(data().subscriptions).some(sub => sub.name === TUTORIAL_EVENT_NAME && !sub.filters.document_id && validSubscription(sub)); },

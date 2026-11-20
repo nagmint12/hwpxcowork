@@ -5,7 +5,7 @@ import os from 'node:os';
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 
 /** 응답 크기 한도 기본값과 범위(글자) */
-export const LIMIT_DEFAULTS = Object.freeze({ mcpResponseChars: 40000 });
+export const LIMIT_DEFAULTS = Object.freeze({ mcpResponseChars: 100_000 });
 export const LIMIT_RANGE = Object.freeze({ mcpResponseChars: [5000, 1000000] });
 export function clampLimit(v, [min, max] = LIMIT_RANGE.mcpResponseChars) {
   const n = Math.trunc(Number(v));

@@ -44,6 +44,33 @@ pub(crate) fn resolve_styles_for_document(document: &Document, dpi: f64) -> Reso
     }
 }
 
+// [hwpx-cowork] 한/글 2022는 MS_WORD 호환에서 같은 탭 정지에도
+// 다른 줄 배치를 쓴다. 원본 파일의 호환 모드에서 결정한다.
+fn doc_targets_ms_word(doc_info: &DocInfo) -> bool {
+    if let Some(tail) = doc_info.hwpx_head_tail.as_deref() {
+        let mut reader = quick_xml::Reader::from_str(tail);
+        while let Ok(event) = reader.read_event() {
+            match event {
+                quick_xml::events::Event::Start(element)
+                | quick_xml::events::Event::Empty(element)
+                    if element.local_name().as_ref() == "compatibleDocument" =>
+                {
+                    return element.attributes().flatten().any(|attr| {
+                        attr.key.local_name().as_ref() == "targetProgram"
+                            && attr.value.as_ref() == "MS_WORD"
+                    });
+                }
+                quick_xml::events::Event::Eof => break,
+                _ => {}
+            }
+        }
+    }
+    doc_info.extra_records.iter().any(|record| {
+        record.tag_id == crate::parser::tags::HWPTAG_COMPATIBLE_DOCUMENT
+            && record.data.get(..4) == Some(&2_u32.to_le_bytes()[..])
+    })
+}
+
 pub(crate) fn try_resolve_styles_for_document<S: storage::Storage>(
     document: &Document,
     dpi: f64,
@@ -53,6 +80,7 @@ pub(crate) fn try_resolve_styles_for_document<S: storage::Storage>(
     let lookup = missing_fonts::try_lookup_context(document, storage)?;
     let mut styles = try_resolve_styles_with_variant(&lookup, dpi, profile.hwp3_layout(), storage)?;
     styles.source_hwp3_native = profile.hwp3_native_layout();
+    styles.word_compat_target = doc_targets_ms_word(&document.doc_info);
     if document.provenance.format == crate::model::provenance::SourceFormat::Hwp5
         && !document.provenance.hwpx_lineage
     {
@@ -459,6 +487,7 @@ fn try_resolve_styles_with_variant<S: storage::Storage>(
     let mut styles = ResolvedStyleSet {
         hangul2024_missing_glyphs: false,
         source_hwp3_native: false,
+        word_compat_target: doc_targets_ms_word(doc_info),
         source_program_projection_slots: Default::default(),
         script_metrics: Default::default(),
         native_pua_fonts: Default::default(),

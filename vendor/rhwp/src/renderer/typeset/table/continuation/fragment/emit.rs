@@ -2216,7 +2216,32 @@ impl TypesetEngine {
                 false,
             );
         }
-        st.advance_column_or_new_page();
+        // [hwpx-cowork] #8984 한/글 2022의 1·2·3쪽 대조. 표의 마지막 행
+        // 내용을 모두 이 조각에 담았으면, 넘길 빈 꼬리가 있을 때만
+        // 다음 단/쪽으로 넘어간다. 꼬리가 없으면 표는 여기서 끝나고 뒤 본문이
+        // 같은 쪽에서 이어진다 — 종전에는 무조건 넘겨 내용 없는 빈 쪽이 생겼다.
+        // 아래 꼬리 계산이 새 쪽 가용 높이를 읽는 첫 조각 빈 띠 경로는 제외한다.
+        // 앞 표 뒤에 자리가 없어 이 표와 함께 밀린 host 글줄은 표 끝 뒤에 놓여야 하므로
+        // 종전대로 넘긴다(그 글줄 몫의 빈 쪽).
+        // [hwpx-cowork] 2026-11-20 한/글 2022(12.0.0.3146 COM 쪽 그림·재저장 HWPX) 실측: 쪽 끝을
+        // 채운 표 뒤에 아직 놓을 문단이 있으면 그 문단은 다음 쪽 맨 위에서 시작한다(25행 표 24개
+        // 합성 문서 — 표 22 가 12쪽 291~1040px 을 채우고 표 23 은 13쪽 vpos 0, 모두 20쪽).
+        // 그때도 미루면 계산 빈 호스트의 문단 끝이 앵커 줄(시작 + 한 줄)로 되돌아가는데, 중간
+        // 조각 경로는 끝 조각이 남기는 배제 띠·흐름 끝을 남기지 않아 뒤 표가 같은 쪽의 이 표 위에
+        // 겹쳐 놓였다(19쪽). #8984 의 실측은 표가 마지막 흐름 내용인 문서뿐이므로 미루기는 그
+        // 조건에만 쓰고, 뒤 문단이 있으면 종전대로 넘긴다.
+        let flow_successor_pending = st
+            .table_flow_successor(para_idx, input.source.paragraphs_all)
+            .is_some();
+        let defer_terminal_advance = end_row >= row_count
+            && complete_physical_end_cut
+            && split_block_start.is_none()
+            && !first_fragment_blank_band
+            && !input.prepared.host_line_trails_table
+            && !flow_successor_pending;
+        if !defer_terminal_advance {
+            st.advance_column_or_new_page();
+        }
 
         // 커서 전진 — [작업 #993] 컷은 절대 유닛 인덱스이므로 누적 없이 대입.
         let empty_opening_next_height = input
@@ -2798,6 +2823,9 @@ impl TypesetEngine {
             (Some(ordinary), Some(spanning)) => Some(ordinary.max(spanning)),
             (ordinary, spanning) => ordinary.or(spanning),
         };
+        if defer_terminal_advance && next_start_row_height_override.is_some() {
+            st.advance_column_or_new_page();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if std::env::var_os("RHWP_DIAG_ROW_TAIL").is_some() {
             eprintln!(

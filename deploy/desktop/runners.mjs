@@ -1,6 +1,6 @@
 // AI 실행기 관리(2026-11-17 사용자 결정 — 저장소의 실행기 bat(start-codex-agent·start-claude-worker·start-gemini-agent …)을 앱이 대신한다).
-//   실행기 하나 = { AI(codex·claude-code·gemini-cli·antigravity) · 서버(이 앱의 서버 'local' 또는 '다른 서버') · 자동 시작 · 연결 방식(v2 기본, v1) }.
-//   띄우는 것은 scripts/setup-worker.mjs → scripts/ai-worker.mjs(--provider · --url <서버>/mcp · --mcp 2|1) — 예전 bat 이 띄우던 실행기와 같은 코드다.
+//   실행기 하나 = { AI(codex·claude-code·gemini-cli·antigravity) · 서버(이 앱의 서버 'local' 또는 '다른 서버') · 자동 시작 · 연결 방식(v2 기본, v3 TSV, v1) }.
+//   띄우는 것은 scripts/setup-worker.mjs → scripts/ai-worker.mjs(--provider · --url <서버>/mcp · --mcp 1|2|3) — 예전 bat 이 띄우던 실행기와 같은 코드다.
 //   '다른 서버' 토큰은 Electron safeStorage(vault)로 암호화해 설정 폴더(runner-secrets.json)에 두고, 실행기에는 환경 변수 HWPX_COWORK_TOKEN 으로만
 //   넘긴다 — 명령줄 인자·기록·화면·runners.json 에는 쓰지 않는다(기록 줄은 토큰 글자를 *** 로 가린다).
 //   상태는 실행기의 '[hwpx 개인 AI] …' 줄(server/worker.js DEFAULT_LOG, scripts/ai-worker.mjs)에서 읽는다.
@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
 export const LOCAL_SERVER = 'local';
-/** managed = 앱이 공식 CLI 를 설치·로그인까지 돕는다(desktop-ai.mjs). mcp = 연결 방식(v2/v1)을 고른다(Google CLI 는 MCP 로 일하지 않는다) */
+/** managed = 앱이 공식 CLI 를 설치·로그인까지 돕는다(desktop-ai.mjs). mcp = 연결 방식(v1/v2/v3)을 고른다(Google CLI 는 MCP 로 일하지 않는다) */
 export const RUNNER_AIS = Object.freeze({
   codex: Object.freeze({ label: 'Codex', account: 'ChatGPT 구독', command: 'codex', managed: true, mcp: true }),
   'claude-code': Object.freeze({ label: 'Claude Code', account: 'Claude 구독', command: 'claude', managed: true, mcp: true }),
@@ -107,6 +107,12 @@ export function killTree(child, { platform = process.platform, run = spawnSync }
   } catch { /* 이미 끝남 */ }
 }
 
+// 예전 저장 목록의 누락값은 v2였으며, 명시한 v3도 다시 열 때 보존한다.
+function runnerMcp(value) {
+  const version = Number(value);
+  return [1, 3].includes(version) ? version : 2;
+}
+
 function writeAtomic(file, text) {
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, text, { mode: 0o600 });
@@ -148,12 +154,12 @@ export class RunnerManager extends EventEmitter {
     for (const s of Array.isArray(data?.servers) ? data.servers : []) {
       if (typeof s?.id !== 'string' || !/^s-[0-9a-f]{8}$/.test(s.id) || servers.some((x) => x.id === s.id)) continue;
       let address; try { address = serverAddress(s.url); } catch { continue; }
-      servers.push({ id: s.id, url: address.base, user: String(s.user || ''), role: String(s.role || ''), mcp2: s.mcp2 === true, checkedAt: String(s.checkedAt || '') });
+      servers.push({ id: s.id, url: address.base, user: String(s.user || ''), role: String(s.role || ''), mcp2: s.mcp2 === true, mcp3: s.mcp3 === true, checkedAt: String(s.checkedAt || '') });
     }
     for (const r of Array.isArray(data?.runners) ? data.runners : []) {
       if (typeof r?.id !== 'string' || !/^r-[0-9a-f]{8}$/.test(r.id) || !RUNNER_AIS[r.ai] || runners.some((x) => x.id === r.id)) continue;
       if (r.server !== LOCAL_SERVER && !servers.some((s) => s.id === r.server)) continue;
-      runners.push({ id: r.id, ai: r.ai, server: r.server, autoStart: r.autoStart !== false, mcp: r.mcp === 1 ? 1 : 2 });
+      runners.push({ id: r.id, ai: r.ai, server: r.server, autoStart: r.autoStart !== false, mcp: runnerMcp(r.mcp) });
     }
     const list = { servers, runners };
     // 예전 '내 AI 연결'(desktop.json { ai: codex|claude-code }) → 이 앱 서버의 실행기 하나(자동 시작, 새 연결). desktop.json 은 그대로 둔다
@@ -225,7 +231,7 @@ export class RunnerManager extends EventEmitter {
     return s ? `${hostLabel(s.url)}${s.user ? ` · ${s.user}` : ''}` : '(없는 서버)';
   }
   #serverView(s) {
-    return { id: s.id, url: s.url, host: hostLabel(s.url), user: s.user, role: s.role, roleLabel: ROLE_LABEL[s.role] || s.role, mcp2: s.mcp2, checkedAt: s.checkedAt,
+    return { id: s.id, url: s.url, host: hostLabel(s.url), user: s.user, role: s.role, roleLabel: ROLE_LABEL[s.role] || s.role, mcp2: s.mcp2, mcp3: s.mcp3, checkedAt: s.checkedAt,
       inUse: this.#list.runners.some((r) => r.server === s.id) };
   }
   #view(r) {
@@ -294,7 +300,7 @@ export class RunnerManager extends EventEmitter {
     if (user.tutorialApiOnly) throw new Error('체험 계정은 실행기를 연결할 수 없습니다.');
     let config = null;
     try { const r = await get('api/config', false); config = r.ok ? await r.json() : null; } catch { config = null; }
-    return { base, mcpUrl, user: user.name, role: String(user.role || ''), mcp2: config?.features?.mcp2 === true };
+    return { base, mcpUrl, user: user.name, role: String(user.role || ''), mcp2: config?.features?.mcp2 === true, mcp3: config?.features?.mcp3 === true };
   }
 
   /** 서버를 확인해 저장한다(같은 주소면 토큰·이름을 새로 바꾼다) → 서버 보기 */
@@ -306,7 +312,7 @@ export class RunnerManager extends EventEmitter {
     const id = server?.id || this.#newId('s');
     const tokens = this.#secrets(); tokens[id] = sealed; this.#writeSecrets(tokens);
     if (!server) { server = { id }; this.#list.servers.push(server); }
-    Object.assign(server, { url: info.base, user: info.user, role: info.role, mcp2: info.mcp2, checkedAt: new Date(this.#now()).toISOString() });
+    Object.assign(server, { url: info.base, user: info.user, role: info.role, mcp2: info.mcp2, mcp3: info.mcp3, checkedAt: new Date(this.#now()).toISOString() });
     this.#save(); this.#changed();
     return this.#serverView(server);
   }
@@ -325,7 +331,7 @@ export class RunnerManager extends EventEmitter {
     if (!RUNNER_AIS[ai]) throw new Error('AI를 골라 주세요.');
     if (server === LOCAL_SERVER) { if (!this.#localSupported) throw new Error('이 운영 방식에는 앱의 서버가 없습니다. 다른 서버를 골라 주세요.'); }
     else this.#server(server);
-    const version = Number(mcp) === 1 ? 1 : 2;
+    const version = runnerMcp(mcp);
     this.#checkMcp(ai, server, version);
     if (this.#list.runners.some((r) => r.ai === ai && r.server === server)) throw new Error('같은 AI·서버의 실행기가 이미 있습니다.');
     const runner = { id: this.#newId('r'), ai, server, autoStart: autoStart !== false, mcp: version };
@@ -333,13 +339,15 @@ export class RunnerManager extends EventEmitter {
     return this.#view(runner);
   }
   #checkMcp(ai, server, version) {
-    if (!RUNNER_AIS[ai].mcp || version !== 2 || server === LOCAL_SERVER) return;
-    if (!this.#server(server).mcp2) throw new Error('이 서버는 새 연결(v2)을 지원하지 않습니다. 고급에서 예전 연결(v1)을 고르거나 서버를 업데이트해 주세요.');
+    if (!RUNNER_AIS[ai].mcp || version === 1 || server === LOCAL_SERVER) return;
+    const remote = this.#server(server);
+    if (version === 3 && !remote.mcp3) throw new Error('이 서버에서 MCP v3(TSV) 지원을 확인할 수 없습니다. 시험 서버 주소와 토큰으로 서버를 다시 확인해 주세요.');
+    if (version === 2 && !remote.mcp2) throw new Error('이 서버는 새 연결(v2)을 지원하지 않습니다. 고급에서 예전 연결(v1)을 고르거나 서버를 업데이트해 주세요.');
   }
   /** 자동 시작·연결 방식만 바꾼다(연결 방식은 다음에 켤 때부터) */
   updateRunner(id, { autoStart, mcp } = {}) {
     const runner = this.#runner(id);
-    if (mcp !== undefined && mcp !== null) { const version = Number(mcp) === 1 ? 1 : 2; this.#checkMcp(runner.ai, runner.server, version); runner.mcp = version; }
+    if (mcp !== undefined && mcp !== null) { const version = runnerMcp(mcp); this.#checkMcp(runner.ai, runner.server, version); runner.mcp = version; }
     if (autoStart !== undefined) runner.autoStart = autoStart === true;
     this.#save(); this.#changed();
     return this.#view(runner);

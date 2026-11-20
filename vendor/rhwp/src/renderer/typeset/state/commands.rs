@@ -118,6 +118,15 @@ impl TypesetState {
         }
     }
 
+    pub(in crate::renderer::typeset) fn queue_pile_picture<S: crate::storage::Storage>(
+        &mut self,
+        para_index: usize,
+        control_index: usize,
+        storage: &S,
+    ) -> Result<(), S::Error> {
+        storage.push(&mut self.data.pending_picture_pile, (para_index, control_index))
+    }
+
     #[track_caller]
     pub(in crate::renderer::typeset) fn append_item_with_storage<S: crate::storage::Storage>(
         &mut self,
@@ -1121,8 +1130,14 @@ impl TypesetState {
     /// [hwpx-cowork] 진행 상태를 확정하거나 소비하지 않고 완료된 쪽을 복사한다.
     /// 마지막 쪽의 현재 단에는 아직 반영하지 않은 항목이 남아 있을 수 있다.
     pub(in crate::renderer::typeset) fn snapshot_closed_pages(&self) -> PaginationResult {
+        self.snapshot_closed_pages_from(0)
+    }
+    /// [hwpx-cowork] 2026-11-20 `first` 번째 쪽부터의 완료된 쪽만 복사한다(앞쪽은 호출자가 다른 데서 채운다 —
+    /// 뒤쪽 미루기의 잠정 결과).
+    pub(in crate::renderer::typeset) fn snapshot_closed_pages_from(&self, first: usize) -> PaginationResult {
+        let closed = self.data.pages.len().saturating_sub(1);
         PaginationResult {
-            pages: self.data.pages[..self.data.pages.len().saturating_sub(1)].to_vec(),
+            pages: self.data.pages[first.min(closed)..closed].to_vec(),
             wrap_around_paras: Vec::new(),
             hidden_empty_paras: self.data.hidden_empty_paras.clone(),
             pre_emitted_host_paras: self.data.pre_emitted_host_paras.clone(),
@@ -1255,11 +1270,31 @@ impl TypesetState {
             self.data.current_items.push(item);
         }
     }
+    /// [hwpx-cowork] 2026-11-20: 문단을 닫으며 흐름을 개체 계획의 끝으로 옮긴다 — 되감을 수도 있어
+    /// 쪽 나눔 결정 기록(`layout:trace --decisions`)에 남긴다(쪽 끝을 채운 표 뒤 문단이 그 표 위에
+    /// 겹친 결함에서, 958.5 → 229.3 으로 되감은 자리가 기록에 없어 찾기 어려웠다).
+    #[track_caller]
     pub(in crate::renderer::typeset) fn finish_paragraph_float_flow(
         &mut self,
         para_idx: usize,
         spacing_after: f64,
     ) {
+        let flow_before = self.data.current_height;
+        self.close_paragraph_float_flow(para_idx, spacing_after);
+        if crate::renderer::layout_trace_log::enabled()
+            && (self.data.current_height - flow_before).abs() > 0.05
+        {
+            crate::renderer::layout_trace_log::record(
+                self.data.pages.len(),
+                "floatFlowEnd",
+                flow_before,
+                self.data.current_height,
+                String::new(),
+                std::panic::Location::caller(),
+            );
+        }
+    }
+    fn close_paragraph_float_flow(&mut self, para_idx: usize, spacing_after: f64) {
         let data = &mut *self.data;
         for (&(owner, _), placement) in &data.paragraph_float_placements {
             if owner == para_idx

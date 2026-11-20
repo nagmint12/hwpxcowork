@@ -102,7 +102,7 @@ export const pageLayoutStateFingerprint = doc => crypto.createHash('sha256').upd
 //  - objects_to_body: 옮길 글상자·선(종류·자리·크기·글 — layoutFingerprint)과 그 개체 문단 자신의 글을 문단 번호 없이(구역 번호와 차례만) 본다.
 //    앞에 문단이 들어와 주소만 밀려도 개체가 그대로면 같은 지문, 개체가 바뀌거나 생기거나 없어지면(개체 문단에 글이 들어가도) 다른 지문이다.
 // → { v: 2, parts(구역 구성 — 구역 수 포함), sizes?(구역별 문단 수), objects?(옮길 개체) } — 반영 때 같은 ops 로 다시 재어 견준다(server/service.js _applyCore).
-const REF_OPS = new Set(['split_section', 'objects_to_body']);
+const REF_OPS = new Set(['split_section', 'objects_to_body', 'insert_document']);
 // [hwpx-cowork] 여러 문단 서식(restyle — 2026-11-18)의 at 항목: 문단 주소(중첩 포함)·범위 's0/p3..p9'·표 열쇠 's0/p3#t0'·{ table }. 구역 's1'·'*' 는 주소가 아니다
 const RESTYLE_ONE = /^(s\d+\/p\d+)((?:\/[nd]\d+)*(?:#.*)?)$/;
 const RESTYLE_RANGE = /^s(\d+)\/p(\d+)\.\.(?:s(\d+)\/)?p(\d+)$/;
@@ -117,7 +117,7 @@ function restyleBodyRefs(op) {
   }
   return out;
 }
-const MOVES_REFS = new Set(['split_section', 'merge_section', 'objects_to_body']);
+const MOVES_REFS = new Set(['split_section', 'merge_section', 'objects_to_body', 'insert_document']);
 const PARA_REF = /^(s\d+\/p\d+)(:L\d+)?$/;
 const digest = (v) => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /** op 안의 문단 주소 글('s1/p3', 'drop' 의 's1/p3:L2') — 주소를 쓰는 op(REF_OPS)만, 머리말 글 같은 사용자 글은 보지 않는다 */
@@ -365,7 +365,7 @@ export function editPageLayout(doc, ops, options = {}) {
   return onlyStyles ? formattingTransaction(doc, () => applyLayoutOps(doc, ops, options, true)) : applyLayoutOps(doc, ops, options, false);
 }
 
-function applyLayoutOps(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); }, author = null }, onlyStyles) {
+function applyLayoutOps(doc, ops, { attachmentBytes = () => { throw fail('BAD_IMAGE', '그림 첨부가 필요합니다.'); }, documentOf = () => { throw fail('BAD_DOCUMENT', '끼워 넣을 문서 첨부가 필요합니다.'); }, author = null }, onlyStyles) {
   const beforeNested = onlyStyles ? [] : nestedSnapshot(doc);
   const mapping = doc.sections.map((s, si) => s.bodyParas.map((_, i) => ({ old: [si, i], to: [si, i] }))).flat();
   // 지워진 문단(to = null — 개체 → 본문이 비게 된 문단을 지운다)은 그대로 둔다
@@ -424,6 +424,16 @@ function applyLayoutOps(doc, ops, { attachmentBytes = () => { throw fail('BAD_IM
       const moved = new Map(out.mapping.map(m => [m.old.join('/'), m.to]));
       for (const m of mapping) if (m.to) m.to = moved.get(m.to.join('/')) ?? null;
       reports.set(op, out.report);
+      continue;
+    }
+    if (op.op === 'insert_document') {
+      // [hwpx-cowork] 문서 끼워 넣기(MCP v3 실험 — 2026-11-20 §21): 첨부 HWPX 의 본문 문단을 after 뒤에(engine/doc.js insertDocumentAfter) — 뒤 문단 주소는 넣은 수만큼 민다
+      const [, sn, pn] = /^s(\d+)\/p(\d+)$/.exec(op.after) || [], si = Number(sn), pi = Number(pn);
+      if (!doc.sections[si]?.bodyParas[pi]) throw fail('PAGE_LAYOUT', `끼워 넣을 자리(after)가 본문 문단 범위 밖입니다: ${op.after}`);
+      const out = doc.insertDocumentAfter(si, pi, documentOf(op.attachment_id));
+      rebuild(doc);
+      move((s, i) => (s === si && i > pi ? [s, i + out.count] : [s, i]));
+      reports.set(op, { ...out.report, inserted: op.attachment_id, after: op.after });
       continue;
     }
     if (op.op === 'split_section') {
@@ -535,6 +545,7 @@ function applyLayoutOps(doc, ops, { attachmentBytes = () => { throw fail('BAD_IM
   });
   return { mapping, refMapping, reports: ops.filter(op => reports.has(op)).map(op => reports.get(op)), labels: ops.map(op => {
     if (op.op === 'objects_to_body') return structureLabel(reports.get(op));
+    if (op.op === 'insert_document') { const r = reports.get(op) || {}; return `문서 끼워 넣기(${op.after} 뒤): 문단 ${r.paragraphs ?? 0}개${r.tables ? ` · 표 ${r.tables}개` : ''}${r.figures ? ` · 그림 ${r.figures}개` : ''}${r.first ? ` — 「${r.first}」` : ''}`; }
     if (op.op === 'styles' || op.op === 'restyle') return formatLabel(op);
     const name = ({ paper:'용지·여백', section:'구역 설정', split_section:'구역 나누기', merge_section:'구역 합치기', header:'머리말', footer:'꼬리말', page_number:'쪽 번호', master_page:'바탕쪽' })[op.op];
     if (op.op === 'split_section') return `${op.before_ref} 앞에서 구역 나누기`;

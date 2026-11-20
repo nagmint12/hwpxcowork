@@ -10,6 +10,7 @@ import { savedMode, saveMode, modeFromArgs, relaunchArgs, MODE_CHOICE, MODES, MO
 import { RUNNER_AIS } from './runners.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 app.setName('Hwpx Cowork');
+const githubRepository = 'https://github.com/nagmint12/hwpxcowork';
 // Explicit opt-in for native release validation. A fresh directory is mandatory
 // so a test run cannot attach to an existing user's settings or documents.
 const verificationAt = process.argv.indexOf('--verification-profile');
@@ -92,6 +93,15 @@ async function connectFolder() {
   } catch (error) { await dialog.showMessageBox(editor, { type: 'error', message: '폴더를 연결하지 못했습니다.', detail: error.message }); }
 }
 let menuKey = '';
+async function showAbout(window) {
+  const options = {
+    type: 'info', title: app.getName(), message: app.getName(),
+    detail: `${app.getVersion()}\n\n${githubRepository}`,
+    buttons: ['GitHub 바로가기', '확인'], defaultId: 1, cancelId: 1, noLink: true,
+  };
+  const { response } = await (window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options));
+  if (response === 0) await shell.openExternal(githubRepository);
+}
 function refreshMenus() {
   const s = host?.snapshot() || {};
   const key = `${s.phase}|${s.share}|${s.aiSupported}|${(host?.runners.running() || 0) > 0}|${shareBusy}`;
@@ -102,7 +112,7 @@ function menus() {
   const shared = mode === 'shared'; const personal = mode === 'personal';
   const running = host?.runners.running() || 0;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'Hwpx Cowork', submenu: [{ role: 'about', label: 'Hwpx Cowork 정보' }, { type: 'separator' },
+    { label: 'Hwpx Cowork', submenu: [{ label: 'Hwpx Cowork 정보', click: (_item, window) => void showAbout(window).catch(showError) }, { type: 'separator' },
       { label: '운영 방식 바꾸기', submenu: MODES.filter(m => m !== mode).map(m => ({ label: `${MODE_LABELS[m]}…`, click: () => void switchMode(m) })) }, { type: 'separator' },
       { role: 'hide', label: '가리기', visible: mac }, { role: 'quit', label: '종료' }] },
     { label: '파일', submenu: [{ label: '문서 폴더 연결…', accelerator: 'CmdOrCtrl+Shift+O', visible: personal, click: connectFolder }, { type: 'separator', visible: personal }, { role: 'close', label: '창 닫기' }] },

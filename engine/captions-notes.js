@@ -29,7 +29,9 @@ export function normUnit(v) {
   const s = xmlSafe(v).replace(/\s*\n\s*/g, ' ').trim().slice(0, 200);
   if (!s) return '';
   if (/^[(（].*[)）]$/.test(s)) return s;
-  if (/^단위\s*[:：]/.test(s)) return `(${s})`;
+  // 단위 문구를 적은 그대로(2026-11-20 — docs/MCP_REDESIGN_2026-11-16.md §20): 'base: 봉사활동 참여자, 단위: 명, 회' 처럼 '단위'가 든 글은 괄호만 씌운다
+  // (예전에는 '단위:' 로 시작할 때만 — 그 밖은 '(단위: …)' 로 감싸 실제 Codex 가 '(base: …, 단위: …)' 를 '(단위: …; base: …)' 로 바꿔 냈다)
+  if (/단위\s*[:：]/.test(s)) return `(${s})`;
   return `(단위: ${s})`;
 }
 

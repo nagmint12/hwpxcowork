@@ -573,6 +573,7 @@ export class WasmBridge {
     // fail, but cannot return ownership of an already published document.
     const previousDoc = this.doc;
     this.doc = nextDoc;
+    this.applyTypesetTailDeferral();
     this._fileName = nextFileName;
     this._currentFileHandle = null;
     const previousCipher = this._recoveryCipher;
@@ -714,6 +715,7 @@ export class WasmBridge {
       this.doc = HwpDocument.createEmpty();
     }
     const info: DocumentInfo = JSON.parse(this.doc.createBlankDocument());
+    this.applyTypesetTailDeferral();
     this.ensureParagraphStableIds();
     this._fileName = '새 문서.hwp';
     this._currentFileHandle = null;
@@ -1006,6 +1008,45 @@ export class WasmBridge {
     return typeof d.cancelDeferredPagination === 'function'
       ? d.cancelDeferredPagination()
       : false;
+  }
+
+  // [hwpx-cowork] 2026-11-20 뒤쪽 미루기(엔진 `document_core::typeset_tail`) — 편집 화면(InputHandler)이 켠다.
+  // 켜면 편집의 쪽 나눔이 편집한 쪽 근처까지만 하고, 남은 작업을 stepTypesetTail 로 쉬는 동안 잇는다.
+  // 새 문서마다 다시 건다. 엔진이 낡아 API 가 없으면 아무 일도 하지 않는다(늘 끝까지 바로 조판).
+  private _typesetTailDeferral = false;
+
+  setTypesetTailDeferral(enabled: boolean): void {
+    this._typesetTailDeferral = enabled;
+    this.applyTypesetTailDeferral();
+  }
+
+  private applyTypesetTailDeferral(): void {
+    const d = this.doc as unknown as { setTypesetTailDeferral?: (enabled: boolean) => void } | null;
+    if (d && typeof d.setTypesetTailDeferral === 'function') d.setTypesetTailDeferral(this._typesetTailDeferral);
+  }
+
+  typesetTailPending(): boolean {
+    const d = this.doc as unknown as { typesetTailPending?: () => boolean } | null;
+    return !!d && typeof d.typesetTailPending === 'function' && d.typesetTailPending();
+  }
+
+  /** 남은 뒤쪽 조판을 budgetMs 동안 잇는다. status complete = 쪽 나눔이 바뀌었다. */
+  stepTypesetTail(budgetMs: number): DeferredPaginationResult {
+    const d = this.doc as unknown as { stepTypesetTail?: (budgetMs: number) => string } | null;
+    if (!d || typeof d.stepTypesetTail !== 'function') {
+      return { ok: true, status: 'none', revision: 0, fragmentsProcessed: 0, pageCount: this.pageCount };
+    }
+    const result = JSON.parse(d.stepTypesetTail(Math.max(0, budgetMs))) as { status: DeferredPaginationStatus; pageCount: number };
+    return { ok: true, status: result.status, revision: 0, fragmentsProcessed: 0, pageCount: result.pageCount };
+  }
+
+  flushTypesetTail(): DeferredPaginationResult {
+    const d = this.doc as unknown as { flushTypesetTail?: () => string } | null;
+    if (!d || typeof d.flushTypesetTail !== 'function') {
+      return { ok: true, status: 'none', revision: 0, fragmentsProcessed: 0, pageCount: this.pageCount };
+    }
+    const result = JSON.parse(d.flushTypesetTail()) as { status: DeferredPaginationStatus; pageCount: number };
+    return { ok: true, status: result.status, revision: 0, fragmentsProcessed: 0, pageCount: result.pageCount };
   }
 
   flushDeferredPagination(): DeferredPaginationResult {

@@ -41,6 +41,7 @@ pub(super) struct TableFormatInput<'a> {
     pub(super) external_flow: Option<crate::renderer::float_placement::ReflowExternalTableFlow>,
     /// [hwpx-cowork] 2026-11-10 현재 단 폭(px) — host 간격 판정용(`host_spacing::HostSpacingInput`).
     pub(super) column_width_px: Option<f64>,
+    pub(super) keeps_coanchored_frame: bool,
 }
 
 /// 측정 선택 → host 간격 → 측정값 복제 → 각주 수집 → 결과 조립 순서를 유지한다.
@@ -83,12 +84,26 @@ pub(super) fn format_with_storage<S: crate::storage::Storage>(
         render_host,
         external_flow,
         column_width_px,
+        keeps_coanchored_frame,
     } = input;
     let mt = measured_tables
         .iter()
         .find(|mt| mt.para_index == para_idx && mt.control_index == ctrl_idx);
-    let fitted_visible_mt =
-        fit_measured_for_host_with_storage(para, table, mt, dpi, styles, &profile, storage)?;
+    let closed_frame = if keeps_coanchored_frame {
+        mt.map(|measured| {
+            crate::renderer::height_measurer::fit_measured_table_coanchored_frame_with_storage(
+                measured, table, dpi, storage,
+            )
+        })
+        .transpose()?
+        .flatten()
+    } else {
+        None
+    };
+    let fitted_visible_mt = match closed_frame {
+        Some(closed) => Some(closed),
+        None => fit_measured_for_host_with_storage(para, table, mt, dpi, styles, &profile, storage)?,
+    };
     let mt = fitted_visible_mt.as_ref().or(mt);
 
     let is_tac = uses_tac_flow();

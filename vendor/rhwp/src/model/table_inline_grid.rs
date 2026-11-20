@@ -1,4 +1,4 @@
-//! 완결된 TAC 표의 행 선언에서 흐름과 실제 그리드가 공유하는 폭을 구한다.
+//! 완결된 표의 행 선언에서 흐름과 실제 그리드가 공유하는 폭을 구한다.
 
 use super::table::Cell;
 use super::Table;
@@ -26,64 +26,66 @@ impl Table {
     /// 개체의 `sz`만 바꾼 독립 한컴 Print 대조군에서도 셀 그리드 폭은 유지된다.
     /// 반대로 행마다 구획·합이 다른 표는 열별 최대값을 더할 수 없으므로 기존
     /// 개체 폭 계약을 유지한다. 직렬화 모델과 원시 유효성 검사는 바꾸지 않는다.
-    pub(crate) fn closed_inline_grid_width_hu(&self) -> Option<u32> {
-        match self.closed_inline_grid_width_hu_with_storage(&crate::storage::Unbounded) {
+    pub(crate) fn closed_cell_grid_width_hu(&self) -> Option<u32> {
+        match self.closed_cell_grid_width_hu_with_storage(&crate::storage::Unbounded) {
             Ok(value) => value,
             Err(never) => match never {},
         }
     }
-    pub(crate) fn closed_inline_grid_width_hu_with_storage<S: crate::storage::Storage>(
+    pub(crate) fn closed_cell_grid_width_hu_with_storage<S: crate::storage::Storage>(
         &self,
         storage: &S,
     ) -> Result<Option<u32>, S::Error> {
-        if !self.common.treat_as_char
+        // [hwpx-cowork] 한/글 2022 재저장과 쪽 그림에서 HWPX의 떠 있는 표도 각 셀의
+        // 물리 폭을 지킨다. 부모 셀 폭은 표시 범위를 정하며 열 경계를 바꾸지 않는다.
+        if !(self.common.treat_as_char || self.common.hwpx_size_rule)
             || self.row_count == 0
             || self.col_count == 0
             || self.cell_spacing < 0
-            || self.cells.iter().any(|cell| {
-                cell.row >= self.row_count
-                    || cell.row_span != 1
-                    || cell.col_span == 0
-                    || cell.width == 0
-            })
         {
             return Ok(None);
         }
-        let mut rows = storage.vec(usize::from(self.row_count))?;
-        rows.resize_with(usize::from(self.row_count), Vec::new);
-        for cell in &self.cells {
-            storage.push(&mut rows[usize::from(cell.row)], cell)?;
+        // [hwpx-cowork] 보통의 행·열 순서는 그대로 읽는다. 칸 저장 순서가 다른
+        // 문서만 참조를 정렬하여 같은 물리 구획 검사를 거친다.
+        if self.cells.is_sorted_by_key(|cell| (cell.row, cell.col)) {
+            return Ok(self.grid_width_in_cell_order(self.cells.iter()));
         }
-        Ok((|| {
-            let mut consensus = None;
-            for cells in &mut rows {
-                cells.sort_unstable_by_key(|cell| cell.col);
-                let mut next_col = 0u16;
-                let mut width = 0u64;
-                for cell in cells.iter() {
-                    if cell.col != next_col {
-                        return None;
-                    }
-                    next_col = next_col.checked_add(cell.col_span)?;
-                    if next_col > self.col_count {
-                        return None;
-                    }
-                    width = width.checked_add(u64::from(self.physical_cell_width_hu(cell)))?;
-                }
-                if next_col != self.col_count {
+        let mut ordered = storage.collect(self.cells.iter())?;
+        ordered.sort_unstable_by_key(|cell| (cell.row, cell.col));
+        Ok(self.grid_width_in_cell_order(ordered.into_iter()))
+    }
+
+    fn grid_width_in_cell_order<'a>(&self, cells: impl Iterator<Item = &'a Cell>) -> Option<u32> {
+        let mut cells = cells.peekable();
+        let mut consensus = None;
+        let spacing = i64::from(self.cell_spacing);
+        for row in 0..self.row_count {
+            let mut next_col = 0u16;
+            // 왼쪽 바깥 간격 하나, 이어서 각 물리 셀의 폭과 오른쪽 간격 하나.
+            let mut width = spacing;
+            while let Some(cell) = cells.next_if(|cell| cell.row == row) {
+                if cell.col != next_col
+                    || cell.row_span != 1
+                    || cell.col_span == 0
+                    || cell.width == 0
+                {
                     return None;
                 }
-                // 병합 셀 안의 간격은 cell.width에 포함된다. 물리 셀 사이만 더한다.
-                let spacing = i64::from(self.outer_cell_spacing_hu())
-                    + self.inner_cell_spacing_hu(cells.len());
-                width = width.checked_add(u64::try_from(spacing).ok()?)?;
-                let width = u32::try_from(width).ok()?;
-                if width > i32::MAX as u32 || consensus.is_some_and(|prior| prior != width) {
-                    return None;
-                }
-                consensus = Some(width);
+                next_col = next_col.checked_add(cell.col_span)?;
+                width += i64::from(self.physical_cell_width_hu(cell)) + spacing;
             }
-            consensus
-        })())
+            if next_col != self.col_count || width > i64::from(i32::MAX) {
+                return None;
+            }
+            let width = width as u32;
+            if consensus.is_some_and(|prior| prior != width) {
+                return None;
+            }
+            consensus = Some(width);
+        }
+        if cells.next().is_some() {
+            return None;
+        }
+        consensus
     }
 }

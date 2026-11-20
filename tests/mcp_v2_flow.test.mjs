@@ -13,7 +13,7 @@ import { startServer, uploadDoc, root } from './helpers/server.mjs';
 import { floatingDoc } from './helpers/floating-doc.mjs';
 import { MAX_SERVER_INSTRUCTIONS } from '../server/mcp.js';
 import { isV2Request, v2Toolset, v2Keeps, v2Instructions, V2_TOOLS } from '../server/mcp2.js';
-import { parseOps, prepareOps, OP_NAMES, HIDDEN_OPS, opsGuide, OPS_BRIEF } from '../server/mcp2/ops.js';
+import { parseOps, prepareOps, OP_NAMES, HIDDEN_OPS, V3_ONLY_OPS, opsGuide, OPS_BRIEF, opsBrief } from '../server/mcp2/ops.js';
 import { rangePicker, pageLines } from '../server/mcp2/views.js';
 import { buildInstructions, CHANNEL_INSTRUCTIONS, CHANNEL_INSTRUCTIONS_V2, FALLBACK_INSTRUCTIONS_V2, instructionsBudget } from '../server/bridge.js';
 import { codexToolPolicy, validateCodexJob } from '../server/codex-mcp.js';
@@ -58,7 +58,10 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
   // 2026-11-18(여러 문단 서식·스타일 들여오기 — tests/mcp_v2_restyle.test.mjs, §15): +421자(3,775) — format 의 범위·표 대상(+206)과 styles 줄(+215).
   // 실제 Codex 실행이 '표준서식에 맞춰줘'를 표 칸마다 format op 3,141개로 냈다(op 한도 오류 → 1,900개 미리 해 보기 120초 시간 초과 → 6분 뒤 칸 서식 포기):
   // 표 전체를 한 op 로 주는 꼴과 스타일을 들여오는 길이 설명에 없었다. 한도 = 3,775 + 여유 45
-  assert.ok(OPS_BRIEF.length < 3820, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
+  // 2026-11-19(표 칸 안 문단 — tests/mcp_v2_cell_paragraphs.test.mjs, §17): +135자(3,910) — replace 의 칸 주소·whole 줄바꿈(+78), insert 의 칸 안 넣기(+12), delete_paragraphs 의
+  // 칸 문단(+45). 실제 Codex 실행 3건(gpt-6.2-sol)이 회의록 서식의 내용 칸(문단 21개)을 다시 쓰지 못했다: 칸 주소의 whole:true 가 첫 문단만 바꾸고, 칸 문단 뒤 insert 는
+  // 표 밖으로 가고, delete_paragraphs 는 칸 문단을 받지 않았다 — 설명에 칸 안 문단을 다루는 길이 없었다. 한도 = 3,910 + 여유 40
+  assert.ok(OPS_BRIEF.length < 3950, `도구 설명의 op 목록 ${OPS_BRIEF.length}자`);
   // 짧은 꼴(BRIEF)이 실제 꼴과 맞는지: 꼴 줄에 적힌 인자만으로 만든 op 가 꼴 검사(zod)를 지난다(2026-11-17 작업 I — 틀린 꼴 한 줄이 중복 제안을 남긴 일이 있다, §10.4 2차 T09)
   const briefExamples = [
     { op: 'replace', at: 's0/p1', find: '가', with: '나', occurrence: 2, style: '바탕글', reason: '까닭' }, { op: 'replace', at: 's0/p1', whole: true, with: '' }, { op: 'replace', at: { table: 's0/p3#t0', row: 0, col: 1 }, find: '', with: '값' },
@@ -71,6 +74,9 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
     { op: 'styles', import: 'standard', define: [{ name: '새 스타일', base: '바탕글', char: { bold: true }, paragraph: { align: 'CENTER' } }] }, { op: 'styles', import: 'standard' },
     ...['s0/p3', 's0/p3..p9', 's2', '*', ['s0/p3', 's0/p5']].map((a) => ({ op: 'delete_objects', at: a, kinds: ['table', 'figure', 'shape', 'chart'] })),
     ...['s1/p8', 's1/p8..p13', ['s1/p8', 's1/p9']].map((a) => ({ op: 'delete_paragraphs', at: a })),
+    // 2026-11-19: 표 칸 안 문단(칸 주소의 whole 다시 쓰기·칸 문단 뒤 넣기·칸 문단 지우기)
+    { op: 'replace', at: { table: 's0/p3#t0', row: 2, col: 1 }, whole: true, with: '첫 줄\n둘째 줄' }, { op: 'insert', after: 's0/p3/n9', paragraphs: [{ text: '칸 안 문단' }] },
+    ...['s0/p3/n9', 's0/p3/n9..n12', ['s0/p3/n9', 's0/p3/n11']].map((a) => ({ op: 'delete_paragraphs', at: a })),
     { op: 'move_paragraphs', at: 's1/p8..p9', after: 's1/p20' }, { op: 'move_paragraphs', at: 's1/p8', before: 's1/p2' },
     { op: 'objects_to_body', remove_rest: true, drop: ['s0/p0:L3'] }, { op: 'objects_to_body', at: 's1' },
     { op: 'memo', at: 's0/p1', text: '의견', find: '가' }, { op: 'memo', reply_to: 'memo3', text: '답' },
@@ -86,8 +92,10 @@ test('순수 함수: op 꼴 검사·범위 글·연결 판정·안내 길이', (
     { op: 'header', section: 0, text: '머리말' }, { op: 'footer', section: 0, clear: true }, { op: 'page_number', section: 0, position: 'BOTTOM_CENTER', start: 1 }, { op: 'page_number', section: 0, clear: true },
   ];
   assert.deepEqual(parseOps(briefExamples).errors, []);
-  for (const name of OP_NAMES) assert.ok(briefExamples.some((x) => x.op === name) || ['section', 'split_section', 'merge_section', 'master_page', 'restyle'].includes(name), `BRIEF 예시가 없는 op: ${name}`);
-  for (const name of OP_NAMES.filter((n) => !['section', 'split_section', 'merge_section', 'master_page', 'footer', ...HIDDEN_OPS].includes(n))) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), `OPS_BRIEF 에 없는 op: ${name}`);
+  // v3 실험 op(V3_ONLY_OPS — 문서 끼워 넣기 2026-11-20 §21)는 v2 에서 모르는 op 다: v2 꼴 목록에 없고 v3 꼴 목록에만 있다(시험 tests/mcp_insert_document.test.mjs)
+  for (const name of OP_NAMES.filter((n) => !V3_ONLY_OPS.includes(n))) assert.ok(briefExamples.some((x) => x.op === name) || ['section', 'split_section', 'merge_section', 'master_page', 'restyle'].includes(name), `BRIEF 예시가 없는 op: ${name}`);
+  for (const name of OP_NAMES.filter((n) => !['section', 'split_section', 'merge_section', 'master_page', 'footer', ...HIDDEN_OPS, ...V3_ONLY_OPS].includes(n))) assert.match(OPS_BRIEF, new RegExp(`op:'${name}'`), `OPS_BRIEF 에 없는 op: ${name}`);
+  for (const name of V3_ONLY_OPS) { assert.doesNotMatch(OPS_BRIEF, new RegExp(`op:'${name}'`)); assert.match(opsBrief('v3'), new RegExp(`op:'${name}'`)); }
   for (const name of HIDDEN_OPS) assert.doesNotMatch(OPS_BRIEF, new RegExp(`op:'${name}'`), `숨긴 op 가 OPS_BRIEF 에 있다: ${name}`);
   assert.match(OPS_BRIEF, /section·split_section·merge_section·master_page/);
   assert.match(opsGuide(), /objects_to_body/); assert.match(opsGuide('table_edit'), /delete_rows/);
@@ -161,7 +169,9 @@ test('임시 서버: 예전 연결은 그대로이고 새 연결은 작업 도�
   // 2026-11-18(한/글 차트 개체는 숨긴 op — tests/mcp_v2_hidden_chart.test.mjs): 8,773자(−1,361) — op 목록의 chart 줄을 빼고 figure 줄에 직접 그리는 법을 실음(−75),
   // ops 의 이름 목록(enum)을 뺌(−330쯤 — 숨긴 이름을 드러내지 않게), preview_figure 를 새 연결 이름·svg 만으로(chart 자료 스키마 −950쯤). 한도 = 8,773 + 여유 47
   // 2026-11-18(여러 문단 서식·스타일 들여오기): 9,254자(+481) — 위 OPS_BRIEF 몫(+421)과 read 의 styles 보기(+60). 한도 = 9,254 + 여유 46
-  assert.ok(size < 9300, `새 연결(core) 도구 정의 ${size}자`);
+  // 2026-11-19(표 칸 안 문단 — §17): 위 OPS_BRIEF 몫(+135), read 의 at 에 표 칸 주소(설명 +62·입력 꼴 +230쯤 — 실제 Codex 실행 3건 모두 첫 호출이 read(at:{table,row,col})였고
+  // 입력 검사에서 거절됐다), 칸 안 문단 나눔 ¶ 와 칸 주소 뜻(task·edit 설명 +88). 어림 9,770자 — 한도 = 어림 + 여유 80(검증에서 잰 값으로 맞춘다)
+  assert.ok(size < 9850, `새 연결(core) 도구 정의 ${size}자`);
   assert.match(v2.client.getInstructions(), /task\(맡기/);
   const all = await connect(srv, 'a', { headers: { 'X-Hwpx-Mcp': '2' } }); open.push(all);
   const allNames = (await all.client.listTools()).tools.map((x) => x.name);
@@ -404,7 +414,7 @@ test('같은 호출의 objects_to_body 와 delete_objects: 옮기는 문단의 �
 test('Codex 실행기: 새 연결의 도구 허용·고정과 첫 입력', async () => {
   const job = { type: 'request', docId: 'doc_1', requestId: 3, attempt: 2, surface: 'v2' };
   assert.equal(validateCodexJob(job), job);
-  assert.throws(() => validateCodexJob({ ...job, surface: 'v3' }));
+  assert.throws(() => validateCodexJob({ ...job, surface: 'v4' }));
   assert.throws(() => validateCodexJob({ ...job, workflow: 'content_format' }));
   const calls = [];
   const policy = codexToolPolicy(job, async (name, args) => { calls.push([name, args]); return { attempt: 2, status: 'working', claim: { mine: true, expired: false } }; });
@@ -447,7 +457,8 @@ test('Codex 실행기: 새 연결의 도구 허용·고정과 첫 입력', async
   assert.equal(prompt.split(hint).length, 2);
   assert.ok(prompt.length - hint.length < 1200 + JSON.stringify(brief).length);
   // 2026-11-18: 4,298자 — OPS_BRIEF 가 3,775자가 된 몫(위 한도와 같은 근거: format 의 범위·표 대상, styles). 한도 = 4,298 + 여유 52
-  assert.ok(hint.length < 4350, `코드 모드 안내 ${hint.length}자`);
+  // 2026-11-19(표 칸 안 문단 — §17): OPS_BRIEF 몫(+135)과 표 칸 주소 줄(+25 — read 도 칸 주소를 받는다·칸 주소 = 칸의 문단 전체). 어림 4,460자 — 한도 = 어림 + 여유 60
+  assert.ok(hint.length < 4520, `코드 모드 안내 ${hint.length}자`);
 });
 
 test('개인 실행기(Codex): --mcp 2 는 짧은 요청 내용을 첫 입력에 싣고 작업 도구 넷으로 처리한다', { timeout: 60000 }, async (t) => {
@@ -465,7 +476,7 @@ test('개인 실행기(Codex): --mcp 2 는 짧은 요청 내용을 첫 입력에
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v2');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '1'], env), env).mcpSurface, null);
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, null);
-  assert.throws(() => parseWorkerArgs(['--provider', 'codex', '--mcp', '3'], env));
+  assert.throws(() => parseWorkerArgs(['--provider', 'codex', '--mcp', '4'], env));
 
   const api = srv.api('a');
   const COLS = [5200, 14000, 11000, 17600];

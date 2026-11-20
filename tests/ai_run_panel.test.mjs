@@ -16,7 +16,8 @@ const moduleSource = source
       if (options.body) { const { kind, ...settings } = options.body; harness.response.settings[kind] = settings; }
       return structuredClone(harness.response);
     };`)
-  .replace("import { AdminCreditsPanel } from './admin-credits.js';", 'const AdminCreditsPanel = {};');
+  .replace("import { AdminCreditsPanel } from './admin-credits.js';", 'const AdminCreditsPanel = {};')
+  .replace("import { PAGES_HOST } from './pages-host.js';", 'const PAGES_HOST = false;');
 const ui = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}`);
 const view = admin => ({ kinds: [{ id: 'codex', label: 'Codex (ChatGPT 로그인)', efforts: ['low', 'high'],
   applies: 'request', start: 'Windows 앱 [AI → 실행기 관리…] · npm run worker -- --provider codex', models: [{ id: 'judge-model', efforts: ['low', 'high'] }],

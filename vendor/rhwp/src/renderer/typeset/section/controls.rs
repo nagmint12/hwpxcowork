@@ -92,7 +92,23 @@ impl TypesetEngine {
             fullpage_img_min_height_hu,
             fullpage_img_body_bottom_hu,
         );
-        let is_multi_fullpage_img_para = !stored_line_beside_pile
+        // [hwpx-cowork] #8842: Hancom HWP 2022 gives each overlapping,
+        // text-following picture its own page when two cannot fit.
+        let cascades_picture_pile = !has_table
+            && st.col_count == 1
+            && fullpage_img_body_h > 0.0
+            && crate::document_core::queries::rendering::floating_image_stack_extents(
+                para, fullpage_img_min_height_hu.saturating_add(1),
+            ).is_some()
+            && para.controls.iter().all(|control| matches!(control,
+                Control::Picture(pic)
+                    if pic.common.flow_with_text
+                        && pic.common.vert_rel_to == crate::model::shape::VertRelTo::Para
+                        && pic.common.vert_align == crate::model::shape::VertAlign::Top
+                        && pic.caption.is_none()
+                        && hwpunit_to_px(pic.common.height as i32, self.dpi) <= fullpage_img_body_h
+            ));
+        let is_multi_fullpage_img_para = !cascades_picture_pile && !stored_line_beside_pile
             && has_majority_fullpage_images(fullpage_img_ctrls.len(), noninline_pic_count);
 
         // [#2097] 이 문단의 TopAndBottom 자리차지 float pushdown 가로 컬럼
@@ -150,6 +166,36 @@ impl TypesetEngine {
                 st.collect_endnote(en_ref.clone());
             }
             // [#1995] 다수 전면 이미지: 각 전면 그림을 새 페이지에 단독 배치.
+            if cascades_picture_pile {
+                if let Control::Picture(picture) = ctrl {
+                    if ctrl_idx == 0 {
+                        let anchor = picture_host_origin.2;
+                        let top = anchor + hwpunit_to_px(
+                            crate::renderer::float_placement::signed_hwpunit(picture.common.vertical_offset).max(0),
+                            self.dpi,
+                        );
+                        st.record_paragraph_float_placement_with_storage(
+                            (para_idx, ctrl_idx),
+                            crate::renderer::float_placement::ParagraphFloatPlacement {
+                                flow: crate::renderer::float_placement::ParagraphFloatFlow::Exclusion,
+                                anchor_y: anchor,
+                                stored_host_origin: Some(anchor),
+                                stored_successor_line_origin: None,
+                                table_left: None,
+                                table_top: top,
+                                occupied_bottom: top + hwpunit_to_px(picture.common.height as i32, self.dpi),
+                            },
+                            storage,
+                        )?;
+                        st.append_item_with_storage(PageItem::Shape {
+                            para_index: para_idx, control_index: ctrl_idx,
+                        }, storage)?;
+                    } else {
+                        st.queue_pile_picture(para_idx, ctrl_idx, storage)?;
+                    }
+                }
+                continue;
+            }
             if is_multi_fullpage_img_para && fullpage_img_ctrls.contains(&ctrl_idx) {
                 st.force_new_page_with_storage(storage)?;
                 st.append_item_with_storage(
@@ -315,6 +361,36 @@ impl TypesetEngine {
                         // `find_inline_control_target_page` 의 `in_current` 검사가 `None` 을
                         // 돌려주므로 제자리 개체는 하나도 움직이지 않는다. 같은 문서의
                         // `pi=25` 가 그 경우다(`would_route=None`).
+                        // [#8660] 쪽 영역 안으로 제한한 문단 기준 개체가 본문 아래 끝을 넘으면
+                        // 한컴은 개체만 다음 쪽 본문 맨 위에 그린다(기준 문단은 남는다). 같은 쪽
+                        // 아래 끝으로 끌어올리는 그리기 단계 제한(#2032·#2075)보다 먼저 쪽을 정한다.
+                        if st.col_count == 1
+                            && (st.pages.len(), st.current_column)
+                                == (picture_host_origin.0, picture_host_origin.1)
+                        {
+                            if let Some(placement) = st
+                                .restricted_object_host_top(para_idx, para, picture_host_origin.2, self.dpi)
+                                .and_then(|host_top| {
+                                    crate::renderer::float_placement::overflow_para_object_next_page_placement(
+                                        ctrl,
+                                        host_top,
+                                        st.available_height(),
+                                        self.dpi,
+                                    )
+                                })
+                            {
+                                st.defer_stored_frame(
+                                    crate::renderer::typeset::DeferredStoredFrameControl {
+                                        following_body_para_index: None,
+                                        kind: crate::renderer::typeset::DeferredStoredFrameKind::Picture,
+                                        para_index: para_idx,
+                                        control_index: ctrl_idx,
+                                        placement,
+                                    },
+                                );
+                                continue;
+                            }
+                        }
                         let routed =
                             if crate::renderer::pagination::is_routable_anchored_picture_or_shape(
                                 ctrl,

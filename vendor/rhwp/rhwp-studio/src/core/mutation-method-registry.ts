@@ -135,6 +135,8 @@ export const EXCLUDED_NON_DOCUMENT: readonly string[] = [
   // [#7002] 지연 쪽나눔 진행 API — 조판은 파생 상태다. 문서 IR 을 바꾸지 않는다.
   'beginDeferredPagination', 'stepDeferredPagination',
   'flushDeferredPagination', 'cancelDeferredPagination',
+  // [hwpx-cowork] 2026-11-20 뒤쪽 미루기 — 같은 파생 조판 상태의 켜기·잇기·마무리다.
+  'setTypesetTailDeferral', 'stepTypesetTail', 'flushTypesetTail',
   // [#7002 · #4180] 저장 직전 캐럿 스탬프. doc_properties.caret_* 와 DocInfo raw_stream 을
   // surgical update 하므로 **저장 바이트를 바꾼다**. 그럼에도 제외인 이유는 편집이 아니라
   // 저장 흐름(onBeforeExport)의 일부이기 때문이다 — 되돌릴 사용자 편집이 없다.

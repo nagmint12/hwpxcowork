@@ -213,12 +213,6 @@ test('묶음 제안(bundle — docs/UI_TERMS.md §9): 항목 하나 — 일부 �
   assert.deepEqual(alt.map((x) => [x.gid, x.bundle ?? null, x.list.length]), [['g', null, 2]]);
 });
 
-test('복구 메모 두 꼴: 이정표(사람용 버전)면 v, 아니면 기록 시각(시각도 모르면 옛 기록)', () => {
-  assert.equal(MT.renderRestoreMemo({ v: 3, at: T2, by: '관리자', count: 2 }), `[복구] v3(${MT.fmtTime(T2)}) 내용으로 되돌림 — 관리자\n바뀐 문단 2개`);
-  assert.equal(MT.renderRestoreMemo({ at: T2, by: '관리자', count: 1 }), `[복구] ${MT.fmtTime(T2)} 기록 내용으로 되돌림 — 관리자\n바뀐 문단 1개`);
-  assert.equal(MT.renderRestoreMemo({ v: null, at: null, by: '관리자', count: 1 }), '[복구] 옛 기록 내용으로 되돌림 — 관리자\n바뀐 문단 1개');
-});
-
 test('compareRefs: 구역 → 본문 → 중첩 번호 차례', () => {
   const refs = ['s0/p10', 's0/p2/n3', 's1/p0', 's0/p2', 's0/p2/n10', 'x', 's0/p2/n3/n0'];
   assert.deepEqual([...refs].sort(MT.compareRefs), ['s0/p2', 's0/p2/n3', 's0/p2/n3/n0', 's0/p2/n10', 's0/p10', 's1/p0', 'x']);

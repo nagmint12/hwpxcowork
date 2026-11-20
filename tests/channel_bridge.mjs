@@ -403,14 +403,16 @@ try {
     const pick = (o) => { const p = B.bridgeSurface(o); return `${p.surface}${p.lean ? '+lean' : ''}`; };
     ok(pick({}) === 'v2' && pick({ v2: true }) === 'v2' && pick({ v2: false }) === 'v1' && pick({ lean: true }) === 'v1+lean' && pick({ surface: 'v2', lean: true }) === 'v2'
       && pick({ surface: 'v1', lean: true }) === 'v1+lean' && pick({ url: 'http://h/mcp?v=1' }) === 'v1' && pick({ url: 'http://h/mcp?v=2' }) === 'v2' && pick({ url: 'http://h/mcp?lean=1' }) === 'v1+lean'
-      && pick({ surface: 'v1', url: 'http://h/mcp?v=2' }) === 'v1' && pick({ surface: 'v2', url: 'http://h/mcp?lean=1' }) === 'v2',
+      && pick({ surface: 'v1', url: 'http://h/mcp?v=2' }) === 'v1' && pick({ surface: 'v2', url: 'http://h/mcp?lean=1' }) === 'v2'
+      && pick({ surface: 'v3', url: 'http://h/mcp?v=2' }) === 'v3' && pick({ url: 'http://h/mcp?v=3' }) === 'v3',
     'bridgeSurface: 기본 새 연결 · v1 은 밝힐 때(surface·v2:false·--lean·?v=1·?lean=1) · 인자가 주소보다 먼저');
-    let bad = null; try { B.bridgeSurface({ surface: 'v3' }); } catch (e) { bad = e; }
-    ok(/v1 또는 v2/.test(bad?.message || ''), '모르는 연결 종류는 거절');
+    let bad = null; try { B.bridgeSurface({ surface: 'v4' }); } catch (e) { bad = e; }
+    ok(/v1.*v2.*v3/.test(bad?.message || ''), '모르는 연결 종류는 거절');
     const P = (argv) => B.parseBridgeArgs(argv, {});
-    ok(P([]).surface === null && P(['--v1']).surface === 'v1' && P(['--v2']).surface === 'v2' && P(['--mcp', '1']).surface === 'v1' && P(['--mcp=2']).surface === 'v2'
-      && P(['--v2', '--v1']).surface === 'v1' && P(['--lean']).lean === true && P(['--lean']).surface === null && P(['--mcp', '3']).bad.length === 1 && P(['--channel', '--x']).unknown[0] === '--x',
-    '브리지 명령줄: --v1·--v2·--mcp 1|2(마지막 것), --lean 은 따로, 잘못된 --mcp 는 bad');
+    ok(P([]).surface === null && P(['--v1']).surface === 'v1' && P(['--v2']).surface === 'v2' && P(['--v3']).surface === 'v3'
+      && P(['--mcp', '1']).surface === 'v1' && P(['--mcp=2']).surface === 'v2' && P(['--mcp', '3']).surface === 'v3'
+      && P(['--v2', '--v1']).surface === 'v1' && P(['--lean']).lean === true && P(['--lean']).surface === null && P(['--mcp', '4']).bad.length === 1 && P(['--channel', '--x']).unknown[0] === '--x',
+    '브리지 명령줄: --v1·--v2·--v3·--mcp 1|2|3(마지막 것), --lean 은 따로, 잘못된 --mcp 는 bad');
   }
 
   {
@@ -772,8 +774,8 @@ ${B.FALLBACK_INSTRUCTIONS_V2}` && ins.includes('브리지에 내장된 안내') 
     }
     const r = await runNode([BRIDGE_CLI, '--channel', '--url', stub.mcpUrl], envBase, { timeoutMs: 15000 });
     ok(r.code === 2 && r.stdout === '' && /토큰이 필요합니다/.test(r.stderr), '토큰이 없으면 코드 2, stdout 은 비어 있고 stderr 에 안내');
-    const rb = await runNode([BRIDGE_CLI, '--channel', '--mcp', '3', '--url', stub.mcpUrl], { ...envBase, HWPX_COWORK_TOKEN: TOKEN }, { timeoutMs: 15000 });
-    ok(rb.code === 2 && rb.stdout === '' && /--mcp 는 1\(예전 연결\) 또는 2/.test(rb.stderr), '잘못된 --mcp 값이면 붙지 않고 코드 2(지침과 도구가 어긋나지 않게)');
+    const rb = await runNode([BRIDGE_CLI, '--channel', '--mcp', '4', '--url', stub.mcpUrl], { ...envBase, HWPX_COWORK_TOKEN: TOKEN }, { timeoutMs: 15000 });
+    ok(rb.code === 2 && rb.stdout === '' && /--mcp.*1.*2.*3/.test(rb.stderr), '잘못된 --mcp 값이면 붙지 않고 코드 2(지침과 도구가 어긋나지 않게)');
     // .mcp.json 의 "${HWPX_COWORK_TOKEN}" 이 풀리지 않고 온 경우(setx 를 같은 창에서 함 등) — 401 을 되풀이하며 '연결됨(도구 0개)'로 남지 않고 끝낸다
     const conns0 = stub.st.conns.length;
     const ph = await runNode([BRIDGE_CLI, '--channel', '--url', stub.mcpUrl], { ...envBase, HWPX_COWORK_TOKEN: '${HWPX_COWORK_TOKEN}' }, { timeoutMs: 15000 });

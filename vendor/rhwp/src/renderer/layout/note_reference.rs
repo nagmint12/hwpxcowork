@@ -5,6 +5,24 @@ use super::*;
 
 pub(super) type Reference = (u16, String, TextStyle, usize, f64);
 
+/// [hwpx-cowork] A marker at a run boundary belongs to the UTF-16 position of
+/// its control, even when the following run provides the drawing anchor.
+pub(super) fn control_style(
+    para: Option<&Paragraph>,
+    styles: &ResolvedStyleSet,
+    control_index: usize,
+    fallback: &TextStyle,
+) -> TextStyle {
+    let source_shape = para.and_then(|para| {
+        let pos = *para.control_utf16_positions().get(control_index)?;
+        para.char_shapes
+            .iter()
+            .rfind(|shape| shape.start_pos <= pos)
+            .map(|shape| shape.char_shape_id)
+    });
+    source_shape.map_or_else(|| fallback.clone(), |id| resolved_to_text_style(styles, id, 1))
+}
+
 pub(super) fn reference(
     control: Option<&Control>,
     number: u16,

@@ -4,8 +4,9 @@
 // 한/글 2022 는 이런 표 구조·모양 바꾸기를 변경 추적하지 않는다(줄·칸·합치기·너비·선·채우기 — 실측 scratchpad/track_hangul) — 여기서도 바로 고치고
 // 되돌리기는 고치기 전 표 XML 로 한다(서비스 _undoCore). 칸 주소(row·col)는 0부터, doc.tables() 의 cells.row·col 과 같다.
 // 셀 XML 은 원문을 살리고 바뀐 것(셀 주소·합침·크기·테두리 번호·세로 정렬)만 고친다. 합친 칸의 글은 차례대로 한 칸에 모은다(빈 칸은 뺀다).
+// 2026-11-19: 칸 안 문단을 넣고·지우고·통째로 다시 쓰는 cell_paragraphs(CELL_OPS — 새 MCP 연결이 안에서 쓰는 op, 아래 '칸 문단 다시 짜기').
 import { createHash } from 'node:crypto';
-import { scan, attrs, escapeAttr, escapeText } from './xmlscan.js';
+import { scan, attrs, attr, escapeAttr, escapeText, decodeEntities } from './xmlscan.js';
 import { EngineError } from './errors.js';
 
 /** 표 XML 지문(되돌리기 전에 그새 바뀌지 않았는지 본다) */
@@ -17,6 +18,10 @@ const fail = (code, message) => { throw new EngineError(code, message); };
 const WIDTHS = ['0.1', '0.12', '0.15', '0.2', '0.25', '0.3', '0.4', '0.5', '0.6', '0.7', '1.0', '1.5', '2.0', '3.0', '4.0', '5.0'];
 export const LINE_TYPES = ['NONE', 'SOLID', 'DASH', 'DOT', 'DASH_DOT', 'DASH_DOT_DOT', 'LONG_DASH', 'CIRCLE', 'DOUBLE_SLIM', 'SLIM_THICK', 'THICK_SLIM', 'SLIM_THICK_SLIM'];
 export const TABLE_OPS = ['delete_rows', 'delete_cols', 'insert_rows', 'insert_cols', 'merge', 'unmerge', 'border', 'fill', 'col_widths', 'row_height', 'cell_align', 'table'];
+// [hwpx-cowork] 2026-11-19 칸 문단 다시 짜기(cell_paragraphs — 아래 rebuildCell). 새 MCP 연결(server/mcp2/ops.js)이 칸 통째로 다시 쓰기·칸 안 문단 넣기·지우기를
+// 이 op 로 푼다. 도구가 받는 표 고치기 목록(TABLE_OPS — server/table-schema.js TableOpSchema 의 op 이름)에는 싣지 않는다(예전 연결의 도구 꼴은 그대로).
+export const CELL_OPS = ['cell_paragraphs'];
+export const CELL_PARAGRAPHS_MAX = 500;
 export const BORDER_SIDES = ['all', 'outer', 'inner', 'top', 'bottom', 'left', 'right', 'inner_h', 'inner_v'];
 const SIDES = ['left', 'right', 'top', 'bottom'];
 
@@ -118,6 +123,190 @@ function blankCell(model, src, row, col, rowSpan = 1, colSpan = 1, text = '') {
   return { open: src.open, kids: [{ name: 'hp:subList', xml: subXml }, ...kids], row, col, rowSpan, colSpan, width: 0, height: 0 };
 }
 
+// ───────── 칸 문단 다시 짜기(cell_paragraphs — 2026-11-19, docs/MCP_REDESIGN_2026-11-16.md §17) ─────────
+// 회의록 서식처럼 내용이 표 칸 하나에 문단 여럿으로 든 문서에서 칸 안 문단을 넣고 지울 길이 없었다(2026-11-19 실제 Codex 실행 3건이 그 칸을 다시 쓰지 못했다 —
+// 새 글을 줄바꿈으로 한 문단에 몰아 넣거나 빈 문단을 남겼다). 다른 표 고치기처럼 변경 추적 없이 바로 고치고, 되돌리기는 고치기 전 표 XML 로 한다.
+//   op: { op:'cell_paragraphs', row, col, count(제안할 때 그 칸의 문단 수), paragraphs:[{keep:k} | {text, like?:k, near?:k}], expect?(사라질 문단의 글 지문 — 제안할 때 엔진이 적는다) }
+//   · {keep:k} = 지금 k 번째(0부터) 문단을 원문 그대로 둔다(차례대로 한 번씩). {text} = 새 문단 — 문단·글자 모양은 like 번째 문단을 따른다
+//     (없으면 같은 글머리(□·ㅇ·- …)로 시작하는 문단 가운데 near 에 가장 가까운 것 — near 가 없으면 바로 앞에 남긴 문단·그 자리 — 그런 문단이 없으면 near 자리 문단)
+//   · 남기지 않는 문단은 사라진다 — 글만 든 문단만(표·그림·메모·각주 같은 개체·조판 부호나 처리 안 된 변경 추적이 있으면 거절: 그 문단은 keep 으로 남긴다)
+const LINESEG = /<hp:linesegarray>[\s\S]*?<\/hp:linesegarray>|<hp:linesegarray\/>/g;
+// 칸 문단에 든 단 정의(hp:colPr — 본문 첫 문단에서 옮겨 붙인 글에 딸려 온다)는 글만 든 문단으로 본다(첫 문단의 것은 새 첫 문단으로 옮긴다)
+const COLPR = /<hp:ctrl\b[^>]*>\s*<hp:colPr\b[^>]*\/>\s*<\/hp:ctrl>/g;
+const NOT_PLAIN = /<hp:(?:ctrl|secPr|tbl|pic|rect|ellipse|line|polygon|curve|arc|container|equation|ole|chart|textart|connectLine|video|compose|dutmal|switch|form|insertBegin|insertEnd|deleteBegin|deleteEnd)\b/;
+const inlineXml = (text) => String(text).split(/\r?\n/).map((line) => escapeText(line).replace(/\t/g, '<hp:tab/>')).join('<hp:lineBreak/>');
+const shortHash = (s) => createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
+const clipText = (s, max) => { const t = [...String(s ?? '')]; return t.length > max ? `${t.slice(0, max).join('')}…` : t.join(''); };
+
+/** 칸 subList 안 XML → 가장 바깥 문단(hp:p)들의 XML(문단 안 표·글상자의 문단은 그 문단 XML 에 든다) | null(문단 밖에 다른 것이 있어 다시 짤 수 없음) */
+function cellParagraphs(inner) {
+  const out = []; let depth = 0; let start = -1;
+  for (const t of scan(inner)) {
+    if (t.type === 'open') { if (depth === 0) { if (t.name !== 'hp:p') return null; start = t.start; } depth++; }
+    else if (t.type === 'close') { depth--; if (depth < 0) return null; if (depth === 0) out.push(inner.slice(start, t.end)); }
+    else if (t.type === 'selfclose') { if (depth === 0) { if (t.name !== 'hp:p') return null; out.push(inner.slice(t.start, t.end)); } }
+    else if (depth === 0 && inner.slice(t.start, t.end).trim()) return null;
+  }
+  return depth === 0 ? out : null;
+}
+
+/** 칸 문단 하나(가장 바깥 hp:p XML) → { open(여는 태그), runs: [{ charPr, text }](가장 바깥 run 의 글 — 문단 안 개체의 글은 세지 않는다), text, plain(글만 든 문단인가), colPr(단 정의 XML | null) } */
+function paraInfo(xml) {
+  const runs = []; let depth = 0; let run = null; let inT = false; let columnCharPr = null;
+  for (const t of scan(xml)) {
+    // 이 문단의 run/ctrl 바로 아래 단 정의만 따른다. 칸 안의 중첩 표·글상자는 자체 단 정의를 가질 수 있다.
+    if (depth === 3 && run && t.name === 'hp:colPr' && (t.type === 'open' || t.type === 'selfclose')) columnCharPr ??= run.charPr;
+    if (t.type === 'open') {
+      depth++;
+      if (depth === 2 && t.name === 'hp:run') { run = { charPr: attr(xml, t, 'charPrIDRef') ?? '0', text: '' }; runs.push(run); }
+      else if (depth === 3 && run && t.name === 'hp:t') inT = true;
+    } else if (t.type === 'close') {
+      if (depth === 3 && t.name === 'hp:t') inT = false;
+      if (depth === 2 && t.name === 'hp:run') run = null;
+      depth--;
+    } else if (t.type === 'selfclose') {
+      if (depth === 1 && t.name === 'hp:run') runs.push({ charPr: attr(xml, t, 'charPrIDRef') ?? '0', text: '' });
+      else if (inT && depth === 3 && run) { if (t.name === 'hp:lineBreak') run.text += '\n'; else if (t.name === 'hp:tab') run.text += '\t'; }
+    } else if (t.type === 'text' && inT && depth === 3 && run) run.text += t.cdata ? xml.slice(t.start + 9, t.end - 3) : decodeEntities(xml.slice(t.start, t.end));
+  }
+  const open = (/^<hp:p\b[^>]*>/.exec(xml) || [''])[0].replace(/\s*\/>$/, '>');
+  return { open, runs, text: runs.map((r) => r.text).join(''), plain: !NOT_PLAIN.test(xml.replace(COLPR, '')), colPr: (xml.match(COLPR) || [null])[0], columnCharPr };
+}
+
+/**
+ * 문단 글머리 갈래: 빈 줄 'blank', 기호(□·ㅇ·-·※ …)는 그 글자, 번호 꼴('1.'·'(1)'·'가.'·'(가)'·'①'), 그 밖의 글 'text'.
+ * 새 칸 문단이 따를 모양(같은 갈래의 가까운 문단)을 고르는 데만 쓴다 — 서식 문서의 칸은 제목 줄(□)과 항목 줄(ㅇ)의 문단 모양이 다를 수 있다
+ */
+export function paraMarker(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return 'blank';
+  if (/^\d+[.)]/.test(t)) return '1.';
+  if (/^\(\d+\)/.test(t)) return '(1)';
+  if (/^[가-힣][.)]\s/.test(t)) return '가.';
+  if (/^\([가-힣]\)/.test(t)) return '(가)';
+  if (/^[①-⑳㉠-㉻]/.test(t)) return '①';
+  const ch = [...t][0];
+  // 낱자(ㅇ·ㅁ — 공문서 글머리로 쓴다)는 기호로 본다
+  return /[\p{L}\p{N}]/u.test(ch) && !/[ㄱ-ㆎ]/.test(ch) ? 'text' : ch;
+}
+
+/** 새 칸 문단 XML: like(paraInfo)의 문단 모양·스타일과 글이 가장 많은 run 의 글자 모양 */
+function freshParagraph(like, text) {
+  let open = like?.open || '<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">';
+  for (const [k, v] of [['id', '0'], ['pageBreak', '0'], ['columnBreak', '0'], ['merged', '0']]) open = setAttr(open, k, v);
+  let main = like?.runs[0] || null;
+  for (const r of like?.runs || []) if ([...r.text].length > [...main.text].length) main = r;
+  const cp = escapeAttr(String(main?.charPr ?? '0'));
+  const t = String(text ?? '');
+  return `${open}<hp:run charPrIDRef="${cp}"${t ? `><hp:t>${inlineXml(t)}</hp:t></hp:run>` : '/>'}</hp:p>`;
+}
+
+/** 표 하나만 든 칸 문단(like 의 문단 모양·스타일, 글이 가장 많은 run 의 글자 모양) — 한/글이 칸 안에 만든 표 문단과 같은 꼴(표 뒤 빈 hp:t) */
+function tableParagraph(like, tblXml) {
+  let open = like?.open || '<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">';
+  for (const [k, v] of [['id', '0'], ['pageBreak', '0'], ['columnBreak', '0'], ['merged', '0']]) open = setAttr(open, k, v);
+  let main = like?.runs[0] || null;
+  for (const r of like?.runs || []) if ([...r.text].length > [...main.text].length) main = r;
+  return `${open}<hp:run charPrIDRef="${escapeAttr(String(main?.charPr ?? '0'))}">${tblXml}<hp:t/></hp:run></hp:p>`;
+}
+
+/** 칸 안쪽 폭(HWPUNIT) = 칸 폭 − 왼·오른 안 여백(칸 여백 hasMargin=1 이면 그 칸의 hp:cellMargin, 아니면 표의 hp:inMargin) */
+function cellInnerWidth(c, inMargin) {
+  const own = getAttr(c.open, 'hasMargin') === '1' ? kid(c, 'hp:cellMargin')?.xml : null;
+  const m = own || inMargin || '';
+  const side = (k) => { const v = new RegExp(`\\b${k}="(\\d+)"`).exec(m); return v ? Number(v[1]) : 510; };
+  return Math.max(0, (c.width || 0) - side('left') - side('right'));
+}
+
+/** 칸 글 지문(되돌리기 전에 그새 그 칸이 바뀌지 않았는지): 문단마다 문단 모양·스타일과 같은 글자 모양끼리 이은 글. 줄 정보·run 나뉨은 보지 않는다 */
+function cellSignature(c) {
+  const ps = (kid(c, 'hp:subList') ? cellParagraphs(subListInner(c)) : null) || [];
+  return shortHash(JSON.stringify(ps.map((x) => {
+    const i = paraInfo(x); const runs = [];
+    for (const r of i.runs) { if (!r.text) continue; const p = runs[runs.length - 1]; if (p && p[0] === r.charPr) p[1] += r.text; else runs.push([r.charPr, r.text]); }
+    return [getAttr(i.open, 'paraPrIDRef') ?? '', getAttr(i.open, 'styleIDRef') ?? '', runs, i.plain];
+  })));
+}
+
+/**
+ * 칸 c 의 문단을 o.paragraphs 대로 다시 짠다(c 의 subList 를 고친다) → { map(옛 문단 k → 새 차례 | null = 사라짐), count(새 문단 수), expect(사라진 문단의 글 지문), label }.
+ * 던짐: TABLE_SPEC·TABLE_RANGE(꼴·범위), TABLE_CELL_SHAPE(문단 수가 읽은 주소와 다름), TABLE_CELL_OBJECT(글만 든 문단이 아닌 것을 지우려 함), STALE(제안 뒤 그 칸이 바뀜)
+ */
+function rebuildCell(c, o, nm, { cellTable = null, inMargin = null } = {}) {
+  const olds = kid(c, 'hp:subList') ? cellParagraphs(subListInner(c)) : null;
+  if (!olds?.length) fail('TABLE_XML', `${nm}: 칸의 문단을 읽지 못했습니다`);
+  const M = olds.length; const list = o.paragraphs;
+  if (o.count != null && o.count !== M) {
+    if (o.expect) fail('STALE', `${nm}: 제안한 뒤 그 칸의 문단 수가 바뀌었습니다(${o.count} → ${M}개) — 다시 읽고 제안하세요`);
+    fail('TABLE_CELL_SHAPE', `${nm}: 칸의 문단 수(${M})가 읽은 주소의 수(${o.count})와 다릅니다 — 그 칸에 처리하지 않은 변경 추적이 있으면 먼저 수락·거절하세요`);
+  }
+  if (!Array.isArray(list) || !list.length || list.length > CELL_PARAGRAPHS_MAX) fail('TABLE_SPEC', `${nm}: 새 문단 목록(paragraphs — {keep:k} 또는 {text})이 필요합니다(1~${CELL_PARAGRAPHS_MAX}개)`);
+  const info = olds.map(paraInfo);
+  const map = new Array(M).fill(null); let last = -1;
+  list.forEach((e, j) => {
+    if (e && typeof e === 'object' && e.keep != null) {
+      if (!isInt(e.keep) || e.keep >= M) fail('TABLE_RANGE', `${nm}: 남길 문단 ${e.keep} — 칸에 문단이 ${M}개뿐입니다(0부터)`);
+      if (e.keep <= last) fail('TABLE_SPEC', `${nm}: 남길 문단(keep)은 차례대로 한 번씩만 씁니다`);
+      last = e.keep; map[e.keep] = j;
+    } else if (e && typeof e === 'object' && e.table && typeof e.table === 'object') {
+      // 칸 안 새 표(2026-11-20 §22): 표 XML 은 문서 쪽(engine/doc.js _cellTableFactory — 머리·id·본보기 표)이 만든다
+      if (!cellTable) fail('TABLE_SPEC', `${nm}: 칸 안 새 표는 문서 편집(HwpxDoc.editTable)에서만 만들 수 있습니다`);
+      if (e.near != null && (!isInt(e.near) || e.near >= M)) fail('TABLE_RANGE', `${nm}: 표를 넣을 자리 문단 ${e.near} — 칸에 문단이 ${M}개뿐입니다(0부터)`);
+    } else if (!e || typeof e !== 'object' || typeof e.text !== 'string') fail('TABLE_SPEC', `${nm}: paragraphs 항목은 {keep:k} 또는 {text:'글', like?:k} 또는 {table:{rows…}, near?:k} 입니다`);
+    else if (e.like != null && (!isInt(e.like) || e.like >= M)) fail('TABLE_RANGE', `${nm}: 모양을 따를 문단 ${e.like} — 칸에 문단이 ${M}개뿐입니다(0부터)`);
+  });
+  const gone = []; for (let k = 0; k < M; k++) if (map[k] == null) gone.push(k);
+  const bad = gone.filter((k) => !info[k].plain);
+  if (bad.length) fail('TABLE_CELL_OBJECT', `${nm}: ${bad.map((k) => k + 1).join('·')}번째 문단에 표·그림·메모·각주 같은 개체나 조판 부호(또는 처리하지 않은 변경 추적)가 있어 지우거나 통째로 바꿀 수 없습니다 — 그 문단은 남기고 글만 고치세요`);
+  const expect = gone.map((k) => shortHash(info[k].text));
+  // 반영(제안 때 적어 둔 지문이 있다): 사라질 문단의 글이 제안 때 그대로이거나 그새 비워졌을 때만 — 사람이 그 뒤 고친 글을 지우지 않는다
+  if (o.expect && (o.expect.length !== gone.length || gone.some((k, i) => info[k].text !== '' && o.expect[i] !== expect[i]))) fail('STALE', `${nm}: 제안한 뒤 지울 문단의 글이 바뀌었습니다 — 다시 읽고 제안하세요`);
+  // 새 문단이 따를 모양: 같은 글머리 갈래의 가장 가까운 옛 문단(hint = 바로 앞에 남긴 문단, 없으면 그 자리)
+  const marks = info.map((x) => paraMarker(x.text));
+  const likeOf = (text, hint) => {
+    const mk = paraMarker(text); let best = -1;
+    for (let k = 0; k < M; k++) if (marks[k] === mk && (best < 0 || Math.abs(k - hint) < Math.abs(best - hint))) best = k;
+    return best >= 0 ? best : Math.max(0, Math.min(M - 1, hint));
+  };
+  let anchor = -1; const fresh = [];
+  const parts = list.map((e, j) => {
+    if (e.keep != null) { anchor = e.keep; return olds[e.keep].replace(LINESEG, ''); }
+    if (e.table) {
+      // 칸 안 새 표: 표만 든 문단(한/글·편집기 엔진이 칸 안에 만든 표와 같은 꼴 — vendor/rhwp create_table_in_cell_by_path_native).
+      // 문단 모양·스타일·글자 모양은 넣을 자리 문단(near — 없으면 바로 앞에 남긴 문단)의 것, 표 폭은 칸 안쪽 폭(칸 폭 − 칸 안 여백)에서 문서 쪽이 정한다
+      const like = info[Math.max(0, Math.min(M - 1, isInt(e.near) ? e.near : anchor >= 0 ? anchor : 0))];
+      const tbl = cellTable({ spec: e.table, width: cellInnerWidth(c, inMargin), paraPr: getAttr(like.open, 'paraPrIDRef') ?? '0', styleId: getAttr(like.open, 'styleIDRef') ?? '0',
+        charPr: (like.runs.find((r) => r.text) || like.runs[0])?.charPr ?? '0' });
+      fresh.push(`[표 ${tbl.rows}×${tbl.cols}]`);
+      return tableParagraph(like, tbl.xml);
+    }
+    fresh.push(e.text);
+    const hint = isInt(e.near) ? e.near : anchor >= 0 ? anchor : j;
+    return freshParagraph(info[e.like ?? likeOf(e.text, hint)], e.text);
+  });
+  // 첫 문단이 없어져도 칸의 단 정의는 새 첫 문단에 둔다. 기존 문단이 그 자리에 오면 그 문단의 자체 단 정의가 우선한다.
+  if (map[0] == null && info[0].colPr && info[list[0].keep]?.columnCharPr == null) {
+    const xml = parts[0]; const tag = scan(xml)[0];
+    const open = xml.slice(0, tag.end).replace(/\s*\/>$/, '>');
+    const rest = tag.type === 'selfclose' ? '</hp:p>' : xml.slice(tag.end);
+    const cp = escapeAttr(info[0].columnCharPr ?? '0');
+    parts[0] = `${open}<hp:run charPrIDRef="${cp}">${info[0].colPr}</hp:run>${rest}`;
+  }
+  setSubListInner(c, parts.join(''));
+  // 카드에 보일 글(표 고치기 제안의 labels): 무엇을 몇 문단, 그리고 새 글
+  const where = `${c.row + 1}번째 줄 ${c.col + 1}번째 칸`;
+  const show = (texts, max) => { const s = clipText(texts.map((x) => String(x).replace(/\s*\n\s*/g, ' ')).join(' ⏎ '), max); return s.trim() ? `: ${s}` : ''; };
+  let label;
+  const tables = list.filter((e) => e && e.table).length;
+  // 칸 안 새 표(빈 문단 자리에 든 경우 포함 — 사라진 문단이 모두 빈 문단이면 '표 넣기')
+  if (tables && gone.every((k) => !info[k].text.trim())) label = `셀(${where})에 표 ${tables}개 넣기${show(fresh, 1500)}`;
+  else if (gone.length === M) label = `셀(${where}) 글 다시 쓰기 — 문단 ${M} → ${list.length}개${show(fresh, 1500)}`;
+  else if (!gone.length) label = `셀(${where})에 문단 ${fresh.length}개 넣기${show(fresh, 1500)}`;
+  else if (!fresh.length) label = `셀(${where})의 문단 ${gone.length}개 지우기${show(gone.map((k) => clipText(info[k].text.trim(), 40)).filter(Boolean), 400)}`;
+  else label = `셀(${where})의 문단 ${gone.length}개를 ${fresh.length}개로 바꾸기${show(fresh, 1500)}`;
+  return { map, count: list.length, expect, label };
+}
+
 /** 칸 범위 { row_from, row_to, col_from, col_to }(포함, 생략하면 표 끝까지) → { r0, r1, c0, c1 } */
 function rangeOf(m, rg, name) {
   const r = rg || {};
@@ -203,7 +392,7 @@ export function validateTableOps(ops) {
   if (!Array.isArray(ops) || !ops.length) fail('TABLE_SPEC', '표 고치기(ops)가 필요합니다');
   if (ops.length > 40) fail('TABLE_SPEC', '표 고치기는 한 번에 40개까지입니다');
   for (const o of ops) {
-    if (!o || typeof o !== 'object' || !TABLE_OPS.includes(o.op)) fail('TABLE_SPEC', `표 고치기 종류(op)는 ${TABLE_OPS.join('·')} 가운데 하나입니다`);
+    if (!o || typeof o !== 'object' || !(TABLE_OPS.includes(o.op) || CELL_OPS.includes(o.op))) fail('TABLE_SPEC', `표 고치기 종류(op)는 ${TABLE_OPS.join('·')} 가운데 하나입니다`);
   }
   return ops;
 }
@@ -211,8 +400,10 @@ export function validateTableOps(ops) {
 /**
  * 표 XML 에 고치기 목록을 차례로 적용한다 → { xml, rows, cols, labels, geometry(크기·구조가 바뀌었는가) }
  * header = 문서 Header(테두리 모양 항목을 더한다 — 미리 보기는 사본을 넘긴다)
+ * [hwpx-cowork] 칸 문단 다시 짜기(cell_paragraphs)가 들면 relayout(표를 품은 문단의 줄 정보를 지워 다시 재게 한다), stamps(op 차례 — 그 op 의 사라질 문단 글 지문:
+ * 제안할 때 op.expect 로 적어 둔다), cellMoves(모든 op 가 칸 문단 다시 짜기일 때만 — [{ row, col, map, count }], 중첩 주소 옮기기용)를 더 준다
  */
-export function editTableXml(xml, ops, { header }) {
+export function editTableXml(xml, ops, { header, cellTable = null }) {
   validateTableOps(ops);
   const m = parseTable(xml);
   m.cells.forEach((c, i) => { c.orig = i; });   // 되돌릴 때 글을 옮겨 올 원래 칸(새 칸·합친 칸은 없앤다)
@@ -221,8 +412,20 @@ export function editTableXml(xml, ops, { header }) {
   const total0 = colW.reduce((s, v) => s + v, 0);
   let geometry = false; let tblOpen = m.open; let head = m.head;
   const done = [];
+  const retexted = new Map(); const stamps = []; const cellMoves = [];   // 칸 문단 다시 짜기를 한 칸 → 결과
   ops.forEach((o, i) => {
     const name = `${i + 1}번째(${o.op})`;
+    if (o.op === 'cell_paragraphs') {
+      const nm = `칸(${o.row}, ${o.col})`;
+      if (!isInt(o.row) || !isInt(o.col) || o.row >= m.rows || o.col >= m.cols) fail('TABLE_RANGE', `${nm}: 표 밖입니다(표 ${m.rows}행×${m.cols}열, 0부터)`);
+      const c = gridOf(m)[o.row][o.col];
+      if (!c) fail('TABLE_RANGE', `${nm}: 그 자리에 칸이 없습니다`);
+      if (retexted.has(c)) fail('TABLE_SPEC', `${nm}: 같은 칸의 문단을 한 번에 두 번 다시 짤 수 없습니다`);
+      const res = rebuildCell(c, o, nm, { cellTable, inMargin: (/<hp:inMargin\b[^>]*\/>/.exec(m.head) || [null])[0] });
+      retexted.set(c, res); stamps[i] = res.expect; cellMoves.push({ row: o.row, col: o.col, map: res.map, count: res.count });
+      done.push(res.label);
+      return;
+    }
     if (o.op === 'delete_rows' || o.op === 'delete_cols') {
       const rowsOp = o.op === 'delete_rows';
       const list = rowsOp ? o.rows : o.cols; const n = rowsOp ? m.rows : m.cols;
@@ -415,8 +618,12 @@ export function editTableXml(xml, ops, { header }) {
   }
   const out = `${tblOpen}${head}${trs.join('')}${m.tail}`;
   // 되돌리기 기록: 고친 뒤 표 뼈대 지문(칸 글·캡션 글은 뺀다 — 그새 작업 기록 메모·칸 글이 바뀌어도 되돌린다)과 고친 뒤 칸 → 원래 칸 번호
-  const origins = m.cells.filter((c) => c.orig != null).map((c) => [c.row, c.col, c.orig]);
-  return { xml: out, rows: m.rows, cols: m.cols, labels: done, geometry, undo: { skeleton: tableSkeletonHash(out), origins } };
+  // [hwpx-cowork] 칸 문단을 다시 짠 칸은 origins 에서 뺀다(그 칸은 고치기 전 글로 되돌린다) — 대신 고친 뒤의 칸 글 지문(cells)을 남겨, 그새 그 칸이 다시 바뀌었으면
+  // 되돌리지 않는다(restoreTableXml — 고친 글을 버리지 않게)
+  const origins = m.cells.filter((c) => c.orig != null && !retexted.has(c)).map((c) => [c.row, c.col, c.orig]);
+  const cells = [...retexted.keys()].filter((c) => m.cells.includes(c)).map((c) => [c.row, c.col, cellSignature(c)]);
+  return { xml: out, rows: m.rows, cols: m.cols, labels: done, geometry, undo: { skeleton: tableSkeletonHash(out), origins, ...(cells.length ? { cells } : {}) },
+    ...(retexted.size ? { relayout: true, stamps, ...(ops.every((o) => CELL_OPS.includes(o.op)) ? { cellMoves } : {}) } : {}) };
 }
 
 /** [hwpx-cowork] 2026-11-04 칸이 시작하지 않는 줄을 없앤다(그 줄 높이는 바로 위 남는 줄에 더하고, 그 줄을 지나던 칸의 rowSpan 을 줄인다). 바꿨으면 true */
@@ -451,6 +658,11 @@ export function restoreTableXml(current, before, undo) {
   if (!undo?.skeleton || tableSkeletonHash(current) !== undo.skeleton) fail('STALE', '표를 고친 뒤 표 구조·모양이 다시 바뀌어 되돌릴 수 없습니다');
   const cur = parseTable(current); const old = parseTable(before);
   const at = new Map(cur.cells.map((c) => [`${c.row},${c.col}`, c]));
+  // [hwpx-cowork] 칸 문단을 다시 짠 칸(undo.cells)은 고치기 전 글로 되돌린다 — 그새 그 칸의 글·모양이 다시 바뀌었으면 되돌리지 않는다(뒤에 고친 글을 버리지 않는다)
+  for (const [r, c, sig] of undo.cells || []) {
+    const now = at.get(`${r},${c}`);
+    if (!now || cellSignature(now) !== sig) fail('STALE', '표 칸의 문단을 고친 뒤 그 칸이 다시 바뀌어 되돌릴 수 없습니다');
+  }
   for (const [r, c, i] of undo.origins || []) {
     const now = at.get(`${r},${c}`); const was = old.cells[i];
     const sub = now && kid(now, 'hp:subList'); const target = was && kid(was, 'hp:subList');

@@ -198,11 +198,11 @@ const lastSeen = new WeakMap();
 const seenOf = (store) => { let m = lastSeen.get(store); if (!m) { m = new Map(); lastSeen.set(store, m); } return m; };
 
 /**
- * 이 커밋을 검사하는가: 서버가 문서를 고친 커밋만 — 통째 바꾸기(ctx.bytes)·편집기 밀어 넣기(server/live.js)·편집본 올림(uploadEdited)·
+ * 이 커밋을 검사하는가: 서버가 문서를 고친 커밋만 — 편집기 밀어 넣기(server/live.js)·편집본 올림(uploadEdited)·
  * 변경 요청 반영(crs.js)은 사람이 만든 파일이 기준이라 그 자리에서 ctx.skipVerify 를 켠다(기록 note 글로 가르지 않는다).
  */
 export function shouldVerify(ctx, note) { // eslint-disable-line no-unused-vars
-  return !!ctx?.dirty && !ctx.bytes && ctx.liveSeq == null && !ctx.skipVerify;
+  return !!ctx?.dirty && ctx.liveSeq == null && !ctx.skipVerify;
 }
 
 /**

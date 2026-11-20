@@ -23,6 +23,7 @@ import path from 'node:path';
 import { connectDebugTransport, debugRecord, debugError } from './ai-debug.js';
 import { proposalToolResult } from './editor-instructions.js';
 import { editCapabilities, OperationEnvelopeSchema } from './document-edit.js';
+import { isTaskSurface } from './tool-profiles.js';
 import { registerV2Tools, v2Keeps, v2Instructions } from './mcp2.js';
 import { newBundleId } from './mcp2/ops.js';
 
@@ -82,7 +83,7 @@ ${work}
  * createMcpServer(initialize)와 2026-07-28 어댑터(server/mcp-modern.js 의 server/discover)가 같은 글을 낸다
  */
 export function mcpInstructions(userName, service, { surface = null, lean = false, toolset = 'all' } = {}) {
-  return surface === 'v2' ? v2Instructions(cleanName(userName, 20, { keepParens: true }), { toolset }) : serverInstructions(userName, service, { lean });
+  return isTaskSurface(surface) ? v2Instructions(cleanName(userName, 20, { keepParens: true }), { toolset, surface }) : serverInstructions(userName, service, { lean });
 }
 
 /**
@@ -95,9 +96,9 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
   // surface 'v2'(server/mcp2.js, docs/MCP_REDESIGN_2026-11-16.md): 작업 도구 넷(task·read·edit·finish). HTTP 연결은 2026-11-17 부터 밝히지 않으면 이것이다
   //   (server/index.js 가 mcpSurface 로 정해 넘긴다). 읽기·제안·요청 흐름의 예전 도구는 등록하지 않고(v2Keeps), 응답은 들여쓰기 없이, 도구 스키마는 lean 처럼 줄여 싣는다.
   //   이 함수 자체의 기본(surface 없음)은 예전 연결이다 — 서버 안 연결(server/api-service-tools.js 등)은 그대로다.
-  const v2 = surface === 'v2';
+  const v2 = isTaskSurface(surface);
   const lean = v2 || leanOpt;
-  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: mcpInstructions(user.name, service, { surface: v2 ? 'v2' : null, lean, toolset }) });
+  const server = new McpServer({ name: 'hwpx-cowork', version }, { instructions: mcpInstructions(user.name, service, { surface, lean, toolset }) });
   const connect = server.connect.bind(server);
   server.connect = transport => connectDebugTransport({ connect }, transport, {
     directory: service.cfg?.dataDir ? path.join(service.cfg.dataDir, 'runtime', 'ai-debug') : undefined,
@@ -535,9 +536,10 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
     description: lean
       ? `가장 오래된 내 대기 요청 또는 선점 시간이 만료된 작업 하나를 맡고 요청 내용을 돌려준다(claimed: true). 없으면 { none: true }. doc_id 를 주면 그 문서에서만. 채널 없는 ChatGPT·Codex 에서는 이 도구로 대기 작업을 가져온다(연결만으로 자동 수신되지 않음). ${LEAN_BRIEF}`
       : '가장 오래된 내 대기 요청 또는 선점 시간이 만료된 작업 하나를 맡고 get_request 와 같은 내용을 돌려준다(claimed: true). 없으면 { none: true }. doc_id 를 주면 그 문서에서만. 채널 없는 ChatGPT·Codex 에서는 이 도구로 대기 작업을 가져온다(연결만으로 자동 수신되지 않음)',
-    inputSchema: { doc_id: z.string().optional(), tutorial_only: z.boolean().optional().describe('true이면 진행 중인 튜토리얼 요청만 맡는다. 관리자 공유 ChatGPT는 true로 지정한다.'), workflows: z.array(z.literal('content_format')).optional().describe('내용·형식 두 단계 도구를 지원하는 실행기/클라이언트만 content_format을 선언한다. 생략한 옛 실행기는 일반 요청만 맡는다.') },
-  }, wrap(async ({ doc_id, tutorial_only, workflows }) => {
-    const out = await service.claimNextRequest(user, agent(), sessionId(), doc_id || undefined, { tutorialOnly: tutorial_only === true, workflows });
+    inputSchema: { doc_id: z.string().optional(), tutorial_only: z.boolean().optional().describe('true이면 진행 중인 튜토리얼 요청만 맡는다. 관리자 공유 ChatGPT는 true로 지정한다.'), workflows: z.array(z.literal('content_format')).optional().describe('내용·형식 두 단계 도구를 지원하는 실행기/클라이언트만 content_format을 선언한다. 생략한 옛 실행기는 일반 요청만 맡는다.'),
+      run_kind: z.string().max(30).optional().describe('개인 실행기의 종류. 지정된 모델·추론 강도를 적용하는 실행기 전용') },
+  }, wrap(async ({ doc_id, tutorial_only, workflows, run_kind }) => {
+    const out = await service.claimNextRequest(user, agent(), sessionId(), doc_id || undefined, { tutorialOnly: tutorial_only === true, workflows, runKind: run_kind });
     return text(lean ? leanRequest(out) : out);
   }));
 
@@ -682,7 +684,7 @@ export function createMcpServer({ service, user, version = '0.2.0', agentName = 
 
   // AI 드라이브 도구(get_drive_context·propose_drive_upload·prepare_drive_file)는 2026-11-17 두레이 API 전환 때 걷어 냈다 —
   // AI 는 드라이브 목록·파일을 다루지 않는다(예전 코드: backups/dooray_drive_extension_2026-11-17/server/mcp.js)
-  if (v2) registerV2Tools({ register, service, user, wrap, text, actor, agent, sessionId });
+  if (v2) registerV2Tools({ register, service, user, wrap, text, actor, agent, sessionId, surface });
   // lean: 도구 목록의 입력 스키마에서 'null 허용' 가지·값 범위를 빼 싣는다(서식 속성마다 두 번 적히던 것 — 받는 쪽 zod 검사는 그대로).
   // propose_change 는 propose_changes 한 건과 같아 목록에서만 뺀다(부르면 그대로 된다 — API 프로필과 같은 까닭).
   // SDK 가 만든 목록 처리기를 감싼다(없으면 손대지 않는다 — 목록은 SDK 기본 꼴로 나간다)

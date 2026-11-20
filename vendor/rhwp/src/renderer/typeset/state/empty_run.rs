@@ -3,6 +3,7 @@
 use super::*;
 use crate::model::paragraph::{ColumnBreakType, LineSeg, Paragraph};
 
+#[derive(Clone)]
 pub(in crate::renderer::typeset) struct SavedEmptyRun {
     first: usize,
     reset: usize,

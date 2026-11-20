@@ -429,7 +429,7 @@ pub(crate) fn parse_fill(r: &mut ByteReader) -> Fill {
         fill.solid = Some(SolidFill {
             background_color: r.read_color_ref().unwrap_or(0xFFFFFF),
             pattern_color: r.read_color_ref().unwrap_or(0),
-            pattern_type: r.read_i32().unwrap_or(-1),
+            pattern_type: SolidFill::pattern_from_hwp5(r.read_i32().unwrap_or(-1)),
         });
     }
 

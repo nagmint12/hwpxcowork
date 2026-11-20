@@ -281,8 +281,8 @@ test('새 연결(--mcp 2): 실행기 인자는 codex 와 같은 규칙, 기본�
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-cli', '--mcp', '1'], { ...env, HWPX_COWORK_MCP: '2' }), env).mcpSurface, null, '명령줄이 환경 변수보다 먼저');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '2'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, 'v2', '명령줄이 환경 변수보다 먼저');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, null);
-  for (const bad of ['3', '0', 'v2']) assert.throws(() => parseWorkerArgs(['--provider', 'claude-code', '--mcp', bad], env), /--mcp 는 1/);
-  assert.throws(() => parseWorkerArgs(['--provider', 'claude-code'], { ...env, HWPX_COWORK_MCP: '3' }), /--mcp 는 1/);
+  for (const bad of ['4', '0', 'v2']) assert.throws(() => parseWorkerArgs(['--provider', 'claude-code', '--mcp', bad], env), /--mcp.*1.*2.*3/);
+  assert.throws(() => parseWorkerArgs(['--provider', 'claude-code'], { ...env, HWPX_COWORK_MCP: '4' }), /--mcp.*1.*2.*3/);
   assert.equal(new ClaudeCodeProposer({ mcp: 'v2' }).mcpSurface, 'v2'); assert.equal(new ClaudeCodeProposer({}).mcpSurface, null);
 });
 

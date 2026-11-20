@@ -945,6 +945,15 @@ pub(crate) fn json_usize(json: &str, key: &str) -> Result<usize, HwpError> {
         .map_err(|_| HwpError::RenderError(format!("JSON 필드 '{}' 값 파싱 실패", key)))
 }
 
+/// JSON 선택 필드 usize 파싱 (없으면 `None`, 있는데 값이 잘못되면 에러)
+pub(crate) fn json_usize_opt(json: &str, key: &str) -> Result<Option<usize>, HwpError> {
+    let pattern = format!("\"{}\":", key);
+    if !compact_json(json).contains(&pattern) {
+        return Ok(None);
+    }
+    json_usize(json, key).map(Some)
+}
+
 /// JSON 문자열 이스케이프
 /// JSON 문자열 본문으로 이스케이프한다 (바깥 따옴표는 호출부 몫).
 ///
@@ -1325,34 +1334,60 @@ pub(crate) fn html_to_plain_text(html: &str) -> String {
         .to_string()
 }
 
+/// [hwpx-cowork] Read whole attribute names, consuming each quoted value before
+/// examining the next name. A clipboard table's `data-border` is distinct from `border`.
+pub(crate) fn html_attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    let tag = tag.trim_start().strip_prefix('<').unwrap_or(tag);
+    let mut rest = &tag[tag.find(|c: char| c.is_ascii_whitespace())?..];
+    loop {
+        rest = rest.trim_start_matches(|c: char| c.is_ascii_whitespace());
+        if rest.is_empty() || rest.starts_with(['/', '>']) {
+            return None;
+        }
+        let name_end = rest
+            .find(|c: char| c.is_ascii_whitespace() || matches!(c, '=' | '/' | '>'))
+            .unwrap_or(rest.len());
+        let (name, after_name) = rest.split_at(name_end);
+        let after_name = after_name.trim_start_matches(|c: char| c.is_ascii_whitespace());
+        let Some(after_equals) = after_name.strip_prefix('=') else {
+            rest = after_name;
+            continue;
+        };
+        let value = after_equals.trim_start_matches(|c: char| c.is_ascii_whitespace());
+        let (parsed, after_value) = match value.as_bytes().first() {
+            Some(b'"' | b'\'') => {
+                let quote = value.as_bytes()[0] as char;
+                let body = &value[1..];
+                let end = body.find(quote)?;
+                (&body[..end], &body[end + 1..])
+            }
+            _ => value.split_at(value
+                .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                .unwrap_or(value.len())),
+        };
+        if name.eq_ignore_ascii_case(attr) {
+            return Some(parsed);
+        }
+        rest = after_value;
+    }
+}
+
 /// HTML 태그에서 숫자 속성값을 추출한다.
 pub(crate) fn parse_html_attr_f64(tag: &str, attr: &str) -> Option<f64> {
-    // width="200" 또는 width='200' 형식
-    let patterns = [format!("{}=\"", attr), format!("{}='", attr)];
-    for pat in &patterns {
-        if let Some(start) = tag.to_lowercase().find(&pat.to_lowercase()) {
-            let after = &tag[start + pat.len()..];
-            let delim = if pat.ends_with('"') { '"' } else { '\'' };
-            if let Some(end) = after.find(delim) {
-                let val_str = &after[..end].trim();
-                // 한글은 `width="97pt"` 로 낸다 — pt 를 px 로 읽으면 그림이 25% 작아진다.
-                // "200px"·"200" → 200.0, "97pt" → 129.3(px), "2cm"·"20mm" 도 px 로 환산.
-                let (num_str, factor) = if let Some(v) = val_str.strip_suffix("pt") {
-                    (v, 96.0 / 72.0)
-                } else if let Some(v) = val_str.strip_suffix("cm") {
-                    (v, 96.0 / 2.54)
-                } else if let Some(v) = val_str.strip_suffix("mm") {
-                    (v, 96.0 / 25.4)
-                } else if let Some(v) = val_str.strip_suffix("in") {
-                    (v, 96.0)
-                } else {
-                    (val_str.trim_end_matches("px"), 1.0)
-                };
-                return num_str.trim().parse::<f64>().ok().map(|n| n * factor);
-            }
-        }
-    }
-    None
+    let value = html_attr_value(tag, attr)?.trim();
+    // 한글은 그림 크기를 97pt처럼 저장한다. 공통 붙여넣기 좌표는 px다.
+    let (number, factor) = if let Some(value) = value.strip_suffix("pt") {
+        (value, 96.0 / 72.0)
+    } else if let Some(value) = value.strip_suffix("cm") {
+        (value, 96.0 / 2.54)
+    } else if let Some(value) = value.strip_suffix("mm") {
+        (value, 96.0 / 25.4)
+    } else if let Some(value) = value.strip_suffix("in") {
+        (value, 96.0)
+    } else {
+        (value.trim_end_matches("px"), 1.0)
+    };
+    number.trim().parse::<f64>().ok().map(|n| n * factor)
 }
 
 /// HTML 태그에서 정수 속성값을 추출한다 (colspan="3" 등).

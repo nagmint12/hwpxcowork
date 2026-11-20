@@ -78,6 +78,7 @@ export function mergePreferMine(base, mine, theirs) {
  * → { paras, text, format, object, picMore, secDef, tableHead } (object = 판 2 개체 지문, 나머지 셋 = 덧지문의 갈래)
  */
 export function liveDrift(a, b) {
+  b = b.inFormattingUnitsOf(a);
   const out = { paras: 0, text: 0, format: 0, object: 0, picMore: 0, secDef: 0, tableHead: 0 };
   const A = a.bodyEntries(); const B = b.bodyEntries();
   for (const s of Object.keys(A)) {
@@ -112,6 +113,7 @@ function cleanOrLog(id, doc, head, committed) {
 
 /** 두 문서의 본문·칸 글(최종본, 메모 본문 제외 — bodyEntries)·서식·그림 속성/조판 부호가 똑같은가(§2.2-5 clean) */
 export function sameBodyTexts(a, b) {
+  b = b.inFormattingUnitsOf(a);
   const A = a.bodyEntries(); const B = b.bodyEntries();
   const ka = Object.keys(A); if (ka.length !== Object.keys(B).length) return false;
   for (const s of ka) {
@@ -564,7 +566,11 @@ export class LiveEditor {
         throw new ServiceError('TUTORIAL_RESTORED', '연습 문서를 이 단계의 시작 상태로 되돌렸습니다. 현재 문서를 다시 열어 계속하세요.', 409,
           { baseVersion: meta.version, restoreVersion: restoredAt, reload: true });
       }
+      svc._assertFileVersion(meta, n, loadedV);
       if (n > meta.version) throw new ServiceError('BAD_BASE', '보낸 기준(base)이 지금 문서보다 새것입니다 — 편집기를 다시 여세요');
+      // 빈 문서가 붙여넣은 원본의 판본을 채택할 수 있다. 저장·재전송·clean 판정은
+      // 모두 서버 문서의 단위로 읽되, 그 문서나 편집기가 보낸 원본은 변경하지 않는다.
+      head = head.inFormattingUnitsOf(doc);
       const sentBase = n;
       n = ownBase(meta, n, seqNo, by);
       let baseDoc = doc;

@@ -38,6 +38,22 @@ export const TableOpSchema = z.object({
   page_break: opt(z.enum(['CELL', 'TABLE', 'NONE'])).describe('table: 쪽 경계에서 CELL 셀 단위로 나눔 · TABLE 나눔 · NONE 나누지 않음'),
 }).strict();
 
+/**
+ * [hwpx-cowork] 칸 문단 다시 짜기(2026-11-19 — engine/table-edit.js CELL_OPS·rebuildCell, docs/MCP_REDESIGN_2026-11-16.md §17).
+ * 새 MCP 연결(server/mcp2/ops.js)이 칸 통째로 다시 쓰기·칸 안 문단 넣기·지우기를 이 op 로 풀어 표 고치기 제안으로 낸다. 도구 입력 꼴(TableOpSchema)에는 싣지 않는다 —
+ * 예전 연결의 propose_table_edit·새 연결의 table_edit 도구 꼴은 그대로다(모델은 replace·insert·delete_paragraphs 를 쓴다).
+ * count = 제안할 때 그 칸의 문단 수, paragraphs = 새 문단 차례({keep:k} 지금 k 번째 문단 그대로 · {text, like?, near?} 새 문단 — like = 모양을 따를 문단,
+ * near = 같은 글머리의 문단을 고를 때 가까움을 재는 자리), expect = 사라질 문단의 글 지문(제안할 때 서버가 적는다)
+ */
+export const CellParagraphsOpSchema = z.object({
+  op: z.literal('cell_paragraphs'), row: n0, col: n0, count: z.number().int().min(1).max(5000),
+  paragraphs: z.array(z.union([z.object({ keep: n0 }).strict(), z.object({ text: z.string().max(20000), like: opt(n0), near: opt(n0) }).strict(),
+    // 칸 안 새 표(2026-11-20 §22 — engine/doc.js _cellTableFactory): 표만 든 문단. near = 문단·글자 모양을 따를 칸 문단(넣을 자리)
+    z.object({ table: z.object({ rows: z.array(z.array(z.string().max(2000)).min(1).max(30)).min(1).max(200), headerRows: opt(z.number().int().min(0).max(200)),
+      merges: opt(z.array(z.string().regex(/^r\d+c\d+:r\d+c\d+$/)).max(500)), like: opt(z.string().min(1).max(200)) }).strict(), near: opt(n0) }).strict()])).min(1).max(500),
+  expect: opt(z.array(z.string().max(64)).max(5000)),
+}).strict();
+
 /** null·빈 값을 뺀 ops(엔진에 넘길 꼴) */
 export function normalizeTableOps(ops) {
   const clean = (v) => {
@@ -49,5 +65,9 @@ export function normalizeTableOps(ops) {
     }
     return v;
   };
+  // 칸 문단 다시 짜기가 든 목록만 그 꼴을 함께 받는다(그 밖의 입력은 예전 그대로 — 오류 글도 같다)
+  if (Array.isArray(ops) && ops.some((o) => o && typeof o === 'object' && o.op === 'cell_paragraphs')) {
+    return z.array(z.union([CellParagraphsOpSchema, TableOpSchema])).min(1).max(40).parse(ops).map(clean);
+  }
   return z.array(TableOpSchema).min(1).max(40).parse(ops).map(clean);
 }

@@ -29,13 +29,13 @@ export class AgentRegistry {
    * SSE 연결 하나를 등록한다. 같은 사용자의 같은 세션이 이미 있으면(브리지 재연결) 옛 연결은 닫는다 — 알림이 두 번 가지 않게.
    * → handle { id, user, session, agent, client, channel, since, lastSeen, res, closed }
    */
-  connect(user, { session, agent, client, channel } = {}, res) {
+  connect(user, { session, agent, client, channel, runKind } = {}, res) {
     const name = typeof user === 'string' ? user : user?.name;
     if (!name) throw new Error('AgentRegistry.connect: 사용자가 필요합니다');
     const at = nowIso();
     const h = {
       id: ++seq, user: name, session: String(session || `${name}|${agent || ''}`), agent: agent || 'AI', client: client || '',
-      channel: !!channel, since: at, lastSeen: at, res, closed: false,
+      channel: !!channel, runKind, since: at, lastSeen: at, res, closed: false,
     };
     let set = this.byUser.get(name);
     if (!set) { set = new Set(); this.byUser.set(name, set); }
@@ -71,7 +71,7 @@ export class AgentRegistry {
   /** 그 사람의 세션들(붙은 순) — 응답 객체는 빼고 */
   sessions(userName) {
     return this._handles(userName).sort((a, b) => a.id - b.id)
-      .map((h) => ({ session: h.session, agent: h.agent, client: h.client, channel: h.channel, since: h.since, lastSeen: h.lastSeen }));
+      .map((h) => ({ session: h.session, agent: h.agent, client: h.client, channel: h.channel, since: h.since, lastSeen: h.lastSeen, ...(h.runKind ? { runKind: h.runKind } : {}) }));
   }
 
   /** 붙어 있는 사람별 에이전트 → [{ user, agents: [{ agent, channel, since }] }](세션 id 는 싣지 않는다) */
@@ -118,10 +118,10 @@ export class AgentRegistry {
    * push 와 같고 받은 세션을 돌려준다 → { session, agent, client } | null.
    * 고른 세션에 쓰지 못하면(이미 끊김) 그 연결을 정리하고 다음 최근 세션에 보낸다.
    */
-  deliver(userName, event, data, { prefer = null } = {}) {
+  deliver(userName, event, data, { prefer = null, runKind = null } = {}) {
     const list = this._channels(userName);
     if (prefer) list.sort((a, b) => (b.session === prefer) - (a.session === prefer));   // 안정 정렬: 같은 무리 안에서는 최근 순 그대로
-    for (const h of list) if (this.send(h, event, data)) return { session: h.session, agent: h.agent, client: h.client };
+    for (const h of list) if ((!runKind || h.runKind === runKind) && this.send(h, event, data)) return { session: h.session, agent: h.agent, client: h.client };
     return null;
   }
 

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::io::Cursor;
 
 mod print_alpha;
+pub(crate) mod picture_effect_alpha;
 mod print_alpha_2024;
 mod print_crop;
 mod print_jpeg_encode;
@@ -124,6 +125,11 @@ const MAX_MEMO_ENTRIES: usize = 64;
 /// 변환 종류. 같은 바이트라도 어떤 변환을 거쳤느냐에 따라 결과가 다르다.
 #[derive(Clone, Copy, Hash)]
 enum Conversion {
+    PictureEffectAlpha {
+        effect: picture_effect_alpha::AlphaKey,
+        crop: [u64; 4],
+        size: [u32; 2],
+    },
     Bmp,
     CmykJpeg,
     Pcx,

@@ -98,7 +98,7 @@ test('순수: 도구 범위·지침·첫 입력·연결 값 고르기', async ()
   assert.equal(prompt.match(/<\/document_context>/g).length, 1); assert.match(prompt, /u003c\/document_context/); assert.match(prompt, /id a1x\)/);
   // 연결 값: 'v2'·'2' = 새, 'v1'·'1'·false = 예전, 비움 = 정하지 않음, 그 밖은 오류
   assert.deepEqual(['v2', '2', 2, 'v1', '1', false, null, undefined, ''].map(normalizeMcp), ['v2', 'v2', 'v2', 'v1', 'v1', 'v1', null, null, null]);
-  assert.throws(() => normalizeMcp('3'), /v2/);
+  assert.throws(() => normalizeMcp('4'), /v2/);
   // 개인 실행기가 보는 값(mcpSurface): 'v2' 를 밝혔을 때만 — 정하지 않은 값(시험의 AiProposer 등)은 예전 연결, 모의 AI 는 도구가 없어 늘 예전
   const make = (mcp, extra = {}) => new AiProposer({ ai: { provider: 'openai', model: 'm', enabled: true, mcp, ...extra } }, { key: 'k' });
   assert.deepEqual([make('v2').mcpSurface, make('2').mcpSurface, make(null).mcpSurface, make(undefined).mcpSurface, make('v1').mcpSurface], ['v2', 'v2', null, null, null]);

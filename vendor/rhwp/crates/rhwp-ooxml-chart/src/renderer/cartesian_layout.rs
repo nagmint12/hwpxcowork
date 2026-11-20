@@ -124,6 +124,53 @@ fn automatic_scale(min: f64, max: f64, length: f64, _font: f64, horizontal: bool
     ValueScale::from_tuple(auto_axis_fit(min.min(0.0), max.max(0.0), length.abs(), horizontal))
 }
 
+// [hwpx-cowork] 한/글 2022의 값 290·300 묶은 세로 막대는 축을 288~302,
+// 간격 2로 쓴다. 양수 값이 몰린 자동 축의 기준은 상단의 여유와 함께 정한다.
+// 분포·높이를 바꾼 #9025 대조에서 나온 비율을 쓰고, 원래 0 기준 축은 유지한다.
+fn clustered_positive_column_scale(
+    data_min: f64,
+    data_max: f64,
+    height: f64,
+    font: f64,
+) -> Option<ValueScale> {
+    if !(data_min > 0.0 && data_max > data_min && height > 0.0) {
+        return None;
+    }
+    let spread = data_max - data_min;
+    let ratio = spread / data_max;
+    if ratio >= 0.2 {
+        return None;
+    }
+    let lower = if data_max >= 100.0 && ratio < 1.0 / 6.0 {
+        data_min - spread * 0.05
+    } else {
+        data_min - data_max * 0.1
+    };
+    let line_height = axis_line_height(font);
+    let steps = ((height - line_height * 3.1) / (line_height * 1.35))
+        .round()
+        .clamp(2.0, 9.0);
+    let raw = (data_max - lower) / steps;
+    let magnitude = 10.0_f64.powf(raw.log10().floor());
+    if !magnitude.is_finite() || magnitude <= 0.0 {
+        return None;
+    }
+    let step = [1.0, 2.0, 5.0, 10.0]
+        .into_iter()
+        .map(|n| n * magnitude)
+        .find(|n| *n >= raw * (1.0 - 1e-9))?;
+    let top = (data_max / step - 1e-9).ceil() * step;
+    Some(ValueScale {
+        min: (lower / step + 1e-9).floor() * step,
+        max: if top - data_max <= step * (0.2 + 1e-9) {
+            top + step
+        } else {
+            top
+        },
+        step,
+    })
+}
+
 /// 3D 세로 축은 최대 다섯 칸을 두고 큰 글줄에는 더 성긴 단위를 고른다.
 /// 묶은 막대의 원래 최댓값이 눈금에 닿으면 그 범위를 유지하되 두 칸은 확보한다.
 fn automatic_3d_vertical(min: f64, max: f64, height: f64, font: f64) -> ValueScale {
@@ -284,6 +331,22 @@ impl ChartScales {
                         AxisPos::Left
                     },
                 );
+                if chart.chart_type == OoxmlChartType::Column
+                    && grouping == BarGrouping::Clustered
+                    && !chart.is_3d
+                    && axis.minimum.is_none()
+                    && axis.maximum.is_none()
+                {
+                    let data_min = chart
+                        .series
+                        .iter()
+                        .flat_map(|series| series.values.iter().copied())
+                        .fold(f64::INFINITY, f64::min);
+                    if let Some(scale) = clustered_positive_column_scale(data_min, max, height, font)
+                    {
+                        primary = scale;
+                    }
+                }
                 if let Some(min) = axis.minimum {
                     primary.min = min;
                 }

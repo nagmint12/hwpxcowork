@@ -10,7 +10,8 @@ import { runResponsesAgent } from './api-responses-agent.js';
 import { runMessagesAgent } from './api-messages-agent.js';
 import { runGeminiAgent } from './api-gemini-agent.js';
 import { normalizeTableOps } from './table-schema.js';
-import { EDITOR_INSTRUCTIONS, EDITOR_INSTRUCTIONS_API_V2, API_V2_HOSTED_NOTE, apiTaskPromptV2, automaticNumberReadNote } from './editor-instructions.js';
+import { isTaskSurface } from './tool-profiles.js';
+import { EDITOR_INSTRUCTIONS, taskEditorInstructions, API_V2_HOSTED_NOTE, apiTaskPromptV2, automaticNumberReadNote } from './editor-instructions.js';
 import { withAiDebug, debugRecord, debugError, debugHttpResponse } from './ai-debug.js';
 import { editStageInstructions } from './edit-workflow-runner.js';
 
@@ -23,9 +24,10 @@ import { editStageInstructions } from './edit-workflow-runner.js';
 export function normalizeMcp(value) {
   if (value == null || value === '') return null;
   const v = String(value).trim().toLowerCase();
+  if (['v3', '3'].includes(v)) return 'v3';
   if (['v2', '2'].includes(v)) return 'v2';
   if (['v1', '1', 'false'].includes(v)) return 'v1';
-  throw new Error("MCP 연결(ai.mcp)은 'v2'(새 연결 — 기본) 또는 'v1'(예전 연결)입니다");
+  throw new Error("MCP 연결(ai.mcp)은 'v2'(새 연결 — 기본) · 'v3'(TSV) · 'v1'(예전 연결) 중 하나입니다");
 }
 
 const TABLE_OP_HINT = 'delete_rows{rows} · delete_cols{cols,keep_width?} · insert_rows{row,count?,position:below|above} · insert_cols{col,count?,position:right|left,keep_width?} · merge{range} · unmerge{row,col} · '
@@ -223,7 +225,7 @@ export class AiProposer {
    * (scripts/ai-worker.mjs 가 --mcp 2(기본)면 'v2', 1 이면 null 을 넘긴다). 모의 AI 는 도구를 쓰지 않으므로 늘 null.
    * 서버 AI 의 기본(정하지 않으면 새 연결)은 server/service.js 가 config.ai.mcp 로 정한다
    */
-  get mcpSurface() { return this.supportsTools && this.mcp === 'v2' ? 'v2' : null; }
+  get mcpSurface() { return this.supportsTools && isTaskSurface(this.mcp) ? this.mcp : null; }
   get runSettings() { return { model: this.cfg.model || null, effort: this.cfg.effort || null }; }
   setRunSettings({ model = null, effort = null } = {}) {
     if (effort && !AI_EFFORTS.includes(effort)) throw new Error(`추론 강도(effort)는 ${AI_EFFORTS.join('·')} 중 하나입니다`);
@@ -379,15 +381,15 @@ export class AiProposer {
    * input = { brief, attachments? } → { finished: { status: 'done'|'failed', tool }, model, usage, execution: 'tool-agent' }
    */
   async runV2(input, { signal, toolContext } = {}) {
-    return withAiDebug({ context: { route: 'api', surface: 'v2', provider: this.provider, model: this.cfg.model } }, () => this._runV2Recorded(input, { signal, toolContext }));
+    return withAiDebug({ context: { route: 'api', surface: toolContext?.surface, provider: this.provider, model: this.cfg.model } }, () => this._runV2Recorded(input, { signal, toolContext }));
   }
 
   async _runV2Recorded(input, { signal, toolContext } = {}) {
-    debugRecord('ai.input', input, { provider: this.provider, model: this.cfg.model, effort: this.cfg.effort, surface: 'v2' });
+    debugRecord('ai.input', input, { provider: this.provider, model: this.cfg.model, effort: this.cfg.effort, surface: toolContext?.surface });
     if (!this.enabled) throw new Error(`서버 AI 호출이 꺼져 있습니다 (${this.reason})`);
-    if (this.mock || toolContext?.surface !== 'v2') throw Object.assign(new Error('새 MCP 연결 실행에는 작업 도구(read·edit·finish) 연결이 필요합니다'), { code: 'API_TOOL_UNSUPPORTED' });
+    if (this.mock || !isTaskSurface(toolContext?.surface)) throw Object.assign(new Error('새 MCP 연결 실행에는 작업 도구(read·edit·finish) 연결이 필요합니다'), { code: 'API_TOOL_UNSUPPORTED' });
     const brief = input?.brief;
-    if (!brief || typeof brief !== 'object') throw Object.assign(new Error('요청 내용(brief)을 받지 못했습니다'), { code: 'SERVER_UPDATE_REQUIRED' });
+    if (!brief || typeof brief !== 'object' || (toolContext.surface === 'v3' && brief.surface !== 'v3')) throw Object.assign(new Error('요청 내용(brief)을 받지 못했습니다'), { code: 'SERVER_UPDATE_REQUIRED' });
     if (brief.instruction_hidden) throw Object.assign(new Error('지시를 볼 수 없는 요청입니다'), { code: 'API_INPUT_INVALID' });
     signal?.throwIfAborted();
     const attachments = (input.attachments || []).filter(a => a?.base64 && (a.kind === 'pdf' || (a.kind === 'image' && /^image\/(png|jpeg|gif|webp)$/.test(a.mime || ''))));
@@ -405,7 +407,7 @@ export class AiProposer {
       out.push(provider === 'openai' ? { type: 'input_text', text } : provider === 'gemini' ? { text } : { type: 'text', text });
       return out;
     };
-    const system = EDITOR_INSTRUCTIONS_API_V2 + (this.provider === 'openai' && this.cfg.workspace === 'hosted' ? API_V2_HOSTED_NOTE : '');
+    const system = taskEditorInstructions(toolContext.surface, { api: true }) + (this.provider === 'openai' && this.cfg.workspace === 'hosted' ? API_V2_HOSTED_NOTE : '');
     // 최종 JSON 이 없으니 parse 는 없다(api-tool-loop 가 새 연결이면 finished 로 끝낸다). 출력 한도·추론 강도는 예전 연결과 같다
     if (this.provider === 'openai') {
       return runResponsesAgent(this, { attachments: input.attachments || [] }, {

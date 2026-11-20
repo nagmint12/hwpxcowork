@@ -1,6 +1,6 @@
 // API 모델에도 MCP 도구를 그대로 준다(범위 = server/tool-profiles.js 의 api 프로필). 문서·요청·시도는 실행기가 고정하며 파일 바이트는 모델을 거치지 않는다.
 // MCP 도구 정의(zod → JSON Schema)가 단일 출처 — 여기서는 고정할 값만 떼고 { name, description, parameters } 로 넘기며, 제공자 꼴은 각 어댑터가 씌운다.
-import { TOOL_PROFILES, isWriteTool } from './tool-profiles.js';
+import { isTaskSurface, TOOL_PROFILES, isWriteTool } from './tool-profiles.js';
 import { modelToolResult } from './editor-instructions.js';
 import { leanToolSchema, leanToolResult } from './lean.js';
 
@@ -24,7 +24,7 @@ const jsonOf = result => { try { return JSON.parse((result.content || []).filter
  * 같은 쓰기 되풀이 막기(receipts)·written 은 예전 연결(최종 JSON 의 중복 빼기)에만 쓴다 — 새 연결의 edit 는 서버가 한 호출을 다 저장하거나 하나도 저장하지 않는다
  */
 export async function createApiToolContext({ listTools, callTool, assertCurrent, uploadFile, docId, requestId, attempt, existingFigures = 0, profile = 'api', surface = null, requestStatus = null }) {
-  const v2 = surface === 'v2';
+  const v2 = isTaskSurface(surface);
   if (v2 && typeof requestStatus !== 'function') throw fault('API_TOOL_UNSUPPORTED', '새 연결에는 요청 상태 확인(requestStatus)이 필요합니다.');
   const allowed = v2 ? new Set(TOOL_PROFILES.apiV2) : profile === 'workspace' ? new Set(TOOL_PROFILES.workspace) : ALLOWED;
   const page = await listTools(), selected = (page.tools || page).filter(t => allowed.has(t.name));
@@ -41,7 +41,7 @@ export async function createApiToolContext({ listTools, callTool, assertCurrent,
   return {
     tools,
     /** 'v2' = 새 MCP 연결(작업 도구) — 어댑터·반복문이 지침·끝 판정을 이것으로 고른다 */
-    surface: v2 ? 'v2' : null,
+    surface: v2 ? surface : null,
     get savedFiles() { return savedFiles; },
     get figures() { return figures; },
     get nativeCharts() { return nativeCharts; },

@@ -166,6 +166,21 @@ impl CellComposeMemo {
         self.lock().verify = enabled;
     }
 
+    /// [hwpx-cowork] 2026-11-20 검증 모드인지 — 이 기억과 함께 쓰는 다른 재사용(쪽 나눔 한 번 안의 TAC 표 측정
+    /// `inline_table_frame::measure_tac_table_with_storage`)도 검증 모드에서는 새로 계산해 견준다.
+    pub(crate) fn verify_enabled(&self) -> bool {
+        self.lock().verify
+    }
+
+    /// [hwpx-cowork] 2026-11-20 함께 쓰는 재사용의 견줌 결과를 이 기억의 검증 수에 더한다(`verify_stats`).
+    pub(crate) fn record_verify(&self, same: bool) {
+        let mut state = self.lock();
+        state.verify_checks += 1;
+        if !same {
+            state.verify_mismatches += 1;
+        }
+    }
+
     /// (검증 모드에서 견준 횟수, 그중 달랐던 횟수)
     pub(crate) fn verify_stats(&self) -> (u64, u64) {
         let state = self.lock();

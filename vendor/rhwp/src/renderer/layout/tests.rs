@@ -780,6 +780,7 @@ fn test_layout_with_composed_styles() {
         horizontal_shaping_context: None,
         supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false, // [hwpx-cowork] These fixtures use the default compatibility target.
     };
 
     let page_content = PageContent {
@@ -939,6 +940,7 @@ fn test_layout_multi_run_x_position() {
         horizontal_shaping_context: None,
         supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false,
     };
 
     let page_content = PageContent {
@@ -1053,6 +1055,7 @@ fn test_resolved_to_text_style() {
         horizontal_shaping_context: None,
         supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false,
     };
 
     let ts = resolved_to_text_style(&styles, 0, 0);
@@ -1100,6 +1103,7 @@ fn test_resolved_to_text_style_with_ratio() {
         horizontal_shaping_context: None,
         supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false,
     };
 
     let ts = resolved_to_text_style(&styles, 0, 0);

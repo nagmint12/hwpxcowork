@@ -38,6 +38,8 @@ test('저장·검사: 종류별 추론 강도, 모델 ID 글자, 비우면 기�
     assert.equal(r.count, 1);
     const codex = run.view(me).kinds.find((k) => k.id === 'codex');
     assert.deepEqual([codex.modelsFrom, codex.models], ['reported', [{ id: 'gpt-6.1-sol', label: 'GPT-6.1-Sol', efforts: ['low', 'ultra'], defaultEffort: 'medium' }]]);
+    assert.throws(() => run.requestSettings(me, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'high' }), /이 모델의 추론 강도/);
+    assert.throws(() => run.requestSettings(me, { kind: 'codex', model: '--model' }), /-로 시작/);
     // 다른 사람과 섞이지 않고, 다시 읽어도 남는다
     assert.deepEqual(run.view({ name: '김검토' }).kinds.find((k) => k.id === 'codex').models, []);
     run.save(me, { kind: 'claude-code', model: 'claude-opus-5-5', effort: 'high' });
@@ -107,6 +109,12 @@ test('실행기: 요청마다 웹 값 적용(비우면 실행할 때 준 값), �
   assert.deepEqual([ai.model, ai.effort], ['gpt-cli', 'low']);
   down = true; await w.applyRunSettings(); down = false;
   assert.deepEqual([ai.model, ai.effort], ['gpt-cli', 'low'], '못 읽으면 지금 값 그대로');
+  down = true;
+  await w.applyRunSettings(undefined, { kind: 'codex', model: 'gpt-request', effort: 'xhigh' });
+  assert.deepEqual([ai.model, ai.effort], ['gpt-request', 'xhigh']);
+  await w.applyRunSettings();
+  assert.deepEqual([ai.model, ai.effort], ['gpt-cli', 'low'], '계정 설정을 다시 읽지 못해도 다음 요청은 기본값');
+  down = false;
   assert.equal(await w.reportModels(), 2);
   assert.deepEqual(puts, [{ kind: 'codex', models: [{ id: 'gpt-web' }, { id: 'gpt-cli' }] }]);
   assert.ok(logs.some((l) => l.includes('gpt-web') && l.includes('웹 설정')));

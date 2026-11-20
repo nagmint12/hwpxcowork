@@ -227,25 +227,46 @@ export class Store {
   /**
    * 수정된 doc 을 새 기록(내부 판 n)으로 저장. meta 를 주면 그 객체(호출자가 고친 것)에 판을 올린다.
    * milestone({ kind, note, by? })을 주면 새 기록에 사람용 버전(이정표, V3 §9.4)을 붙인다(addMilestone).
-   * bytes 를 주면 doc.save() 대신 그 바이트를 그대로 기록한다(doc 은 그 바이트를 읽은 문서 — PC 파일·검토본으로 통째로 바꿀 때).
+   * bytes 를 주면 doc.save() 대신 그 바이트를 그대로 기록한다(doc 은 그 바이트를 읽은 문서).
+   * persist(meta)를 주면 파일 교체에 필요한 메타데이터까지 저장하고 나서 기록을 정리하고 커밋을 알린다.
    * afterCommit(id, meta, bytes)(있으면): 기록을 쓴 뒤 부른다(PC 폴더 문서의 파일 맞춤 예약 — 던져도 커밋은 그대로)
    */
-  async commit(id, doc, { by, note, meta, milestone = null, bytes: given = null }) {
+  async commit(id, doc, { by, note, meta, milestone = null, bytes: given = null, persist = null }) {
     meta = meta || this.readMeta(id);
     const bytes = given ?? await doc.save();
-    meta.version += 1;
     const d = this._docDir(id);
+    const current = path.join(d, 'current.hwpx');
+    const previous = persist ? this.currentBytes(id) : null;
+    meta.version += 1;
+    const record = path.join(d, 'versions', `${meta.version}.hwpx`);
     // 버전 파일 먼저(중간에 멈추면 current 는 옛 버전 그대로 — 남은 버전 파일은 다음 커밋이 덮어쓴다)
-    writeFileAtomic(path.join(d, 'versions', `${meta.version}.hwpx`), bytes);
-    writeFileAtomic(path.join(d, 'current.hwpx'), bytes);
-    const at = new Date().toISOString();
-    // 기록 파일 정리가 손대도 되는 첫 기록(V4 §2.6): v0.4 전에 쌓인 기록 파일은 지우지 않는다 — 옛 문서는 처음 커밋한 기록부터
-    if (!Number.isInteger(meta.gcFrom)) meta.gcFrom = meta.version;
-    meta.versions.push({ n: meta.version, at, by, note });
-    if (milestone) this.addMilestone(meta, { ...milestone, n: meta.version, at, by: milestone.by ?? by });
+    writeFileAtomic(record, bytes);
+    let replaced = false;
+    let trim = false;
+    try {
+      writeFileAtomic(current, bytes);
+      replaced = true;
+      const at = new Date().toISOString();
+      // v0.4 전에 쌓인 기록은 보존한다. 옛 문서는 이 커밋부터 정리할 수 있다.
+      if (!Number.isInteger(meta.gcFrom)) meta.gcFrom = meta.version;
+      meta.versions.push({ n: meta.version, at, by, note });
+      if (milestone) this.addMilestone(meta, { ...milestone, n: meta.version, at, by: milestone.by ?? by });
+      trim = !meta.tutorialSession && meta.versions.length > RECENT_MIN;
+      if (trim) trimVersions(meta);
+      if (persist) persist(meta);
+    } catch (error) {
+      if (persist) {
+        try {
+          if (replaced) writeFileAtomic(current, previous);
+          removeFile(record);
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], '파일 교체 또는 이전 파일 복원에 실패했습니다');
+        }
+      }
+      throw error;
+    }
     // 기록 목록을 자르고(최근 30 — 10분 안이면 200까지 — + 사람용 버전·묶음 기록) 잘려 나간 기록의 파일을 지운다(실시간 문서는 기록이 빨리 쌓인다)
-    // Keep practice-session history while step checkpoints may still refer to it. Completed documents use the normal retention policy.
-    if (!meta.tutorialSession && meta.versions.length > RECENT_MIN) { trimVersions(meta); this.gcVersions(id, meta); }
+    if (trim) this.gcVersions(id, meta);
     this.cache.set(id, { version: meta.version, doc });
     if (typeof this.afterCommit === 'function') { try { this.afterCommit(id, meta, bytes); } catch (e) { console.error('[저장소] afterCommit:', e.message); } }
     return meta; // 호출자가 saveMeta

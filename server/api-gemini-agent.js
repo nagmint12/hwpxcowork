@@ -2,6 +2,7 @@
 // Gemini 함수 선언은 JSON Schema 의 일부만 받으므로 투영 때 다듬는다(값 범위·패턴 빼기, oneOf → anyOf, const → enum).
 // 도구와 구조화 출력을 함께 거절하는 모델·게이트웨이(HTTP 400)는 구조화 출력 없이 한 번 더 보내고(스키마는 지시 글로) 답에서 JSON 을 꺼낸다.
 // 새 MCP 연결(toolContext.surface 'v2'): 구조화 출력이 없으므로(server/ai.js runV2) 400 은 곧 도구 거절이다. 도구 규칙은 시스템 지시에 이미 있다.
+import { isTaskSurface } from './tool-profiles.js';
 import { runToolLoop, toolRules, fail, responseFailure, V2_CONTINUE } from './api-tool-loop.js';
 import { withoutBounds } from './format-schema.js';
 
@@ -21,7 +22,7 @@ function geminiSchema(node) {
 const jsonText = text => { const s = text.indexOf('{'), e = text.lastIndexOf('}'); return s >= 0 && e > s ? text.slice(s, e + 1) : text; };
 
 export async function runGeminiAgent(ai, input, request, { signal, toolContext, parse, singleTurn = false }) {
-  const v2 = toolContext?.surface === 'v2';
+  const v2 = isTaskSurface(toolContext?.surface);
   const declarations = (toolContext?.tools || []).map(t => ({ name: t.name, description: t.description || '', parametersJsonSchema: withoutBounds(geminiSchema(t.parameters)) }));
   const contents = structuredClone(request.contents);
   const url = `${ai.baseUrl}/models/${encodeURIComponent(request.model)}:generateContent`;

@@ -792,6 +792,8 @@ async function initialize(): Promise<void> {
     // [#4180] 저장 시점 캐럿 스탬핑 — 셀/글상자 캐럿은 현행 캐럿 필드(list_id 를
     // 구역 인덱스로 쓰는 rhwp 관례)로 표현 불가 → 호스트 문단 시작으로 강등.
     wasm.onBeforeExport = () => {
+      // [hwpx-cowork] 2026-11-20 저장 사본은 모든 쪽이 정해진 쪽 나눔을 쓴다 — 멈춰 둔 뒤쪽 조판을 먼저 끝낸다.
+      inputHandler?.flushTypesetTailIfPending('before-export');
       const p = inputHandler?.getCursorPosition();
       if (!p) return;
       wasm.setCaretPosition(

@@ -130,6 +130,7 @@ pub(crate) fn walk_ref<S: crate::storage::Storage>(
                 }
                 Control::Shape(shape) => storage.push(&mut stack, RefNode::Shape(shape))?,
                 Control::Picture(pic) => caption_ref(&mut stack, pic.caption.as_ref(), storage)?,
+                Control::Equation(equation) => caption_ref(&mut stack, equation.caption.as_ref(), storage)?,
                 Control::Header(h) => {
                     storage.push(&mut stack, RefNode::Paragraphs(&h.paragraphs))?
                 }

@@ -572,18 +572,6 @@ export function withCommentHeader(oldText, rid, body) {
   return `${i < 0 ? s : s.slice(0, i)}\n${body}`;
 }
 
-/**
- * 버전 복구 메모(§9.4): 되돌린 기록이 사람용 버전(이정표)이면 `[복구] v3(10-23 01:16) 내용으로 되돌림 — 관리자`,
- * 아니면 `[복구] 10-23 01:16 기록 내용으로 되돌림 — 관리자`(+ 줄 `바뀐 문단 n개`). 시각도 모르는 옛 기록이면 `옛 기록`.
- * v = 그 기록의 이정표 번호(없으면 null), at = 그 기록(이정표)의 시각
- */
-export function renderRestoreMemo({ v = null, at = null, by, count }) {
-  const when = at ? fmtTime(at) : '';
-  const head = v != null ? `[복구] v${v}${when ? `(${when})` : ''} 내용으로 되돌림 — ${by}`
-    : `[복구] ${when ? `${when} 기록` : '옛 기록'} 내용으로 되돌림 — ${by}`;
-  return xmlSafe(`${head}\n바뀐 문단 ${count}개`);
-}
-
 // ───────── 메모 스레드(답글·해결) — docs/V3_SPEC.md §3.6 ─────────
 
 /** 스레드 블록 머리줄. 사람 메모의 '본문' = 글에서 이 줄 앞까지 */

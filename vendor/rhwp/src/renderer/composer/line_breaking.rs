@@ -25,6 +25,7 @@ use std::ops::Range;
 mod inline_frame_input;
 mod list_marker_metrics;
 mod stored_external_geometry;
+mod word_line_metrics;
 use stored_external_geometry::stored_rows_require_external_geometry;
 
 struct PreparedParagraphKerning {
@@ -2116,6 +2117,7 @@ struct TabFill<'a> {
     /// 첫 줄·다음 줄의 줄 상자 시작 (단 시작 기준 px) — 문단 왼쪽 여백 + 그 줄의 들여쓰기.
     line_origin_px: [f64; 2],
     available_width_px: f64,
+    word_compat_target: bool,
 }
 
 impl<'a> TabFill<'a> {
@@ -2126,6 +2128,7 @@ impl<'a> TabFill<'a> {
             auto_tab_right: false,
             line_origin_px: [0.0, 0.0],
             available_width_px: 0.0,
+            word_compat_target: false,
         }
     }
 
@@ -2146,7 +2149,13 @@ impl<'a> TabFill<'a> {
                 style.margin_left + (-indent_px).max(0.0),
             ],
             available_width_px,
+            word_compat_target: false,
         }
+    }
+
+    fn with_word_compat_target(mut self, styles: &ResolvedStyleSet) -> Self {
+        self.word_compat_target = styles.word_compat_target;
+        self
     }
 
     fn default_width(&self) -> f64 {
@@ -2174,6 +2183,21 @@ impl<'a> TabFill<'a> {
             0 | 3 => to_hwp(position - origin).max(lw_hwp),
             _ => to_hwp(((lw_px / self.default_width()).floor() + 1.0) * self.default_width()),
         }
+    }
+
+    /// 줄 안 위치 `lw_hwp` 다음의 명시적 왼쪽·가운데·소수점 정지가 줄 오른쪽 끝(`line_width_hwp`)
+    /// 밖에 있는가. 정지 좌표는 단 시작 기준이고 줄 오른쪽 끝은 줄 상자 시작 + 줄 폭이다.
+    fn explicit_stop_beyond_line(
+        &self,
+        lw_hwp: i32,
+        first_line: bool,
+        origin_override: Option<f64>,
+        line_width_hwp: i32,
+    ) -> bool {
+        let origin = origin_override.unwrap_or(self.line_origin_px[usize::from(!first_line)]);
+        let x = origin + lw_hwp as f64 / 75.0;
+        let right_edge = origin + line_width_hwp as f64 / 75.0;
+        crate::renderer::layout::explicit_non_right_stop_beyond_edge(self.stops, x, right_edge)
     }
 }
 
@@ -2447,6 +2471,51 @@ fn fill_one_interval(
                     cursor.line_max_fs = *max_font_size;
                 }
 
+                // [hwpx-cowork] #9156 한/글 2022: 가와 X의 y 차는 30px다.
+                // 다음 명시적 왼쪽·가운데 정지가 줄 오른쪽 끝 밖이고 탭 뒤에 글이 이어지면, 한컴은
+                // 탭 앞의 글과 탭 뒤의 글을 같은 줄에 두지 않는다(웹한글기안기 인쇄: 줄 폭 5500 HU 에
+                // 정지 8840 HU, `가`+탭+`X` 는 `가` / 탭 / `X` 세 줄이고 `X` 는 줄 처음). 탭 앞에 글이
+                // 있으면 탭을 다음 줄로 보낸다. 워드 호환에서는 새 줄 맨 앞의
+                // 바깥 탭 폭이 0이고 뒤의 글을 그 줄에 둔다(한/글 2022 재저장).
+                if auto_left_target.is_none()
+                    && tokens.len() > ti + 1
+                    && tabs.explicit_stop_beyond_line(
+                        cursor.lw,
+                        cursor.is_first_line,
+                        origin_override,
+                        eff_w(cursor.is_first_line),
+                    )
+                {
+                    let tab_leads_line = cursor.line_start_idx == *idx;
+                    if tab_leads_line && tabs.word_compat_target {
+                        cursor.token_index += 1;
+                        continue;
+                    }
+                    let end_idx = if tab_leads_line { *idx + 1 } else { *idx };
+                    let result = LineBreakResult {
+                        start_idx: cursor.line_start_idx,
+                        end_idx,
+                        max_font_size: cursor.line_max_fs,
+                        has_line_break: false,
+                    };
+                    cursor.line_start_idx = end_idx;
+                    cursor.lw = 0;
+                    cursor.line_space_savings = 0;
+                    cursor.line_max_fs = 0.0;
+                    cursor.is_first_line = false;
+                    cursor.last_break_token_idx = None;
+                    if tab_leads_line {
+                        // 탭은 이 줄에 남는다. 탭 앞에 글이 있던 경우는 탭을 다음 줄 처음에서
+                        // 다시 읽어 위 규칙(줄 처음의 탭)으로 끝낸다.
+                        cursor.token_index += 1;
+                    }
+                    cursor.emitted_any = true;
+                    return Some(FilledInterval {
+                        line: result,
+                        termination: FillTermination::IntervalFull,
+                    });
+                }
+
                 if next_tab_hwp > eff_w(cursor.is_first_line) && cursor.line_start_idx < *idx {
                     let result = if cursor.last_break_token_idx.is_some() {
                         let result = LineBreakResult {
@@ -2529,11 +2598,33 @@ fn fill_one_interval(
                     !first_interword_separator(tokens, ti, text_chars, cursor.line_start_idx)
                 }) {
                     let absorbed = cut > *idx;
+                    let mut cut = cut;
+                    let mut hanging_space_tokens = 0;
+                    // [hwpx-cowork] #8639 한/글 2022: 첫 공백부터 넘친 낱말은
+                    // 공백 두 개까지 현재 줄에 걸고, 셋째나 다음 글에서 새 줄을 연다.
+                    // 둘째 공백에서 처음 넘치는 기존 #7418 조건에는 적용하지 않는다.
+                    if absorbed
+                        && *idx > cursor.line_start_idx
+                        && text_chars.get(*idx - 1).is_some_and(|c| !c.is_whitespace())
+                    {
+                        if let Some(BreakToken::Space {
+                            idx: next_idx,
+                            max_font_size: next_size,
+                            ..
+                        }) = tokens.get(ti + 1)
+                        {
+                            if *next_idx == cut {
+                                cursor.line_max_fs = cursor.line_max_fs.max(*next_size);
+                                cut = *next_idx + 1;
+                                hanging_space_tokens = 1;
+                            }
+                        }
+                    }
                     // [#7418] 줄 끝에 건 공백이 문단의 마지막 글자면 문단이 여기서 끝난다 —
                     // 종전에는 글자 없는 빈 행을 하나 더 게시했다. 한/글은 넘친 공백 **하나**만
                     // 줄 끝에 걸고 그 뒤 공백은 새 줄로 넘긴다(42자+공백 2 → 1줄, 공백 3 → 2줄;
                     // `trailing_space_synthetic`). 그래서 뒤에 공백이 더 남은 경우는 종전대로 끊는다.
-                    if absorbed && ti + 1 == tokens.len() {
+                    if absorbed && ti + 1 + hanging_space_tokens == tokens.len() {
                         cursor.finished = true;
                         cursor.emitted_any = true;
                         cursor.token_index = tokens.len();
@@ -2553,7 +2644,7 @@ fn fill_one_interval(
                     // Extra spaces still belong to the next row; leading/repeated
                     // breaks and the terminal empty row keep their normal path.
                     let forced_end = if absorbed {
-                        match tokens.get(ti + 1) {
+                        match tokens.get(ti + 1 + hanging_space_tokens) {
                             Some(BreakToken::LineBreak { idx }) if *idx == cut => Some(*idx + 1),
                             _ => None,
                         }
@@ -2579,7 +2670,7 @@ fn fill_one_interval(
                     cursor.is_first_line = false;
                     cursor.last_break_token_idx = None;
                     cursor.word_gap_natural_hwp = None;
-                    cursor.token_index += if forced_end.is_some() { 2 } else { 1 };
+                    cursor.token_index += 1 + hanging_space_tokens + usize::from(forced_end.is_some());
                     cursor.emitted_any = true;
                     // The terminal separator was consumed by this row. The
                     // cursor is at paragraph end, not at a new empty line.
@@ -3644,9 +3735,8 @@ pub(crate) fn inline_control_occupied_size_hwp_with_storage<S: crate::storage::S
             // 자라고, 행 합이 선언보다 작으면 한/글은 그 행 높이로 그리고 다음 줄을 잇는다
             // (선언 8160HU·행 합 7536HU 결재문서 표, 한/글 2020 Print). 선언값으로 줄을
             // 발행하면 뒤 내용이 그 차이만큼 내려간다.
-            let measured = crate::renderer::height_measurer::HeightMeasurer::new(dpi)
-                .with_session_edited(true)
-                .measure_table_with_storage(table, 0, 0, styles, storage)?;
+            // [hwpx-cowork] 2026-11-20 같은 측정기 — 쪽 나눔 동안은 문서의 칸 줄 구성 기억을 쓴다.
+            let measured = super::measure_tac_table_with_storage(table, styles, dpi, storage)?;
             // 위/아래 캡션도 인라인 개체가 소유하는 물리 상자다. 표 본체만
             // 발행하면 캡션 글줄에 다음 개체가 놓이고 저장 줄도 그 높이로 굳는다.
             // [hwpx-cowork] 2026-11-09 펼친 투명 래퍼는 외곽 프레임까지 줄이 소유한다.
@@ -4868,6 +4958,7 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
         ),
     );
     tab_fill.default_width_px = styles.default_tab_width(tab_fill.default_width_px);
+    tab_fill.word_compat_target = styles.word_compat_target;
     let english_break_unit = para_style
         .map(|style| style.english_break_unit)
         .unwrap_or(0);
@@ -5117,7 +5208,16 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
                     .then_some(terminal_inline_spacing_height)
                     .flatten();
                 let mut row_terminated = false;
+                let mut row_end = cursor_checkpoint.line_start_idx;
+                // [hwpx-cowork] 저장 줄이 없는 칸도 문단의 '한 줄로 입력'을
+                // 실제 프레임 채움에 전달한다. 원래 상자 폭은 배치·자간에 쓴다.
+                let squeeze = para_style.is_some_and(|style| style.line_wrap_squeeze)
+                    && para.controls.iter().all(control_is_width_neutral_marker)
+                    && !para.text.contains('\n');
                 let interval_width = |index: usize, interval: &std::ops::Range<i32>| {
+                    if squeeze {
+                        return f64::from(i32::MAX / 4) / 75.0;
+                    }
                     let width = crate::renderer::hwpunit_to_px(
                         interval.end.saturating_sub(interval.start),
                         dpi,
@@ -5280,6 +5380,7 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
                             _ => Some((control.height_hwp, control.baseline_distance_hwp)),
                         };
                     }
+                    row_end = row_end.max(line.end_idx);
                     let text_start =
                         if start_char == 0 && frame.row_count() == first_row && segments.is_empty()
                         {
@@ -5312,6 +5413,17 @@ fn try_layout_paragraph_in_frame_impl<S: Storage>(
                     line_spacing_value,
                     dpi,
                 );
+                if let Some(word) = word_line_metrics::for_row(
+                    para, styles, &text_chars, cursor_checkpoint.line_start_idx..row_end,
+                    cursor.finished, dpi,
+                ) {
+                    metrics.line_height = word.height;
+                    metrics.text_height = word.height;
+                    metrics.baseline_distance = word.baseline;
+                    metrics.line_spacing = compute_line_spacing_hwp(
+                        line_spacing_type, line_spacing_value, word.height, dpi,
+                    );
+                }
                 let text_baseline = metrics.baseline_distance;
                 let text_line_height = metrics.line_height;
                 if let Some(height) = inline_spacing_height {
@@ -6545,6 +6657,9 @@ fn try_reflow_line_segs_body<S: Storage>(
             // 치수를 복사하면 TAC 그림 높이까지 상속되므로 vpos 원점만 보존한다.
             let font_size = paragraph_font_size_px(para, styles).unwrap_or(12.0);
             let mut seg = make_line_seg(0, font_size);
+            if let Some(word) = word_line_metrics::for_row(para, styles, &[], 0..0, true, dpi) {
+                word.apply_to(&mut seg, ls_type, ls_value, dpi);
+            }
             if let Some(template) = orig.as_ref() {
                 seg.vertical_pos = template.vertical_pos;
                 // 폭0인 빈 floating table 호스트는 개체 앵커다. 본문 글줄의
@@ -6768,7 +6883,8 @@ fn try_reflow_line_segs_body<S: Storage>(
         &text_chars,
         available_width_px,
         indent_px,
-        TabFill::for_paragraph(para_style, indent_px, available_width_px),
+        TabFill::for_paragraph(para_style, indent_px, available_width_px)
+            .with_word_compat_target(styles),
         korean_break_unit,
         condense_min_space,
         &try_resolved_paragraph_letter_spacing(
@@ -6799,7 +6915,8 @@ fn try_reflow_line_segs_body<S: Storage>(
             &text_chars,
             available_width_px,
             indent_px,
-            TabFill::for_paragraph(para_style, indent_px, available_width_px),
+            TabFill::for_paragraph(para_style, indent_px, available_width_px)
+                .with_word_compat_target(styles),
             korean_break_unit,
             condense_min_space,
             &try_resolved_paragraph_letter_spacing(
@@ -6907,6 +7024,12 @@ fn try_reflow_line_segs_body<S: Storage>(
             fs
         };
         let mut text_seg = make_line_seg(utf16_start, fs);
+        if let Some(word) = word_line_metrics::for_row(
+            para, styles, &text_chars, lb.start_idx..lb.end_idx,
+            line_idx + 1 == line_breaks.len(), dpi,
+        ) {
+            word.apply_to(&mut text_seg, ls_type, ls_value, dpi);
+        }
         // [hwpx-cowork] 자리차지 개체 앵커 + 줄 바꿈만 있는 줄: 한/글은 높이(vertsize)를 문단 글자 크기(900)로, 전진은 그 줄
         // 글자(textheight 100 + 줄간격 12 = 112)로 쓴다. 쪽 끝 판정은 vertsize 다 — 표는 들어가도 이 줄이 900 을 못 담으면
         // 앵커 줄과 글이 함께 다음 쪽으로 간다(조판 시험 whole X=160·300: 앵커 줄 다음 쪽 vertpos 0). 높이를 900 으로 두고
@@ -7371,7 +7494,7 @@ fn round_px_to_hwpunit(px: f64, dpi: f64) -> i32 {
 ///
 /// line_spacing = 현재 줄 하단 → 다음 줄 상단 사이의 추가 간격.
 /// Y advance = line_height + line_spacing.
-fn compute_line_spacing_hwp(
+pub(crate) fn compute_line_spacing_hwp(
     ls_type: LineSpacingType,
     ls_value: f64,
     line_height_hwp: i32,

@@ -141,6 +141,15 @@ pub(super) fn inline_tab_type(ext: &[u16; 7]) -> u8 {
     ((ext[2] >> 8) & 0xFF) as u8
 }
 
+pub(crate) fn explicit_non_right_stop_beyond_edge(
+    tab_stops: &[TabStop],
+    x: f64,
+    right_edge: f64,
+) -> bool {
+    tab_stops.iter().find(|stop| stop.position > x + 0.5)
+        .is_some_and(|stop| stop.tab_type != 1 && stop.position > right_edge + 0.5)
+}
+
 /// 현재 절대 위치에서 다음 탭 정지를 찾는다.
 ///
 /// Returns (position, tab_type, fill_type).
@@ -412,6 +421,11 @@ fn compute_char_positions_walk(
             continue;
         }
         if c == '\t' {
+            if i == 0 && style.word_overflow_tab_at_start {
+                tab_char_idx += 1;
+                positions.push(x);
+                continue;
+            }
             if let Some(position) = style
                 .auto_left_tab_position
                 .filter(|position| *position > style.line_x_offset + x)
@@ -551,6 +565,10 @@ impl EmbeddedTextMeasurer {
                     continue;
                 }
                 if c == '\t' {
+                    if i == 0 && style.word_overflow_tab_at_start {
+                        tab_char_idx += 1;
+                        continue;
+                    }
                     if let Some(position) = style
                         .auto_left_tab_position
                         .filter(|position| *position > style.line_x_offset + total)
@@ -1063,6 +1081,7 @@ fn try_char_style_to_text_style<S: crate::renderer::style_resolver::storage::Sto
             right_tab_block_width_override: None,
             tab_leaders: Vec::new(),
             inline_tabs: Vec::new(),
+            word_overflow_tab_at_start: false,
             extra_word_spacing: 0.0,
             unjustified_leading_spaces: 0,
             extra_char_spacing: 0.0,

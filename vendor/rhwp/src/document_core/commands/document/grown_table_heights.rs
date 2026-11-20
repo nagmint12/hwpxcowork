@@ -89,13 +89,24 @@ impl DocumentCore {
                         })
                         .filter(|_| {
                             may_write_frame && (has_reflowed_cell_text(table)
-                                || self.table_text_reflowed_path_exists(
-                                    section_idx,
-                                    para_idx,
-                                    control_idx,
-                                ))
+                                || edited_owner)
                         })
-                        .map(|m| content_height(m, self.dpi));
+                        .map(|measured| {
+                            // [hwpx-cowork] 공동 앵커의 닫힌 끝 행은 저장 때에도
+                            // 조판과 같은 하한을 사용한다.
+                            let closed = if profile.hwp5_stored_pagination_layout()
+                                && !edited_owner
+                                && crate::renderer::float_placement::stored_inline_host_has_separate_float_frame(paragraph, table)
+                            {
+                                crate::renderer::height_measurer::fit_measured_table_coanchored_frame_with_storage(
+                                    measured, table, self.dpi, storage,
+                                )?
+                            } else {
+                                None
+                            };
+                            Ok::<u32, S::Error>(content_height(closed.as_ref().unwrap_or(measured), self.dpi))
+                        })
+                        .transpose()?;
                     storage.push(
                         &mut out,
                         content.and_then(|value| grown(table.common.height, value)),

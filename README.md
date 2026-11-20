@@ -135,6 +135,8 @@ npm run worker -- --provider claude-code --url 'https://서버주소/mcp'
 
 이 PC의 서버(`http://localhost:8787/mcp`)면 `--url` 을 뺍니다. Windows PowerShell 이 `npm` 실행을 막으면 `npm.cmd run worker …` 로 씁니다. macOS·Linux 는 `export HWPX_COWORK_TOKEN=…` 뒤 같은 명령입니다. 실행기는 새 MCP 연결(v2)이 기본이고, 아직 새 연결을 모르는 옛 서버에는 `--mcp 1`(예전 연결)을 붙입니다. 구독 사용 한도 안에서 처리하고 별도 API 요금은 없습니다. 실행기가 MCP 연결을 준비하므로 대화창용 MCP 등록은 생략해도 됩니다. 웹에서 글을 골라 **AI에게 맡기기**로 보내면 제안이 돌아오고, 반영은 사람이 합니다.
 
+표 안의 표나 병합된 칸을 AI와 편집할 때는 실험 연결 **MCP v3**을 선택할 수 있습니다. Windows 앱에서는 **AI → 실행기 관리 → 고급 → 연결 → 표를 TSV로 읽기(v3)**를 고릅니다. 명령줄 실행기에는 `--mcp 3`을 붙이고, MCP 주소로 직접 연결할 때는 `/mcp?v=3`을 사용합니다. AI가 받을 표의 행과 열을 내 PC에서 확인하려면 `node scripts/preview-mcp-v3.mjs "문서.hwpx"`를 실행하세요.
+
 사람이 보는 짧은 설명과 WebP 그림, **VS Code에 붙여넣을 내용** 복사 상자는 웹의 **사용 설명서 → 내 PC의 구독 AI**에 있습니다. 대화창에서도 쓰려면 그곳의 MCP 등록 명령·설정을 복사합니다. ChatGPT 웹의 URL·OAuth 안내는 접힌 고급 안내에서 펼쳐 봅니다. API 키는 구독과 별도 과금이므로 마지막에 고릅니다.
 
 자세한 안내: [운영·AI 연결 매뉴얼](docs/DEPLOYMENT_AND_AI_GUIDE.md) · [개인 에이전트 연결](docs/AGENT_SETUP.md) ·

@@ -318,6 +318,52 @@ test('연결 방식: 새 연결을 모르는 서버에는 v2 를 막고 v1 은 �
   } finally { cleanup(dir); }
 });
 
+test('실행기 MCP v3 선택을 저장·다시 불러와 시작하고 v2 전용 서버의 v3 선택을 막는다', async () => {
+  const dir = temporary();
+  let loaded;
+  try {
+    const initial = manager(dir, { fetch: { config: { features: { mcp2: true, mcp3: true } } } }).m;
+    const server = await initial.addServer({ url: 'https://tsv.example', token: TOKEN });
+    assert.equal(server.mcp3, true);
+    const remote = initial.addRunner({ ai: 'codex', server: server.id, autoStart: false });
+    assert.equal(remote.mcp, 2, '연결 방식의 기본은 v2');
+    assert.equal(initial.updateRunner(remote.id, { mcp: 3 }).mcp, 3);
+    const local = initial.addRunner({ ai: 'claude-code', server: LOCAL_SERVER, autoStart: false, mcp: 3 });
+
+    loaded = manager(dir);
+    assert.equal(loaded.m.snapshot().servers[0].mcp3, true);
+    for (const r of [remote, local]) {
+      assert.equal(view(loaded.m, r.id).mcp, 3);
+      await loaded.m.start(r.id);
+      const child = loaded.runners.children.at(-1);
+      assert.deepEqual(child.args.slice(-2), ['--mcp', '3']);
+      assert.equal(parseWorkerArgs(child.args, child.env).mcp, '3');
+    }
+
+    const older = await loaded.m.addServer({ url: 'https://old.example', token: TOKEN });
+    assert.deepEqual([older.mcp2, older.mcp3], [true, false]);
+    assert.throws(() => loaded.m.addRunner({ ai: 'codex', server: older.id, mcp: 3 }), /MCP v3\(TSV\) 지원을 확인할 수 없습니다/);
+    const v2 = loaded.m.addRunner({ ai: 'codex', server: older.id });
+    assert.throws(() => loaded.m.updateRunner(v2.id, { mcp: 3 }), /MCP v3\(TSV\) 지원을 확인할 수 없습니다/);
+    assert.equal(view(loaded.m, v2.id).mcp, 2);
+    assert.equal(loaded.runners.children.length, 2, '거절한 선택으로 실행기를 시작하지 않는다');
+  } finally {
+    await loaded?.m.stopAll();
+    cleanup(dir);
+  }
+});
+
+test('실행기 추가와 설정 화면의 연결 선택에 v3 TSV가 있으며 추가의 기본 선택은 v2다', () => {
+  const html = fs.readFileSync(path.join(root, 'deploy', 'desktop', 'runners.html'), 'utf8');
+  const panel = /<select\b[^>]*\bid="mcp"[^>]*>([\s\S]*?)<\/select>/.exec(html);
+  assert.ok(panel, '추가 화면의 연결 선택');
+  assert.deepEqual([...panel[1].matchAll(/<option\b[^>]*\bvalue="([123])"/g)].map((match) => match[1]), ['2', '3', '1']);
+  assert.match(panel[1], /<option\b[^>]*\bvalue="3"[^>]*>[^<]*TSV/);
+  const js = fs.readFileSync(path.join(root, 'deploy', 'desktop', 'runners.js'), 'utf8');
+  const edit = js.slice(js.indexOf('function settingsPanel('), js.indexOf('function runnerRow('));
+  assert.match(edit, /el\('option',\s*\{\s*value:\s*'3',\s*text:\s*'[^']*TSV/);
+});
+
 test('앱 인자는 실제 ai-worker 가 받는 꼴이다(토큰은 환경 변수): codex·claude-code 는 --mcp 2/1, Google CLI 는 MCP 없이', () => {
   const env = { HWPX_COWORK_TOKEN: TOKEN };
   const codex = parseWorkerArgs(['--provider', 'codex', '--url', 'https://cowork.example.com/mcp', '--mcp', '2'], env);

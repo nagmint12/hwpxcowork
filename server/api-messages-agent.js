@@ -2,13 +2,14 @@
 // 도구 정의·시스템 지시·첫 사용자 글(문맥·첨부)은 라운드마다 같으므로 cache_control 로 캐시한다.
 // 새 MCP 연결(toolContext.surface 'v2'): 도구 규칙은 시스템 지시(server/ai.js runV2 — EDITOR_INSTRUCTIONS_API_V2)에 이미 있고, 구조화 출력이 없으며,
 // 끝내는 도구 없이 끝난 차례는 nudge 로 다시 부른다(server/api-tool-loop.js).
+import { isTaskSurface } from './tool-profiles.js';
 import { runToolLoop, toolRules, fail, responseFailure, V2_CONTINUE } from './api-tool-loop.js';
 import { mcpClaudeContent } from './api-mcp-tools.js';
 
 const cached = { type: 'ephemeral' };
 
 export async function runMessagesAgent(ai, input, request, { signal, toolContext, parse, singleTurn = false }) {
-  const v2 = toolContext?.surface === 'v2';
+  const v2 = isTaskSurface(toolContext?.surface);
   const tools = (toolContext?.tools || []).map(t => ({ name: t.name, description: t.description || '', input_schema: t.parameters }));
   const messages = structuredClone(request.messages);
   let partialText = '', last = [];

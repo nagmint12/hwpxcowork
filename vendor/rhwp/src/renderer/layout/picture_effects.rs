@@ -13,14 +13,15 @@
 //!   전체 단면 맞춤: r1000·alpha0.5 → 0.25 지점 14px·σ 5.1px, r500·alpha0 → 0.5 지점 8.7px·σ 2.5px(144dpi). 반지름 두 가지뿐이라 경험식.
 //! - 효과가 그림 틀의 왼쪽·위로 나가면 한/글은 **그림을 그만큼 오른쪽·아래로 옮겨** 그린다(개체 자리 = 효과까지 넣은 상자의
 //!   왼쪽 위): 그림자 135° 1000 → 14px(707HU), 네온 1000 → 20px(1000HU), 네온 500 → 10px. 흐림 폭은 옮김에 들지 않는다.
-//! - 옅은 테두리(`hp:softEdge`)·반사(`hp:reflection`)·안쪽 그림자(style="INSIDE")는 아직 그리지 않는다(원장 ledger_object.md).
+//! - 옅은 테두리와 반사는 공유 그림 노드에서 가시 창의 alpha를 합성한다. 지원 범위는 회전하지 않은 그림이다.
 //!
 //! 흐림은 백엔드마다 필터가 달라(SVG feGaussianBlur·Canvas filter·CanvasKit MaskFilter) 결과가 갈리므로, 여기서
 //! σ 를 따라 겹친 띠 사각형(BLUR_BANDS 장)의 누적 불투명도가 가우스 단면 Φ 를 따르게 만든다 — 모든 경로가 이미 같은
 //! 방식으로 그리는 '채운 사각형 + 불투명도' 만 쓴다.
 
 use super::LayoutEngine;
-use crate::model::image::{EffectColor, Picture, PictureShadow};
+use crate::model::image::{EffectColor, Picture, PictureReflection, PictureShadow};
+use crate::renderer::image_resolver::picture_effect_alpha;
 use crate::renderer::hwpunit_to_px;
 use crate::renderer::render_tree::{
     BoundingBox, PageLayoutContext, RectangleNode, RenderNode, RenderNodeType,
@@ -183,6 +184,26 @@ pub(crate) fn blur_bands(layer: &EffectLayer) -> Vec<(BoundingBox, f64)> {
     out
 }
 
+fn reflection_frame(effect: &PictureReflection, frame: BoundingBox, dpi: f64)
+    -> (BoundingBox, [bool; 2])
+{
+    let (ax, ay) = anchor(effect.align_style.as_deref().or(Some("BOTTOM_LEFT")));
+    let direction = num(&effect.direction, 90.0).to_radians();
+    let distance = hwpunit_to_px(num(&effect.distance, 0.0) as i32, dpi);
+    let (sx, sy) = effect.scale.as_ref()
+        .map(|scale| (num(&scale.x, 1.0), num(&scale.y, -1.0)))
+        .unwrap_or((1.0, -1.0));
+    let width = frame.width * sx.abs();
+    let height = frame.height * sy.abs();
+    let x = frame.x + ax * frame.width
+        - (if sx < 0.0 { 1.0 - ax } else { ax }) * width
+        + distance * direction.cos();
+    let y = frame.y + ay * frame.height
+        - (if sy < 0.0 { 1.0 - ay } else { ay }) * height
+        + distance * direction.sin();
+    (BoundingBox::new(x, y, width, height), [sx < 0.0, sy < 0.0])
+}
+
 impl LayoutEngine {
     /// 그림 노드를 넣기 직전에 효과 층(그림 뒤)을 넣고, 효과의 왼쪽·위 넘침만큼 그림 노드를 옮긴다.
     /// 돌려준 (dx, dy) 는 그림과 함께 옮겨야 할 테두리·캡션 쪽이 쓴다.
@@ -193,7 +214,9 @@ impl LayoutEngine {
         picture: &Picture,
         image: &mut RenderNode,
     ) -> (f64, f64) {
-        let has_effects = picture.effects.shadow.is_some() || picture.effects.glow.is_some();
+        let effects = &picture.effects;
+        let has_effects = effects.shadow.is_some() || effects.glow.is_some()
+            || effects.soft_edge.is_some() || effects.reflection.is_some();
         if !has_effects {
             return (0.0, 0.0);
         }
@@ -227,6 +250,32 @@ impl LayoutEngine {
                     rect,
                 );
                 parent.children.push(node);
+            }
+        }
+        if let RenderNodeType::Image(node) = &mut image.node_type {
+            let visible = node.paint_bbox(&frame);
+            if let Some(edge) = &effects.soft_edge {
+                picture_effect_alpha::soft_edge(node, visible, num(&edge.radius, 0.0), self.dpi);
+            }
+            if let Some(reflection) = &effects.reflection {
+                let (reflected, mirror) = reflection_frame(reflection, visible, self.dpi);
+                let pair = |values: &Option<(Option<String>, Option<String>)>, defaults: [f64; 2]| {
+                    values.as_ref().map_or(defaults, |(start, end)| {
+                        [num(start, defaults[0]), num(end, defaults[1])].map(|v| v.clamp(0.0, 1.0))
+                    })
+                };
+                if let Some(reflected_image) = picture_effect_alpha::reflection(
+                    node, reflected, self.dpi, mirror,
+                    num(&reflection.fade_direction, 90.0),
+                    pair(&reflection.alpha, [0.5, 1.0]),
+                    pair(&reflection.pos, [0.0, 1.0]),
+                ) {
+                    parent.children.push(RenderNode::new(
+                        tree.next_id(),
+                        RenderNodeType::Image(reflected_image),
+                        reflected,
+                    ));
+                }
             }
         }
         (dx, dy)

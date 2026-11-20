@@ -300,6 +300,16 @@ tr.doc:hover { background: #f5f8fc; cursor: pointer; }
 .cmp-foot > button, .cmp-foot > select { height: 28px; }
 .cmp-foot > button { padding: 0 11px; }
 .cmp-foot > select { padding: 0 6px; }
+.cmp-submit { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 6px; margin-inline-start: auto; }
+.cmp-submit > button { height: 28px; padding: 0 11px; }
+button.cmp-run-toggle { padding: 0 7px; gap: 6px; color: var(--muted); }
+.cmp-run-toggle.chosen { color: var(--accent); border-color: #b9cfea; background: var(--accent-soft); }
+.cmp-run-chevron { width: 5px; height: 5px; border: solid currentColor; border-width: 0 1px 1px 0; transform: translateY(-1px) rotate(45deg); }
+.cmp-run-toggle[aria-expanded="true"] .cmp-run-chevron { transform: translateY(1px) rotate(225deg); }
+.cmp-run { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: #f8fafc; font-size: 12px; }
+.cmp-run-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr)); gap: 6px; }
+.cmp-run label { display: grid; gap: 3px; min-width: 0; color: var(--muted); }
+.cmp-run select, .cmp-run input { width: 100%; min-width: 0; height: 30px; font-size: 12px; padding: 2px 5px; }
 .composer .warn { color: var(--warn); }
 .dropzone { border: 1.5px dashed #c3cad4; border-radius: 8px; padding: 10px; text-align: center; color: var(--muted); font-size: 12.5px; cursor: pointer; background: #fafbfc; transition: background .12s, border-color .12s; }
 .dropzone.compact { padding: 6px 8px; text-align: left; }

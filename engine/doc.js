@@ -13,13 +13,26 @@ import { imageInfo, scanPictures, pictureXml, PX, MM } from './picture.js';
 import { importChartParts, releaseChartParts, chartPartKey, fixSwitchIds, pruneChartParts, syncSwitchCopies } from './chart-parts.js';
 import { SHAPE_TAGS, shapeProps, shapePrintText, shapeChange, shapeKey, pairShapes, patchShape, shapeName, shapeFlowsText } from './shapes.js';
 import { planBody, planBodyAnchored, charOps, entryKind, foldOwners } from './diff.js';
-import { inspectFormatting, formattingCatalog, formatRange, formatParagraphs, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, breakChangeLabels } from './formatting.js';
+import { inspectFormatting, formattingCatalog, formatRange, formatParagraphs, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, formattingPartsFor, breakChangeLabels } from './formatting.js';
 export { validateFormatSpec } from './formatting.js';
 
 const SUBLIST_ATTRS = 'id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"';
 
 export class HwpxDoc {
   static async load(buffer) { return new HwpxDoc(await HwpxContainer.load(buffer)); }
+
+  // 붙여넣기·수정본 병합의 비교와 적용이 같은 단위의 서식 정의를 보게 한다.
+  // 판본이 같은 경로와 이미 저장한 문단 지문은 그대로 사용한다.
+  inFormattingUnitsOf(target) {
+    const converted = formattingPartsFor(this, target);
+    if (!converted) return this;
+    const container = new HwpxContainer(new Map(this.container.files), [...this.container.order]);
+    if (converted.versionXml === null) container.remove('version.xml');
+    else container.setText('version.xml', converted.versionXml);
+    container.setText('Contents/header.xml', converted.header.xml);
+    this.sections.forEach((section, i) => container.setText(this.sectionNames[i], section.xml));
+    return new HwpxDoc(container);
+  }
 
   constructor(container) {
     this.container = container;
@@ -215,8 +228,22 @@ export class HwpxDoc {
     const { sec, t } = this._tableTarget(target);
     const before = sec.xml.slice(t.start, t.end);
     const header = dryRun ? new Header(this.header.xml) : this.header;
-    const res = editTableXml(before, ops, { header });
+    // [hwpx-cowork] 칸 안 새 표(cell_paragraphs 의 {table} — 2026-11-20 §22): 표 XML 은 여기서(머리·id·본보기 표가 필요하다)
+    const wantsTable = ops.some((o) => o?.op === 'cell_paragraphs' && Array.isArray(o.paragraphs) && o.paragraphs.some((e) => e && typeof e === 'object' && e.table));
+    const res = editTableXml(before, ops, { header, cellTable: wantsTable ? this._cellTableFactory(header) : null });
     const out = { key: t.key, ref: t.ref, before, after: res.xml, undo: res.undo, rows: res.rows, cols: res.cols, labels: res.labels, geometry: res.geometry };
+    // [hwpx-cowork] 칸 문단 다시 짜기(cell_paragraphs — 2026-11-19): stamps = op 마다 사라질 문단의 글 지문(서비스가 제안의 op.expect 로 적어 둔다),
+    // cellMoves = 그 칸 문단들의 중첩 주소 옮김표 [{ parent(칸 문단의 부모 문단 ref), first(칸 첫 문단의 '/n' 번호), map(옛 문단 k → 새 차례 | null), count(새 문단 수) }]
+    // (서비스가 meta 의 주소를 옮긴다 — _remapCellMoves). 칸 문단 기록이 XML 문단 차례와 어긋나면(숨은 문단 등) 그 칸은 옮김표를 주지 않는다
+    if (res.stamps) out.stamps = res.stamps;
+    if (res.cellMoves) {
+      out.cellMoves = res.cellMoves.map((mv) => {
+        const cell = t.cells.find((c) => c.row != null && mv.row >= c.row && mv.row < c.row + c.rowSpan && mv.col >= c.col && mv.col < c.col + c.colSpan);
+        const paras = cell?.paras || [];
+        if (!paras.length || paras.length !== mv.map.length || !paras[0].parent || paras.some((p, i) => p.hidden || p.parent !== paras[0].parent || p.nested !== paras[0].nested + i)) return null;
+        return { parent: paras[0].parent.ref, first: paras[0].nested, map: mv.map, count: mv.count };
+      }).filter(Boolean);
+    }
     // [hwpx-cowork] 한/글 2022 실측(2026-11-14): 글자처럼 표는 hp:pos.horzAlign만 바꿔도 x=113px 그대로이고,
     // 소유 문단을 CENTER로 바꿔야 x=227px가 된다. 떠 있는 표는 표 위치 속성을 그대로 쓴다.
     const align = ops.findLast(o => o.op === 'table' && o.align != null)?.align;
@@ -230,7 +257,8 @@ export class HwpxDoc {
       }
     }
     if (dryRun) return out;
-    this._putTableXml(sec, t, res.xml, out.geometry);
+    // 칸 문단 수가 바뀌면 표 높이가 달라질 수 있다 — 표를 품은 문단의 줄 정보도 지워 다시 재게 한다(relayout)
+    this._putTableXml(sec, t, res.xml, out.geometry || !!res.relayout);
     if (out.undo.paragraphAlign) this.formatRange(t.ref, { start: 0, end: this.inspectFormatting(t.ref).length, paragraph: { align } });
     return out;
   }
@@ -2027,7 +2055,7 @@ export class HwpxDoc {
    * @param {{rows: string[][], headerRows?: number, caption?: string}} spec
    * @returns {{ref: string, captionRef: string|null, tableKey: string, bodyShift: 1}} captionRef 는 표 문단의 중첩 ref(`${ref}/n0`)
    */
-  insertTableAfter(sectionIndex, afterIdx, { rows, headerRows = 1, caption = '' } = {}, { author, date, trackBreak = false } = {}) {
+  insertTableAfter(sectionIndex, afterIdx, { rows, headerRows = 1, caption = '', like = null } = {}, { author, date, trackBreak = false } = {}) {
     const sec = this.sections[sectionIndex];
     if (!sec) throw new EngineError('NO_SECTION', `구역이 없습니다: ${sectionIndex}`);
     if (!sec.bodyParas.length) throw new EngineError('NO_PARAGRAPH', '구역에 본문 문단이 없습니다');
@@ -2039,7 +2067,8 @@ export class HwpxDoc {
     const hr = Math.max(0, Math.min(rows.length, parseInt(headerRows, 10) || 0));
     if (!Number.isFinite(Number(afterIdx))) throw new EngineError('RANGE', `문단 번호가 잘못되었습니다: ${afterIdx}`);
     const at = Math.max(0, Math.min(Math.trunc(Number(afterIdx)), sec.bodyParas.length - 1));
-    const style = this._tableStyle();
+    // like(2026-11-20 — docs/MCP_REDESIGN_2026-11-16.md §20): 본보기 표를 사람·AI 가 고른다. 크기가 같으면 칸마다 그 표의 모양·열 폭을 그대로
+    const style = this._tableStyle(like, { rows: grid.length, cols: nCols });
     // 폭은 본보기 표 폭(본문 폭의 90~100% 일 때 — 표준서식 표 42,240), 아니면 본문 폭
     const textWidth = sectionTextWidth(sec);
     const width = style.width && style.width <= textWidth && style.width >= textWidth * 0.9 ? style.width : textWidth;
@@ -2554,6 +2583,70 @@ export class HwpxDoc {
     const own = [...this._ownPictures(sec, p), ...this._tableIndex(sec).tables.filter((t) => t.owner === p && !t.hidden), ...ownShapeAnchors(p), ...headerFooterAnchors(p)];
     const inOwn = (q) => { let r = q; while (r.parent && r.parent !== p) r = r.parent; return own.some((x) => x.start < r.start && r.end <= x.end); };
     return this._nestedWalk(sec, p).every(({ p: q }) => inOwn(q));
+  }
+
+  /**
+   * [hwpx-cowork] 다른 HWPX(source — 대개 이 문서에서 만든 빈 서식에 모델이 쓴 문서)의 본문 문단을 sectionIndex 의 afterIdx 문단 뒤에 넣는다
+   * (MCP v3 실험 op insert_document — 2026-11-20, docs/MCP_REDESIGN_2026-11-16.md §21). 긴 장·부록을 문서로 써서 통째로 넣는 길.
+   *  - 각 구역 첫 문단(구역 정의 hp:secPr 를 든 문단)은 구역·쪽 설정이라 넣지 않는다 — 그 문단에 글이 있으면 글만 같은 모양의 보통 문단으로
+   *  - 글자·문단 모양·스타일·테두리 번호는 이 문서의 같은 정의로(importFormattingRefs — 빈 서식은 이 문서 머리를 그대로 가지므로 대개 그대로)
+   *  - 개체(표·그림·도형)·누름틀 id 는 새로 매긴다(모델이 이 문서 사본의 표를 본떠 오면 id 가 겹친다), 그림 파일은 이 문서로(_importBinary)
+   *  - 줄 정보(hp:linesegarray)는 지운다(자리가 바뀌므로 한/글·편집기가 다시 잰다)
+   *  - 메모는 부호만 지우고 글은 남긴다(report.memos), 차트(부분 파일이 따로 있다)가 든 문단은 아직 받지 않는다
+   * → { count(넣은 본문 문단 수), report: { paragraphs, tables, figures, shapes, chars, memos? } }
+   */
+  insertDocumentAfter(sectionIndex, afterIdx, source) {
+    const sec = this.sections[sectionIndex];
+    if (!sec || !Number.isInteger(afterIdx) || afterIdx < 0 || afterIdx >= sec.bodyParas.length) throw new EngineError('RANGE', `끼워 넣을 자리가 본문 문단 범위 밖입니다: s${sectionIndex}/p${afterIdx}`);
+    if (typeof source.acceptAll === 'function' && source.changes().length) source.acceptAll();
+    // 메모는 검토 의견이지 넣을 글이 아니다 — 부호만 지우고 글은 남긴다(사본 'document' 의 문단을 본떠 오면 메모가 묻어 온다). 지운 수는 report.memos
+    let memos = 0;
+    for (const m of source.memos().filter((x) => !x.hidden)) { try { source.deleteMemo(m.id); memos += 1; } catch { /* 아래 검사가 남은 메모를 거절한다 */ } }
+    const parts = [];
+    for (const [si, s] of source.sections.entries()) {
+      for (const [bi, p] of s.bodyParas.entries()) {
+        const xml = s.xml.slice(p.start, p.end);
+        if (/<hp:secPr\b/.test(xml)) {
+          // 구역 정의 문단: 글이 있으면 글만(첫 글자 모양·문단 모양·스타일 그대로) — 쪽 설정·머리말·꼬리말·쪽 번호는 이 문서 것을 쓴다
+          const text = source.text(`s${si}/p${bi}`, 'final');
+          if (!text.trim()) continue;
+          const pa = (k) => (new RegExp(`\\s${k}="([^"]*)"`).exec(xml.slice(0, xml.indexOf('>'))) || [])[1] ?? '0';
+          const cp = (/<hp:run\b[^>]*\bcharPrIDRef="(\d+)"/.exec(xml) || [])[1] ?? '0';
+          parts.push(`<hp:p id="0" paraPrIDRef="${pa('paraPrIDRef')}" styleIDRef="${pa('styleIDRef')}" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${cp}"><hp:t>${inlineXml(text)}</hp:t></hp:run></hp:p>`);
+          continue;
+        }
+        parts.push(xml);
+      }
+    }
+    if (!parts.length) throw new EngineError('EMPTY', '끼워 넣을 본문 문단이 없습니다 — 빈 서식의 첫 문단(구역 정의) 뒤에 문단을 쓰세요');
+    let x = parts.join('');
+    if (/chartIDRef=/.test(x)) throw new EngineError('UNSUPPORTED', '차트가 든 문서는 아직 끼워 넣을 수 없습니다 — 차트는 그림(figure)으로 넣으세요');
+    if (/<hp:fieldBegin\b[^>]*\btype="MEMO"/.test(x)) throw new EngineError('UNSUPPORTED', '메모가 든 문단은 끼워 넣을 수 없습니다 — 메모를 빼고 다시 올리세요');
+    x = x.replace(/<hp:linesegarray>[\s\S]*?<\/hp:linesegarray>/g, '');
+    x = importFormattingRefs(this, source, x);
+    // 개체·누름틀·각주/미주 id 새로: 이 문서에서 쓰는 id·instid·instId 다음 번호부터(32비트 안 — 넘으면 1부터 빈 번호).
+    // 2026-11-20 검증: 각주·미주의 instId(대문자 I)도 겹치지 않게, 넣기를 거듭해 4e9 를 넘겨도 앞 번호와 겹치지 않게
+    const all = this.sections.map((s) => s.xml).join('');
+    const U32 = 4294967295;
+    const used = new Set([...all.matchAll(/\s(?:id|instid|instId)="(\d{1,10})"/g)].map((m) => Number(m[1])).filter((n) => n <= U32));
+    let cursor = Math.max(0, ...used);
+    const fresh = () => {
+      for (;;) { cursor = cursor >= U32 ? 1 : cursor + 1; if (!used.has(cursor)) { used.add(cursor); return cursor; } }
+    };
+    const fieldIds = new Map();
+    x = x.replace(/<hp:(tbl|pic|rect|line|ellipse|arc|polygon|curve|connectLine|container|equation|ole|textart)\b[^>]*>/g, (tag) => tag
+      .replace(/(\sid=")\d+(")/, (m, a, b) => `${a}${fresh()}${b}`).replace(/(\sinstid=")\d+(")/, (m, a, b) => `${a}${fresh()}${b}`));
+    x = x.replace(/<hp:(footNote|endNote)\b[^>]*>/g, (tag) => tag.replace(/(\sinstId=")\d+(")/, (m, a, b) => `${a}${fresh()}${b}`));
+    x = x.replace(/<hp:fieldBegin\b[^>]*>/g, (tag) => tag.replace(/(\sid=")(\d+)(")/, (m, a, old, b) => { const n = fresh(); fieldIds.set(old, n); return `${a}${n}${b}`; }));
+    x = x.replace(/(<hp:fieldEnd\b[^>]*\sbeginIDRef=")(\d+)(")/g, (m, a, old, b) => `${a}${fieldIds.get(old) ?? old}${b}`);
+    const bins = new Map();
+    x = x.replace(/binaryItemIDRef="([^"]+)"/g, (m, id) => { if (!bins.has(id)) bins.set(id, this._importBinary(source, id)); return `binaryItemIDRef="${bins.get(id)}"`; });
+    const pos = sec.bodyParas[afterIdx].end;
+    sec.load(sec.xml.slice(0, pos) + x + sec.xml.slice(pos));
+    const count = (re) => (x.match(re) || []).length;
+    // 첫 글(카드·영수증에서 무엇을 넣는지 알아보게 — 표 칸 글이 아닌 첫 본문 글 40자)
+    const first = parts.map((q) => q.replace(/<hp:tbl\b[\s\S]*<\/hp:tbl>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).find(Boolean) || '';
+    return { count: parts.length, report: { paragraphs: parts.length, tables: count(/<hp:tbl\b/g), figures: count(/<hp:pic\b/g), shapes: count(/<hp:(?:rect|line|ellipse|arc|polygon|curve|connectLine|container)\b/g), chars: [...x.replace(/<[^>]+>/g, '')].length, ...(memos ? { memos } : {}), ...(first ? { first: [...first].length > 40 ? `${[...first].slice(0, 40).join('')}…` : first } : {}) } };
   }
 
   /** source 의 그림 파일 binId 를 이 문서로 — 같은 id 에 같은 바이트가 있으면 그것, 아니면 새 항목(BinData·매니페스트) → 이 문서의 id */
@@ -3119,7 +3212,14 @@ export class HwpxDoc {
    * 점수: 번호 매긴 자료 표(numberingType TABLE — 번호 없는 배치용 표보다 앞) > 합친 칸 없음(자리마다 제 모양 칸이 있다) >
    * 4행·3열 이상(머리행·첫 본문 행·중간 행·끝 행 × 첫 열·가운데 열·끝 열이 다 있다) > 2행·2열 이상
    */
-  _tableModel() {
+  _tableModel(like = null) {
+    // [hwpx-cowork] 고른 본보기 표(like — 표 열쇠, 2026-11-20 §20). 없거나 쓸 수 없으면 아래 점수로 고른다
+    if (like) {
+      for (const sec of this.sections) {
+        const t = this._tableIndex(sec).tables.find((x) => x.key === like);
+        if (t && !t.hidden && t.cells.length && !t.cells.some((c) => c.row == null || !c.paras.length)) return { sec, t, picked: true };
+      }
+    }
     let best = null; let bestScore = -1;
     for (const sec of this.sections) {
       for (const t of this._tableIndex(sec).tables) {
@@ -3130,6 +3230,17 @@ export class HwpxDoc {
       }
     }
     return best;
+  }
+
+  /**
+   * [hwpx-cowork] 본보기 표(like)의 병합 칸 목록 — 새 표가 그 표와 행·열 수가 같을 때만(2026-11-20 §20). → ['r0c0:r0c5', …] | null(크기가 다르거나 표 없음)
+   * 표기는 read 의 병합 표기와 같다(server/mcp2/views.js)
+   */
+  tableMergesLike(like, nRows, nCols) {
+    const m = like ? this._tableModel(like) : null;
+    if (!m?.picked || m.t.rows !== nRows || m.t.cols !== nCols) return null;
+    const out = m.t.cells.filter((c) => c.rowSpan > 1 || c.colSpan > 1).map((c) => `r${c.row}c${c.col}:r${c.row + c.rowSpan - 1}c${c.col + c.colSpan - 1}`);
+    return out.length ? out : null;
   }
 
   /** 문서의 자동 번호 표 캡션 꼴(본보기 표 것, 없으면 문서 앞쪽 표 것) → captionModel 결과 | null */
@@ -3143,9 +3254,67 @@ export class HwpxDoc {
    * 새 표 모양: { tblAttrs, width(본보기 표 폭 | 없음), pos, outMargin, inMargin, para, caption, cell(r, c, nRows, nCols, headerRows, { numeric }) } — header 에 모양 항목을 더할 수 있다.
    * caption = { open(hp:caption 여는 태그), subList, prefix, suffix, autoNum, para({paraPr, styleId, charPr} | null) }
    */
-  _tableStyle() {
+  /**
+   * [hwpx-cowork] 칸 안 새 표 XML 을 만드는 함수(editTable 의 cell_paragraphs {table} — 2026-11-20 §22, engine/table-edit.js rebuildCell 이 부른다).
+   * 꼴은 한/글·편집기 엔진이 칸 안에 만든 표와 같게(vendor/rhwp create_table_in_cell_by_path_native — 한/글 2020 표본 #8262): 글자처럼 취급,
+   * 세로 기준 문단·가로 기준 단, 바깥 여백 283, 폭 = 칸 안쪽 폭 − 2×283(열은 고르게), 칸 안 여백 510/141, 세로 가운데, 줄 높이 = 141 + 글자 높이 + 141,
+   * 칸 문단 모양·글자 모양 = 넣을 자리 칸 문단의 것, 테두리 = 네 변 실선. spec.like(본보기 표 열쇠)가 있으면 그 표의 칸 모양을 빌린다(위치·여백은 칸 안 표 그대로).
+   * 머리행(header_rows)은 굵게. 캡션 없는 표라 번호 종류 '없음'(insertTableAfter 와 같은 까닭). merges 는 표 고치기 merge 로.
+   * h = 쓸 머리(미리 보기는 사본). → ({ spec:{rows, headerRows?, merges?, like?}, width, paraPr, styleId, charPr }) → { xml, rows, cols }
+   */
+  _cellTableFactory(h) {
+    const all = this.sections.map((s) => s.xml).join('');
+    const used = new Set();
+    let zOrder = Math.max(0, ...this.sections.flatMap((s) => [...s.xml.matchAll(/\bzOrder="(\d+)"/g)].map((m) => parseInt(m[1], 10)))) + 1;
+    const OUT = 283;
+    return ({ spec, width, paraPr, styleId, charPr }) => {
+      const rows = spec?.rows;
+      if (!Array.isArray(rows) || !rows.length || !rows.every(Array.isArray)) throw new EngineError('TABLE_ROWS', '칸 안 표 내용(rows: 문자열 2차원 배열)이 필요합니다');
+      const nCols = Math.max(...rows.map((r) => r.length));
+      if (nCols < 1 || rows.length > 200 || nCols > 30) throw new EngineError('TABLE_SIZE', `칸 안 표가 너무 크거나 열이 없습니다(${rows.length}×${nCols}, 최대 200×30)`);
+      const grid = rows.map((r) => Array.from({ length: nCols }, (_, c) => cellText(r[c])));
+      const hr = Math.max(0, Math.min(grid.length, parseInt(spec.headerRows ?? 0, 10) || 0));
+      // 열 폭은 고르게(한/글·편집기 엔진처럼 칸 안쪽 폭 − 2×바깥 여백을 열 수로 나눈 몫 — 표 폭 = 몫 × 열 수)
+      const content = Math.max(600, Math.floor((Math.round(width) - 2 * OUT) / nCols)) * nCols;
+      const inlinePos = '<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>';
+      const outMargin = `<hp:outMargin left="${OUT}" right="${OUT}" top="${OUT}" bottom="${OUT}"/>`;
+      let style;
+      if (spec.like) {
+        // 본보기 표의 칸 모양(테두리·글자·문단·높이) — _tableStyle 은 this.header 를 쓰므로 미리 보기 사본 머리로 잠시 바꾼다
+        const saved = this.header; this.header = h;
+        try { style = this._tableStyle(spec.like, { rows: grid.length, cols: nCols }); } finally { this.header = saved; }
+        style = { ...style, pos: inlinePos, outMargin };
+      } else {
+        const line = { type: 'SOLID', width: '0.12 mm', color: '#000000' };
+        const bf = h.borderFill({ left: line, right: line, top: line, bottom: line });
+        const height = 141 + h.charHeight(charPr) + 141;
+        const head = hr ? h.boldCharPr(charPr) : charPr;
+        const margin = '<hp:cellMargin left="510" right="510" top="141" bottom="141"/>';
+        style = {
+          colWidths: Array(nCols).fill(1), em: h.charHeight(charPr),
+          cell: (r) => ({ borderFill: bf, paraPr, styleId, charPr: r < hr ? head : charPr, height, hasMargin: 0, margin, vertAlign: 'CENTER' }),
+          pos: inlinePos, outMargin, inMargin: '<hp:inMargin left="510" right="510" top="141" bottom="141"/>',
+          tblAttrs: new Map([['id', '0'], ['zOrder', '0'], ['numberingType', 'NONE'], ['textWrap', 'TOP_AND_BOTTOM'], ['textFlow', 'BOTH_SIDES'], ['lock', '0'], ['dropcapstyle', 'None'],
+            ['pageBreak', 'CELL'], ['repeatHeader', '0'], ['rowCnt', '0'], ['colCnt', '0'], ['cellSpacing', '0'], ['borderFillIDRef', String(bf)], ['noAdjust', '0']]),
+        };
+      }
+      const id = uniqueNumberBy((n) => used.has(Number(n)) || idTaken(all, n, 'id') || idTaken(all, n, 'beginIDRef'));
+      used.add(id);
+      let xml = tableXml({ id, zOrder: zOrder++, rows: grid, headerRows: hr, width: content, style, textXml: inlineXml, numbering: 'NONE' });
+      // 글자처럼 취급 표는 쪽에서 나뉘지 않으므로 머리행 되풀이는 끈다(편집기 엔진이 칸 안에 만드는 표와 같게 — 머리행 표시는 칸의 header="1")
+      xml = xml.replace(/^(<hp:tbl\b[^>]*?\s)repeatHeader="1"/, '$1repeatHeader="0"');
+      const merges = Array.isArray(spec.merges) && spec.merges.length ? spec.merges : spec.like ? this.tableMergesLike(spec.like, grid.length, nCols) : null;
+      if (merges?.length) {
+        const mops = merges.map((s) => { const [r0, c0, r1, c1] = /r(\d+)c(\d+):r(\d+)c(\d+)/.exec(String(s)).slice(1).map(Number); return { op: 'merge', range: { row_from: r0, row_to: r1, col_from: c0, col_to: c1 } }; });
+        xml = editTableXml(xml, mops, { header: h }).xml;
+      }
+      return { xml, rows: grid.length, cols: nCols };
+    };
+  }
+
+  _tableStyle(like = null, shape = null) {
     const h = this.header;
-    const model = this._tableModel();
+    const model = this._tableModel(like);
     const cache = new Map();
     const capModel = this._captionModel(model);
     const capPara = (m) => {
@@ -3168,7 +3337,22 @@ export class HwpxDoc {
       const tblAttrs = new Map(t.attrs);
       const owner = t.owner; const run = owner.runs.find((x) => x.start < t.start && t.start < x.end) || owner.runs[0];
       const bodyCell = firstIn(range(sb, last), () => true) || t.cells[0];
+      // [hwpx-cowork] 고른 본보기(like)와 크기가 같으면(2026-11-20 §20) 칸마다 그 자리 칸(합친 칸이면 그 칸)의 모양을 그대로 — 단위·주석 행처럼 행 종류로는
+      // 나눌 수 없는 꼴까지 같게. 열 폭은 열 수가 같으면 본보기 비율대로(한 칸짜리 칸의 폭, 없으면 합친 칸 폭을 나눔)
+      const exact = !!(model.picked && shape && shape.rows === t.rows && shape.cols === t.cols);
+      const cover = (r, c) => t.cells.find((x) => r >= x.row && r < x.row + x.rowSpan && c >= x.col && c < x.col + x.colSpan) || null;
+      let colWidths = null;
+      if (model.picked && shape && shape.cols === C) {
+        colWidths = range(0, C - 1).map((c) => {
+          const one = t.cells.find((x) => x.col === c && x.colSpan === 1 && x.width > 0);
+          if (one) return one.width;
+          const span = t.cells.find((x) => c >= x.col && c < x.col + x.colSpan && x.width > 0);
+          return span ? Math.round(span.width / span.colSpan) : 0;
+        });
+        if (colWidths.some((w) => !(w > 0))) colWidths = null;
+      }
       const style = {
+        colWidths,
         tblAttrs,
         em: h.charHeight(textRunCharPr(bodyCell.paras[0])),
         width: /\bwidthRelTo="ABSOLUTE"/.test(t.parts['hp:sz'] || '') ? parseInt((/\bwidth="(\d+)"/.exec(t.parts['hp:sz']) || [])[1], 10) || null : null,
@@ -3182,6 +3366,19 @@ export class HwpxDoc {
         // 그런 칸이 없으면(첫 열이 합친 칸 등) 같은 행 종류의 다른 칸 테두리에서 왼쪽·오른쪽 선만 그 변 자리 칸의 것으로 바꾼다 —
         // 첫 열 왼쪽·끝 열 오른쪽 선이 없는 표에서 가운데 칸 테두리를 그대로 빌리면 표 바깥에 세로선이 생긴다
         cell: (r, c, nRows, nCols, hr, { numeric = false } = {}) => {
+          if (exact) {
+            const x = cover(r, c);
+            if (x?.paras.length) {
+              const key = `x:${x.row},${x.col}`;
+              if (cache.has(key)) return cache.get(key);
+              const sp = x.paras[0];
+              const out = { borderFill: x.attrs.get('borderFillIDRef') || '1', hasMargin: x.attrs.get('hasMargin') || '0',
+                paraPr: attrOf(sec.xml, sp, 'paraPrIDRef'), styleId: attrOf(sec.xml, sp, 'styleIDRef'), charPr: textRunCharPr(sp),
+                vertAlign: x.subListAttrs?.get('vertAlign') || 'CENTER', margin: x.parts['hp:cellMargin'] || DEFAULT_CELL_MARGIN,
+                height: Math.max(500, Math.round((x.height || 1282) / (x.rowSpan || 1))) };
+              cache.set(key, out); return out;
+            }
+          }
           const isHead = r < hr;
           const grp = isHead ? `h${Math.min(r, Math.max(0, srcHead - 1))}` : (r === hr ? 'b1' : r === nRows - 1 ? 'bl' : 'bn');
           const outL = c === 0; const outR = c === nCols - 1;
@@ -3567,7 +3764,7 @@ function captionFormat(sec, capP, objStart, numType) {
  */
 export async function diffDocs(baseDoc, headDoc, { anchorFirst = false, yieldEvery = 0 } = {}) {
   const base = baseDoc instanceof HwpxDoc ? baseDoc : await HwpxDoc.load(baseDoc);
-  const head = headDoc instanceof HwpxDoc ? headDoc : await HwpxDoc.load(headDoc);
+  const head = (headDoc instanceof HwpxDoc ? headDoc : await HwpxDoc.load(headDoc)).inFormattingUnitsOf(base);
   // [hwpx-cowork] yieldEvery(ms): 견주는 동안 그만큼마다 이벤트 루프에 차례를 내준다(서버가 다른 요청·생존 신호를 처리하게 — 2026-11-10:
   // 글상자 4천여 개 문서의 밀어 넣기 한 번이 1초 넘게 서버를 막았다). 두 문서를 그사이 아무도 고치지 않을 때만(문서 큐 안 · 사본) 준다
   const slice = yieldEvery > 0 ? timeSlicer(yieldEvery) : null;
@@ -3738,7 +3935,15 @@ export async function diffDocs(baseDoc, headDoc, { anchorFirst = false, yieldEve
           if ((h.kind === 'table' || h.kind === 'object') && !head.plainOrObjectParagraph(h.ref)) warn(at, h.kind === 'table' ? 'table-structure' : 'object', '글상자·도형이 든 문단 추가는 반영되지 않습니다(그림·표 문단은 반영됨)');
           else {
             // 글 문단·그림 문단: 문단을 넣고(글·서식) 그 문단의 그림·부호를 옮긴다(objects — 반영 쪽이 headRef 로 copyObjectsFrom)
-            const op = head.objectPrint(h.ref);
+            // 맨 앞에 문단을 넣으면 서버가 기존 구역 정의를 새 첫 문단으로 옮긴다.
+            // 붙여넣기가 그 설정까지 바꿨으면 옮긴 자리에서 갱신한다. 첫 문단의
+            // secPr는 일반 개체 지문에서 제외되므로 그대로 두면 용지·쪽 테두리가 사라진다.
+            let op = head.objectPrint(h.ref);
+            if (o.j === 0 && bs.length) {
+              const oldSection = base._objectInfo(bs[0].ref).codes.find(c => c.secDef);
+              const newSection = head._objectInfo(h.ref).codes.find(c => c.secDef);
+              if (oldSection && newSection && oldSection.key !== newSection.key) op = head.objectPrintFull(h.ref);
+            }
             hunks.push({ hid: '', type: 'insert', ref: at, afterRef, baseText: '', newText: h.text, cell: null, ...formatInfo(null, h.ref), ...(op ? { objects: true, newObjectPrint: op, objectPrintVersion: OBJECT_PRINT_VERSION } : {}) });
             extras(h, at, '추가한');
           }

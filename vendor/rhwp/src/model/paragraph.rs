@@ -1325,6 +1325,15 @@ impl Paragraph {
                 range.control_idx += 1;
             }
         }
+        // [hwpx-cowork] #9053 한/글 2022: 제어 문자만 있는 문단의 한 슬롯은
+        // 8 UTF-16 단위다. 그림 삽입 뒤에도 다음 표는 원래 줄에 속해야 한다.
+        if self.text.is_empty() && self.char_offsets.is_empty() {
+            let stream_pos = u32::try_from(control_idx)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(CTRL_CHAR_CODE_UNITS);
+            self.shift_position_metadata_for_stream_insertion(stream_pos, CTRL_CHAR_CODE_UNITS);
+            return;
+        }
         self.shift_for_control_slot_insert(char_offset);
     }
 
@@ -2186,6 +2195,22 @@ impl Paragraph {
             updated_offsets.push(offset - utf16_delta);
         }
         self.char_offsets = updated_offsets;
+
+        // [hwpx-cowork] #8899 한/글 2022: 원본부터 같은 위치의 글자 모양은
+        // 마지막 참조가 유효하다. 삭제로 새로 생기는 중복을 정리하기 전에
+        // 원래의 유효 모양과 맨 앞의 암묵적 서식 구간을 보존한다.
+        if let [first, second, ..] = self.char_shapes.as_mut_slice() {
+            if first.start_pos > 0 && first.start_pos == second.start_pos {
+                first.start_pos = 0;
+            }
+        }
+        self.char_shapes.dedup_by(|later, kept| {
+            let same = later.start_pos == kept.start_pos;
+            if same {
+                kept.char_shape_id = later.char_shape_id;
+            }
+            same
+        });
 
         // 3. char_shapes: 삭제 범위 이후 → utf16_delta만큼 감소
         for cs in &mut self.char_shapes {

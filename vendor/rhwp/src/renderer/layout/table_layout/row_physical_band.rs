@@ -492,6 +492,26 @@ impl LayoutEngine {
         trailing + self.continued_cut_nested_atom_tail(cell, &units, start, end, styles)
     }
 
+    /// [hwpx-cowork] #9060: confirm the same saved opening fragment before
+    /// deciding whether to defer the whole table and when cutting its row.
+    pub(crate) fn first_row_before_saved_restart_fits(
+        &self,
+        table: &Table,
+        available: f64,
+        padding: f64,
+        styles: &ResolvedStyleSet,
+    ) -> bool {
+        if available <= 0.0 || available < self.reflow_row_opening_cut_height(table, 0, styles).unwrap_or(0.0) {
+            return false;
+        }
+        let (cut, _) = self.advance_row_cut_for_physical_band(table, 0, &[], available, styles);
+        cut.hit_hard_break
+            && !cut.fully_consumed
+            && cut.consumed_height > 0.0
+            && cut.end_cut.iter().any(|&units| units > 0)
+            && self.row_content_fits_page_rest(cut.consumed_height + padding, available)
+    }
+
     /// 실제 칸별 안여백과 같은 컷의 내용 점유로 물리 밴드 안의 유닛을 고른다.
     /// 안여백이 같아도 논리 전진 예산으로 되돌아가지 않는다.
     pub(crate) fn advance_row_cut_for_physical_band(

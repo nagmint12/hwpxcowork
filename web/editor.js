@@ -958,7 +958,7 @@ export function mountEditor(el, d) {
       if (paraVersion && paraVersion >= (Number(s.paraVersion) || 0)) { s.paragraphs = paragraphs; s.paraVersion = paraVersion; }
       // 내 수정본이 옛 기준이면 칩에 '최신 반영 필요'(서버가 센 뒤처진 버전 수), 작업본이면 기준 = 지금
       const behind = source === 'draft' ? Math.max(0, Number(mine?.cr?.behind) || 0) : 0;
-      Object.assign(s.draft, { ...emptyDraft(), tutorialRestored: false, baseVersion: version, behind, unsupported: mine?.cr?.unsupported || [], ...draftFields(draftToCur(st)) });
+      Object.assign(s.draft, { ...emptyDraft(), tutorialRestored: false, fileReplaced: false, baseVersion: version, behind, unsupported: mine?.cr?.unsupported || [], ...draftFields(draftToCur(st)) });
       if (next !== 'live') s.live.error = '';
       h.error = ''; h.loading = false; h.ready = true;
       previewOpenActive = false; h.previewReady = false; applyInert();
@@ -1096,6 +1096,7 @@ export function mountEditor(el, d) {
    */
   async function saveNow(o = {}) {
     if (s.draft.tutorialRestored) throw Object.assign(new Error(s.draft.error), { code: 'TUTORIAL_RESTORED' });
+    if (s.draft.fileReplaced) throw Object.assign(new Error(s.draft.error), { code: 'FILE_REPLACED' });
     if (mode === 'live') {
       clearTimeout(pushTimer); pushTimer = null;
       if (pushing) { try { await pushing; } catch { /* 칩 */ } }
@@ -1253,7 +1254,7 @@ export function mountEditor(el, d) {
 
   /** 밀어 넣기 예약: 쉼 ms(기본 800ms) — 쉬지 않고 쳐도 첫 입력 뒤 3초 안에 한 번. o.exact: 그 시간 그대로(실패 뒤 다시 — 5·10·15초) */
   function schedulePush(ms = PUSH_IDLE_MS, o = {}) {
-    if (destroyed || mode !== 'live' || s.draft.tutorialRestored) return;
+    if (destroyed || mode !== 'live' || reopenRequired()) return;
     const now = Date.now();
     if (!pushFirstAt) pushFirstAt = now;
     clearTimeout(pushTimer);
@@ -1268,7 +1269,7 @@ export function mountEditor(el, d) {
    * '보내지 못함'(5·10·15초 뒤 저절로). 던지지 않는다 → 응답 | null
    */
   async function pushOnce() {
-    if (mode !== 'live' || !cw || !studio || destroyed || !h.ready || s.readOnly || s.draft.tutorialRestored) return null;
+    if (mode !== 'live' || !cw || !studio || destroyed || !h.ready || s.readOnly || reopenRequired()) return null;
     if (pushing) { pushAgain = true; return pushing; }
     if (lastSeq <= savedSeq) return null;
     clearTimeout(pushTimer); pushTimer = null; pushFirstAt = 0;
@@ -1335,11 +1336,15 @@ export function mountEditor(el, d) {
   function onPushError(e) {
     const code = e?.code;
     if (destroyed) return null;
-    if (code === 'TUTORIAL_RESTORED' && e?.data?.reload) {
+    const fileReplaced = code === 'FILE_REPLACED';
+    if ((code === 'TUTORIAL_RESTORED' || fileReplaced) && e?.data?.reload) {
       clearTimeout(pushTimer); pushTimer = null; pushFirstAt = 0; pushAgain = false;
       clearTimeout(syncTimer); syncTimer = null; syncWant = null;
-      const message = '다른 창에서 이 연습 문서를 복구했습니다. 이 창의 글은 자동 저장하지 않습니다. [다시 열기]로 복구한 문서를 여세요.';
-      Object.assign(s.draft, { tutorialRestored: true, stale: true, rebased: false, elsewhere: '연습 문서 복구됨', error: message });
+      const message = fileReplaced
+        ? '문서가 이력의 파일로 교체되어 이 창의 자동 저장이 멈췄습니다. [다시 열기]로 최신 문서를 여세요.'
+        : '다른 창에서 이 연습 문서를 복구했습니다. 이 창의 글은 자동 저장하지 않습니다. [다시 열기]로 복구한 문서를 여세요.';
+      Object.assign(s.draft, { tutorialRestored: !fileReplaced, fileReplaced, stale: true, rebased: false,
+        elsewhere: fileReplaced ? '문서 파일 교체됨' : '연습 문서 복구됨', error: message });
       s.live.error = message;
       toast(message, { kind: 'warn', ms: 10000 });
       return null;
@@ -1395,9 +1400,10 @@ export function mountEditor(el, d) {
   function storeParas(version, paragraphs) {
     if (version >= (Number(s.paraVersion) || 0)) { s.paragraphs = paragraphs; s.paraVersion = version; }
   }
+  const reopenRequired = () => s.draft.tutorialRestored || s.draft.fileReplaced;
   /** 맞춤 대기에 더한다(남의 고침·섞인 밀어 넣기). by·refs = 고친 사람·그 자리(지금 기준 ref — 밑줄 색), force = 판을 몰라도 확인 */
   function wantSync({ version = 0, by = null, refs = [], force = false, formatting = false } = {}) {
-    if (mode === 'review' || destroyed || s.draft.tutorialRestored) return;
+    if (mode === 'review' || destroyed || reopenRequired()) return;
     if (!syncWant) syncWant = { version: 0, since: Date.now(), by: new Map(), last: null, force: false };
     syncWant.version = Math.max(syncWant.version, Number(version) || 0);
     if (force) syncWant.force = true;
@@ -1436,7 +1442,7 @@ export function mountEditor(el, d) {
   }
   /** 맞춤 대기를 되돌려 둔다(그새 쳤다 등) — 처음 대기 시각(8초 규칙)은 지킨다 */
   function requeue(w, delay) {
-    if (destroyed || mode === 'review') return;
+    if (destroyed || mode === 'review' || reopenRequired()) return;
     if (!syncWant) syncWant = w;
     else {
       syncWant.version = Math.max(syncWant.version, w.version); syncWant.since = Math.min(syncWant.since, w.since); syncWant.force ||= w.force;

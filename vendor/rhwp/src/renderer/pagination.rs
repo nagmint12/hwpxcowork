@@ -1661,7 +1661,8 @@ impl PageItem {
     }
 
     /// 두 항목이 구조적으로 동일한지 비교 (para_index offset 적용).
-    fn matches_with_offset(&self, other: &PageItem, offset: i32) -> bool {
+    // [hwpx-cowork] 2026-11-20 뒤쪽 미루기의 쪽 시작 맞춤에서도 쓴다.
+    pub(crate) fn matches_with_offset(&self, other: &PageItem, offset: i32) -> bool {
         let adj = |pi: usize| (pi as i64 + offset as i64) as usize;
         match (self, other) {
             (
@@ -2008,6 +2009,208 @@ impl PaginationResult {
             new_hidden.insert((pi as i64 + offset as i64).max(0) as usize);
         }
         self.hidden_empty_paras = new_hidden;
+    }
+}
+
+impl PageContent {
+    /// [hwpx-cowork] 2026-11-20 뒤쪽 미루기(`typeset::section::checkpoints`)의 잠정 쪽: 지난 조판의 쪽을 문단 수
+    /// 차이만큼 문단 번호를 옮겨 넘겨받는다(복제하지 않고 옮긴다). 이 쪽의 모든 문단은 바뀐 자리 뒤에 있으므로
+    /// 문단 번호가 든 값을 모두 같은 만큼 옮긴다. 필드를 `..` 없이 풀어 써서 쪽 구조에 필드가 늘면 여기서
+    /// 컴파일이 멈춘다.
+    pub(crate) fn into_shifted(self, offset: i32) -> PageContent {
+        let shift = move |pi: usize| (pi as i64 + offset as i64).max(0) as usize;
+        let PageContent {
+            page_index,
+            page_number,
+            section_index,
+            layout,
+            column_contents,
+            active_header,
+            active_footer,
+            page_number_restarted,
+            page_number_pos,
+            page_hide,
+            footnotes,
+            active_master_page,
+            extra_master_pages,
+            ladder_band_tables,
+        } = self;
+        let column_contents = column_contents
+            .into_iter()
+            .map(|column| {
+                let ColumnContent {
+                    paragraph_origins,
+                    computed_paragraphs,
+                    host_compositions,
+                    stored_paragraph_flow_ends,
+                    stored_column_top_spacings,
+                    paragraph_float_placements,
+                    float_pushed_line_spacings,
+                    page_band_flow_starts,
+                    inline_flow_plans,
+                    inline_placements,
+                    column_index,
+                    start_height,
+                    endnote_flow,
+                    items,
+                    zone_layout,
+                    zone_y_offset,
+                    wrap_around_paras,
+                    used_height,
+                    wrap_anchors,
+                    overlay_continuations,
+                    overlay_cuts,
+                } = column;
+                ColumnContent {
+                    paragraph_origins: paragraph_origins
+                        .into_iter()
+                        .map(|(owner, origin)| {
+                            (shift(owner), ParagraphOrigin { paragraph_index: shift(origin.paragraph_index), ..origin })
+                        })
+                        .collect(),
+                    computed_paragraphs: computed_paragraphs
+                        .into_iter()
+                        .map(|(owner, comp)| (shift(owner), comp))
+                        .collect(),
+                    host_compositions: host_compositions
+                        .into_iter()
+                        .map(|(owner, comp)| (shift(owner), comp))
+                        .collect(),
+                    stored_paragraph_flow_ends: stored_paragraph_flow_ends
+                        .into_iter()
+                        .map(|(pi, end)| (shift(pi), end))
+                        .collect(),
+                    stored_column_top_spacings: stored_column_top_spacings
+                        .into_iter()
+                        .map(|(pi, spacing)| (shift(pi), spacing))
+                        .collect(),
+                    paragraph_float_placements: paragraph_float_placements
+                        .into_iter()
+                        .map(|((pi, ci), placement)| ((shift(pi), ci), placement))
+                        .collect(),
+                    float_pushed_line_spacings: float_pushed_line_spacings
+                        .into_iter()
+                        .map(|(pi, spacing)| (shift(pi), spacing))
+                        .collect(),
+                    page_band_flow_starts: page_band_flow_starts
+                        .into_iter()
+                        .map(|(pi, start)| (shift(pi), start))
+                        .collect(),
+                    inline_flow_plans: inline_flow_plans
+                        .into_iter()
+                        .map(|(pi, plan)| (shift(pi), plan))
+                        .collect(),
+                    inline_placements: inline_placements
+                        .into_iter()
+                        .map(|((pi, ci), placement)| ((shift(pi), ci), placement))
+                        .collect(),
+                    column_index,
+                    start_height,
+                    endnote_flow,
+                    items: items.iter().map(|item| item.with_offset(offset)).collect(),
+                    zone_layout,
+                    zone_y_offset,
+                    wrap_around_paras: wrap_around_paras
+                        .into_iter()
+                        .map(|w| WrapAroundPara {
+                            para_index: shift(w.para_index),
+                            table_para_index: shift(w.table_para_index),
+                            ..w
+                        })
+                        .collect(),
+                    used_height,
+                    wrap_anchors: wrap_anchors
+                        .into_iter()
+                        .map(|(pi, anchor)| {
+                            (shift(pi), WrapAnchorRef { anchor_para_index: shift(anchor.anchor_para_index), ..anchor })
+                        })
+                        .collect(),
+                    overlay_continuations: overlay_continuations
+                        .into_iter()
+                        .map(|c| OverlayContinuation { para_index: shift(c.para_index), ..c })
+                        .collect(),
+                    overlay_cuts: overlay_cuts
+                        .into_iter()
+                        .map(|(pi, ci, cut)| (shift(pi), ci, cut))
+                        .collect(),
+                }
+            })
+            .collect();
+        let footnotes = footnotes
+            .into_iter()
+            .map(|f| {
+                let source = match f.source {
+                    FootnoteSource::Body { para_index, control_index } => {
+                        FootnoteSource::Body { para_index: shift(para_index), control_index }
+                    }
+                    FootnoteSource::TableCell {
+                        para_index,
+                        table_control_index,
+                        cell_index,
+                        cell_para_index,
+                        cell_control_index,
+                    } => FootnoteSource::TableCell {
+                        para_index: shift(para_index),
+                        table_control_index,
+                        cell_index,
+                        cell_para_index,
+                        cell_control_index,
+                    },
+                    FootnoteSource::NestedTableCell { para_index, table_control_index, cell_path } => {
+                        FootnoteSource::NestedTableCell { para_index: shift(para_index), table_control_index, cell_path }
+                    }
+                    FootnoteSource::ShapeTextBox { para_index, shape_control_index, tb_para_index, tb_control_index } => {
+                        FootnoteSource::ShapeTextBox {
+                            para_index: shift(para_index),
+                            shape_control_index,
+                            tb_para_index,
+                            tb_control_index,
+                        }
+                    }
+                };
+                FootnoteRef { source, ..f }
+            })
+            .collect();
+        // 머리말·꼬리말은 다시 고르므로(`finalize_pages`·구역 후처리) 문단 번호만 옮겨 둔다.
+        let shift_hf =
+            |hf: Option<HeaderFooterRef>| hf.map(|hf| HeaderFooterRef { para_index: shift(hf.para_index), ..hf });
+        PageContent {
+            page_index,
+            page_number,
+            section_index,
+            layout,
+            column_contents,
+            active_header: shift_hf(active_header),
+            active_footer: shift_hf(active_footer),
+            page_number_restarted,
+            page_number_pos,
+            page_hide,
+            footnotes,
+            active_master_page,
+            extra_master_pages,
+            ladder_band_tables: ladder_band_tables.into_iter().map(|(pi, ci)| (shift(pi), ci)).collect(),
+        }
+    }
+}
+
+impl PaginationResult {
+    /// [hwpx-cowork] 2026-11-20 빈 결과(뒤쪽 미루기에 지난 결과를 넘겨줄 때 자리에 둔다).
+    pub(crate) fn empty() -> Self {
+        PaginationResult {
+            pages: Vec::new(),
+            wrap_around_paras: Vec::new(),
+            hidden_empty_paras: std::collections::HashSet::new(),
+            pre_emitted_host_paras: std::collections::HashSet::new(),
+            pre_emitted_host_heights: std::collections::HashMap::new(),
+            pre_emitted_host_content_heights: std::collections::HashMap::new(),
+            endnotes: Vec::new(),
+            endnote_paragraphs: Vec::new(),
+            endnote_para_sources: Vec::new(),
+            endnote_measured_tables: Vec::new(),
+            endnote_between_notes_hu: 0,
+            endnote_separator_above_hu: 0,
+            endnote_separator_below_hu: 0,
+        }
     }
 }
 

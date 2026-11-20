@@ -424,20 +424,19 @@ try {
   ok(ms4.milestone.v === 4 && [...ms4.milestone.note].length === 200, '버전 메모는 200자까지');
   const vRs = (await A(DC)).version;
   const rs1 = await ADM(`${DC}/versions/1/restore`, { method: 'POST' });
-  ok(rs1.version === vRs + 1 && rs1.v === 5 && !rs1.unchanged && rs1.report, `이정표 v1(기록 1) 복구 → { version ${rs1.version}, v ${rs1.v}, report }`);
-  const memosC = await A(`${DC}/memos`);
-  const rsMemo = memosC.find((m) => m.text.startsWith('[복구] v1('));
-  ok(rsMemo && rsMemo.text.startsWith(`[복구] v1(${fmtTime(sC0.milestone.at)}) 내용으로 되돌림 — ${nameAdm}\n바뀐 문단 `), `복구 메모(이정표 꼴): ${rsMemo?.text.replace(/\n/g, ' / ')}`);
+  ok(rs1.version === vRs + 1 && rs1.v === 5, `이정표 v1(기록 1) 파일로 교체 → 기록 ${rs1.version}, 버전 v${rs1.v}`);
+  const currentFile = () => A(`${DC}/file?kind=tracked`);
+  const recordFile = n => A(`${DC}/file?kind=version&n=${n}`);
+  ok((await currentFile()).equals(await recordFile(1)), '교체 뒤 파일은 v1과 바이트가 같다');
   hC = await A(`${DC}/history`);
-  ok(hC.milestones.at(-1).kind === 'restore' && hC.milestones.at(-1).note === 'v1 내용으로 복구' && hC.versions.find((x) => x.n === rs1.version)?.note === 'v1 내용으로 복구', '이정표 restore 「v1 내용으로 복구」(기록 note 도 — 기록 번호는 내지 않음)');
+  ok(hC.milestones.at(-1).kind === 'restore' && hC.milestones.at(-1).note === 'v1 파일로 교체' && hC.versions.find((x) => x.n === rs1.version)?.note === 'v1 파일로 교체', '버전과 기록의 메모 「v1 파일로 교체」');
   const wsRs = await wsC.waitFor((m) => m.type === 'doc' && m.action === 'changed' && m.restore === 1);
   ok(wsRs.v === 5 && !!(await wsC.waitFor((m) => m.type === 'doc' && m.action === 'milestone' && m.kind === 'restore')), 'WS doc changed(restore) 에 v · doc milestone(restore)');
   const n3 = hC.versions.find((x) => x.n === 3);
   const rs2 = await ADM(`${DC}/versions/3/restore`, { method: 'POST' });
-  const rsMemo2 = (await A(`${DC}/memos`)).find((m) => m.text.startsWith(`[복구] ${fmtTime(n3.at)} 기록 내용으로`));
   hC = await A(`${DC}/history`);
-  ok(rs2.v === 6 && rsMemo2 && rsMemo2.text.startsWith(`[복구] ${fmtTime(n3.at)} 기록 내용으로 되돌림 — ${nameAdm}\n바뀐 문단 `) && hC.milestones.at(-1).note === `${fmtTime(n3.at)} 기록으로 복구`,
-    `이정표 아닌 기록(n3) 복구 → v6, 메모 「${rsMemo2?.text.split('\n')[0]}」 · 이정표 「${hC.milestones.at(-1).note}」`);
+  ok(rs2.v === 6 && (await currentFile()).equals(await recordFile(3)) && hC.milestones.at(-1).note === `${fmtTime(n3.at)} 기록 파일로 교체`,
+    `이정표 아닌 기록(n3) 파일로 교체 → v6, 이정표 「${hC.milestones.at(-1).note}」`);
   const rsSame = await ADM(`${DC}/versions/3/restore`, { method: 'POST' });
   ok(rsSame.unchanged === true && !('v' in rsSame) && (await A(`${DC}/history`)).milestones.length === hC.milestones.length, '바뀐 것 없는 복구 → unchanged, v 없음(버전 안 오름)');
   const { doc: wU, version: vU } = await working(ADM, dC.id);

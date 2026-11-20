@@ -762,7 +762,7 @@ fn serialize_fill<W: std::io::Write>(
             if let Some(ref solid) = fill.solid {
                 w.write_color_ref(solid.background_color)?;
                 w.write_color_ref(solid.pattern_color)?;
-                w.write_i32(solid.pattern_type)?;
+                w.write_i32(solid.pattern_for_hwp5())?;
             }
             // 추가 채우기 속성: size(u32) = 0, 이어서 미확인 바이트로 alpha(u8).
             // hwplib 및 parse_fill(additional_size 만큼 skip 후 종류별 1바이트를

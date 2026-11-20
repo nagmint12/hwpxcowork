@@ -102,6 +102,11 @@ pub(crate) fn recompose_stored_lines_in_frame_with_known_square_band_with_storag
         } else {
             None
         };
+        // [hwpx-cowork] 2026-11-20 사본의 표(줄만 비운 깊은 사본)도 원본 표의 측정 결과를 쓴다
+        // (`inline_table_frame::alias_reflow_tables` — 이 guard 는 `fresh_body` 보다 먼저 사라진다).
+        let _reflow_table_alias = fresh_body
+            .as_ref()
+            .map(|body| alias_reflow_tables(para, body));
         let para = fresh_body.as_ref().unwrap_or(para);
         // A degenerate box, or controls with their own layout owner, means there is
         // no frame to build. The composition stands as it is — there is no second

@@ -245,6 +245,38 @@ impl TypesetEngine {
                 };
                 Some(hwpunit_to_px(local, self.dpi))
             });
+            // [hwpx-cowork] #9060: defer only if the actual opening cut
+            // cannot fit. Equal zero origins can be authentic when a later
+            // saved line advances on that restarted page.
+            let uses_saved_opening = table.layout_page_break()
+                == crate::model::table::TablePageBreak::RowBreak
+                && mt.is_some()
+                && (st.profile.hwpx_stored_layout() || st.profile.hwp5_stored_pagination_layout())
+                && table.cells.iter().filter(|cell| cell.row == 0 && cell.row_span == 1)
+                    .flat_map(|cell| &cell.paragraphs)
+                    .any(|paragraph| !paragraph.stored_text_partition_is_dirty()
+                        && !paragraph.cell_format_vpos_dirty
+                        && paragraph.line_segs.windows(2).any(|lines| {
+                            lines[0].vertical_pos >= 0 && lines[1].vertical_pos == 0
+                                && lines[1].text_start > lines[0].text_start
+                                && !is_synthetic_line_seg(&lines[0])
+                                && !is_synthetic_line_seg(&lines[1])
+                        }));
+            let saved_opening_fits = uses_saved_opening && mt.is_some_and(|measured| {
+                let layout_engine = crate::renderer::layout::LayoutEngine::new(self.dpi);
+                self.prime_section_cell_context(&layout_engine);
+                layout_engine.set_layout_profile(st.profile);
+                layout_engine.prime_column_layout_env(&st.layout);
+                layout_engine.set_render_normalization_overlay(self.render_normalization.clone());
+                layout_engine.set_cell_compose_memo(self.cell_compose_memo.clone());
+                layout_engine.remember_stored_frame_rows(table, &measured.row_heights);
+                let start = stored_host_y.unwrap_or(para_start_height + fmt.spacing_before)
+                    + hwpunit_to_px(signed_hwpunit(table.common.vertical_offset), self.dpi)
+                    + hwpunit_to_px(i32::from(table.outer_margin_top), self.dpi);
+                layout_engine.first_row_before_saved_restart_fits(
+                    table, st.available_height() - start, measured.max_padding_for_row(0), styles,
+                )
+            });
             if let Some(placement) =
                 crate::renderer::float_placement::computed_table_next_page_placement(
                     para,
@@ -300,6 +332,7 @@ impl TypesetEngine {
                     }),
                     self.dpi,
                 )
+                .filter(|_| !saved_opening_fits)
             {
                 if self.pre_emit_deferred_float_host_lines(st, para_idx, para, composed_all, styles) {
                     st.defer_computed_frame(crate::renderer::typeset::DeferredStoredFrameControl {
@@ -1177,6 +1210,73 @@ impl TypesetEngine {
             // 내용이 소실된다.
             && table_total <= declared_object_total * SINGLE_ROW_DECLARED_TRUST_MAX_RATIO
             && st.current_height + declared_object_total <= available;
+
+        // The emitted inline line already advanced the cursor. Fit its
+        // sibling float from that line's original pen and reserve only the
+        // float's own outside margins. Use the accepted frame for paint too.
+        if declared_empty_para_float_total.is_some()
+            && st.col_count == 1
+            && st.profile.hwp5_stored_pagination_layout()
+            && !ft.strict_following_plain_text_fit
+            && ft.table_footnotes.is_empty()
+            && table.caption.is_none()
+            && table.common.flow_with_text
+            && table.common.vert_align == crate::model::shape::VertAlign::Top
+            && table.outer_margin_top >= 0
+            && table.outer_margin_bottom >= 0
+            && !table.common.allow_overlap
+            && !self.render_normalization.table_text_reflowed(table)
+            && (ft.effective_height - hwpunit_to_px(signed_hwpunit(table.common.height), self.dpi))
+                .abs()
+                <= self.dpi / 7200.0
+        {
+            if let [PageItem::Table {
+                para_index,
+                control_index,
+            }] = st.current_items.as_slice()
+            {
+                let origin = (*para_index == para_idx && *control_index != ctrl_idx)
+                    .then(|| st.inline_placements.get(&(*para_index, *control_index)))
+                    .flatten()
+                    .map(|inline| inline.y);
+                if let Some(frame) =
+                    crate::renderer::float_placement::ParagraphFloatPlacement::from_stored_inline_host(
+                        para,
+                        table,
+                        origin,
+                        ft.effective_height,
+                        hwpunit_to_px(i32::from(table.outer_margin_top), self.dpi),
+                        hwpunit_to_px(i32::from(table.outer_margin_bottom), self.dpi),
+                        self.dpi,
+                    )
+                    .filter(|frame| {
+                        frame.table_top >= st.current_height && frame.occupied_bottom <= available
+                    })
+                {
+                    st.record_paragraph_float_placement((para_idx, ctrl_idx), frame);
+                    self.place_table_with_text(
+                        st,
+                        para_idx,
+                        ctrl_idx,
+                        para,
+                        table,
+                        fmt,
+                        frame.anchor_y,
+                        frame.occupied_bottom - st.current_height,
+                        is_first_placed,
+                        is_last_placed,
+                        ft.strict_following_plain_text_fit,
+                        styles,
+                    );
+                    // The paragraph's inline height cap must retain the body
+                    // reservation that the accepted title line also anchors.
+                    st.record_inline_flow_bottom(
+                        st.inline_box_flow_bottom.max(frame.occupied_bottom),
+                    );
+                    return None;
+                }
+            }
+        }
 
         let mut source_anchor_splits_here = false;
         if let Some(declared_total) = declared_empty_para_float_total {

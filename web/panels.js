@@ -9,6 +9,7 @@ import {
 import { ReviewCard, ReviewRail, reviewItems, anchorIndex, itemForAnn, syncActiveDraft, ensureCollabCss } from './rail.js';
 import { CrTab, CrList, CrDetail, CrSubmitDialog, CollabHost } from './crs.js';
 import { ICON } from './icons.js';
+import { AppliedHistory } from './applied-history.js';
 import { requestWait } from './request-wait.js';
 import { changeGroupLabel, changeText, visibleChanges } from './menumodel.js';
 import { panelTabIds, REVIEW_FILTERS, reviewFilterIds, filterPass, groupHistory, liveGroupLabel } from './view.js';
@@ -266,22 +267,22 @@ export const AttachTab = {
 // ───────── 이력(docs/V3_SPEC.md §9.4·§9.7) ─────────
 // 사람에게 보이는 것은 버전(이정표 v — 큰 일이 끝났을 때만 오른다)과 그 사이 '변경 이력'(기록의 무엇·누가·언제)뿐 — 기록 번호 n 은 내지 않는다.
 // 맨 위 'v3 이후 변경 이력 n개' + [버전 저장](한 줄 메모 → POST /milestones, 바뀐 것이 없으면 꺼짐) → 버전 목록(v 내림차순, [내려받기]
-// [이 버전으로 복구], 지금 버전은 '지금') → 버전마다 펼치면 그 버전까지의 변경 이력([이 시점으로 복구] 작게) → 맨 아래 접힌 활동 기록
-const MS_KIND = { upload: '올림', merge: '변경 요청 반영', restore: '복구', request: 'AI 작업 완료', manual: '버전 저장' };
-/** 변경 이력 한 줄(시각 · 누가 · 무엇 [내려받기] [이 시점으로 복구]) — top = 그 버전 자신의 기록(그 줄에는 단추 없음), h = 이력 탭의 공용 상태·동작 */
+// 과거 버전의 파일로 교체할 수 있고, 펼친 변경 이력에서도 파일을 선택할 수 있다.
+const MS_KIND = { upload: '올림', merge: '변경 요청 반영', restore: '파일 교체', request: 'AI 작업 완료', manual: '버전 저장' };
+/** 변경 이력 한 줄(시각 · 누가 · 무엇 [내려받기] [이 파일로 교체]) — top = 그 버전 자신의 기록, h = 이력 탭의 공용 상태·동작 */
 const HistRec = {
   components: { InlineConfirm },
   props: { x: Object, top: { type: Number, default: null }, h: Object },
   template: `<div class="hist-rec" :data-n="x.n"><span class="muted">{{ fmtStamp(x.at) }}</span> <span>· {{ x.by }} · {{ x.note }}</span><span class="spacer"></span>
       <span class="pill ok" v-if="x.n === h.cur">지금</span>
       <button class="linkish hist-rec-dl" v-if="x.n !== top" @click="h.dl(x.n, null, x.at)">내려받기</button>
-      <button class="linkish hist-rec-restore" v-if="x.n !== h.cur && x.n !== top" title="이 시점으로 복구" @click="h.askRestore('r' + x.n, x.n, h.recLabel(x), h.recLabel(x))">복구</button></div>
-    <InlineConfirm v-if="h.confirming?.key === 'r' + x.n" :message="h.confirming.msg" ok-label="복구" danger :busy="h.restoring" @ok="h.doRestore" @cancel="h.cancel"/>`,
+      <button class="linkish hist-rec-restore" v-if="h.canReplace && x.n !== h.cur && x.n !== top" :disabled="h.replacing" @click="h.askReplace('r' + x.n, x.n, h.recLabel(x))">이 파일로 교체</button></div>
+    <InlineConfirm v-if="h.confirming?.key === 'r' + x.n" :message="h.confirming.msg" ok-label="교체" danger :busy="h.replacing" @ok="h.doReplace" @cancel="h.cancel"/>`,
   setup() { return { fmtStamp }; },
 };
 /**
  * 변경 이력 목록(새것부터): 같은 사람의 이어진 '실시간 편집' 기록(5분 안)은 한 줄로 묶는다 — '홍길동 · 실시간 편집 23번 · 10:02~10:15'(펼치면 기록마다,
- * [이 시점으로 복구]) — V4 §2.6, view.js groupHistory
+ * [이 파일로 교체]) — V4 §2.6, view.js groupHistory
  */
 const HistRows = {
   components: { HistRec },
@@ -299,7 +300,7 @@ const HistRows = {
   },
 };
 export const HistoryTab = {
-  components: { CollabHost, InlineConfirm, HistRows },
+  components: { CollabHost, InlineConfirm, HistRows, AppliedHistory },
   template: `<div class="tab-history"><CollabHost/>
     <div class="card hist-top">
       <div class="row"><b class="hist-since">{{ sinceLine }}</b><span class="spacer"></span>
@@ -311,14 +312,15 @@ export const HistoryTab = {
       <details class="hist-recs" v-if="sinceRecs.length"><summary class="muted">변경 이력 {{ sinceRecs.length }}개</summary>
         <HistRows :list="sinceRecs" :h="hctx"/></details>
     </div>
+    <AppliedHistory/>
     <div class="sec-h">버전 {{ milestones.length }}</div>
     <div class="card hist-v" v-for="m in milestones" :key="m.v" :data-v="m.v" :class="{now: isNow(m)}">
       <div class="head"><b class="hist-vname">v{{ m.v }}</b><span class="hist-vnote" :title="m.note || ''">{{ m.note || MS_KIND[m.kind] || '' }}</span><span class="spacer"></span>
         <span class="pill ok" v-if="isNow(m)">지금</span></div>
       <div class="row hist-meta"><span class="muted">{{ m.by }} · {{ fmtStamp(m.at) }}</span><span class="spacer"></span>
         <button class="small hist-dl" @click="dl(m.n, m.v, m.at)">내려받기</button>
-        <button class="small hist-restore" v-if="!isNow(m)" title="이 버전으로 복구" @click="askRestore('v' + m.v, m.n, 'v' + m.v, 'v' + m.v + '(' + fmtStamp(m.at) + ')')">복구</button></div>
-      <InlineConfirm v-if="confirming?.key === 'v' + m.v" :message="confirming.msg" ok-label="복구" danger :busy="restoring" @ok="doRestore" @cancel="confirming=null"/>
+        <button class="small hist-restore" v-if="canReplace && !isNow(m)" :disabled="replacing" @click="askReplace('v' + m.v, m.n, 'v' + m.v)">이 파일로 교체</button></div>
+      <InlineConfirm v-if="confirming?.key === 'v' + m.v" :message="confirming.msg" ok-label="교체" danger :busy="replacing" @ok="doReplace" @cancel="confirming=null"/>
       <details class="hist-recs" v-if="recsOf(m).length"><summary class="muted">변경 이력 {{ recsOf(m).length }}개</summary>
         <HistRows :list="recsOf(m)" :top="Number(m.n)" :h="hctx"/></details>
     </div>
@@ -338,6 +340,7 @@ export const HistoryTab = {
     });
     const milestones = computed(() => msAsc.value.slice().reverse());
     const cur = computed(() => Number(d.s.info?.version) || 0);
+    const canReplace = computed(() => d.s.info?.canEdit === true);
     const last = computed(() => (d.s.info?.milestone !== undefined ? d.s.info.milestone : null) || milestoneAt(msAsc.value, cur.value));
     const isNow = (m) => Number(m.n) === cur.value;
     const byN = (a, b) => Number(b.n) - Number(a.n);
@@ -365,15 +368,14 @@ export const HistoryTab = {
     const recLabel = (x) => `${fmtStamp(x.at)} 기록`;
     // 내려받기 이름: 버전이면 '제목_v3.hwpx', 기록이면 '제목_10-23_0116.hwpx'
     const dl = (n, v, at) => d.download(`${d.base}/file?kind=version&n=${n}`, downloadName(d.s.info?.title, { v, at }));
-    // 복구(누른 줄 바로 아래 그 자리 확인 줄 — key = 'v3'(버전) · 'r17'(기록))
-    const confirming = ref(null); const restoring = ref(false);
-    function askRestore(key, n, short, long) {
-      confirming.value = { key, n, short, msg: `${long} 내용으로 되돌릴까요? 바뀌는 문단은 변경 추적·[복구] 메모로 남습니다` };
+    const confirming = ref(null); const replacing = ref(false);
+    function askReplace(key, n, label) {
+      confirming.value = { key, n, label, msg: `${label}에 저장된 파일로 현재 문서 전체를 교체할까요? 현재 저장본은 이력에 남습니다.` };
     }
-    async function doRestore() {
-      const c = confirming.value; if (!c || restoring.value) return;
-      restoring.value = true;
-      try { await d.restoreVersion(c.n, c.short); confirming.value = null; } catch (e) { toastError(e, '복구 실패: '); } finally { restoring.value = false; }
+    async function doReplace() {
+      const c = confirming.value; if (!c || replacing.value) return;
+      replacing.value = true;
+      try { await d.replaceVersion(c.n, c.label); confirming.value = null; } catch (e) { toastError(e, '교체 실패: '); } finally { replacing.value = false; }
     }
     // [버전 저장]: 한 줄 메모 칸 → 저장
     const saveOpen = ref(false); const note = ref(''); const saving = ref(false);
@@ -387,8 +389,8 @@ export const HistoryTab = {
     onMounted(() => d.refresh(['history', 'info']));
     watch(() => d.s.info?.version, (v, old) => { if (v && v !== old) d.refresh(['history']); });
     // 변경 이력 줄(HistRows·HistRec)이 같이 쓰는 상태·동작(reactive 가 ref·computed 를 풀어 준다)
-    const hctx = reactive({ cur, confirming, restoring, dl, askRestore, doRestore, recLabel, cancel: () => { confirming.value = null; } });
-    return { d, noteEl, milestones, cur, last, isNow, recsOf, sinceRecs, since, sinceLine, activity, recLabel, dl, confirming, restoring, askRestore, doRestore, saveOpen, note, saving, openSave, save, hctx, fmtStamp, fmtShort, MS_KIND };
+    const hctx = reactive({ cur, canReplace, confirming, replacing, dl, askReplace, doReplace, recLabel, cancel: () => { confirming.value = null; } });
+    return { d, noteEl, milestones, cur, last, isNow, canReplace, recsOf, sinceRecs, since, sinceLine, activity, recLabel, dl, confirming, replacing, askReplace, doReplace, saveOpen, note, saving, openSave, save, hctx, fmtStamp, fmtShort, MS_KIND };
   },
 };
 

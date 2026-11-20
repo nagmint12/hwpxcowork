@@ -32,7 +32,10 @@ if(args.includes('--output-schema')) {
  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:30,output_tokens:10,cached_input_tokens:5}}));
  process.exit(${selectionMode === 'fail' ? 2 : 0});
 }
-if(prompt.includes('<document_context>')) state.requestContext=JSON.parse(prompt.split('<document_context>')[1].split('</document_context>')[0]);
+if(mode==='v3') {
+ state.requestContext=JSON.parse(prompt.split('<request_brief>')[1].split('</request_brief>')[0]);
+ state.documentContext=prompt.split('<document_context>')[1].split('</document_context>')[0];
+} else if(prompt.includes('<document_context>')) state.requestContext=JSON.parse(prompt.split('<document_context>')[1].split('</document_context>')[0]);
 const failure=e=>{state.error=e?.stack || String(e);fs.writeFileSync(receipt,JSON.stringify(state));process.exit(2);};
 process.on('uncaughtException',failure);process.on('unhandledRejection',failure);
 fs.writeFileSync(receipt,JSON.stringify(state));
@@ -51,8 +54,8 @@ if(mode==='workspace') {
  } finally {await c.close();await transport.close()}
  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:200,output_tokens:20,cached_input_tokens:40}}));process.exit(0);
 }
-if(mode==='v2') {
- // 새 MCP 연결(server/mcp2.js — 작업 도구 넷): 첫 입력의 요청 내용(brief)만으로 일하고 edit 한 번(done)으로 끝낸다
+if(mode==='v2' || mode==='v3') {
+ // 새 MCP 연결은 brief를 받은 뒤 필요한 문서를 읽고 edit(done)으로 끝낸다.
  const c=new Client({name:'codex-cli-test',version:'test'});
  const transport=new StdioClientTransport({command:JSON.parse(config['mcp_servers.hwpx.command']),args:JSON.parse(config['mcp_servers.hwpx.args']),env:process.env,stderr:'pipe'});
  transport.stderr?.on('data',()=>{});
@@ -65,9 +68,11 @@ if(mode==='v2') {
   assert.ok((await c.callTool({name:'read_document',arguments:{}})).isError,'예전 도구는 새 연결에 없다');
   assert.ok((await c.callTool({name:'edit',arguments:{doc_id:'another-document',ops:[{op:'memo',at:'s0/p0',text:'x'}]}})).isError,'다른 문서는 거절');
   assert.ok((await c.callTool({name:'finish',arguments:{expected_attempt:999,summary:'wrong attempt'}})).isError,'다른 시도는 거절');
-  const reading=await c.callTool({name:'read',arguments:{view:'map'}});assert.ok(!reading.isError,JSON.stringify(reading));state.map=reading.content[0].text;
-  const ops=brief.map.includes('⚠')?[{op:'objects_to_body'}]:[{op:'replace',at:brief.target.ref,whole:true,with:'자동 검토한 문장'}];
+  const reading=await c.callTool({name:'read',arguments:{view:mode==='v3'?'text':'map'}});assert.ok(!reading.isError,JSON.stringify(reading));
+  if(mode==='v3') state.documentRead=reading.content[0].text; else state.map=reading.content[0].text;
+  const ops=mode==='v2' && String(brief.map || '').includes('⚠')?[{op:'objects_to_body'}]:[{op:'replace',at:mode==='v3'?'s0/p1':brief.target.ref,whole:true,with:'자동 검토한 문장'}];
   const r=await c.callTool({name:'edit',arguments:{ops,done:'새 연결로 처리했습니다.'}});assert.ok(!r.isError,JSON.stringify(r));state.receipt=JSON.parse(r.content[0].text);
+  if(mode==='v3') assert.equal(state.receipt.completed,true,JSON.stringify(state.receipt));
   state.toolCount=toolCount;fs.writeFileSync(receipt,JSON.stringify(state));
  } finally {await c.close();}
  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:300,output_tokens:30,cached_input_tokens:100}}));process.exit(0);

@@ -701,6 +701,21 @@ impl RenderNormalizationOverlay {
             .contains(&(table as *const Table as usize))
     }
 
+    /// [hwpx-cowork] 공동 앵커 표의 칸에서 글을 추가해도 수직 프레임과
+    /// 원본 저장 줄이 그대로라면 조판과 paint는 같은 닫힌 끝 행을 쓴다.
+    pub(crate) fn keeps_coanchored_table_frame(
+        &self,
+        para: &crate::model::paragraph::Paragraph,
+        table: &Table,
+        profile: crate::model::provenance::LayoutCompatibilityProfile,
+    ) -> bool {
+        profile.hwp5_stored_pagination_layout()
+            && !self.table_text_reflowed(table)
+            && crate::renderer::float_placement::stored_inline_host_has_separate_float_frame(
+                para, table,
+            )
+    }
+
     /// 실제 표 상자로 확장한 줄 뒤에서는 옛 저장 줄의 spill 허용을 재사용하지 않는다.
     pub(crate) fn inline_host_frame_expanded(&self, table: &Table) -> bool {
         self.expanded_inline_host_tables_by_pointer

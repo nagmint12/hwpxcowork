@@ -1705,23 +1705,28 @@ pub(crate) fn fit_measured_table_declared_tail_to_declared_height_with_storage<
     if table.declared_height_hu().is_none() {
         return Ok(None);
     }
+    fit_measured_table_coanchored_frame_with_storage(measured, table, dpi, storage)
+}
+
+/// [hwpx-cowork] For an independently confirmed closed frame shared with
+/// an inline table. The format's protect attribute still governs ordinary
+/// table height, while the stored rows bound the closed frame here.
+pub(crate) fn fit_measured_table_coanchored_frame_with_storage<S: crate::storage::Storage>(
+    measured: &MeasuredTable,
+    table: &Table,
+    dpi: f64,
+    storage: &S,
+) -> Result<Option<MeasuredTable>, S::Error> {
     crate::storage::with_optional(|failure| {
-        let rows = crate::storage::optional(
-            fit_stored_declared_tail_row_heights_with_storage(
-                &measured.row_heights,
-                measured.cell_spacing,
-                table,
-                dpi,
-                storage,
-            ),
-            failure,
-        )??;
-        let spacing_total = measured.cell_spacing * rows.len().saturating_sub(1) as f64;
+        let tail = crate::renderer::table_row_frame::declared_tail_row_height(
+            table, &measured.row_heights, measured.cell_spacing, dpi,
+        )?;
+        let spacing_total = measured.cell_spacing * measured.row_heights.len().saturating_sub(1) as f64;
         let previous_body_height = measured.row_heights.iter().sum::<f64>() + spacing_total;
         let caption_and_spacing = (measured.total_height - previous_body_height).max(0.0);
         let mut fitted =
             crate::storage::optional(crate::storage::try_clone(measured, storage), failure)?;
-        fitted.row_heights = rows;
+        *fitted.row_heights.last_mut()? = tail;
         fitted.cumulative_heights =
             crate::storage::optional(storage.filled(fitted.row_heights.len() + 1, 0.0), failure)?;
         for (index, height) in fitted.row_heights.iter().enumerate() {
@@ -3894,6 +3899,51 @@ let body_height=match nested_body_heights
                     } else {
                         candidate
                     };
+                    // [#8686] 흐름을 전진시키지 않는 저장 호스트 배제 띠는 뒤 문단이
+                    // 오프셋 위 공간에 있어도 칸 내용의 끝이다. 배치와 같은 프레임을 쓴다.
+                    let bottom = if self.is_native_hwp5 || self.hwpx_stored_layout {
+                        let spacing_before = styles
+                            .para_styles
+                            .get(p.para_shape_id as usize)
+                            .map_or(0.0, |s| s.spacing_before);
+                        let last = pidx + 1 == paragraphs.len();
+                        p.controls
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(ci, ctrl)| {
+                                let Control::Table(nested) = ctrl else {
+                                    return None;
+                                };
+                                if self.render_normalization.table_text_reflowed(nested) {
+                                    return None;
+                                }
+                                let margins = hwpunit_to_px(
+                                    i32::from(nested.outer_margin_top)
+                                        + i32::from(nested.outer_margin_bottom),
+                                    self.dpi,
+                                );
+                                let lead = if last {
+                                    crate::renderer::layout::table_layout::para_relative_float_table_lead(
+                                        nested, self.dpi,
+                                    )
+                                } else {
+                                    0.0
+                                };
+                                crate::renderer::float_placement::stored_host_exclusion_bottom(
+                                    p,
+                                    &paragraphs[pidx + 1..],
+                                    nested,
+                                    ci,
+                                    para_top - spacing_before,
+                                    para_top,
+                                    heights[ci] - margins - lead,
+                                    self.dpi,
+                                )
+                            })
+                            .fold(bottom, f64::max)
+                    } else {
+                        bottom
+                    };
                     prior_nested_end.set(prior_nested_end.get().max(bottom));
                     bottom
                 })
@@ -4154,7 +4204,7 @@ let body_height=match nested_body_heights
 
                             // [hwpx-cowork] 같은 내용·같은 폭의 칸 문단은 문서의 줄 구성 기억을 쓴다(`composer::cell_compose_memo`).
                             let comp = crate::renderer::composer::cell_compose_memo::compose_cell_paragraph(
-                                self.cell_compose_memo.as_deref(), p, cell_inner_width, cell.line_wrap, self.dpi,
+                                self.cell_compose_memo.as_deref(), p, cell_inner_width, cell.composition_line_wrap(crate::renderer::px_to_hwpunit(cell_inner_width, self.dpi)), self.dpi,
                                 self.stored_geometry_policy, self.is_native_hwp5, || -> Result<_, S::Error> {
                             let mut comp = crate::renderer::composer::compose_paragraph_in_context_with_storage(p, styles, storage)?;
                             // [Task #671] line_segs 비어 있는 셀 paragraph 의 단일 ComposedLine
@@ -4164,7 +4214,7 @@ let body_height=match nested_body_heights
                                 &mut comp,
                                 p,
                                 cell_inner_width,
-                                cell.line_wrap,
+                                cell.composition_line_wrap(crate::renderer::px_to_hwpunit(cell_inner_width, self.dpi)),
                                 styles,
                                 self.dpi,
                                 self.stored_geometry_policy,
@@ -5227,7 +5277,7 @@ let body_height=match nested_body_heights
                                 &mut comp,
                                 cell_para,
                                 cell_inner_width,
-                                cell.line_wrap,
+                                cell.composition_line_wrap(crate::renderer::px_to_hwpunit(cell_inner_width, self.dpi)),
                                 styles,
                                 self.dpi,
                                 self.stored_geometry_policy,
@@ -5428,7 +5478,7 @@ let body_height=match nested_body_heights
 
                             // [hwpx-cowork] 위 2단계와 같은 줄 구성 — 문서의 기억을 쓴다(`composer::cell_compose_memo`).
                             let comp = crate::renderer::composer::cell_compose_memo::compose_cell_paragraph(
-                                self.cell_compose_memo.as_deref(), p, cell_inner_width, cell.line_wrap, self.dpi,
+                                self.cell_compose_memo.as_deref(), p, cell_inner_width, cell.composition_line_wrap(crate::renderer::px_to_hwpunit(cell_inner_width, self.dpi)), self.dpi,
                                 self.stored_geometry_policy, self.is_native_hwp5, || -> Result<_, S::Error> {
                             let mut comp = crate::renderer::composer::compose_paragraph_in_context_with_storage(p, styles, storage)?;
                             // [Task #671] line_segs 비어 있는 셀 paragraph 의 단일 ComposedLine
@@ -5437,7 +5487,7 @@ let body_height=match nested_body_heights
                                 &mut comp,
                                 p,
                                 cell_inner_width,
-                                cell.line_wrap,
+                                cell.composition_line_wrap(crate::renderer::px_to_hwpunit(cell_inner_width, self.dpi)),
                                 styles,
                                 self.dpi,
                                 self.stored_geometry_policy,
@@ -6269,12 +6319,12 @@ let body_height=match nested_body_heights
                         let comp = if recompose_in_cell_frame {
                             // [hwpx-cowork] 위 2단계와 같은 줄 구성(조합 + 칸 폭 재조판) — 문서의 기억을 쓴다(`composer::cell_compose_memo`).
                             crate::renderer::composer::cell_compose_memo::compose_cell_paragraph(
-                                self.cell_compose_memo.as_deref(), p, inner_width, cell.line_wrap, self.dpi,
+                                self.cell_compose_memo.as_deref(), p, inner_width, cell.composition_line_wrap(crate::renderer::px_to_hwpunit(inner_width, self.dpi)), self.dpi,
                                 self.stored_geometry_policy, self.is_native_hwp5, || -> Result<_, S::Error> {
                             let mut comp =
                                 crate::renderer::composer::compose_paragraph_in_context_with_storage(p, styles, storage)?;
                             crate::renderer::composer::recompose_cell_lines_with_nested_tables_with_storage(
-                                &mut comp, p, inner_width, cell.line_wrap, styles, self.dpi,
+                                &mut comp, p, inner_width, cell.composition_line_wrap(crate::renderer::px_to_hwpunit(inner_width, self.dpi)), styles, self.dpi,
                                 self.stored_geometry_policy, self.is_native_hwp5,
                                 &self.single_line_overflow_cache,
                                 |nested| -> Result<_,S::Error> {

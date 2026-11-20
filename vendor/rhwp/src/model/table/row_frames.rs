@@ -56,7 +56,15 @@ impl Table {
             }
         }
         let spacing = i64::from(self.cell_spacing);
-        let target = i64::from(self.common.width);
+        // [hwpx-cowork] 한/글 2022는 행마다 같은 물리 폭이 나오면 더 큰 hp:sz의
+        // 남은 폭을 마지막 셀에 붙이지 않는다. 문단 측정과 셀 배치가 이 경계를 함께 쓴다.
+        let width = if self.common.hwpx_size_rule {
+            self.closed_cell_grid_width_hu_with_storage(storage)?
+                .unwrap_or(self.common.width)
+        } else {
+            self.common.width
+        };
+        let target = i64::from(width);
         let mut closed = storage.filled(rows, false)?;
         for (row, indices) in covering.iter_mut().enumerate() {
             storage.bytes(std::mem::size_of_val(indices.as_slice()))?;
@@ -94,7 +102,12 @@ impl Table {
         }
         // 행마다 칸 경계가 엇갈리는 표는 하한 해 경계가 모든 행의 칸 끝점이다.
         // 짧은 행을 자기 선언 폭으로 닫으면 다른 행이 고정한 경계보다 앞에 끝난다.
-        if let Some(solved) = self.contradictory_column_boundaries_hu_with_storage(storage)? {
+        let solved = if width == self.common.width {
+            self.contradictory_column_boundaries_hu_with_storage(storage)?
+        } else {
+            None
+        };
+        if let Some(solved) = solved {
             for frames in result.iter_mut().flatten() {
                 for frame in frames.iter_mut() {
                     let cell = &self.cells[frame.cell_index];

@@ -341,6 +341,10 @@ fn from_bytes_inner(
             storage,
         )
         .map_err(storage_error)?;
+        crate::renderer::render_normalization::stored_text_metrics::restore_managed_coanchored_cells(
+            &mut document, &styles, DEFAULT_DPI, storage,
+        )
+        .map_err(storage_error)?;
         // [#7051] 계보 신호가 없는 저장본은 저장 줄 사다리로 HFT ASCII 반각 조판을 판정한다.
         // 편집 중 판정이 흔들리지 않도록 로드 시 한 번만 내린다.
         if !styles.hft_ascii_halfwidth {
@@ -495,6 +499,12 @@ fn from_bytes_inner(
             deferred_pagination_revision: 0,
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
+            typeset_checkpoints: Vec::new(),
+            typeset_unchanged_before: Vec::new(),
+            typeset_resume: Default::default(),
+            typeset_tail_deferral: false,
+            typeset_tail_job: None,
+            typeset_tail_completed: None,
             cell_compose_memo: Default::default(),
             paragraph_format_memo: Default::default(),
             stored_rows_memo: std::sync::Arc::new(
@@ -511,6 +521,7 @@ fn from_bytes_inner(
             layer_tree_json_cache: RefCell::new(Vec::new()),
             page_layer_tree_cache: RefCell::new(Vec::new()),
             bin_data_epoch: 0,
+            loaded_unreferenced_bin_data: std::collections::BTreeSet::new(),
             batch_mode: false,
             pending_cell_format_vpos: false,
             event_log: Vec::new(),
@@ -899,6 +910,7 @@ fn from_bytes_inner(
                         Self::reflow_synthetic_caption(
                             pic.caption.as_mut(),
                             owner_w,
+                            false,
                             styles,
                             dpi,
                             include_empty,
@@ -913,6 +925,7 @@ fn from_bytes_inner(
                         Self::reflow_synthetic_caption(
                             shape.caption_mut(),
                             owner_w,
+                            true,
                             styles,
                             dpi,
                             include_empty,
@@ -1056,6 +1069,7 @@ fn from_bytes_inner(
                         Self::reflow_synthetic_caption(
                             table.caption.as_mut(),
                             table.common.width as i32,
+                            false,
                             styles,
                             dpi,
                             include_empty,
@@ -1174,17 +1188,35 @@ fn from_bytes_inner(
             // 복원 구간은 그 경계에서 끝내고, 뒤의 독립된 정상 조판도 보존한다.
             let mut affected_body_paras = vec![false; section.paragraphs.len()];
             let mut repair_active = false;
+            let mut after_page_opening_tac: Option<i32> = None;
             for (pi, para) in section.paragraphs.iter_mut().enumerate() {
-                if matches!(
+                let opens_page = matches!(
                     para.column_type,
                     crate::model::paragraph::ColumnBreakType::Page
                         | crate::model::paragraph::ColumnBreakType::Section
-                ) {
+                );
+                if opens_page {
                     repair_active = false;
                 }
                 repair_active |= changed_body_paras[pi];
                 affected_body_paras[pi] = repair_active;
                 if include_empty && section_sized && repair_active && !changed_body_paras[pi] {
+                    // [hwpx-cowork] #8925. A locally closed successor on
+                    // an explicit new page can attest the TAC line's full
+                    // trailing space. Keep that origin before tagging the
+                    // regenerated suffix of the section.
+                    if let (Some(advance), [line]) = (after_page_opening_tac, para.line_segs.as_slice()) {
+                        let lead = styles.para_styles.get(para.para_shape_id as usize)
+                            .map_or(0.0, |style| style.spacing_before);
+                        if !opens_page && !para.stored_text_partition_is_dirty()
+                            && !para.cell_format_vpos_dirty
+                            && line.tag & crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0
+                            && line.vertical_pos > 0
+                            && line.vertical_pos == advance.saturating_add(crate::renderer::px_to_hwpunit(lead, dpi))
+                        {
+                            para.source_line_seg_vertical_pos = Some(vec![line.vertical_pos]);
+                        }
+                    }
                     for seg in &mut para.line_segs {
                         seg.tag |= crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY;
                     }
@@ -1193,6 +1225,19 @@ fn from_bytes_inner(
                     para.layout_source_text_partition =
                         !para.line_segs.is_empty() && !para.stored_text_partition_is_dirty();
                 }
+                after_page_opening_tac = if opens_page && changed_body_paras[pi]
+                    && para.text.is_empty()
+                    && matches!(para.controls.as_slice(), [Control::Table(table)] if table.common.treat_as_char)
+                {
+                    let after = styles.para_styles.get(para.para_shape_id as usize)
+                        .map_or(0.0, |style| style.spacing_after);
+                    para.line_segs.first().filter(|_| para.line_segs.len() == 1).map(|line| {
+                        line.line_height.saturating_add(line.line_spacing)
+                            .saturating_add(crate::renderer::px_to_hwpunit(after, dpi))
+                    })
+                } else {
+                    None
+                };
             }
 
             if let (Some(grid), true) = (cell_grid, body_line_seg_changed) {
@@ -1862,6 +1907,7 @@ fn from_bytes_inner(
     fn reflow_synthetic_caption(
         caption: Option<&mut Caption>,
         owner_width_hu: i32,
+        use_owner_width: bool,
         styles: &ResolvedStyleSet,
         dpi: f64,
         include_empty: bool,
@@ -1877,13 +1923,20 @@ fn from_bytes_inner(
         }
         // [hwpx-cowork] 2026-11-17 lastWidth 4294967295(한/글이 OLE 대체 개체에 쓰는 '정하지 않음')는 i32 로 -1 이 된다 —
         // 양수일 때만 쓴다.
-        let cap_w_hu = match i32::try_from(caption.max_width) {
-            Ok(width) if width > 0 => width,
-            _ => owner_width_hu,
+        // [hwpx-cowork] #9079: a fresh top/bottom drawing caption is laid out
+        // in the object width, even if lastWidth belongs to a previous side caption.
+        let cap_w_hu = if use_owner_width {
+            owner_width_hu
+        } else {
+            i32::try_from(caption.max_width).ok()
+                .filter(|width| *width > 0).unwrap_or(owner_width_hu)
         };
         let cap_w_px = crate::renderer::hwpunit_to_px(cap_w_hu, dpi);
         for cap_para in &mut caption.paragraphs {
             if Self::needs_line_seg_reflow_in_scope(cap_para, include_empty, section_sized) {
+                if use_owner_width && cap_w_hu > 0 {
+                    caption.max_width = cap_w_hu as u32;
+                }
                 reflow_line_segs(
                     cap_para,
                     ParagraphBox::content_for_style(
@@ -3502,6 +3555,17 @@ fn from_bytes_inner(
             &crate::model::document::Document,
         ) -> Result<T, crate::serializer::SerializeError>,
     ) -> Result<T, HwpError> {
+        // [hwpx-cowork] #9054 한/글 2022처럼 지운 그림만 저장 사본에서 정리한다.
+        // 원본부터 참조가 없던 항목과 Undo가 사용하는 live 순번은 보존한다.
+        let media_prune_plan = super::bin_data_prune::plan_bin_data_prune(
+            &self.document,
+            &self.loaded_unreferenced_bin_data,
+        );
+        let prune = |doc: &mut Document| {
+            if let Some(plan) = &media_prune_plan {
+                plan.apply(doc);
+            }
+        };
         let hwp3_origin = matches!(self.source_format, crate::parser::FileFormat::Hwp3)
             || self.document.provenance.hwp3_lineage;
         let lower_markers = |doc: &mut Document| {
@@ -3538,6 +3602,7 @@ fn from_bytes_inner(
             }
             Self::materialize_hwp5_missing_linesegs_for_hwpx_export(&mut doc);
             lower_markers(&mut doc);
+            prune(&mut doc);
             serialize(&doc)
         } else if hwp3_origin
             || self
@@ -3560,11 +3625,16 @@ fn from_bytes_inner(
                 Self::push_hwp3_origin_marker(&mut doc);
             }
             lower_markers(&mut doc);
+            prune(&mut doc);
             serialize(&doc)
-        } else if grows_tables || !page_starts.is_empty() {
+        } else if grows_tables
+            || !page_starts.is_empty()
+            || media_prune_plan.is_some()
+        {
             let mut doc = self.document.clone();
             grown_table_heights::apply_grown_table_heights(&mut doc, &grown_tables);
             self.write_page_starts(&mut doc, &page_starts);
+            prune(&mut doc);
             serialize(&doc)
         } else {
             serialize(&self.document)

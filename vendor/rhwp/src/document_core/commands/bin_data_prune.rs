@@ -25,14 +25,14 @@
 //!
 //! ## 참조처
 //!
-//! 순회 구조는 `converters::hwpx_to_hwp` 의 `walk_controls`(프로덕션에서 `OleShape` 를
-//! 실제로 갈아끼우는 워커)를 그대로 따른다 — 담는 그릇 목록을 두 벌로 두지 않는다.
+//! 참조 수집과 재번호 매김은 공통 소유 문서 순회로 본문·바탕쪽을 찾는다.
 //!
 //! | 참조처 | 어디에 |
 //! | --- | --- |
 //! | `Picture.image_attr.bin_data_id` | `Control::Picture` · `ShapeObject::Picture` |
 //! | `DrawingObjAttr.fill.image.bin_data_id` | 모든 도형의 채우기 |
 //! | `BorderFill.fill.image.bin_data_id` | **DocInfo** — 문단 밖이라 항상 참조로 센다 |
+//! | `Bullet::image_reference()` | **DocInfo** 그림 글머리표 — 같은 이유로 항상 참조로 센다 |
 //! | `OleShape.bin_data_id` | OLE 개체 (`u32`) |
 //!
 //! `BorderFill` 은 문단이 아니라 DocInfo 에 있고 `border_fill_id` 로 참조되므로, 어떤
@@ -55,7 +55,7 @@ use std::collections::BTreeSet;
 
 use crate::model::control::Control;
 use crate::model::document::Document;
-use crate::model::shape::{DrawingObjAttr, ShapeObject};
+use crate::model::shape::ShapeObject;
 
 /// 정리 결과 요약.
 ///
@@ -78,114 +78,47 @@ impl BinDataPruneReport {
 
 /// 문서 안의 모든 `u16` `bin_data_id` 참조를 방문한다.
 ///
-/// `f` 가 값을 바꾸면 그대로 반영된다 — 모으기와 옮기기가 **같은 순회**를 쓰므로 두
-/// 단계가 서로 다른 자리를 볼 수 없다.
+/// 순회가 찾은 참조에 `f`의 변경을 반영한다.
 fn visit_bin_data_refs(doc: &mut Document, f: &mut dyn FnMut(&mut u16)) {
-    fn visit_drawing(drawing: &mut DrawingObjAttr, f: &mut dyn FnMut(&mut u16)) {
-        if let Some(image) = drawing.fill.image.as_mut() {
-            f(&mut image.bin_data_id);
-        }
-        if let Some(text_box) = drawing.text_box.as_mut() {
-            visit_paragraphs(&mut text_box.paragraphs, f);
-        }
-        if let Some(caption) = drawing.caption.as_mut() {
-            visit_paragraphs(&mut caption.paragraphs, f);
+    use crate::model::identity::walk::{walk, Node};
+
+    fn remap_ole(value: &mut u32, f: &mut dyn FnMut(&mut u16)) {
+        if let Ok(mut id) = u16::try_from(*value) {
+            f(&mut id);
+            *value = u32::from(id);
         }
     }
-
-    fn visit_shape(shape: &mut ShapeObject, f: &mut dyn FnMut(&mut u16)) {
-        match shape {
-            // `drawing_mut()` 이 `None` 을 주는 두 변형은 각자 캡션을 갖는다.
-            ShapeObject::Picture(pic) => {
-                f(&mut pic.image_attr.bin_data_id);
-                if let Some(caption) = pic.caption.as_mut() {
-                    visit_paragraphs(&mut caption.paragraphs, f);
+    let mut visit = |node: &mut Node<'_>| {
+        match node {
+            Node::Control(Control::Picture(pic)) => f(&mut pic.image_attr.bin_data_id),
+            Node::Shape(shape) => {
+                match shape {
+                    ShapeObject::Picture(pic) => f(&mut pic.image_attr.bin_data_id),
+                    ShapeObject::Ole(ole) => {
+                        if ole.chart_id_ref.is_none() {
+                            remap_ole(&mut ole.bin_data_id, f);
+                        }
+                        if let Some(fallback) = &mut ole.chart_switch_fallback {
+                            remap_ole(&mut fallback.bin_data_id, f);
+                        }
+                    }
+                    _ => {}
+                }
+                if let Some(image) = shape
+                    .drawing_mut()
+                    .and_then(|drawing| drawing.fill.image.as_mut())
+                {
+                    f(&mut image.bin_data_id);
                 }
             }
-            ShapeObject::Group(group) => {
-                for child in &mut group.children {
-                    visit_shape(child, f);
-                }
-                if let Some(caption) = group.caption.as_mut() {
-                    visit_paragraphs(&mut caption.paragraphs, f);
-                }
-            }
-            ShapeObject::Chart(chart) => {
-                visit_drawing(&mut chart.drawing, f);
-                if let Some(caption) = chart.caption.as_mut() {
-                    visit_paragraphs(&mut caption.paragraphs, f);
-                }
-            }
-            ShapeObject::Ole(ole) => {
-                visit_drawing(&mut ole.drawing, f);
-                if let Some(caption) = ole.caption.as_mut() {
-                    visit_paragraphs(&mut caption.paragraphs, f);
-                }
-                // OLE 의 참조는 `u32` 다. `u16` 범위 밖이면 순번 의미가 아니므로
-                // 손대지 않는다 — 모으는 쪽도 같은 조건으로 건너뛴다.
-                if let Ok(mut id) = u16::try_from(ole.bin_data_id) {
-                    f(&mut id);
-                    ole.bin_data_id = u32::from(id);
-                }
-            }
-            _ => {
-                if let Some(drawing) = shape.drawing_mut() {
-                    visit_drawing(drawing, f);
-                }
-            }
+            _ => {}
         }
-    }
-
-    fn visit_controls(controls: &mut [Control], f: &mut dyn FnMut(&mut u16)) {
-        for control in controls {
-            match control {
-                Control::Picture(pic) => {
-                    f(&mut pic.image_attr.bin_data_id);
-                    if let Some(caption) = pic.caption.as_mut() {
-                        visit_paragraphs(&mut caption.paragraphs, f);
-                    }
-                }
-                Control::Shape(shape) => visit_shape(shape, f),
-                Control::Table(table) => {
-                    for cell in &mut table.cells {
-                        visit_paragraphs(&mut cell.paragraphs, f);
-                    }
-                    if let Some(caption) = table.caption.as_mut() {
-                        visit_paragraphs(&mut caption.paragraphs, f);
-                    }
-                }
-                Control::Header(h) => visit_paragraphs(&mut h.paragraphs, f),
-                Control::Footer(h) => visit_paragraphs(&mut h.paragraphs, f),
-                Control::Footnote(n) => visit_paragraphs(&mut n.paragraphs, f),
-                Control::Endnote(n) => visit_paragraphs(&mut n.paragraphs, f),
-                Control::HiddenComment(c) => visit_paragraphs(&mut c.paragraphs, f),
-                Control::Field(field) => visit_paragraphs(&mut field.memo_paragraphs, f),
-                Control::SectionDef(section_def) => {
-                    for master_page in &mut section_def.master_pages {
-                        visit_paragraphs(&mut master_page.paragraphs, f);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn visit_paragraphs(
-        paragraphs: &mut [crate::model::paragraph::Paragraph],
-        f: &mut dyn FnMut(&mut u16),
-    ) {
-        for para in paragraphs {
-            visit_controls(&mut para.controls, f);
-        }
-    }
-
+        Ok(())
+    };
     for section in &mut doc.sections {
-        visit_paragraphs(&mut section.paragraphs, f);
-        // [hwpx-cowork] 바탕쪽은 문단 컨트롤이 아니라 `Section.section_def` 에 있다(HWPX 직렬화기도
-        // 여기서 낸다). 빠뜨리면 바탕쪽 그림이 지워진 자리의 다른 그림을 가리킨다 — 복사 조각에서
-        // 쪽 크기 배경이 본문 로고로 바뀌어 크게 늘어나 붙었다(실측).
+        walk(&mut section.paragraphs, &mut visit).expect("infallible BinData remap");
         for master_page in &mut section.section_def.master_pages {
-            visit_paragraphs(&mut master_page.paragraphs, f);
+            walk(&mut master_page.paragraphs, &mut visit).expect("infallible BinData remap");
         }
     }
     // DocInfo 의 테두리/배경 이미지 채우기는 문단과 무관하게 살아 있는 참조다.
@@ -194,29 +127,100 @@ fn visit_bin_data_refs(doc: &mut Document, f: &mut dyn FnMut(&mut u16)) {
             f(&mut image.bin_data_id);
         }
     }
+    // 그림 글머리표도 DocInfo 의 1 기준 순번 참조다. 읽는 자리(`image_reference`)와 같은
+    // 필드에 되돌려 쓴다 — 순번은 줄기만 하므로 `u8` 자리를 넘지 않는다.
+    for bullet in &mut doc.doc_info.bullets {
+        let Some(mut id) = bullet.image_reference() else {
+            continue;
+        };
+        f(&mut id);
+        if bullet.raw_para_head.is_none() {
+            bullet.image_data[3] = u8::try_from(id).unwrap_or(bullet.image_data[3]);
+        } else {
+            bullet.image_bullet = i32::from(id);
+        }
+    }
 }
 
-/// 산출 문서가 참조하지 않는 `BinData` 를 버리고 남은 참조를 옮긴다.
+/// 참조처에서 쓰이는 `bin_data_content` 위치(0 기준)를 모은다.
 ///
-/// 참조가 없거나 버릴 것이 없으면 문서를 건드리지 않는다.
-pub(crate) fn prune_unreferenced_bin_data(doc: &mut Document) -> BinDataPruneReport {
+/// 내장 글꼴이 storage id 로 쓰는 항목과 `keep_storage` 에 든 storage id 의 항목도
+/// 쓰이는 것으로 센다.
+fn live_positions(doc: &Document, keep_storage: &BTreeSet<u16>) -> BTreeSet<usize> {
+    use crate::model::identity::walk::{walk_ref, RefNode};
+
     let before = doc.bin_data_content.len();
     if before == 0 {
-        return BinDataPruneReport::default();
+        return BTreeSet::new();
     }
 
     // 1. 살아 있는 1 기준 순번을 모은다. 범위 밖 값(HWPX 차트 sparse id 등)은
     //    인덱스 의미가 아니므로 건드리지 않고 그대로 둔다.
     let mut referenced: BTreeSet<usize> = BTreeSet::new();
-    visit_bin_data_refs(doc, &mut |id| {
-        if *id > 0 && (*id as usize) <= before {
-            referenced.insert(*id as usize - 1);
+    let mut record = |id: u16| {
+        if id > 0 && usize::from(id) <= before {
+            referenced.insert(usize::from(id) - 1);
         }
-    });
+    };
+    let mut visit = |node: RefNode<'_>| {
+        match node {
+            RefNode::Control(Control::Picture(pic)) => record(pic.image_attr.bin_data_id),
+            RefNode::Shape(shape) => {
+                match shape {
+                    ShapeObject::Picture(pic) => record(pic.image_attr.bin_data_id),
+                    ShapeObject::Ole(ole) => {
+                        if ole.chart_id_ref.is_none() {
+                            if let Ok(id) = u16::try_from(ole.bin_data_id) {
+                                record(id);
+                            }
+                        }
+                        if let Some(fallback) = &ole.chart_switch_fallback {
+                            if let Ok(id) = u16::try_from(fallback.bin_data_id) {
+                                record(id);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                if let Some(image) = shape
+                    .drawing()
+                    .and_then(|drawing| drawing.fill.image.as_ref())
+                {
+                    record(image.bin_data_id);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    };
+    let storage = &crate::storage::Unbounded;
+    for section in &doc.sections {
+        walk_ref(&section.paragraphs, storage, &mut visit).expect("infallible BinData scan");
+        for master_page in &section.section_def.master_pages {
+            walk_ref(&master_page.paragraphs, storage, &mut visit)
+                .expect("infallible BinData scan");
+        }
+    }
+    for image in doc
+        .doc_info
+        .border_fills
+        .iter()
+        .filter_map(|fill| fill.fill.image.as_ref())
+    {
+        record(image.bin_data_id);
+    }
+    for id in doc
+        .doc_info
+        .bullets
+        .iter()
+        .filter_map(|bullet| bullet.image_reference())
+    {
+        record(id);
+    }
 
     // 1b. 내장 글꼴이 쓰는 storage id 를 가진 항목도 남긴다 — 순번 축이 아니므로
     //     참조값은 건드리지 않고 보존 대상에만 더한다.
-    let font_storage: BTreeSet<u16> = doc
+    let mut kept_storage: BTreeSet<u16> = doc
         .doc_info
         .font_faces
         .iter()
@@ -233,21 +237,96 @@ pub(crate) fn prune_unreferenced_bin_data(doc: &mut Document) -> BinDataPruneRep
         })
         .flatten()
         .collect();
-    if !font_storage.is_empty() {
-        for (index, content) in doc.bin_data_content.iter().enumerate() {
-            if font_storage.contains(&content.id) {
-                referenced.insert(index);
-            }
+    kept_storage.extend(keep_storage);
+    for (index, content) in doc.bin_data_content.iter().enumerate() {
+        // [hwpx-cowork] OOXML chart parts use sparse storage IDs, independent
+        // of picture indexes. The HWPX writer resolves their OLE references.
+        if kept_storage.contains(&content.id) || content.extension == "ooxml_chart" {
+            referenced.insert(index);
         }
     }
+    referenced
+}
 
+/// 어디서도 참조하지 않는 `BinData` 의 storage id 를 모은다.
+///
+/// [#8941] 불러온 원본이 처음부터 참조 없이 지니고 있던 항목을 가려 두려고 쓴다 —
+/// 편집으로 참조가 끊긴 항목과 달리 이것들은 저장할 때도 그대로 옮긴다.
+pub(crate) fn unreferenced_bin_data_storage_ids(doc: &Document) -> BTreeSet<u16> {
+    let live = live_positions(doc, &BTreeSet::new());
+    doc.bin_data_content
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !live.contains(index))
+        .map(|(_, content)| content.id)
+        .collect()
+}
+
+/// 산출 문서가 참조하지 않는 `BinData` 를 버리고 남은 참조를 옮긴다.
+///
+/// 참조가 없거나 버릴 것이 없으면 문서를 건드리지 않는다.
+pub(crate) fn prune_unreferenced_bin_data(doc: &mut Document) -> BinDataPruneReport {
+    let before = doc.bin_data_content.len();
+    let referenced = live_positions(doc, &BTreeSet::new());
     if referenced.len() == before {
         return BinDataPruneReport {
             before,
             after: before,
         };
     }
+    BinDataPrunePlan(referenced).apply(doc)
+}
 
+pub(crate) struct BinDataPrunePlan(BTreeSet<usize>);
+
+/// [hwpx-cowork] Fast-save preflight reads without cloning. The planned indexes
+/// belong to this document and its export snapshot, including original orphans.
+pub(crate) fn plan_bin_data_prune(
+    doc: &Document,
+    keep_storage: &BTreeSet<u16>,
+) -> Option<BinDataPrunePlan> {
+    if doc
+        .bin_data_content
+        .iter()
+        .all(|item| keep_storage.contains(&item.id) || item.extension == "ooxml_chart")
+    {
+        return None;
+    }
+    let referenced = live_positions(doc, keep_storage);
+    if referenced.len() == doc.bin_data_content.len() {
+        return None;
+    }
+    // The save snapshot updates both catalogues. A missing payload, a linked
+    // slot, or a chart followed by differently indexed media cannot prove
+    // that both catalogues use the same positions.
+    let (payloads, charts) = doc
+        .bin_data_content
+        .split_at_checked(doc.doc_info.bin_data_list.len())?;
+    let mut storage_ids = BTreeSet::new();
+    if !payloads
+        .iter()
+        .zip(&doc.doc_info.bin_data_list)
+        .all(|(payload, entry)| {
+            payload.id != 0
+                && payload.id == entry.storage_id
+                && payload.extension != "ooxml_chart"
+                && storage_ids.insert(payload.id)
+        })
+        || charts.iter().any(|item| item.extension != "ooxml_chart")
+    {
+        return None;
+    }
+    Some(BinDataPrunePlan(referenced))
+}
+
+impl BinDataPrunePlan {
+    pub(crate) fn apply(&self, doc: &mut Document) -> BinDataPruneReport {
+        apply_prune(doc, &self.0)
+    }
+}
+
+fn apply_prune(doc: &mut Document, referenced: &BTreeSet<usize>) -> BinDataPruneReport {
+    let before = doc.bin_data_content.len();
     // 2. 옛 인덱스 → 새 인덱스. 남는 항목의 상대 순서는 유지한다.
     let mut new_index = vec![None; before];
     for (next, old) in referenced.iter().enumerate() {

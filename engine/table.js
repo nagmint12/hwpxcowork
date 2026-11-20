@@ -174,9 +174,17 @@ export function columnWidths(rows, total, { em = 1000, minCol = 2400, pad = 1000
  *   style: { tblAttrs: Map, pos, outMargin, inMargin, em(칸 글자 크기), cell(r, c, nRows, nCols, headerRows, { numeric }) → { borderFill, paraPr, styleId, charPr, vertAlign, margin, height, hasMargin } }
  * 열 너비는 글 길이에 맞춘다(columnWidths). 캡션은 한글 순서대로 outMargin 과 inMargin 사이.
  */
+function scaleWidths(ws, width) {
+  const sum = ws.reduce((a, b) => a + b, 0);
+  const out = ws.map((w) => Math.max(1, Math.round((w * width) / sum)));
+  out[out.length - 1] += width - out.reduce((a, b) => a + b, 0);
+  return out;
+}
+
 export function tableXml({ id, zOrder, rows, headerRows, width, style, textXml, numbering = 'NONE', captionXml = '' }) {
   const nRows = rows.length; const nCols = Math.max(...rows.map((r) => r.length));
-  const widths = columnWidths(rows, width, { em: style.em || 1000 });
+  // style.colWidths(본보기 표 열 폭 — like, 2026-11-20): 비율대로 표 폭에 맞춘다(합이 표 폭과 같게 끝 열에서 맞춤)
+  const widths = Array.isArray(style.colWidths) && style.colWidths.length === nCols ? scaleWidths(style.colWidths, width) : columnWidths(rows, width, { em: style.em || 1000 });
   const numeric = numericColumns(rows, headerRows);
   const heights = []; const trs = [];
   for (let r = 0; r < nRows; r++) {

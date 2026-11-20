@@ -545,7 +545,7 @@ const DocView = {
       <button class="pill ver" v-if="verLabel" data-testid="version-pill" :title="verTitle" @click="s.tab = 'history'">{{ verLabel }}</button>
       <span class="pill pcpill" v-if="s.info?.local" :class="'st-' + s.info.local.state" :title="localTip(s.info.local)" data-testid="pc-pill">{{ localLabel(s.info.local) }}</span>
       <span class="draftchip" :class="chip.cls" :title="chip.tip" data-testid="draft-chip"><span class="dot" aria-hidden="true"></span><span class="chip-text">{{ chip.text }}</span>
-        <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="s.draft.tutorialRestored || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ s.draft.tutorialRestored || (s.draft.stale && !liveMode) ? '다시 열기' : '다시' }}</button>
+        <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="chip.reopen || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ chip.reopen || (s.draft.stale && !liveMode) ? '다시 열기' : '다시' }}</button>
         <button v-if="chip.keep" class="linkbtn" data-testid="chip-keep" title="서버의 내 수정본을 이 창의 글로 덮어씁니다" @click="keepMine">이 글로 저장</button>
         <button v-if="chip.carry" class="linkbtn" data-testid="chip-carry" :disabled="carrying" title="서버의 지금 수정본을 열고 이 창에서 고친 문단을 그 위에 다시 넣습니다" @click="carryMine">내 글 옮기기</button></span>
       <template v-if="!liveDoc">
@@ -747,7 +747,7 @@ const DocView = {
     const behind = computed(() => s.draft.behind > 0 && (!!s.myCr || s.draft.dirty) && !s.draft.rebased);
     const chip = computed(() => {
       const dr = s.draft; const cr = s.myCr; const e = s.editor;
-      if (dr.tutorialRestored) return { text: '연습 문서 복구됨 —', cls: 'error', retry: true, tip: dr.error };
+      if (dr.tutorialRestored || dr.fileReplaced) return { text: `${dr.elsewhere} —`, cls: 'error', retry: true, reopen: true, tip: dr.error };
       // v0.4 실시간·읽기 전용(§2.4-8): '실시간 · 저장됨 10:31' / '보내는 중…' / '보내지 못함 — [다시]' / '읽기 전용'
       if (e?.ready && (e.mode === 'live' || e.mode === 'follow')) {
         const c = liveChip({ ready: true, readOnly: e.mode === 'follow', error: s.live.error, pushing: s.live.pushing, progress: s.live.progress, dirty: dr.dirty, savedAt: hhmm(s.live.savedAt) });
@@ -783,6 +783,11 @@ const DocView = {
       if (s.draft.tutorialRestored) {
         if (s.draft.dirty && !confirm('이 창에서 아직 저장하지 못한 글은 복구한 문서에 넣지 않습니다. 복구한 문서를 다시 열까요?')) return;
         location.reload(); return;
+      }
+      if (s.draft.fileReplaced) {
+        if (s.draft.dirty && !confirm('저장하지 못한 편집을 버리고 교체된 문서를 다시 열까요?')) return;
+        await d.editor?.reload({ keepScroll: true });
+        return;
       }
       if (s.draft.stale) {
         // 다시 열기 = 서버의 지금 내 수정본(없으면 공유 문서)을 연다 — 이 창에서 친 저장 안 된 글은 버린다

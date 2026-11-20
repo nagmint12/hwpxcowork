@@ -3040,7 +3040,7 @@ fn serialize_shape_fill<W: std::io::Write>(
         if let Some(ref solid) = fill.solid {
             w.write_color_ref(solid.background_color)?;
             w.write_color_ref(solid.pattern_color)?;
-            w.write_i32(solid.pattern_type)?;
+            w.write_i32(solid.pattern_for_hwp5())?;
         }
     }
 

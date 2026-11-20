@@ -43,6 +43,7 @@ impl DocumentCore {
                 "쪽 범위가 잘못됐습니다: {from}..{to} (1 기준, from <= to)"
             )));
         }
+        self.flush_typeset_tail(); // [hwpx-cowork] 2026-11-20 쪽 범위는 모든 쪽이 정해진 뒤에 고른다(뒤쪽 미루기).
         let pages_before = self.page_count();
         if from > pages_before {
             return Err(HwpError::RenderError(format!(

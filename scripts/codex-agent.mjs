@@ -10,8 +10,9 @@ import { createApiWorker } from '../server/worker.js';
 import { createOrchestrationWorker } from '../server/orchestration-worker.js';
 
 const HELP = `Codex MCP 직접 자동 처리 실행기
-  node scripts/codex-agent.mjs [--check] [--model <모델 ID>] [--effort low|medium|high|xhigh|max|ultra] [--url <중앙 MCP 주소>] [--mcp 1|2]
+  node scripts/codex-agent.mjs [--check] [--model <모델 ID>] [--effort low|medium|high|xhigh|max|ultra] [--url <중앙 MCP 주소>] [--mcp 1|2|3]
   일반 요청은 새 MCP 연결(작업 도구 넷 task·read·edit·finish — docs/MCP_REDESIGN_2026-11-16.md)로 처리합니다(기본 --mcp 2).
+  --mcp 3은 본문 표를 TSV로 전달합니다.
   --mcp 1(또는 HWPX_COWORK_MCP=1)은 예전 연결로 처리합니다.
   모델·추론 강도는 웹 문서함의 'AI 모델·추론 강도'에서 정하면 요청마다 그 값이 우선합니다
   Windows 앱(Hwpx Cowork)에서는 [AI → 실행기 관리]에서 켜고 끕니다(2026-11-17 start-codex-agent.bat 을 대신함).
@@ -87,7 +88,7 @@ export async function runCodexAgent({ options, env = process.env, dependencies =
       } else log('협업 도구가 없는 서버입니다. 일반 요청만 처리하며 서버 업데이트 후 다시 시작하세요.');
     }
     // 일반 요청을 처리할 MCP 연결: 2 = 새 연결(작업 도구 넷 — 기본, --mcp 2), 1 = 예전 연결(--mcp 1)
-    const mcp = normalAi.mcpSurface === 'v2' ? 2 : 1;
+    const mcp = Number(normalAi.mcpSurface?.slice(1) || 1);
     const summary = { provider: 'codex', connected: !!connection.connected, ordinaryReady: true, mcp,
       orchestrationRequested, orchestrationReady: !!orchestration, orchestrationEnabled: !!profile?.enabled, agentId: agent?.id || null,
       modelCalled: false, queueClaimed: false };
@@ -95,7 +96,7 @@ export async function runCodexAgent({ options, env = process.env, dependencies =
     normal.start();
     if (orchestration) orchestration.start();
     log(orchestration ? '일반 요청과 Codex 협업 작업의 자동 처리를 시작했습니다.' : '일반 요청 자동 처리를 시작했습니다.');
-    log(mcp === 2 ? '일반 요청은 새 MCP 연결(작업 도구 넷 task·read·edit·finish)로 처리합니다(예전 연결은 --mcp 1).' : '일반 요청은 예전 MCP 연결로 처리합니다(--mcp 1 — 새 연결은 --mcp 2 또는 인자 없이).');
+    log(mcp === 3 ? '일반 요청은 MCP v3(TSV 표 읽기)로 처리합니다.' : mcp === 2 ? '일반 요청은 새 MCP 연결(작업 도구 넷 task·read·edit·finish)로 처리합니다(예전 연결은 --mcp 1).' : '일반 요청은 예전 MCP 연결로 처리합니다(--mcp 1 — 새 연결은 --mcp 2 또는 인자 없이).');
     if (orchestration && !profile.enabled) log('협업 사용이 꺼져 있습니다. 웹 문서함의 AI 협업 설정을 켜면 협업 큐도 처리합니다.');
     log('작업이 없으면 대기합니다. 종료하려면 Ctrl+C를 누르세요.');
     return { summary, stop, workers };

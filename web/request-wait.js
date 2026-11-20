@@ -1,5 +1,13 @@
 // 요청 상태는 실제 선점과 이벤트 수신 확인을 구분해서 표시한다.
+const RUN_LABEL = { codex: 'Codex', 'claude-code': 'Claude Code', 'gemini-cli': 'Gemini CLI', antigravity: 'Antigravity', api: 'API' };
+export const requestRunLabel = kind => RUN_LABEL[kind] || 'AI';
+
 export function requestWait(r) {
+  if (r?.options?.runSettings) {
+    const name = requestRunLabel(r.options.runSettings.kind);
+    return { label: `${name} 대기`, text: r.delivery ? `${name}에 전달했습니다. 작업을 시작하기를 기다립니다.` : `${name} 실행기가 요청을 맡기를 기다립니다.`,
+      hint: `이 요청을 처리하려면 ${name} 실행기를 켜 주세요.`, manualCopy: false };
+  }
   if (r?.automation?.method !== 'mcp-events') return null;
   switch (r.automation.state) {
     case 'delivered': return { label: 'ChatGPT 실행 대기', text: 'ChatGPT가 알림을 받았습니다. 작업을 시작하기를 기다리고 있습니다.', hint: '자동 처리 대기 중입니다. 프롬프트를 복사할 필요가 없습니다. ChatGPT가 요청을 맡으면 처리 중으로 바뀝니다.', manualCopy: false };

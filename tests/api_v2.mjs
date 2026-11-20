@@ -426,23 +426,24 @@ try {
   ok(up.report.changed.includes('s0/p0') && up.report.bodyMap && up.version === info1.version + 1, `편집본 병합 v${up.version} changed=${up.report.changed}`);
   ok((await textOf(doc1, 's0/p0')).startsWith('첫 번째 문단'), '병합 반영(변경 추적)');
 
-  // ───────── 버전 복구 ─────────
-  section('버전 복구(§3.7)');
+  // ───────── 이력 파일로 교체 ─────────
+  section('이력 파일로 교체(V4 §2.6)');
   const before1 = await api(`/api/docs/${doc1}`);
   const rs = await api(`/api/docs/${doc1}/versions/1/restore`, { method: 'POST' });
   const after = (await paras(doc1)).filter((p) => p.where === '본문').map((p) => p.text);
-  ok(!rs.unchanged && rs.version === before1.version + 1, `v1 복구 → v${rs.version} (바뀐 ${rs.report.changed.length}, 되돌린 제안 ${rs.report.undone.length}, 거절 ${rs.report.rejected})`);
-  ok(JSON.stringify(after) === JSON.stringify(origTexts), '복구 뒤 최종본 글 = v1 최종본 글');
+  ok(rs.version === before1.version + 1 && rs.v != null, `v1 파일로 교체 → 기록 ${rs.version}, 새 버전 v${rs.v}`);
+  ok(JSON.stringify(after) === JSON.stringify(origTexts), '교체 뒤 최종본 글 = v1 최종본 글');
   const chs = await api(`/api/docs/${doc1}/changes`);
   ok(chs.filter((c) => c.author === 'Nag' || c.author === 'AI 검토자').length === 4, `v1 에 있던 한글 변경 4건은 남음(전체 변경 ${chs.length}건)`);
-  ok((await api(`/api/docs/${doc1}/memos`)).some((m) => m.text.startsWith('[복구] v1(') && m.text.includes(`— ${A.name}\n바뀐 문단 `)), '복구 메모 [복구] v1(…)');
+  ok((await api(`/api/docs/${doc1}/file?kind=tracked`)).equals(await api(`/api/docs/${doc1}/file?kind=version&n=1`)), '현재 파일은 v1의 메모와 변경 추적을 포함해 바이트가 같다');
   const later3 = (await api(`/api/docs/${doc1}/proposals`)).find((p) => p.pid === later.pid);
-  ok(later3.status === 'undone', `v1 뒤에 적용된 제안 #${later.pid} → ${later3.status}`);
+  const staleUndo = await call(`/api/docs/${doc1}/proposals/${later.pid}/undo`, { method: 'POST' });
+  ok(later3.status === 'applied' && staleUndo.status === 409 && staleUndo.data.error === 'STALE', '반영 이력은 남고 교체 전 제안의 되돌리기는 막는다');
   const rs2 = await api(`/api/docs/${doc1}/versions/1/restore`, { method: 'POST' });
-  ok(rs2.unchanged === true, '다시 복구 → unchanged');
+  ok(rs2.unchanged === true, '같은 파일 다시 선택 → unchanged');
   ok((await call(`/api/docs/${doc1}/versions/999/restore`, { method: 'POST' })).status === 404, '없는 버전 → 404');
   const rs3 = await api(`/api/docs/${doc2}/versions/1/restore`, { method: 'POST' });
-  ok((await textOf(doc2, 's0/p3/n8')) === '268' && (await api(`/api/docs/${doc2}/tables`)).length === 5, `doc2 v1 복구 → 셀 268, 표 5개 (되돌린 제안 ${rs3.report.undone.join(',')})`);
+  ok(rs3.v != null && (await textOf(doc2, 's0/p3/n8')) === '268' && (await api(`/api/docs/${doc2}/tables`)).length === 5, 'doc2 v1 파일로 교체 → 셀 268, 표 5개');
 
   // ───────── 표 셀 편집 병합 ─────────
   section('편집본 병합: 표 셀(중첩 문단)');

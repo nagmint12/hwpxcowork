@@ -82,10 +82,14 @@ export function localStatus(settings, { alive = pidAlive } = {}) {
   return { user: settings.user, phase: state.phase, running: running(state, alive), processAlive: alive(state.pid), pid: state.pid, ready: state.phase === 'running' && alive(state.pid), startedAt: state.startedAt, heartbeatAt: state.heartbeatAt, stoppedAt: state.stoppedAt, stats: state.stats, error: state.error };
 }
 
+function localMcp(env) {
+  const version = String(env.HWPX_COWORK_MCP ?? '').trim();
+  return ['1', '3'].includes(version) ? version : '2';
+}
+
 async function makeReady(settings, dependencies = {}) {
-  // 2026-11-17: 실행기 기본 연결은 새 연결(v2 — 작업 도구 넷). 예전 연결은 HWPX_COWORK_MCP=1
-  const mcpEnv = (dependencies.env || process.env).HWPX_COWORK_MCP;
-  const ai = dependencies.aiFactory ? dependencies.aiFactory(settings) : new CodexProposer({ model: settings.model, command: settings.command, mcp: String(mcpEnv ?? '').trim() === '1' ? null : 'v2' }, { env: dependencies.env || process.env });
+  const env = dependencies.env || process.env;
+  const ai = dependencies.aiFactory ? dependencies.aiFactory(settings) : new CodexProposer({ model: settings.model, command: settings.command, mcp: localMcp(env) }, { env });
   const auth = await ai.check();
   if (!auth.ready) throw fault(auth.code || 'CODEX_AUTH_REQUIRED', auth.reason || 'ChatGPT 로그인 상태를 확인해 주세요.');
   const worker = (dependencies.workerFactory || createApiWorker)({ url: settings.url, token: settings.token, ai, tutorialOnly: !!settings.tutorialOnly, timing: settings.tutorialOnly ? { pollMs: 1000 } : {}, agent: settings.tutorialOnly ? '관리자 Codex' : 'ChatGPT (Codex)', clientName: settings.tutorialOnly ? 'hwpx-tutorial-codex-worker' : 'hwpx-codex-worker', log: dependencies.log || (() => {}) });
@@ -125,7 +129,9 @@ export async function startLocal(settings, dependencies = {}) {
     const logFd = fs.openSync(paths.log, 'a', 0o600);
     let child; let launchError = false;
     try {
-      child = (dependencies.spawn || nodeSpawn)(process.execPath, args, { cwd: ROOT, env: codexEnvironment(dependencies.env || process.env), detached: true, windowsHide: true, shell: false, stdio: ['ignore', logFd, logFd] });
+      const env = dependencies.env || process.env;
+      const workerEnv = { ...codexEnvironment(env), HWPX_COWORK_MCP: localMcp(env) };
+      child = (dependencies.spawn || nodeSpawn)(process.execPath, args, { cwd: ROOT, env: workerEnv, detached: true, windowsHide: true, shell: false, stdio: ['ignore', logFd, logFd] });
       child.once('error', () => { launchError = true; }); child.unref();
     } finally { fs.closeSync(logFd); }
     const deadline = Date.now() + (dependencies.waitMs || 30000);

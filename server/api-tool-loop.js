@@ -1,6 +1,7 @@
 // API 도구 반복문(제공자 중립): 모델 → 도구 호출 → MCP(createApiToolContext) → 결과 → 모델 … → 최종 JSON.
 // 제공자별 메시지 꼴은 어댑터가 맡는다 — OpenAI Responses(api-responses-agent)·Claude Messages(api-messages-agent)·Gemini generateContent(api-gemini-agent).
 // docs/MCP_TOOLSET_PLAN_2026-11-03.md §10
+import { isTaskSurface } from './tool-profiles.js';
 import { withoutToolDuplicates } from './api-mcp-tools.js';
 import { debugRecord, debugError } from './ai-debug.js';
 
@@ -67,7 +68,7 @@ API 작업 도구 사용 규칙:
 // requireResult: 문서 작업 실행은 실제 저장 결과나 변경 불필요 사유가 있어야 완료(한 번 판단하는 JSON·파일만 만드는 보조 실행은 아님)
 export async function runToolLoop(ai, input, adapter, { signal, toolContext, parse, singleTurn = false, requireResult = !singleTurn }) {
   const total = { input: 0, output: 0 }; let cacheRead = 0, cacheWrite = 0, modelCalls = 0, toolCalls = 0, model = ai.cfg.model, failure, repaired = false;
-  const v2 = toolContext?.surface === 'v2'; let nudges = 0;
+  const v2 = isTaskSurface(toolContext?.surface); let nudges = 0;
   const addUsage = usage => { total.input += Number(usage?.input) || 0; total.output += Number(usage?.output) || 0; cacheRead += Number(usage?.cacheRead) || 0; cacheWrite += Number(usage?.cacheWrite) || 0; };
   const usage = () => ({ ...total, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}), modelCalls, toolCalls });
   const combined = signal || new AbortController().signal;

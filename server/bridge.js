@@ -339,7 +339,7 @@ const defaultLog = (msg) => { try { process.stderr.write(`[hwpx 브리지] ${msg
 const errText = (e) => cleanText(e?.cause?.code || e?.cause?.errors?.[0]?.code || (e?.code ? `${e.code} ${e.message || ''}` : '') || e?.message || String(e), 160);
 
 /**
- * 브리지 명령줄(server/mcp-stdio.js) → 설정. surface: 'v1'(--v1·--mcp 1)|'v2'(--v2·--mcp 2)|null(정하지 않음 — 기본 새 연결, 주소 ?v=·?lean= 를 본다).
+ * 브리지 명령줄(server/mcp-stdio.js) → 설정. surface: 'v1'(--mcp 1)|'v2'(--mcp 2)|'v3'(--mcp 3, TSV)|null(정하지 않음 — 기본 새 연결, 주소 ?v=·?lean= 를 본다).
  * 연결 종류 인자가 여럿이면 마지막 것. 잘못된 --mcp 값은 bad 에(브리지는 시작하지 않는다), 모르는 인자는 unknown 에
  */
 export function parseBridgeArgs(argv, env = {}) {
@@ -360,10 +360,11 @@ export function parseBridgeArgs(argv, env = {}) {
       case '--no-lean': o.lean = false; break;
       case '--v1': o.surface = 'v1'; break;
       case '--v2': o.surface = 'v2'; break;
+      case '--v3': o.surface = 'v3'; break;
       case '--mcp': {
         const v = String(val() ?? '').trim();
-        if (v === '1' || v === '2') o.surface = v === '2' ? 'v2' : 'v1';
-        else o.bad.push(`--mcp 는 1(예전 연결) 또는 2(새 연결)입니다: ${cleanText(v, 20) || '(값 없음)'}`);
+        if (['1', '2', '3'].includes(v)) o.surface = `v${v}`;
+        else o.bad.push(`--mcp 는 1(예전 연결), 2(기본), 3(TSV) 중 하나입니다: ${cleanText(v, 20) || '(값 없음)'}`);
         break;
       }
       case '--tools': o.toolset = val(); break;
@@ -380,17 +381,17 @@ export function parseBridgeArgs(argv, env = {}) {
 }
 
 /**
- * 이 브리지가 쓸 연결 종류 → { surface: 'v2'|'v1', lean }. 2026-11-17 부터 기본은 새 연결(v2)이다(서버 기본과 같다 — server/mcp2.js mcpSurface).
- * 앞이 이긴다: surface 'v1'|'v2'(--v1·--v2·--mcp 1|2) > v2 true|false(예전 인자) > lean(--lean = 예전 연결의 얇은 흐름) > 주소 ?v=1|2·?lean=1 > 새 연결.
+ * 이 브리지가 쓸 연결 종류 → { surface: 'v1'|'v2'|'v3', lean }. 2026-11-17 부터 기본은 새 연결(v2)이다(서버 기본과 같다 — server/mcp2.js mcpSurface).
+ * 앞이 이긴다: surface 'v1'|'v2'|'v3'(--mcp 1|2|3) > v2 true|false(예전 인자) > lean(--lean = 예전 연결의 얇은 흐름) > 주소 ?v=1|2|3·?lean=1 > 새 연결.
  * lean 은 예전 연결일 때만 뜻이 있다(새 연결은 응답이 이미 짧다)
  */
 export function bridgeSurface({ surface = null, v2 = null, lean = false, url = null } = {}) {
-  if (surface != null && surface !== 'v1' && surface !== 'v2') throw new Error(`연결 종류는 v1 또는 v2 입니다: ${surface}`);
+  if (surface != null && !['v1', 'v2', 'v3'].includes(surface)) throw new Error(`연결 종류는 v1, v2, v3 중 하나입니다: ${surface}`);
   let q = null;
   try { q = url ? new URL(url).searchParams : null; } catch { q = null; }
   const urlLean = /^(1|true|yes|on)$/i.test(q?.get('lean') || '');
   const urlV = String(q?.get('v') ?? '').trim();
-  const chosen = surface || (v2 === true ? 'v2' : v2 === false ? 'v1' : lean ? 'v1' : urlV === '2' ? 'v2' : urlV === '1' ? 'v1' : urlLean ? 'v1' : 'v2');
+  const chosen = surface || (v2 === true ? 'v2' : v2 === false ? 'v1' : lean ? 'v1' : ['1', '2', '3'].includes(urlV) ? `v${urlV}` : urlLean ? 'v1' : 'v2');
   return { surface: chosen, lean: chosen === 'v1' && (!!lean || urlLean) };
 }
 
@@ -426,10 +427,14 @@ export async function createBridge({ url = DEFAULT_URL, token = null, agent = nu
   // 연결 종류(bridgeSurface — 기본 새 연결): 새 연결(server/mcp2.js)은 작업 도구 넷(task·read·edit·finish), 도구 범위(--tools core|all)는 X-Hwpx-Tools.
   // 예전 연결의 얇은 흐름(--lean 또는 주소 ?lean=1)은 머리글 X-Hwpx-Lean 도 보낸다(서버가 모델용 요약·영수증으로 답한다)
   const picked = bridgeSurface({ surface: surfaceOpt, v2: v2Opt, lean: leanOpt, url });
-  const v2 = picked.surface === 'v2';
+  const v2 = picked.surface !== 'v1';
+  if (picked.surface === 'v3') {
+    const res = await fetchImpl(`${apiBaseFrom(base)}/api/config`, { redirect: 'error', signal: AbortSignal.timeout(timing.connectTimeoutMs) });
+    if (!res.ok || !(await res.json()).features?.mcp3) throw new Error('이 서버는 MCP v3(TSV 표 읽기)를 지원하지 않습니다. v3를 지원하는 시험 서버로 연결하세요.');
+  }
   const lean = picked.lean;
   const tools2 = ['core', 'all'].includes(toolset) ? toolset : (['core', 'all'].includes(base.searchParams.get('tools')) ? base.searchParams.get('tools') : null);
-  const authHeaders = () => ({ Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session, 'X-Hwpx-Mcp': v2 ? '2' : '1', ...(lean ? { 'X-Hwpx-Lean': '1' } : {}), ...(v2 && tools2 ? { 'X-Hwpx-Tools': tools2 } : {}) });
+  const authHeaders = () => ({ Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session, 'X-Hwpx-Mcp': picked.surface.slice(1), ...(lean ? { 'X-Hwpx-Lean': '1' } : {}), ...(v2 && tools2 ? { 'X-Hwpx-Tools': tools2 } : {}) });
   const transportOpts = () => ({ requestInit: { headers: authHeaders() }, fetch: fetchImpl });
   let stopped = false; let stopping = null;
   const counters = { notified: 0, dropped: 0, reminders: 0 };

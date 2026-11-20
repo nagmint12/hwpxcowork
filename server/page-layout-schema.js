@@ -60,5 +60,12 @@ export const RestyleOpSchema = z.object({
   at: z.array(z.union([z.string().min(1).max(200), tableTarget, styleTarget])).min(1).max(5000),
   style: styleName.optional(), char: CharFormatSchema.optional(), paragraph: ParagraphFormatSchema.optional(),
 }).strict();
-export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema, StylesOpSchema, RestyleOpSchema]);
+// 문서 끼워 넣기(MCP v3 실험 — 2026-11-20, docs/MCP_REDESIGN_2026-11-16.md §21): 이 문서의 빈 서식(download_attachment_file 'template')에 쓴 HWPX 를
+// upload_result_file 로 올린 첨부(attachment_id)의 본문을 after 문단 뒤에 — 제안 하나(쪽 구성 제안과 같은 길: 사본으로 되돌림·주소 옮기기)
+export const InsertDocumentOpSchema = z.object({
+  op: z.literal('insert_document'),
+  after: z.string().regex(/^s\d+\/p\d+$/).describe('넣을 자리 앞 본문 문단 주소'),
+  attachment_id: z.string().min(1).max(64).describe('끼워 넣을 HWPX 첨부 aid(upload_result_file 의 결과)'),
+}).strict();
+export const StructureOpSchema = z.discriminatedUnion('op', [...PageLayoutOpSchema.options, ObjectsToBodyOpSchema, StylesOpSchema, RestyleOpSchema, InsertDocumentOpSchema]);
 export const normalizePageLayoutOps = ops => z.array(StructureOpSchema).min(1).max(200).parse(ops);

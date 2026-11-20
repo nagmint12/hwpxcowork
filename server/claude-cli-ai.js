@@ -18,10 +18,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn } from 'node:child_process';
-import { runProcess, codexMcpPrompt, tagSafe } from './codex-ai.js';
+import { runProcess, codexMcpPrompt } from './codex-ai.js';
 import { validateCodexJob } from './codex-mcp.js';
 import { withAiDebug, debugRecord, debugError, currentAiDebug } from './ai-debug.js';
-import { EDITOR_INSTRUCTIONS, EDITOR_INSTRUCTIONS_V2 } from './editor-instructions.js';
+import { isTaskSurface } from './tool-profiles.js';
+import { EDITOR_INSTRUCTIONS, taskEditorInstructions, modelBriefText, V3_BRIEF_INTRO } from './editor-instructions.js';
 
 const fault = (code, message, extra = {}) => Object.assign(new Error(message), { code }, extra);
 // server/worker.js 가 실행기를 멈추는 오류 코드(이름은 Codex 때 지었지만 뜻은 같다 — 설치·판·로그인·실행 실패).
@@ -50,12 +51,10 @@ const CLAUDE_NOTE_V2 = '이 실행(Claude Code 실행기)에는 명령·코드 �
  */
 export function claudeMcpPromptV2(job, brief) {
   return `hwpx MCP 도구로 배정된 작업 하나를 처리하세요. 문서=${job.docId} 요청=${job.requestId} 시도=${job.attempt}(도구의 doc_id·request_id·expected_attempt 에 이 값을 씁니다).
-아래 document_context 는 이 요청의 내용입니다(task 응답과 같습니다 — task 를 다시 부르지 않아도 됩니다): 지시(instruction)·대상(target)·문서 얼개(map)·대상 주변 글(context)·할 일(todo).
+${brief?.surface === 'v3' ? V3_BRIEF_INTRO : '아래 document_context 는 이 요청의 내용입니다(task 응답과 같습니다 — task 를 다시 부르지 않아도 됩니다): 지시(instruction)·대상(target)·문서 얼개(map)·대상 주변 글(context)·할 일(todo).'}
 받은 내용으로 충분하면 바로 edit 를 부르고, 더 볼 것이 있을 때만 read 로 필요한 범위만 읽습니다. 결과는 edit 의 ops 에 모아 내고(op 꼴은 edit 도구 설명, 자세한 인자는 read(view='guide', id='ops')), 일이 끝나는 호출에 done="공유 요약 1~2문장" 을 줍니다.
 ${CLAUDE_NOTE_V2} 최종 답변은 처리 사실 한 줄이면 됩니다.
-<document_context>
-${tagSafe(JSON.stringify(brief))}
-</document_context>`;
+${modelBriefText(brief)}`;
 }
 
 /** OS·로그인 저장소·네트워크에 필요한 값만 남긴다(ANTHROPIC_* 키·주소, 클라우드 제공자 설정, 바깥 Claude Code 세션 표시는 넘기지 않는다) */
@@ -189,7 +188,7 @@ export class ClaudeCodeProposer {
     if (timeoutMs != null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2147483647)) throw fault('CLAUDE_INPUT_INVALID', '응답 제한 시간은 양의 정수(ms)로 설정해 주세요.');
     this.model = model?.trim() || undefined; this.effort = effort || undefined; this.command = command || 'claude'; this.timeoutMs = timeoutMs;
     // 새 MCP 연결(--mcp 2 — server/mcp2.js, Codex 실행기와 같은 값): 실행기(server/worker.js)가 짧은 요청 내용(brief)을 받아 넘기고 Claude 는 작업 도구 넷으로 처리한다
-    this.mcpSurface = ['v2', '2', 2].includes(mcp) ? 'v2' : null;
+    this.mcpSurface = isTaskSurface(mcp) ? mcp : ['2', '3'].includes(String(mcp)) ? `v${mcp}` : null;
     this.spawn = dependencies.spawn || nodeSpawn; this.env = dependencies.env || process.env;
     this.resolveCommand = dependencies.resolveCommand || resolveClaudeCommand;
     this.tempRoot = dependencies.tempRoot || os.tmpdir(); this.enabled = true;
@@ -215,8 +214,8 @@ export class ClaudeCodeProposer {
     validateCodexJob(job);
     if (job.type !== 'request') throw fault('CLAUDE_INPUT_INVALID', 'Claude Code 실행기는 일반 AI 요청만 처리합니다.');
     // 새 연결(job.surface 'v2'): 첫 입력은 실행기가 받은 요청 내용(brief) — 배정된 요청·시도와 같아야 한다(Codex 실행기와 같은 검사)
-    const v2 = job.surface === 'v2';
-    if (v2 && (!brief || brief.doc_id !== job.docId || brief.request_id !== job.requestId || (brief.attempt ?? 1) !== job.attempt || brief.instruction_hidden)) throw fault('CLAUDE_INPUT_INVALID', '요청 내용이 배정된 요청·시도와 일치하지 않습니다.');
+    const v2 = isTaskSurface(job.surface);
+    if (v2 && (!brief || brief.doc_id !== job.docId || brief.request_id !== job.requestId || (brief.attempt ?? 1) !== job.attempt || brief.instruction_hidden || (job.surface === 'v3' && brief.surface !== 'v3'))) throw fault('CLAUDE_INPUT_INVALID', '요청 내용이 배정된 요청·시도와 일치하지 않습니다.');
     if (requestContext != null && (requestContext.docId !== job.docId || requestContext.rid !== job.requestId || (requestContext.attempt ?? 1) !== job.attempt || requestContext.instructionHidden)) throw fault('CLAUDE_INPUT_INVALID', '문서 문맥이 배정된 요청·시도와 일치하지 않습니다.');
     const endpoint = new URL(url);
     if (!['http:', 'https:'].includes(endpoint.protocol) || !/\/mcp\/?$/.test(endpoint.pathname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !token || !/^[A-Za-z0-9_-]{1,64}$/.test(session || '')) throw fault('CLAUDE_INPUT_INVALID', '작업의 MCP 연결 정보를 확인하세요.');
@@ -238,7 +237,7 @@ export class ClaudeCodeProposer {
       await fs.writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { hwpx: { type: 'stdio', command: process.execPath, args: [bridge] } } }), { encoding: 'utf8', mode: 0o600 });
       const launch = await this.resolveCommand(this.command, this.env);
       // 새 연결이면 지침도 새 연결용(작업 도구 넷 — 예전 도구 이름 없음). 브리지(server/codex-mcp.js)는 HWPX_CODEX_JOB 의 job.surface 'v2' 로 작업 도구 넷만 중계한다
-      const args = claudeArgs({ model: this.model, effort: this.effort, mcpConfigFile, systemPrompt: v2 ? EDITOR_INSTRUCTIONS_V2 : EDITOR_INSTRUCTIONS });
+      const args = claudeArgs({ model: this.model, effort: this.effort, mcpConfigFile, systemPrompt: v2 ? taskEditorInstructions(job.surface) : EDITOR_INSTRUCTIONS });
       const env = { ...claudeEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_DEBUG_DIR: currentAiDebug()?.directory, HWPX_COWORK_TOKEN: token,
         HWPX_CODEX_JOB: JSON.stringify({ job: { ...job, agentId: this.agentName }, url, session, filesDir: work }) };
       const prompt = v2 ? claudeMcpPromptV2(job, brief) : codexMcpPrompt(job, requestContext) + (job.workflow === 'content_format'

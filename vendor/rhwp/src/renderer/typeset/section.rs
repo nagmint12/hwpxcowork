@@ -8,6 +8,7 @@ use crate::renderer::typeset::{
     ResolvedStyleSet, TypesetEngine, TypesetState, MIN_TOP_KEEP_PX,
 };
 mod boundary;
+mod checkpoints;
 mod columns;
 mod controls;
 mod entry;
@@ -18,6 +19,10 @@ mod post_flow;
 mod stored_reset;
 mod tail;
 mod vpos;
+pub(crate) use checkpoints::{
+    ParkedOutcome, ParkedSection, ResumeOutcome, ResumeRequest, SectionCheckpoints, TailWindow,
+};
+
 /// [hwpx-cowork] 구역 작업의 불변 입력. 작업 상태에는 이 참조를 보관하지 않는다.
 pub(crate) struct SectionTypesetInput<'a> {
     pub(crate) paragraphs: &'a [Paragraph],
@@ -39,6 +44,7 @@ pub(crate) struct SectionTypesetInput<'a> {
 
 /// [hwpx-cowork] 기존 동기 문단 루프의 소유된 이어받기 상태.
 /// 큰 표 등을 가진 단일 문단은 한 작업 조각에서 끝까지 처리한다.
+#[derive(Clone)]
 pub(crate) struct SectionTypesetJob {
     state: TypesetState,
     next_para_idx: usize,
@@ -661,6 +667,11 @@ impl TypesetEngine {
         }
 
         // [미주 배치 — Hancom EndnoteEndOfSection/EndnoteEndOfDocument]
+        // [hwpx-cowork] #8842: queued images need their own pages even if the
+        // body ends before it reaches those pages.
+        while !st.pending_picture_pile.is_empty() {
+            st.force_new_page_with_storage(storage)?;
+        }
         let issue2424_endnote_started = issue2424_ts_enabled.then(std::time::Instant::now);
         self.typeset_section_endnotes(
             st,

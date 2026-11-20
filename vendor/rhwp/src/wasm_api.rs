@@ -91,6 +91,14 @@ fn row_index_from_u32(v: u32) -> Result<u16, HwpError> {
         .map_err(|_| HwpError::RenderError(format!("행 인덱스 {} 가 최대치(65535)를 넘습니다", v)))
 }
 
+fn typeset_tail_result_json(state: crate::document_core::TypesetTailState, page_count: u32) -> String {
+    format!(
+        "{{\"ok\":true,\"status\":\"{}\",\"pageCount\":{}}}",
+        state.as_str(),
+        page_count
+    )
+}
+
 fn deferred_pagination_result_json(result: DeferredPaginationStepResult) -> String {
     let status = match result.state {
         DeferredPaginationJobState::None => "none",
@@ -2086,6 +2094,67 @@ impl HwpDocument {
         self.core.cell_compose_memo.set_verify(enabled);
         self.core.measure_frame_memo.set_verify(enabled);
         self.core.metric_request_memo.set_verify(enabled);
+        // [hwpx-cowork] 2026-11-20 구역 조판 체크포인트에서 이어 간 결과도 처음부터 한 조판과 견준다.
+        self.core.typeset_resume.verify.set(enabled);
+    }
+
+    /// [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용) 통계(시험·진단용):
+    /// `{"enabled","resumed","full","skippedParagraphs","verifyChecks","verifyMismatches"}`.
+    /// resumed = 체크포인트에서 이어 간 구역 조판 수, skippedParagraphs = 그때 다시 하지 않은 앞 문단 수(누적).
+    #[wasm_bindgen(js_name = typesetResumeStats)]
+    pub fn typeset_resume_stats(&self) -> String {
+        let control = &self.core.typeset_resume;
+        format!(
+            "{{\"enabled\":{},\"resumed\":{},\"full\":{},\"skippedParagraphs\":{},\"verifyChecks\":{},\"verifyMismatches\":{},\"firstMismatch\":{},\"tailDeferral\":{},\"tailParked\":{},\"tailCompleted\":{},\"tailPending\":{}}}",
+            !control.disabled.get(),
+            control.resumed.get(),
+            control.full.get(),
+            control.skipped_paragraphs.get(),
+            control.verify_checks.get(),
+            control.verify_mismatches.get(),
+            serde_json::to_string(&*control.first_mismatch.borrow()).unwrap_or_else(|_| "null".into()),
+            self.core.typeset_tail_deferral,
+            control.tail_parked.get(),
+            control.tail_completed.get(),
+            self.core.typeset_tail_pending()
+        )
+    }
+
+    /// [hwpx-cowork] 2026-11-20 뒤쪽 미루기를 켜거나 끈다(편집기만 켠다 — `document_core::typeset_tail`).
+    /// 켜면 편집의 쪽 나눔이 편집한 쪽 근처까지만 하고 남은 작업을 `stepTypesetTail` 로 잇게 남길 수 있다.
+    #[wasm_bindgen(js_name = setTypesetTailDeferral)]
+    pub fn set_typeset_tail_deferral(&mut self, enabled: bool) {
+        self.core.set_typeset_tail_deferral(enabled);
+    }
+
+    /// [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판이 있는가.
+    #[wasm_bindgen(js_name = typesetTailPending)]
+    pub fn typeset_tail_pending(&self) -> bool {
+        self.core.typeset_tail_pending()
+    }
+
+    /// [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 `budgetMs` 동안(최소 한 걸음) 잇는다.
+    /// `{"ok":true,"status":"none"|"pending"|"complete"|"stale","pageCount"}`. complete 면 쪽 나눔이 바뀌었다.
+    #[wasm_bindgen(js_name = stepTypesetTail)]
+    pub fn step_typeset_tail(&mut self, budget_ms: f64) -> String {
+        let state = self.core.step_typeset_tail(budget_ms.max(0.0));
+        typeset_tail_result_json(state, self.core.page_count())
+    }
+
+    /// [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 지금 끝낸다.
+    #[wasm_bindgen(js_name = flushTypesetTail)]
+    pub fn flush_typeset_tail(&mut self) -> String {
+        let state = self.core.flush_typeset_tail();
+        typeset_tail_result_json(state, self.core.page_count())
+    }
+
+    /// [hwpx-cowork] 2026-11-20 구역 조판 체크포인트를 끄거나 켠다(견줌·되돌림용). 끄면 늘 처음부터 조판한다.
+    #[wasm_bindgen(js_name = setTypesetResumeEnabled)]
+    pub fn set_typeset_resume_enabled(&mut self, enabled: bool) {
+        self.core.typeset_resume.disabled.set(!enabled);
+        if !enabled {
+            self.core.forget_typeset_checkpoints();
+        }
     }
 
     /// [hwpx-cowork] 조판 기억을 끄거나 켠다(견줌·되돌림용). 끄면 종전처럼 늘 새로 계산한다.
@@ -6319,7 +6388,7 @@ impl HwpDocument {
 
     /// 문서의 메모를 문서 순서대로 반환한다.
     ///
-    /// 반환: `[{id,index,author,date,text,place,sectionIndex,paraIndex,
+    /// 반환: `[{id,index,parentId,author,date,text,place,sectionIndex,paraIndex,
     /// startCharIdx,endCharIdx,path,page,editable,readOnlyReason}]`
     #[wasm_bindgen(js_name = getMemoList)]
     pub fn get_memo_list(&self) -> String {
@@ -6371,6 +6440,14 @@ impl HwpDocument {
                 end_char_idx as usize,
                 json,
             )
+            .map_err(|e| JsValue::from_str(&e.to_json()))
+    }
+
+    /// 부모 메모의 기준 글에 댓글을 단다. `json` = `{author,text}`.
+    #[wasm_bindgen(js_name = insertMemoReply)]
+    pub fn insert_memo_reply(&mut self, parent_id: u32, json: &str) -> Result<String, JsValue> {
+        self.core
+            .insert_memo_reply_json_native(parent_id, json)
             .map_err(|e| JsValue::from_str(&e.to_json()))
     }
 

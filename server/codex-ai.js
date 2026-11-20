@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { validateCodexJob } from './codex-mcp.js';
-import { EDITOR_INSTRUCTIONS, EDITOR_INSTRUCTIONS_V2, modelRequestContext } from './editor-instructions.js';
+import { isTaskSurface } from './tool-profiles.js';
+import { EDITOR_INSTRUCTIONS, taskEditorInstructions, modelRequestContext, modelBriefText, V3_BRIEF_INTRO } from './editor-instructions.js';
 import { editStageInstructions } from './edit-workflow-runner.js';
 import { withAiDebug, debugRecord, debugError, debugStream, currentAiDebug } from './ai-debug.js';
 import { MODEL_SELECTION_MODES, MODEL_SELECTION_INSTRUCTIONS, selectableCodexModels,
@@ -13,8 +14,8 @@ import { MODEL_SELECTION_MODES, MODEL_SELECTION_INSTRUCTIONS, selectableCodexMod
 
 // 2026-11-17(작업 M): 새 연결 첫 입력에 싣는 edit op 꼴 — 도구 설명과 같은 글(server/mcp2/ops.js OPS_BRIEF)을 그대로 쓴다(손으로 베끼지 않음).
 // 개인 실행기 ZIP(server/worker-package.js)에는 mcp2/ 와 그 엔진 파일이 없다 → 그때는 op 목록 없이 부르는 꼴만 싣는다(그 밖의 import 오류는 그대로 낸다).
-let OPS_BRIEF_V2 = null;
-try { ({ OPS_BRIEF: OPS_BRIEF_V2 } = await import('./mcp2/ops.js')); } catch (cause) { if (cause?.code !== 'ERR_MODULE_NOT_FOUND') throw cause; }
+let OPS_BRIEF_V2 = null; let opsBriefFor = null;
+try { ({ OPS_BRIEF: OPS_BRIEF_V2, opsBrief: opsBriefFor } = await import('./mcp2/ops.js')); } catch (cause) { if (cause?.code !== 'ERR_MODULE_NOT_FOUND') throw cause; }
 const error = (code, message) => Object.assign(new Error(message), { code });
 const MAX_OUTPUT = 16 * 1024 * 1024;
 const REQUIRED_FLAGS = ['--strict-config', '--ignore-user-config', '--sandbox', '--skip-git-repo-check', '--json'];
@@ -29,7 +30,22 @@ const CONFIG = ['forced_login_method="chatgpt"', 'model_provider="openai"', 'app
 // 모르는 기능 이름·잘못된 web_search 값은 CLI 가 거절한다. 켜기: 새 연결(v2) 실행 + HWPX_COWORK_CODEX_LEAN_TOOLS=1 (또는 CodexProposer 옵션 leanTools:true).
 export const CODEX_LEAN_TOOL_ARGS = Object.freeze(['-c', 'web_search="disabled"', '--disable', 'image_generation', '--disable', 'goals']);
 
-export function codexExecArgs({ model, effort, platform = process.platform, instructionsFile, connectMcp = true, leanTools = false, features = null }) {
+// v3(실험 연결) 큰 읽기(2026-11-20 — docs/MCP_REDESIGN_2026-11-16.md §19): Codex 0.166 은 도구 출력을 모델 문맥에 약 1만 6천 토큰까지만 넣는다
+// (exec 의 max_output_tokens 를 크게 줘도 — 65쪽 보고서 103,772자를 한 번에 읽히자 가운데 79,000자가 '…tokens truncated…'로 빠졌다).
+// tool_output_token_limit 를 올리면 한 번에 들어간다(같은 실험에서 문맥 14k → 89k, 가운데 문단을 맞게 인용). 한글 약 0.72토큰/자 — 10만 토큰 ≈ 13만 9천 자.
+// 바꾸기: 환경 HWPX_COWORK_CODEX_TOOL_OUTPUT_TOKENS(정수, 0 = 넘기지 않음)
+export const CODEX_V3_TOOL_OUTPUT_TOKENS = 100000;
+// 큰 읽기 한 번의 글자 수(서버는 'AI 응답 크기' 한도 − 600 까지만 준다 — 운영 80,000 이면 79,400자). 위 토큰 한도 안에 드는 값
+export const CODEX_V3_READ_CHARS = 120000;
+export function codexToolOutputTokens(surface, env = process.env) {
+  if (surface !== 'v3') return null;
+  const raw = env.HWPX_COWORK_CODEX_TOOL_OUTPUT_TOKENS;
+  if (raw == null || raw === '') return CODEX_V3_TOOL_OUTPUT_TOKENS;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+export function codexExecArgs({ model, effort, platform = process.platform, instructionsFile, connectMcp = true, leanTools = false, features = null, toolOutputTokens = null }) {
   const args = ['--no-daemon', 'exec', '--strict-config', '--ignore-user-config', '--skip-git-repo-check', '--sandbox', connectMcp ? 'workspace-write' : 'read-only', '--color', 'never', '--json'];
   for (const feature of DISABLED_FEATURES) args.push('--disable', feature);
   for (const config of CONFIG) args.push('-c', config);
@@ -39,6 +55,7 @@ export function codexExecArgs({ model, effort, platform = process.platform, inst
   args.push('-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true', '-c', 'sandbox_workspace_write.exclude_slash_tmp=true');
   if (model) args.push('--model', model);
   if (effort) args.push('-c', `model_reasoning_effort=${JSON.stringify(effort)}`);
+  if (connectMcp && Number.isInteger(toolOutputTokens) && toolOutputTokens > 0) args.push('-c', `tool_output_token_limit=${toolOutputTokens}`);
   if (instructionsFile) args.push('-c', `model_instructions_file=${JSON.stringify(instructionsFile)}`, '-c', 'project_doc_max_bytes=0', '-c', 'skills.include_instructions=false', '-c', 'skills.bundled.enabled=false', '--disable', 'multi_agent', '--disable', 'skill_search');
   if (connectMcp) {
     const bridge = fileURLToPath(new URL('./codex-mcp.js', import.meta.url));
@@ -219,7 +236,7 @@ export class CodexProposer {
     if (!MODEL_SELECTION_MODES.includes(modelSelection)) throw error('CODEX_INPUT_INVALID', '모델 선택 방식은 manual·auto 중 하나입니다.');
     this.model = model?.trim(); this.effort = effort; this.modelSelection = modelSelection; this.command = command; this.timeoutMs = timeoutMs;
     // 새 MCP 연결(--mcp 2 — server/mcp2.js): 실행기가 짧은 요청 내용(brief)을 받아 넘기고 Codex 는 작업 도구 넷으로 처리한다
-    this.mcpSurface = ['v2', '2', 2].includes(mcp) ? 'v2' : null;
+    this.mcpSurface = isTaskSurface(mcp) ? mcp : ['2', '3'].includes(String(mcp)) ? `v${mcp}` : null;
     this.spawn = dependencies.spawn || nodeSpawn; this.env = dependencies.env || process.env;
     this.resolveCommand = dependencies.resolveCommand || resolveCodexCommand;
     this.tempRoot = dependencies.tempRoot || os.tmpdir(); this.enabled = true;
@@ -276,8 +293,8 @@ export class CodexProposer {
 
   async _runMcpRecorded(job, { url, token, session, signal, requestContext, brief } = {}) {
     validateCodexJob(job);
-    const v2 = job.surface === 'v2';
-    if (v2 && (!brief || brief.doc_id !== job.docId || brief.request_id !== job.requestId || (brief.attempt ?? 1) !== job.attempt || brief.instruction_hidden)) throw error('CODEX_INPUT_INVALID', '요청 내용이 배정된 요청·시도와 일치하지 않습니다.');
+    const v2 = isTaskSurface(job.surface);
+    if (v2 && (!brief || brief.doc_id !== job.docId || brief.request_id !== job.requestId || (brief.attempt ?? 1) !== job.attempt || brief.instruction_hidden || (job.surface === 'v3' && brief.surface !== 'v3'))) throw error('CODEX_INPUT_INVALID', '요청 내용이 배정된 요청·시도와 일치하지 않습니다.');
     if (requestContext != null && (job.type !== 'request' || requestContext.docId !== job.docId || requestContext.rid !== job.requestId || (requestContext.attempt ?? 1) !== job.attempt || requestContext.instructionHidden)) throw error('CODEX_INPUT_INVALID', '문서 문맥이 배정된 요청·시도와 일치하지 않습니다.');
     const endpoint = new URL(url);
     if (!['http:', 'https:'].includes(endpoint.protocol) || !/\/mcp\/?$/.test(endpoint.pathname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !token || !/^[A-Za-z0-9_-]{1,64}$/.test(session || '')) throw error('CODEX_INPUT_INVALID', '작업의 MCP 연결 정보를 확인하세요.');
@@ -293,16 +310,18 @@ export class CodexProposer {
       await fs.mkdir(path.join(directory, 'work', 'out'), { recursive: true });
       const temp = path.join(directory, 'work', 'tmp');
       await fs.mkdir(temp, { recursive: true });
-      const prompt = v2 ? codexMcpPromptV2(job, brief) : codexMcpPrompt(job, requestContext);
+      // v3 큰 읽기: CLI 의 tool_output_token_limit 와 첫 입력의 안내가 같은 값을 쓴다(codexToolOutputTokens — 실행기 환경)
+      const toolOutputTokens = v2 ? codexToolOutputTokens(job.surface, this.env) : null;
+      const prompt = v2 ? codexMcpPromptV2(job, brief, { toolOutputTokens }) : codexMcpPrompt(job, requestContext);
       const instructionsFile = path.join(directory, 'editor-instructions.txt');
-      await fs.writeFile(instructionsFile, v2 ? EDITOR_INSTRUCTIONS_V2 : EDITOR_INSTRUCTIONS, 'utf8');
+      await fs.writeFile(instructionsFile, v2 ? taskEditorInstructions(job.surface) : EDITOR_INSTRUCTIONS, 'utf8');
       const launch = await this.resolveCommand(this.command, this.env);
       const selected = this.modelSelection === 'auto' && job.type === 'request' && requestContext
         ? await this.selectModel(requestContext, { directory, temp, launch, signal }) : { model: this.model, effort: this.effort };
       if (signal?.aborted) throw Object.assign(error('ABORTED', '개인 AI 요청이 취소되었습니다.'), { usage: selected.usage });
       // 2026-11-17(작업 M): 내장 도구 줄이기는 새 연결에서만, 켰을 때만(기본 꺼짐 — 실제 실험으로 재기 전)
       const leanTools = v2 && (this.leanTools || this.env.HWPX_COWORK_CODEX_LEAN_TOOLS === '1');
-      const args = codexExecArgs({ model: selected.model, effort: selected.effort, instructionsFile, leanTools, features: checked.features });
+      const args = codexExecArgs({ model: selected.model, effort: selected.effort, instructionsFile, leanTools, features: checked.features, toolOutputTokens });
       const env = { ...codexEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_DEBUG_DIR: currentAiDebug()?.directory,
         HWPX_COWORK_TOKEN: token, HWPX_CODEX_JOB: JSON.stringify({ job, url, session, filesDir: path.join(directory, 'work') }) };
       const result = await runProcess(launch, args, { spawn: this.spawn, env, cwd: directory, input: prompt, signal, timeoutMs: this.timeoutMs })
@@ -324,8 +343,7 @@ export class CodexProposer {
 
 // 자료 JSON 의 태그 문자(< >)를 JSON 유니코드 이스케이프(역슬래시 + u003c·u003e)로 바꾼다 — 자료 안의 닫는 태그가 document_context 경계를 바꾸지 못하게.
 // 역슬래시를 글자 번호(92)로 만든다(소스에 역슬래시-u 꼴을 그대로 적지 않으려고)
-const BACKSLASH = String.fromCharCode(92);
-export const tagSafe = (json) => json.replace(/[<>]/g, (ch) => `${BACKSLASH}u00${ch.charCodeAt(0).toString(16)}`);
+export { tagSafeJson as tagSafe } from './editor-instructions.js';
 
 /**
  * 2026-11-17(작업 M): Codex CLI 0.166 은 MCP 도구를 코드 모드 exec 안에서 부르는데, exec 설명에는 MCP 도구 선언이 빠져 있다
@@ -334,14 +352,22 @@ export const tagSafe = (json) => json.replace(/[<>]/g, (ch) => `${BACKSLASH}u00$
  * 부르는 꼴(이름 mcp__hwpx__* — codexExecArgs 의 mcp_servers.hwpx, 인자 이름은 server/mcp2.js 의 inputSchema)과 op 꼴을 첫 입력에 실어 그 찾기를 없앤다.
  * 코드 모드가 아닌 Codex 에서는 이 몇 줄이 도구 설명과 겹칠 뿐이다.
  */
-export function codexCodeModeHintV2(job) {
+export function codexCodeModeHintV2(job, { toolOutputTokens = null } = {}) {
   const ids = `doc_id:${JSON.stringify(job.docId)}, request_id:${job.requestId}, expected_attempt:${job.attempt}`;
-  const ops = OPS_BRIEF_V2 ? `edit 의 ops 꼴(edit 도구 설명과 같습니다 — 더 자세한 인자는 read(view='guide', id='ops')):\n${OPS_BRIEF_V2}` : "edit 의 ops 꼴은 edit 도구 설명에 있습니다.";
+  // v3 는 표 줄만 다르다(server/mcp2/ops.js opsBrief — 2026-11-20 §20)
+  const brief = opsBriefFor ? opsBriefFor(job.surface) : OPS_BRIEF_V2;
+  const ops = brief ? `edit 의 ops 꼴(edit 도구 설명과 같습니다 — 더 자세한 인자는 read(view='guide', id='ops')):\n${brief}` : "edit 의 ops 꼴은 edit 도구 설명에 있습니다.";
+  // v3(2026-11-20 §19): 실행기가 tool_output_token_limit 를 올려 띄우므로 큰 읽기 한 번이 모델에 다 보인다 — 읽기 왕복(65쪽 문서 9~15번)을 1~2번으로
+  const big = job.surface === 'v3' && toolOutputTokens
+    ? `\n문서 전체를 봐야 하면 read(view:'text', max_chars:${CODEX_V3_READ_CHARS}) 로 크게 받습니다(서버 한도만큼 오고 남으면 끝의 이어 읽기 cursor). 그 exec 첫 줄에 // @exec: {"max_output_tokens": ${toolOutputTokens}} 를 붙이고 받은 글을 text() 한 번으로 봅니다 — 나눠 출력하지 않는다. 출력에 '…tokens truncated…' 가 보이면 빠진 범위를 at·cursor 로 다시 읽습니다.`
+    : '';
+  // v3(2026-11-20 after3 실측): 모델이 제안 393건 저장(서버 약 10초)에 yield_time_ms 1000 을 줘 wait 로 세 번 기다렸다 — 기다릴 때마다 대화 전체(약 13만 토큰)를 다시 보낸다
+  const wait = job.surface === 'v3' ? "\nedit 은 제안이 많으면 서버에서 10~30초 걸립니다 — 그 exec 에 yield_time_ms 를 짧게 주지 않습니다(기본 30초. 짧으면 wait 로 기다리는 호출마다 대화 전체를 다시 보냅니다)." : '';
   return `코드 모드(exec)에서는 ALL_TOOLS 로 도구 설명을 찾지 말고 아래 꼴로 바로 부릅니다(결과는 text(await …) 로 봅니다):
 · await tools.mcp__hwpx__edit({${ids}, ops:[…], done?:"공유 요약", dry_run?:true})
-· await tools.mcp__hwpx__read({doc_id:${JSON.stringify(job.docId)}, view?, at?, find?, id?, cursor?})
+· await tools.mcp__hwpx__read({doc_id:${JSON.stringify(job.docId)}, view?, at?, find?, id?, cursor?${job.surface === 'v3' ? ', max_chars?' : ''}})
 · await tools.mcp__hwpx__finish({${ids}, summary?, no_changes_reason?, error?})
-표 칸 주소는 at:{table:'s0/p3#t0', row, col}(0부터).
+표 칸 주소는 at:{table:'s0/p3#t0', row, col}(0부터 — read·edit 모두, 그 칸의 문단 전체).${big}${wait}
 ${ops}`;
 }
 
@@ -349,15 +375,13 @@ ${ops}`;
  * 새 MCP 연결(job.surface 'v2')의 첫 입력:일하는 방식은 모델 지침(EDITOR_INSTRUCTIONS_V2)과 도구 설명에 있으므로 여기는 요청 내용(brief — task 응답과 같다)만 싣는다.
  * 요청 내용을 함께 줘 모델이 task 를 부르는 한 번을 아낀다. JSON 문자열의 태그 문자는 escape 해 자료 안의 닫는 태그가 경계를 바꾸지 못하게 한다.
  */
-export function codexMcpPromptV2(job, brief) {
+export function codexMcpPromptV2(job, brief, { toolOutputTokens = null } = {}) {
   return `hwpx MCP 도구로 배정된 작업 하나를 처리하세요. 문서=${job.docId} 요청=${job.requestId} 시도=${job.attempt}(도구의 doc_id·request_id·expected_attempt 에 이 값을 씁니다).
-아래 document_context 는 이 요청의 내용입니다(task 응답과 같습니다 — task 를 다시 부르지 않아도 됩니다): 지시(instruction)·대상(target)·문서 얼개(map)·대상 주변 글(context)·할 일(todo).
+${brief?.surface === 'v3' ? V3_BRIEF_INTRO : '아래 document_context 는 이 요청의 내용입니다(task 응답과 같습니다 — task 를 다시 부르지 않아도 됩니다): 지시(instruction)·대상(target)·문서 얼개(map)·대상 주변 글(context)·할 일(todo).'}
 받은 내용으로 충분하면 바로 edit 를 부르고, 더 볼 것이 있을 때만 read 로 필요한 범위만 읽습니다. 결과는 edit 의 ops 에 모아 내고, 일이 끝나는 호출에 done="공유 요약 1~2문장" 을 줍니다.
 그림·파일 작업은 work/ 안에서 하고 결과는 work/out/ 에 저장한 뒤 upload_result_file 로 올립니다. 최종 답변은 처리 사실 한 줄이면 됩니다.
-${codexCodeModeHintV2(job)}
-<document_context>
-${tagSafe(JSON.stringify(brief))}
-</document_context>`;
+${codexCodeModeHintV2(job, { toolOutputTokens })}
+${modelBriefText(brief)}`;
 }
 
 export function codexMcpPrompt(job, requestContext) {

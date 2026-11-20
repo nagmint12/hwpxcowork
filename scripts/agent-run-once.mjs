@@ -1,6 +1,6 @@
 // 실제 에이전트(내 PC 의 Codex·Claude Code 구독 로그인)로 요청 한 건을 격리된 임시 서버에서 처리해 보고 호출·토큰·결과를 모은다.
 //   node scripts/agent-run-once.mjs --doc <hwpx> --instruction "<지시>" --mcp 2 --yes-real-ai [--provider codex|claude-code] [--model <ID>] [--effort <강도>]
-//        [--target document|<문단 주소>] [--out <결과 폴더>] [--apply] [--timeout-min 15] [--codex-command <codex 실행 파일>] [--cli-command <claude 실행 파일>]
+//        [--target document|<문단 주소>] [--out <결과 폴더>] [--apply] [--timeout-min 15] [--mcp-chars N] [--codex-command <codex 실행 파일>] [--cli-command <claude 실행 파일>]
 // · 운영 서버(:8787)·data/·config.json 은 쓰지 않는다 — 임시 data·임시 토큰·빈 포트(tests/helpers/server.mjs)에 문서 사본을 올린다.
 // · 실제 AI 를 부른다(구독 사용량이 든다) — 사용자가 실측을 요청했을 때만, --yes-real-ai 를 줘야 돈다. 모델 없는 비교는 scripts/measure-mcp2.mjs.
 //   모델 없는 예행연습: --codex-command <가짜 codex> · --cli-command <가짜 claude>(tests/helpers/claude-cli.mjs fakeClaudeInstall 의 claude.cmd)
@@ -24,14 +24,14 @@ const argv = process.argv.slice(2);
 const opt = (name, fallback = null) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : fallback; };
 const flag = (name) => argv.includes(`--${name}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const USAGE = '사용: node scripts/agent-run-once.mjs --doc <hwpx> --instruction "<지시>" --mcp 1|2 --yes-real-ai [--provider codex|claude-code] [--model ID] [--effort 강도] [--target document|<주소>] [--out <폴더>] [--apply] [--timeout-min 15] [--codex-command <codex 실행 파일>] [--cli-command <claude 실행 파일>]\n실제 AI(구독 사용량)를 부르므로 --yes-real-ai 가 필요합니다.\n';
+const USAGE = '사용: node scripts/agent-run-once.mjs --doc <hwpx> --instruction "<지시>" --mcp 1|2|3 --yes-real-ai [--provider codex|claude-code] [--model ID] [--effort 강도] [--target document|<주소>] [--out <폴더>] [--apply] [--timeout-min 15] [--mcp-chars N] [--attach <파일>] [--codex-command <codex 실행 파일>] [--cli-command <claude 실행 파일>]\n실제 AI(구독 사용량)를 부르므로 --yes-real-ai 가 필요합니다.\n';
 
 const docPath = opt('doc'); const instruction = opt('instruction');
 if (!docPath || !instruction || !flag('yes-real-ai')) { process.stderr.write(USAGE); process.exit(2); }
 const provider = opt('provider', 'codex'); const mcp = opt('mcp', '2'); const model = opt('model'); const effort = opt('effort');
 // 새 연결(--mcp 2)은 Codex·Claude Code 실행기에만 있다 — 다른 제공자를 주면 조용히 예전 흐름으로 돌아 결과가 헷갈린다
 if (!['codex', 'claude-code'].includes(provider)) { process.stderr.write(`--provider 는 codex 또는 claude-code 입니다(받은 값: ${provider}).\n`); process.exit(2); }
-if (!['1', '2'].includes(mcp)) { process.stderr.write('--mcp 는 1(예전 연결) 또는 2(새 연결)입니다.\n'); process.exit(2); }
+if (!['1', '2', '3'].includes(mcp)) { process.stderr.write('--mcp 는 1(예전 연결), 2(기본), 3(TSV) 중 하나입니다.\n'); process.exit(2); }
 // 실행 파일 옵션이 제공자와 어긋나면 멈춘다 — 가짜 CLI 로 예행연습하려다 진짜 CLI(구독 사용량)를 부르지 않게
 if (provider === 'codex' && flag('cli-command')) { process.stderr.write('--cli-command 는 --provider claude-code 용입니다(Codex 는 --codex-command).\n'); process.exit(2); }
 if (provider === 'claude-code' && flag('codex-command')) { process.stderr.write('--codex-command 는 --provider codex 용입니다(Claude Code 는 --cli-command).\n'); process.exit(2); }
@@ -184,7 +184,10 @@ function claudeSummary(streams) {
 }
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-agent-run-'));
-const srv = await startServer({ ai: 'off', log: path.join(out, 'server.log') });
+// --mcp-chars N: 임시 서버의 MCP 응답 한도(관리자 설정 limits.mcpResponseChars — 운영 80,000·기본 100,000)를 바꿔 '한 번에 크게 읽기'를 잰다(2026-11-20)
+const mcpChars = opt('mcp-chars') ? Number(opt('mcp-chars')) : null;
+if (mcpChars != null && !(Number.isInteger(mcpChars) && mcpChars >= 5000 && mcpChars <= 1000000)) { process.stderr.write('--mcp-chars 는 5000~1000000 사이 정수입니다.\n'); process.exit(2); }
+const srv = await startServer({ ai: 'off', log: path.join(out, 'server.log'), ...(mcpChars ? { config: { mcp: { defaultSurface: 'v1' }, limits: { mcpResponseChars: mcpChars } } } : {}) });
 let worker = null;
 const startedAt = Date.now();
 try {
@@ -192,7 +195,14 @@ try {
   const doc = await uploadDoc(srv.base, srv.tokens.a, path.resolve(docPath));
   const D = `/api/docs/${doc.id}`;
   const before = await api(`${D}`);
-  const body = { kind: 'instruct', instruction, target: target === 'document' ? { scope: 'document', ref: 's0/p0' } : { ref: target }, route: 'queue' };
+  // --attach <파일>(2026-11-20): 임시 서버 문서에 첨부로 올리고 요청에 붙인다(운영 요청의 '첨부로 표 넣기' 같은 실행을 재현)
+  const attachPath = opt('attach');
+  const aids = [];
+  if (attachPath) {
+    const up = await api(`${D}/attachments`, { method: 'POST', body: fs.readFileSync(path.resolve(attachPath)), headers: { 'x-file-name': encodeURIComponent(path.basename(attachPath)) } });
+    aids.push(String(up.aid ?? up.attachment?.aid));
+  }
+  const body = { kind: 'instruct', instruction, target: target === 'document' ? { scope: 'document', ref: 's0/p0' } : { ref: target }, route: 'queue', ...(aids.length ? { attachments: aids } : {}) };
   const req = (await api(`${D}/requests`, { method: 'POST', body })).request;
   log(`임시 서버 ${srv.base} · 문서 ${doc.id} · 요청 #${req.rid} — 실행기(${provider}, MCP ${mcp})를 띄웁니다`);
 

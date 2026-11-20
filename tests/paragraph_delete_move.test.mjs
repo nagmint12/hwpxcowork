@@ -263,7 +263,11 @@ test('새 연결 op: 꼴·작은 안내(OPS_BRIEF·replace 글)·막는 경우�
   const errs = (ops) => prepareOps(d, parseOps(ops).ok).errors.map((e) => e.error).join('\n') || parseOps(ops).errors.map((e) => e.error).join('\n');
   assert.match(errs([{ op: 'delete_paragraphs', at: 's1/p0..p3' }]), /구역의 첫 문단.*replace\(whole:true/);
   assert.match(errs([{ op: 'delete_paragraphs', at: 's1' }]), /구역 전체/);
-  assert.match(errs([{ op: 'delete_paragraphs', at: 's1/p17/n0' }]), /본문 문단만/);
+  // 2026-11-19(표 칸 안 문단 — tests/mcp_v2_cell_paragraphs.test.mjs, docs/MCP_REDESIGN_2026-11-16.md §17): 표 칸 안 문단은 이제 통째로 지울 수 있다(실제 Codex 실행이
+  // 칸 문단 20개를 지우지 못해 글만 비운 빈 문단을 남겼다). 캡션·글상자 안 문단(s1/p17/n0 = 표 캡션)은 예전처럼 거절하되 오류 글이 바뀌었다
+  // (예전 기대: /본문 문단만/ — '본문 문단만 고를 수 있습니다(표 칸·글상자 안 문단은 replace 로)'). 옮기기는 예전 그대로 본문 문단만
+  assert.match(errs([{ op: 'delete_paragraphs', at: 's1/p17/n0' }]), /s1\/p17\/n0 은\(는\) 표 칸 문단이 아닙니다.*글상자·캡션 안 문단은 replace/);
+  assert.match(errs([{ op: 'move_paragraphs', at: 's1/p17/n0', after: 's1/p20' }]), /본문 문단만/);
   assert.match(errs([{ op: 'delete_paragraphs', at: ['s1/p8', 's1/p10'] }]), /떨어진 문단/);
   assert.match(errs([{ op: 'delete_paragraphs', at: 's0/p5..s1/p2' }]), /구역을 넘/);
   assert.match(errs([{ op: 'move_paragraphs', at: 's1/p55..p60' }]), /after\(그 문단 뒤\) 또는 before/);

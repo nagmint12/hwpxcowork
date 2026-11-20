@@ -38,6 +38,14 @@ impl DocumentCore {
 
         let mut parsed_rows: Vec<Vec<ParsedCell>> = Vec::new();
 
+        // [hwpx-cowork] #9017 한/글 HTML 가져오기: 양수 table border는
+        // 칸에 1px 실선을 기본으로 적용한다. 칸별 CSS는 아래에서 우선한다.
+        let table_tag = &table_html[..table_html.find('>').map_or(0, |end| end + 1)];
+        let table_border = match parse_html_attr_f64(table_tag, "border") {
+            Some(width) if width > 0.0 => 0.75,
+            _ => 0.0,
+        };
+
         let mut pos = 0;
         while let Some(tr_start) = table_lower[pos..].find("<tr") {
             let tr_abs = pos + tr_start;
@@ -89,7 +97,7 @@ impl DocumentCore {
                     let padding_pt = parse_css_padding_pt(&css_lower);
 
                     // 테두리 파싱 (left, right, top, bottom)
-                    let mut border_widths_pt = [0.0f64; 4];
+                    let mut border_widths_pt = [table_border; 4];
                     let mut border_colors = [0u32; 4]; // black
                     let mut border_styles = [1u8; 4]; // solid default
 
@@ -1089,17 +1097,7 @@ pub(crate) fn html_img_src(img_tag: &str) -> Option<&str> {
 
 /// 태그에서 속성 문자열을 그대로 뽑는다(따옴표 양쪽 지원).
 pub(crate) fn extract_html_attr(tag: &str, attr: &str) -> Option<String> {
-    let lower = tag.to_lowercase();
-    for quote in ['"', '\''] {
-        let needle = format!("{}={}", attr, quote);
-        if let Some(start) = lower.find(&needle) {
-            let after = &tag[start + needle.len()..];
-            if let Some(end) = after.find(quote) {
-                return Some(after[..end].to_string());
-            }
-        }
-    }
-    None
+    super::helpers::html_attr_value(tag, attr).map(str::to_owned)
 }
 
 /// PNG·JPEG·BMP·GIF 헤더에서 원본 픽셀 크기를 읽는다.

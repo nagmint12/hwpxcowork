@@ -27,6 +27,7 @@ pub(crate) use inline_table_frame::{
     inline_table_width_cache_is_stale, inline_table_width_cache_is_stale_with_storage,
     measured_inline_table_whole_height, measured_reflow_inline_table,
     measured_reflow_inline_table_with_storage, reflow_inline_table_heights, reflow_inline_table_heights_with_storage,
+    alias_reflow_tables, measure_tac_table_with_storage, reflow_table_memo_scope,
 };
 pub(crate) use nested_table_frames::{
     recompose_cell_lines_with_nested_tables, recompose_cell_lines_with_nested_tables_with_storage,
@@ -357,7 +358,9 @@ mod empty_line_metrics;
 pub(crate) mod inline_box_rows;
 mod line_breaking;
 pub(crate) use line_breaking::try_reflow_line_segs;
-pub(crate) use line_breaking::{condense_space_savings_px, overflowing_space_cut};
+pub(crate) use line_breaking::{
+    compute_line_spacing_hwp, condense_space_savings_px, overflowing_space_cut,
+};
 
 mod picture_anchor_projection;
 pub(crate) use line_breaking::{

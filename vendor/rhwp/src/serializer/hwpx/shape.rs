@@ -1323,7 +1323,7 @@ where
     let hatch = color_to_hex_with_storage(solid.pattern_color, storage)?;
     let alpha = fill_alpha_str_with_storage(alpha, storage)?;
     start_tag(w, "hc:fillBrush", storage)?;
-    if solid.pattern_type >= 1 {
+    if (1..=6).contains(&solid.pattern_type) {
         empty_tag(
             w,
             "hc:winBrush",

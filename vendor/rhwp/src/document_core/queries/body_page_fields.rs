@@ -128,6 +128,16 @@ fn collect_owners(
 }
 
 impl DocumentCore {
+    /// [hwpx-cowork] 2026-11-20 쪽이 다 정해져야 값이 정해지는 본문 쪽 번호 필드가 있는가(뒤쪽 미루기 조건).
+    pub(crate) fn has_body_page_fields(&self) -> bool {
+        !fields(self).is_empty()
+            || self.document.sections.iter().any(|s| {
+                s.paragraphs
+                    .iter()
+                    .any(|p| !p.layout_field_values.is_empty())
+            })
+    }
+
     pub(super) fn settle_body_page_fields(&mut self, force_breaks: &[HashSet<usize>]) {
         // [hwpx-cowork] 2026-11-10 P2: 첫 쪽 미리보기(점진 열기 진행 중)는 쪽이 다 정해지지 않았다 — 본문 쪽번호 필드는
         // 마무리 조판 뒤 한 번 정한다(쪽마다 새로 각주 번호 settle 과 같은 규칙). 여러 구역 미리보기에서 아직 짜지 않은

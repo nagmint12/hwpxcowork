@@ -71,6 +71,14 @@ use super::pagination::{
 /// 80px 는 663번 문단(69.7px)을 놓쳐 알짜 풀이가 1193px 에 남았다.
 const ENDNOTE_PAGE_OFFCANVAS_GUARD_PX: f64 = 56.0;
 
+/// [hwpx-cowork] #8926: 한/글 2022가 같은 문단의 TAC 표 뒤 줄을
+/// 다음 쪽에 저장했다면 재생성하지 않은 두 줄의 쪽 원점을 따른다.
+pub(crate) fn stored_line_restarts_page(previous: &LineSeg, next: &LineSeg) -> bool {
+    (previous.tag | next.tag) & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0
+        && next.vertical_pos <= 0
+        && previous.vertical_pos.saturating_add(previous.line_height) > 5000
+}
+
 /// [#4654] 전면 크기 그림 낱장 배치는 문단의 비인라인 그림 중 엄격한 과반일 때만 쓴다.
 ///
 /// 정확히 절반인 문단까지 낱장 정책을 적용하면 기존 pile 문서의 다수 그림 흐름을
@@ -2098,7 +2106,7 @@ pub(in crate::renderer) fn cell_unit_row_is_atomic_here(
 }
 
 /// RowBreak 표 셀 안에 저장된 vpos reset이 있는지 판별한다.
-fn rowbreak_table_has_internal_saved_vpos_reset(table: &crate::model::table::Table) -> bool {
+pub(super) fn rowbreak_table_has_internal_saved_vpos_reset(table: &crate::model::table::Table) -> bool {
     // [#7639] 행마다 전체 셀을 다시 거르지 않고 셀을 한 번만 훑는다(행×셀 → 셀).
     let row_count = table.row_count as usize;
     table
@@ -3287,7 +3295,10 @@ mod paragraph;
 pub(crate) use paragraph::format_memo::ParagraphFormatMemo;
 mod section;
 // [hwpx-cowork] 초기 열기의 불변 입력과 소유된 조판 이어받기 상태.
-pub(crate) use section::{SectionTypesetInput, SectionTypesetJob};
+pub(crate) use section::{
+    ParkedOutcome, ParkedSection, ResumeOutcome, ResumeRequest, SectionCheckpoints,
+    SectionTypesetInput, SectionTypesetJob, TailWindow,
+};
 mod state;
 mod stored_table_frame;
 use state::TypesetState;
@@ -3429,7 +3440,7 @@ fn debug_brief_line_text(text: &str, max_chars: usize) -> String {
 /// `RHWP_2424_PROFILE=1`(native 전용)일 때만 채워지고 구역당 한 줄로 출력한다.
 /// `(Duration, u32)` 는 (누적 시간, 호출 수). wasm 에서는 enabled=false 로 고정되어
 /// `Instant::now` 가 호출되지 않는다 (`paginate_pass` 의 게이트 패턴과 동일).
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Issue2424TypesetProfile {
     setup: std::time::Duration,
     wrap_around: (std::time::Duration, u32),
@@ -3891,6 +3902,13 @@ impl TypesetEngine {
         endnote_deferral: EndnoteDeferral<'_>,
         storage: &S,
     ) -> Result<PaginationResult, S::Error> {
+        // [hwpx-cowork] 2026-11-20 이 구역 조판(쪽 나눔 한 번) 동안 구역 문단의 글자처럼 취급 표는 한 번만 잰다 —
+        // 구역 진행과 배치가 같은 문단을 두 번 구성한다(`composer::reflow_table_memo_scope`). 문단 구성의 범위는
+        // 이 범위를 이어 쓴다. 한정된 Storage 는 기억·재사용을 거치지 않는다.
+        let _reflow_table_memo = crate::renderer::composer::reflow_table_memo_scope(
+            self.cell_compose_memo.clone().filter(|_| S::UNBOUNDED),
+            S::UNBOUNDED.then_some((paragraphs, styles)),
+        );
         self.run_section_with_storage(
             paragraphs,
             composed,
@@ -3992,6 +4010,13 @@ impl TypesetEngine {
             &self.uniform_filler_ladder,
             &self.float_carve_evidence,
             self.format_next_stored_vpos.get(),
+        );
+        // [hwpx-cowork] 2026-11-20 문단 구성 안의 글자처럼 취급 표 측정(표 높이 목록·줄 나눔의 개체 크기)도
+        // 문서의 칸 줄 구성 기억을 쓴다(`composer::reflow_table_memo_scope`). 한정된 Storage 는 기억을 거치지 않는다.
+        // 이 문단의 표는 이 문단 구성 안에서 한 번만 잰다(표 높이 목록과 줄 나눔이 같은 표를 잰다).
+        let _reflow_table_memo = crate::renderer::composer::reflow_table_memo_scope(
+            self.cell_compose_memo.clone().filter(|_| S::UNBOUNDED),
+            S::UNBOUNDED.then_some((std::slice::from_ref(para), styles)),
         );
         let compute = || {
             paragraph::format::format_paragraph_for_flow_with_storage(
@@ -4183,6 +4208,11 @@ impl TypesetEngine {
                 render_host: self.render_normalization.table_host(table),
                 external_flow,
                 column_width_px,
+                keeps_coanchored_frame: self.render_normalization.keeps_coanchored_table_frame(
+                    para,
+                    table,
+                    self.profile.get(),
+                ),
             },
             self.dpi,
             || self.profile.get(),
@@ -6194,12 +6224,17 @@ impl TypesetEngine {
                 .line_heights
                 .get(post_table_start)
                 .is_some_and(|height| st.current_height + height <= st.available_height() + 0.5);
-            if (self.tac_table_line_index(para, table, fmt) == Some(0)
-                || session_grown_topbottom_spill)
+            let table_line = self.tac_table_line_index(para, table, fmt);
+            let saved_reset = !self.profile.get().session_edited()
+                && table_line
+                    .filter(|&line| post_table_start > line)
+                    .and_then(|line| para.line_segs.get(line))
+                    .zip(para.line_segs.get(post_table_start))
+                    .is_some_and(|(previous, next)| stored_line_restarts_page(previous, next));
+            let computed_overflow = (table_line == Some(0) || session_grown_topbottom_spill)
                 && st.current_height + post_content_height > st.available_height() + 0.5
-                && !st.current_items.is_empty()
-                && !(composed_tac_line_split && first_post_line_fits)
-            {
+                && !(composed_tac_line_split && first_post_line_fits);
+            if (saved_reset || computed_overflow) && !st.current_items.is_empty() {
                 st.advance_column_or_new_page();
             }
             if !session_grown_topbottom_spill
@@ -8268,6 +8303,7 @@ mod tests {
             source_cellbreak_row_end: None,
             next_para_stored_top: None,
             relax_terminal_table_footnote_fit: false,
+            host_line_trails_table: false,
         };
         let flow_layout =
             PageLayoutInfo::from_page_def(&a4_page_def(), &ColumnDef::default(), DEFAULT_DPI);

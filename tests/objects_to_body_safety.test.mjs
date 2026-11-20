@@ -29,7 +29,8 @@ const pics = (doc) => doc.sections.flatMap((s) => [...s.xml.matchAll(/<hp:pic\b[
 let rhwp = null;
 async function engine() {
   if (rhwp) return rhwp;
-  const pkg = path.join(root, process.env.HWPX_COWORK_ENGINE_PKG || path.join('vendor', 'rhwp', 'pkg'));
+  // 후보 엔진을 절대 경로로 줘도 되게 resolve 로 잇는다(join 은 절대 경로를 루트 뒤에 붙여 깨뜨렸다 — 2026-11-19 재검).
+  const pkg = path.resolve(root, process.env.HWPX_COWORK_ENGINE_PKG || path.join('vendor', 'rhwp', 'pkg'));
   rhwp = await import(pathToFileURL(path.join(pkg, 'rhwp.js')).href);
   globalThis.measureTextWidth ??= (font, text) => String(text).length * 10;
   rhwp.initSync({ module: fs.readFileSync(path.join(pkg, 'rhwp_bg.wasm')) });

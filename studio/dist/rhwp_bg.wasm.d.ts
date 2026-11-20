@@ -162,6 +162,7 @@ export const hwpdocument_findOrCreateFontId: (a: number, b: number, c: number) =
 export const hwpdocument_findOrCreateFontIdForLang: (a: number, b: number, c: number, d: number) => number;
 export const hwpdocument_flushDeferredPagination: (a: number) => [number, number, number, number];
 export const hwpdocument_flushProgressiveOpen: (a: number) => [number, number];
+export const hwpdocument_flushTypesetTail: (a: number) => [number, number];
 export const hwpdocument_fontMissingText: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const hwpdocument_fontMissingTextWithSpaces: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const hwpdocument_fontSupportsText: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -422,6 +423,7 @@ export const hwpdocument_insertFootnote: (a: number, b: number, c: number, d: nu
 export const hwpdocument_insertHyperlinkEx: (a: number, b: number, c: number) => [number, number, number];
 export const hwpdocument_insertMemo: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
 export const hwpdocument_insertMemoByPath: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+export const hwpdocument_insertMemoReply: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_insertNewNumber: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const hwpdocument_insertPageBreak: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_insertParagraph: (a: number, b: number, c: number) => [number, number, number, number];
@@ -622,6 +624,8 @@ export const hwpdocument_setTableCellFormulaEx: (a: number, b: number, c: number
 export const hwpdocument_setTableProperties: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const hwpdocument_setTextBoxAt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_setTitleMark: (a: number, b: number, c: number) => [number, number, number, number];
+export const hwpdocument_setTypesetResumeEnabled: (a: number, b: number) => void;
+export const hwpdocument_setTypesetTailDeferral: (a: number, b: number) => void;
 export const hwpdocument_set_debug_overlay: (a: number, b: number) => void;
 export const hwpdocument_set_respect_vpos_reset: (a: number, b: number) => void;
 export const hwpdocument_snapshotCapacity: (a: number) => number;
@@ -640,6 +644,7 @@ export const hwpdocument_splitTableCellsInRange: (a: number, b: number, c: numbe
 export const hwpdocument_splitTableCellsInRangeEx: (a: number, b: number, c: number) => [number, number, number, number];
 export const hwpdocument_stepDeferredPagination: (a: number, b: number) => [number, number, number, number];
 export const hwpdocument_stepProgressiveOpen: (a: number, b: number) => [number, number];
+export const hwpdocument_stepTypesetTail: (a: number, b: number) => [number, number];
 export const hwpdocument_supportsPdfImport: () => number;
 export const hwpdocument_swapPictureTransform: (a: number, b: number) => [number, number];
 export const hwpdocument_swapTable: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -648,6 +653,8 @@ export const hwpdocument_tableMergeAtCursor: (a: number, b: number, c: number, d
 export const hwpdocument_textToLogicalOffset: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const hwpdocument_toggleHideHeaderFooter: (a: number, b: number, c: number) => [number, number, number, number];
 export const hwpdocument_transposeTableCellsInPlace: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const hwpdocument_typesetResumeStats: (a: number) => [number, number];
+export const hwpdocument_typesetTailPending: (a: number) => number;
 export const hwpdocument_ungroupShape: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const hwpdocument_unlockAllObjectsH2022: (a: number) => [number, number, number, number];
 export const hwpdocument_updateAllTablesOfContents: (a: number) => [number, number, number, number];

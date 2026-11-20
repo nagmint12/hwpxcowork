@@ -357,7 +357,7 @@ impl CellComposedStore {
                 engine.compose_cell_unit_paragraph(
                     &cell.paragraphs[cpi],
                     cell.text_direction,
-                    cell.line_wrap,
+                    cell.composition_line_wrap(crate::renderer::px_to_hwpunit(inner_width, engine.dpi)),
                     inner_width,
                     styles,
                 )
@@ -1892,6 +1892,12 @@ impl LayoutEngine {
                 let fragment_cell =
                     is_in_split_row || straddles_fragment_start || straddles_fragment_end;
 
+                let authored_inner_width = crate::renderer::composer::cell_inner_text_width(
+                    frame_cell_w, pad_left, pad_right, self.dpi,
+                );
+                let composition_wrap = cell.composition_line_wrap(
+                    crate::renderer::px_to_hwpunit(authored_inner_width, self.dpi),
+                );
                 // 텍스트 오버플로우 시 좌우 패딩 축소
                 let (new_pl, new_pr) = self.shrink_cell_padding_for_overflow(
                     pad_left,
@@ -1902,7 +1908,7 @@ impl LayoutEngine {
                     &cell.paragraphs,
                     styles,
                     cell.apply_inner_margin || fragment_cell,
-                    cell.line_wrap == crate::model::table::CELL_LINE_WRAP_SQUEEZE,
+                    composition_wrap == crate::model::table::CELL_LINE_WRAP_SQUEEZE,
                 );
                 pad_left = new_pl;
                 pad_right = new_pr;
@@ -1920,7 +1926,7 @@ impl LayoutEngine {
                         *comp = self.compose_cell_unit_paragraph(
                             para,
                             cell.text_direction,
-                            cell.line_wrap,
+                            composition_wrap,
                             inner_width_for_recompose,
                             styles,
                         );
@@ -4194,6 +4200,25 @@ impl LayoutEngine {
                                             // 원본 line_seg vertical_pos 는 전체 셀 내부 좌표다. 그대로
                                             // 쓰면 다음 쪽 상단에 와야 할 그림이 조각 하단으로 밀린다.
                                             para_y_before_compose
+                                        } else if let Some(origin) =
+                                            crate::renderer::float_placement::stored_cell_picture_pushed_line_origin_hu(
+                                                &cell.paragraphs, cp_idx, &pic.common,
+                                            )
+                                        {
+                                            // [#8737] 그림이 자기 앵커 줄을 민 저장 형상: 그림은
+                                            // 밀린 줄이 아니라 문단 시작에 있다. 잘리지 않은
+                                            // 셀은 세로 정렬이 저장 내용 묶음 전체를 옮긴다.
+                                            let shift = if cut_units.is_none() {
+                                                crate::renderer::float_placement::stored_cell_block_align_shift(
+                                                    effective_align,
+                                                    inner_height,
+                                                    &cell.paragraphs,
+                                                    self.dpi,
+                                                )
+                                            } else {
+                                                0.0
+                                            };
+                                            cell_y + pad_top + shift + hwpunit_to_px(origin, self.dpi)
                                         } else {
                                             para.line_segs
                                                 .first()
@@ -4363,7 +4388,29 @@ impl LayoutEngine {
                                             .then(|| para.line_segs.first())
                                             .flatten()
                                             .filter(|seg| seg.vertical_pos > 0)
-                                            .map(|seg| hwpunit_to_px(seg.vertical_pos, self.dpi));
+                                            .map(|seg| {
+                                                // [#8737] 자기 앵커 줄을 민 그림은 밀린 줄이
+                                                // 아니라 문단 시작이 원점이다.
+                                                crate::renderer::float_placement::stored_cell_picture_pushed_line_origin_hu(
+                                                    &cell.paragraphs, cp_idx, &pic.common,
+                                                )
+                                                .map_or(
+                                                    hwpunit_to_px(seg.vertical_pos, self.dpi),
+                                                    |origin| {
+                                                        let shift = if cut_units.is_none() {
+                                                            crate::renderer::float_placement::stored_cell_block_align_shift(
+                                                                effective_align,
+                                                                inner_height,
+                                                                &cell.paragraphs,
+                                                                self.dpi,
+                                                            )
+                                                        } else {
+                                                            0.0
+                                                        };
+                                                        shift + hwpunit_to_px(origin, self.dpi)
+                                                    },
+                                                )
+                                            });
                                         if let Some(vpos_px) = stored_flow_vpos {
                                             content_top + vpos_px + v_off
                                         } else {

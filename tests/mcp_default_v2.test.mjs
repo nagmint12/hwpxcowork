@@ -37,7 +37,7 @@ test('순수 함수: 연결 종류 고르기 — 기본 새 연결, 예전 연�
   assert.equal(requestedSurface(req('/mcp?v=2', { 'x-hwpx-mcp': '1' })), 'v1');
   assert.equal(requestedSurface(req('/mcp?v=1', { 'x-hwpx-mcp': '2' })), 'v2');
   assert.equal(requestedSurface(req('/mcp?v=1')), 'v1');
-  assert.equal(requestedSurface(req('/mcp?v=3', { 'x-hwpx-mcp': 'x' })), null, '모르는 값은 밝히지 않은 것');
+  assert.equal(requestedSurface(req('/mcp?v=4', { 'x-hwpx-mcp': 'x' })), null, '모르는 값은 밝히지 않은 것');
   assert.equal(isV2Request(req('/mcp?v=2')), true); assert.equal(isV2Request(req()), false, 'isV2Request 는 밝혔는지만 본다(기본은 mcpSurface)');
   // 2) 표: [요청, 설정, clientName, legacyCall] → 연결
   const rows = [
@@ -83,7 +83,7 @@ test('순수 함수: 브리지 기본 새 연결(bridgeSurface·명령줄)과 �
     assert.equal(parseWorkerArgs(argv, env).mcp, '2', `${provider}: 기본 2`);
     assert.equal(parseWorkerArgs([...argv, '--mcp', '1'], env).mcp, '1', `${provider}: --mcp 1`);
     assert.equal(parseWorkerArgs(argv, { ...env, HWPX_COWORK_MCP: '1' }).mcp, '1', `${provider}: HWPX_COWORK_MCP=1`);
-    assert.throws(() => parseWorkerArgs([...argv, '--mcp', '3'], env), /--mcp 는 1/, `${provider}: 잘못된 값`);
+    assert.throws(() => parseWorkerArgs([...argv, '--mcp', '4'], env), /--mcp.*1.*2.*3/, `${provider}: 잘못된 값`);
   }
   // 모델에게 넘기는 값: 구독 CLI 는 mcpSurface, API 는 ai.mcp('v2'|'v1' — server/ai.js normalizeMcp), Google CLI 는 MCP 를 쓰지 않아 받기만 한다
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v2');

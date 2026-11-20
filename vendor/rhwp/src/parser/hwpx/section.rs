@@ -2839,6 +2839,8 @@ fn materialize_hwpx_table_attrs(table: &mut Table, table_record_flags: u32) {
     } else {
         0
     };
+    // [hwpx-cowork] Preserve the HWPX position bits read by the property API.
+    table.attr |= table.common.attr & ((1 << 13) | (1 << 14));
     let mut record_attr = match table.page_break {
         TablePageBreak::CellBreak => 0x01,
         TablePageBreak::RowBreak => 0x02,
@@ -9614,7 +9616,7 @@ mod tests {
         assert_eq!(table.common.text_wrap, TextWrap::TopAndBottom);
         assert_eq!(table.common.vertical_offset as i32, -2000);
         assert_eq!(table.common.attr, 0x082a_2211);
-        assert_eq!(table.attr, 0x01);
+        assert_eq!(table.attr, 0x2001);
         assert_eq!(table.raw_table_record_attr, 0x0400_000e);
     }
 

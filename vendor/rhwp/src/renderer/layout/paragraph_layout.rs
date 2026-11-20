@@ -2141,6 +2141,25 @@ fn tac_picture_label_extra_for_line(
 /// 글자가 `x=671.4 → 1000.1` 로 **용지(793.7) 밖**으로 나갔다. 이 런들의 위치는 이미
 /// 기존 기계가 정하고 있고, 그 계약은 이 이슈의 범위가 아니다.
 #[allow(clippy::too_many_arguments)]
+fn word_overflow_tab_at_line_start(
+    styles: &ResolvedStyleSet,
+    line: &ComposedLine,
+    run_index: usize,
+    style: &TextStyle,
+) -> bool {
+    styles.word_compat_target
+        && run_index == 0
+        && style.auto_left_tab_position.is_none()
+        && line.runs.first().is_some_and(|run| run.text.starts_with('\t'))
+        && line.runs.iter().flat_map(|run| run.text.chars()).skip(1)
+            .any(|c| !c.is_whitespace())
+        && super::explicit_non_right_stop_beyond_edge(
+            &style.tab_stops,
+            style.text_start_offset,
+            style.text_start_offset + style.available_width,
+        )
+}
+
 pub(crate) fn resolve_intra_run_right_tab(
     run_text: &str,
     full_width: f64,
@@ -8087,7 +8106,10 @@ impl LayoutEngine {
                                     <= effective_col_w + 2.0
                         })
                 });
+            let paragraph_squeeze = composed.lines.len() == 1
+                && para_style.is_some_and(|style| style.line_wrap_squeeze);
             let suppress_cell_overflow_spacing = cell_ctx.is_some()
+                && !paragraph_squeeze
                 && total_text_width > available_width * 1.15
                 && !stored_single_line_fits_cell
                 && !stored_ladder_fits_frame;
@@ -8148,8 +8170,7 @@ impl LayoutEngine {
             // 줄 폭에 드러나지 않으므로 탭을 뺀 글 폭 + 탭 자리(글자 반 칸)로 잰다 — 쪽 번호까지 한 줄에 들어간다
             // [hwpx-cowork] Consume the same cell-local one-line policy
             // that produced its measured units; body paragraph behavior stays local.
-            let squeeze_need = if (composed.cell_line_wrap_squeeze
-                || (para_style.is_some_and(|s| s.line_wrap_squeeze) && cell_ctx.is_none()))
+            let squeeze_need = if (composed.cell_line_wrap_squeeze || paragraph_squeeze)
                 && !has_forced_break
                 && total_char_count > 1
             {
@@ -9700,6 +9721,9 @@ impl LayoutEngine {
                 inline_tab_cursor_render,
                 !self.profile.get().hwp3_external_realign(),
             );
+            text_style.word_overflow_tab_at_start = word_overflow_tab_at_line_start(
+                styles, comp_line, run_idx, &text_style,
+            );
             let mut resolved_tab_block = false;
             if pending_right_leader_digit_render {
                 if run.text.trim().is_empty() {
@@ -10394,7 +10418,7 @@ impl LayoutEngine {
                             let reference = super::note_reference::reference(
                                 para.and_then(|p| p.controls.get(ctrl_idx)),
                                 fnum,
-                                text_style.clone(),
+                                super::note_reference::control_style(para, styles, ctrl_idx, &text_style),
                                 ctrl_idx,
                             );
                             let sup_w = reference.4;
@@ -11902,6 +11926,9 @@ impl LayoutEngine {
                 inline_tab_cursor_est,
                 !self.profile.get().hwp3_external_realign(),
             );
+            ts.word_overflow_tab_at_start = word_overflow_tab_at_line_start(
+                styles, comp_line, run_idx_est, &ts,
+            );
             if pending_right_leader_digit_est {
                 if run.text.trim().is_empty() {
                     pending_right_leader_digit_est = true;
@@ -11980,17 +12007,13 @@ impl LayoutEngine {
                 };
                 if !note_width_inserted[fni] && in_range {
                     note_width_inserted[fni] = true;
-                    let fn_text = note_marker_text_from_control(
+                    let reference = super::note_reference::reference(
                         para.and_then(|p| p.controls.get(ctrl_idx)),
                         fnum,
+                        super::note_reference::control_style(para, styles, ctrl_idx, &ts),
+                        ctrl_idx,
                     );
-                    let sup_size = FootnoteMarkerNode::font_size(ts.font_size);
-                    let sup_ts = TextStyle {
-                        font_size: sup_size,
-                        font_family: ts.font_family.clone(),
-                        ..Default::default()
-                    };
-                    note_width += estimate_text_width_exact(&fn_text, &sup_ts);
+                    note_width += reference.4;
                 }
             }
             // 글자겹침 run: PUA 다자리 숫자는 1글자 폭, 그 외는 font_size * char_count
@@ -13812,6 +13835,10 @@ pub fn map_pua_bullet_char(ch: char) -> char {
         0x75 => '\u{25C6}', // ◆ Black diamond
         0x76 => '\u{2756}', // ❖ Black diamond minus white X
         0x77 => '\u{2B25}', // ⬥ Black medium diamond
+        // [hwpx-cowork] Project the circled digits for paint and retain the
+        // Wingdings PUA source for round trips.
+        0x81..=0x89 => char::from_u32(0x2460 + u32::from(w - 0x81)).unwrap_or(ch),
+        0x8A => '\u{2469}',
         // 체크/별/점 (0x9E~0xAF)
         0x9E => '\u{00B7}', // · Middle dot
         0x9F => '\u{2022}', // • Bullet

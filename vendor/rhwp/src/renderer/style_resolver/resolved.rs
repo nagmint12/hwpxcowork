@@ -548,6 +548,7 @@ impl Default for ResolvedBorderStyle {
 pub struct ResolvedStyleSet {
     /// [hwpx-cowork] Render-session policy, independent of serialized document font settings.
     pub hangul2024_missing_glyphs: bool,
+    pub(crate) word_compat_target: bool,
     /// 문단 모양과 독립적인 현재 구역의 기본 탭 폭. 내부 composition/측정/배치
     /// 범위에서만 설정하며 문서의 공유 문단 모양을 변경하지 않는다.
     pub(crate) section_tab_width_bits: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -634,6 +635,7 @@ impl ResolvedStyleSet {
         }
         let Self {
             hangul2024_missing_glyphs,
+            word_compat_target,
             section_tab_width_bits: _,
             source_hwp3_native,
             source_program_projection_slots,
@@ -661,6 +663,7 @@ impl ResolvedStyleSet {
         let old_char_count = old.char_styles.len();
         let known_slot = |key: &(u32, usize)| (key.0 as usize) < old_char_count;
         *hangul2024_missing_glyphs == old.hangul2024_missing_glyphs
+            && *word_compat_target == old.word_compat_target
             && *source_hwp3_native == old.source_hwp3_native
             && debug_eq(script_metrics, &old.script_metrics)
             && std::sync::Arc::ptr_eq(native_pua_fonts, &old.native_pua_fonts)
@@ -792,6 +795,6 @@ crate::storage::clone_fields!(ResolvedParaStyle, {alignment, vertical_alignment,
 
 crate::storage::clone_fields!(ResolvedBorderStyle, {borders, fill_color, pattern, gradient, image_fill, diagonal_attr, diagonal, center_line});
 
-crate::storage::clone_fields!(ResolvedStyleSet, {hangul2024_missing_glyphs, section_tab_width_bits, script_metrics, source_hwp3_native, source_program_projection_slots, native_pua_fonts, display_only_otf_slots, char_overlap_size_bounds, source_char_shapes, resolved_dpi, isolated_jamo_font, page_number_char_style_id, page_number_font_is_hft, supplemental_metrics, style_char_shapes, char_styles, para_styles, border_styles, numberings, bullets, hwp3_variant, hft_ascii_halfwidth, kerning_measurement_context, horizontal_shaping_context});
+crate::storage::clone_fields!(ResolvedStyleSet, {hangul2024_missing_glyphs, word_compat_target, section_tab_width_bits, script_metrics, source_hwp3_native, source_program_projection_slots, native_pua_fonts, display_only_otf_slots, char_overlap_size_bounds, source_char_shapes, resolved_dpi, isolated_jamo_font, page_number_char_style_id, page_number_font_is_hft, supplemental_metrics, style_char_shapes, char_styles, para_styles, border_styles, numberings, bullets, hwp3_variant, hft_ascii_halfwidth, kerning_measurement_context, horizontal_shaping_context});
 
 crate::storage::clone_fields!(ResolvedImageFill, {bin_data_id, fill_mode, brightness, contrast, effect});

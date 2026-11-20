@@ -33,7 +33,7 @@ import { tutorialConfig, shareAgentMatches } from './tutorial.js';
 import { legacyTutorialFolder, legacyTutorialTemplate } from './tutorial-catalog.js';
 import { openServiceApiTools } from './api-service-tools.js';
 import { exampleAi, stepId } from './tutorial-advanced.js';
-import { serverAiAllowed, serverAiRestricted } from './config.js';
+import { LIMIT_DEFAULTS, serverAiAllowed, serverAiRestricted } from './config.js';
 import { validateImage } from './image-integrity.js';
 import { Library, normAcl } from './library.js';
 import { automaticNumberFields, automaticNumberReadNote, tableAutomaticNumbers } from './automatic-number-context.js';
@@ -42,6 +42,7 @@ import { listFields, fieldFillInput, fillFieldTracked, setFieldDirty, fieldAt, e
 import { shouldVerify, verifyBeforeCommit, rememberVerified } from './edit-verify.js';
 import { enqueueLayoutCheck } from './layout-check.js';
 import { editWorkspaceMethods, EDIT_BATCH_SOURCE } from './edit-workspace-service.js';
+import { isTaskSurface } from './tool-profiles.js';
 import { agentServiceMethods } from './mcp2/service.js';
 import { paragraphOpMethods, PARA_TYPES, PARA_TRACK } from './paragraph-ops.js';
 import { contentMarkdown as contentMarkdownForWorkspace, documentEditHash } from './document-edit.js';
@@ -190,7 +191,9 @@ function nestedParas(p) {
 
 function normTable(t) {
   if (!t || !Array.isArray(t.rows) || !t.rows.length) throw new ServiceError('BAD_TABLE', '표 행(rows)이 필요합니다');
-  const rows = t.rows.map((r) => (Array.isArray(r) ? r : [r]).map((c) => MT.xmlSafe(c).replace(/\r?\n/g, ' ')));
+  // 칸 글의 줄바꿈은 칸 안 줄 나눔(hp:lineBreak — engine/doc.js inlineXml)으로 지킨다(2026-11-20: 예전에는 공백으로 바꿔 머리 칸 「t/F⏎(사후검정)」이 한 줄이 됐다 —
+  // docs/MCP_REDESIGN_2026-11-16.md §20). 줄 끝 \r\n 은 \n 으로
+  const rows = t.rows.map((r) => (Array.isArray(r) ? r : [r]).map((c) => MT.xmlSafe(c).replace(/\r\n?/g, '\n')));
   const cols = Math.max(...rows.map((r) => r.length));
   if (!cols) throw new ServiceError('BAD_TABLE', '표 열이 없습니다');
   const norm = rows.map((r) => [...r, ...Array(cols - r.length).fill('')]);
@@ -198,7 +201,47 @@ function normTable(t) {
   // 캡션은 제목 글만 — 번호('[표 3]'·'표 3.')는 문서에 넣을 때 한글 자동 번호가 단다
   // 단위 줄(unit)·주석(notes — 줄 배열)은 준 것만 싣는다(2026-11-17, §10.4 나-8 — 놓는 꼴은 engine/captions-notes.js). 없으면 예전 제안과 같은 꼴
   const unit = normUnit(t.unit); const notes = normNoteLines(t.notes, 'BAD_TABLE');
-  return { rows: norm, headerRows, caption: stripCaptionNumber(MT.xmlSafe(t.caption || '').replace(/\s*\n\s*/g, ' ')).slice(0, 300), ...(unit ? { unit } : {}), ...(notes ? { notes } : {}) };
+  const merges = normMerges(t.merges, norm.length, cols);
+  const like = typeof t.like === 'string' && t.like.trim() ? t.like.trim() : null;
+  return { rows: norm, headerRows, caption: stripCaptionNumber(MT.xmlSafe(t.caption || '').replace(/\s*\n\s*/g, ' ')).slice(0, 300), ...(unit ? { unit } : {}), ...(notes ? { notes } : {}),
+    ...(merges ? { merges } : {}), ...(like ? { like } : {}) };
+}
+
+/** 표 열쇠('s1/p7#t0' — 꼬리 포함)를 구역 sec 의 본문 body 뒤에 문단 by 개가 들어간 뒤의 주소로 */
+function shiftTableKey(key, sec, body, by) {
+  const m = /^s(\d+)\/p(\d+)(.*)$/.exec(String(key ?? ''));
+  if (!m || !by) return key;
+  return Number(m[1]) === Number(sec) && Number(m[2]) > Number(body) ? `s${m[1]}/p${Number(m[2]) + by}${m[3]}` : key;
+}
+
+/**
+ * 새 표의 병합 칸(2026-11-20 §20) — read 의 병합 표기와 같은 'r0c0:r0c5'(0부터, 왼쪽 위:오른쪽 아래) 목록 → 같은 꼴 목록 | null.
+ * 새 표는 병합 없이 만든 뒤 반영할 때 table_edit 의 merge 로 합치므로(engine/table-edit.js — 테두리·글을 그쪽 규칙으로), 그 merge 가 실패할 꼴은 여기서 막는다:
+ * 표 밖·한 칸뿐·서로 겹침
+ */
+function normMerges(v, nRows, nCols) {
+  if (v == null || (Array.isArray(v) && !v.length)) return null;
+  if (!Array.isArray(v) || v.length > 2000) throw new ServiceError('BAD_TABLE', "merges 는 'r0c0:r1c1' 꼴의 목록입니다(2000개까지)");
+  const seen = Array.from({ length: nRows }, () => new Array(nCols).fill(-1)); const top = [];
+  const out = v.map((s, i) => {
+    const m = /^\s*r(\d+)c(\d+)\s*:\s*r(\d+)c(\d+)\s*$/i.exec(String(s ?? ''));
+    if (!m) throw new ServiceError('BAD_TABLE', `merges[${i}] 「${String(s).slice(0, 30)}」 — 'r0c0:r1c1' 꼴(행 r·열 c, 0부터, 왼쪽 위:오른쪽 아래)이어야 합니다`);
+    const [r0, c0, r1, c1] = m.slice(1).map(Number);
+    if (r0 > r1 || c0 > c1) throw new ServiceError('BAD_TABLE', `merges[${i}] ${s}: 왼쪽 위:오른쪽 아래 차례로 주세요`);
+    if (r1 >= nRows || c1 >= nCols) throw new ServiceError('BAD_TABLE', `merges[${i}] ${s}: 표 밖입니다(표 ${nRows}행×${nCols}열, 0부터)`);
+    if (r0 === r1 && c0 === c1) throw new ServiceError('BAD_TABLE', `merges[${i}] ${s}: 칸 하나뿐입니다`);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      if (seen[r][c] >= 0) throw new ServiceError('BAD_TABLE', `merges[${i}] ${s} 가 merges[${seen[r][c]}] 와 겹칩니다(r${r}c${c})`);
+      seen[r][c] = i;
+    }
+    top[i] = r0;
+    return `r${r0}c${c0}:r${r1}c${c1}`;
+  });
+  // 한 행의 모든 칸이 위 행에서 내려온 병합에 덮이면 한/글 규칙대로 그 행이 없어진다(engine/table-edit.js compactRows) — 제안의 행 수와 실제 표가 어긋나므로 막는다
+  for (let r = 1; r < nRows; r++) {
+    if (seen[r].every((k) => k >= 0 && top[k] < r)) throw new ServiceError('BAD_TABLE', `merges 가 ${r}행 전체를 위 행에 합쳐 그 행이 없어집니다(한/글은 칸이 시작하지 않는 행을 줄인다) — 그 행을 rows 에서 빼거나 병합 범위를 줄이세요`);
+  }
+  return out;
 }
 
 /** 주석 줄(문자열 또는 줄 배열) → 줄 배열 | null — 엔진 오류(20줄 넘음)는 code 의 ServiceError 로 */
@@ -759,8 +802,7 @@ export class Service {
     // V2 의도(이번에 적용된 제안)는 제안 객체의 기호 키 → lean 영수증 경고. 검사한 바이트를 그대로 기록한다(두 번 저장하지 않음)
     const checked = shouldVerify(ctx, note) ? await verifyBeforeCommit(this.store, ctx, (code, message, status, extra) => new ServiceError(code, message, status, extra)) : null;
     if (ctx.dirty) {
-      // ctx.bytes: 문서를 통째로 바꿀 때(_replaceContent) 그 파일 바이트를 그대로 기록한다
-      await this.store.commit(ctx.id, ctx.doc, { by: ctx.by, note, meta, milestone: ms, ...(ctx.bytes ? { bytes: ctx.bytes } : checked ? { bytes: checked.bytes } : {}) });
+      await this.store.commit(ctx.id, ctx.doc, { by: ctx.by, note, meta, milestone: ms, bytes: checked?.bytes });
       if (checked) { rememberVerified(this.store, ctx.id, meta.version, checked.all); enqueueLayoutCheck(this, ctx); }   // V3 조판 검사는 작업자 스레드에서 나중에(server/layout-check.js)
       const last = meta.milestones?.[meta.milestones.length - 1];
       ctx.madeMilestone = ms && last && last.n === meta.version ? last : null;
@@ -1174,6 +1216,8 @@ export class Service {
       const lost = () => { if (p.status === 'pending') p.lost = true; else p.refGone = true; };
       for (const k of ['ref', 'afterRef']) if (p[k]) p[k] = map(p[k], lost);
       if (p.figure?.sourceTable?.table) p.figure.sourceTable.table = map(p.figure.sourceTable.table, lost);
+      // 표 제안의 본보기 표(like — 2026-11-20 §20 검증): 그 앞에 문단이 들고 나면 열쇠를 따라 옮긴다. 본보기 표가 지워졌으면 like 만 뺀다(제안은 기본 본보기로)
+      if (p.table?.like) { let gone = false; const v = map(p.table.like, () => { gone = true; }); if (gone) delete p.table.like; else p.table.like = v; }
       for (const k of ['insertedRef', 'captionRef', 'tableKey']) {
         if (!p[k]) continue;
         let gone = false; const v = map(p[k], () => { gone = true; });
@@ -2527,7 +2571,7 @@ export class Service {
     } else if (type === 'page_layout') {
       const ops = normalizePageLayoutOps(inp.pageLayout?.ops);
       const clone = new HwpxDoc(containerFromBytesSync(docBytesSync(doc)));
-      const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), author }));
+      const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), documentOf: aid => this._layoutDocument(ctx, aid), author }));
       // fingerprint = 예전 지문(문단 수 포함 — 같으면 제안 때와 같은 상태라 바로 반영), state = 기대는 상태만(v2 — 같은 요청의 다른 제안이 먼저 반영돼
       // 문단 수만 바뀌어도 반영한다, engine/page-layout.js pageLayoutState·2026-11-17)
       p.pageLayout = { ops, labels: dry.labels, fingerprint: pageLayoutStateFingerprint(doc), state: pageLayoutState(doc, ops) };
@@ -2536,9 +2580,11 @@ export class Service {
       // [hwpx-cowork] 스타일 들여오기·여러 문단 서식(styles·restyle — 2026-11-18)만 든 제안은 '쪽 구성'이 아니라 '서식'으로 보인다(카드·메모 글의 머리말 — web 은 title 이 없으면 '쪽 구성')
       const restyleOnly = ops.every((op) => op.op === 'styles' || op.op === 'restyle');
       if (restyleOnly) p.pageLayout.title = '서식';
+      else if (ops.every((op) => op.op === 'insert_document')) p.pageLayout.title = '본문 추가';   // 문서 끼워 넣기(v3 실험 §21) — 카드 머리말
       // 카드가 놓일 자리: 구역 op 는 그 구역 첫 문단, 서식 op 는 첫 대상의 본문 문단
       const firstAt = ops.find((op) => op.op === 'restyle')?.at?.[0]; const firstRef = typeof firstAt === 'string' ? firstAt : firstAt?.table;
-      const anchor = restyleOnly ? /^s\d+\/p\d+/.exec(String(firstRef ?? ''))?.[0] || (/^s(\d+)$/.test(String(firstRef ?? '')) ? `${firstRef}/p0` : null) : null;
+      const insertAt = ops.find((op) => op.op === 'insert_document')?.after;   // 문서 끼워 넣기: 넣을 자리 앞 문단에 카드
+      const anchor = restyleOnly ? /^s\d+\/p\d+/.exec(String(firstRef ?? ''))?.[0] || (/^s(\d+)$/.test(String(firstRef ?? '')) ? `${firstRef}/p0` : null) : (insertAt || null);
       const section = ops[0].section ?? Number(/^s(\d+)/.exec(ops[0].before_ref)?.[1] || 0);
       p.ref = anchor && (() => { try { doc.resolve(anchor); return true; } catch { return false; } })() ? anchor : `s${section}/p0`; p.afterRef = p.ref;
       memoLoc = { ref: p.ref, start: 0, end: cpLen(this._text(doc, p.ref)) };
@@ -2565,6 +2611,8 @@ export class Service {
       const target = String(te.table ?? inp.ref ?? '');
       if (!target) throw new ServiceError('NO_TABLE', '고칠 표(table — 표 열쇠 s1/p7#t0, 표 문단 ref 또는 표 칸 ref)가 필요합니다');
       const dry = this._engine(() => doc.editTable(target, ops, { dryRun: true }));
+      // [hwpx-cowork] 칸 문단 다시 짜기(cell_paragraphs — 2026-11-19): 사라질 문단의 글 지문을 op 에 적어 둔다 — 반영할 때 그새 그 칸이 바뀌었는지 엔진이 견준다(STALE)
+      if (dry.stamps) ops = ops.map((o, i) => (dry.stamps[i] ? { ...o, expect: dry.stamps[i] } : o));
       const t = doc.tables().find((x) => x.key === dry.key);
       p.ref = dry.ref; p.afterRef = bodyRefOf(dry.ref); p.tableKey = dry.key;
       p.tableEdit = { ops, labels: dry.labels, caption: t?.caption?.text ? stripCaptionNumber(t.caption.text) : '', size: [t?.rows ?? null, t?.cols ?? null], result: [dry.rows, dry.cols] };
@@ -2611,7 +2659,13 @@ export class Service {
         p.figure = this._normFigure(ctx, inp.figure);
         if (p.figure.nativeChart) this._engine(() => chartDimensions(doc, afterRef, p.figure.widthMm, p.figure.heightMm));
         if (fr) { const f = this._figureAt(doc, fr); p.figure.caption = ''; p.figure.replace = { binId: f.binId, n: f.n, caption: f.caption?.text || '' }; }
-      } else p.table = normTable(inp.table);
+      } else {
+        p.table = normTable(inp.table);
+        // like(본보기 표 — 2026-11-20 §20): 만들 때 있는 표인지 본다(반영할 때 없으면 기본 본보기로 — engine/doc.js _tableModel)
+        // 반영 때와 같은 기준(engine/doc.js _tableModel — 문단 없는 칸이 있는 표는 본보기가 못 된다)으로 본다: 만들 때 통과하고 반영 때 조용히 기본 본보기로 바뀌지 않게
+        if (p.table.like && !doc._tableModel(p.table.like)?.picked) throw new ServiceError('BAD_TABLE', doc.tables().some((t) => t.key === p.table.like)
+          ? `like 표(${p.table.like})는 본보기로 쓸 수 없습니다(문단이 없는 칸이 있다) — 다른 표를 고르세요` : `like 의 표를 찾지 못했습니다: ${p.table.like}(read 의 ▦ 표 열쇠 — 예: s0/p3#t0)`);
+      }
       memoLoc = { ref: afterRef, start: 0, end: cpLen(text) };
     }
     // 제안 메모: 요청에 딸린 제안(rid)은 만들지 않는다 — 그 요청의 작업 기록 메모 하나에 모인다(V3 §9.3-1, 대상 문단이든 아니든·memo: true 를 줘도).
@@ -2685,6 +2739,57 @@ export class Service {
     for (const q of all) if (lost.has(q.pid)) { delete q.lost; delete q.refGone; }
   }
 
+  /**
+   * [hwpx-cowork] 칸 문단 다시 짜기(엔진 editTable 의 cellMoves — 2026-11-19, docs/MCP_REDESIGN_2026-11-16.md §17) 뒤 그 칸 문단의 부모 문단(parent) 안 중첩 주소
+   * '/n{k}…' 를 옮긴다: 그 칸 앞(k < first)은 그대로, 칸 안은 map(옛 차례 → 새 차례, null = 사라짐 — 대기 제안은 lost, 그 밖은 refGone), 칸 뒤는 늘거나 준 만큼 민다.
+   * 한 표의 여러 칸이면 뒤 칸부터 옮긴다(앞 칸의 옮김이 뒤 칸의 옛 번호를 흔들지 않게). → 이번에 대상 문단을 잃은 제안 번호들(되돌릴 때 되살린다 — _unmapCellMoves)
+   */
+  _remapCellMoves(meta, moves) {
+    const lostBefore = new Set(meta.proposals.filter((q) => q.lost || q.refGone).map((q) => q.pid));
+    for (const mv of [...moves].sort((a, b) => b.first - a.first)) {
+      const head = `${mv.parent}/n`; const old = mv.map.length; const delta = mv.count - old;
+      this._remapSectionsDeep(meta, (s, i, tail) => {
+        const ref = `s${s}/p${i}${tail || ''}`;
+        const m = ref.startsWith(head) ? /^(\d+)([\s\S]*)$/.exec(ref.slice(head.length)) : null;
+        if (!m) return [s, i, tail];
+        const k = Number(m[1]);
+        if (k < mv.first) return [s, i, tail];
+        let to;
+        if (k >= mv.first + old) to = k + delta;
+        else { const j = mv.map[k - mv.first]; if (j == null) return null; to = mv.first + j; }
+        return [s, i, `${head}${to}${m[2]}`.slice(`s${s}/p${i}`.length)];
+      });
+    }
+    return meta.proposals.filter((q) => (q.lost || q.refGone) && !lostBefore.has(q.pid)).map((q) => q.pid);
+  }
+
+  /**
+   * [hwpx-cowork] _remapCellMoves 를 거꾸로(표 고치기 되돌리기 — 칸 문단이 고치기 전으로 돌아온 뒤): 새 차례 → 옛 차례, 칸 뒤는 다시 당기거나 민다.
+   * 그때 대상 문단을 잃은 제안(lostPids)은 옛 주소를 그대로 가졌으므로 옮기지 않고 되살린다. 그 뒤 새로 넣었던 문단을 가리키게 된 주소는 잃는다(그 문단은 이제 없다)
+   */
+  _unmapCellMoves(meta, moves, lostPids = []) {
+    const lost = new Set(lostPids); const all = meta.proposals;
+    meta.proposals = all.filter((q) => !lost.has(q.pid));
+    try {
+      for (const mv of [...moves].sort((a, b) => a.first - b.first)) {
+        const head = `${mv.parent}/n`; const delta = mv.count - mv.map.length;
+        const back = new Map(); mv.map.forEach((j, k) => { if (j != null) back.set(j, k); });
+        this._remapSectionsDeep(meta, (s, i, tail) => {
+          const ref = `s${s}/p${i}${tail || ''}`;
+          const m = ref.startsWith(head) ? /^(\d+)([\s\S]*)$/.exec(ref.slice(head.length)) : null;
+          if (!m) return [s, i, tail];
+          const k = Number(m[1]);
+          if (k < mv.first) return [s, i, tail];
+          let to;
+          if (k >= mv.first + mv.count) to = k - delta;
+          else { const o = back.get(k - mv.first); if (o == null) return null; to = mv.first + o; }
+          return [s, i, `${head}${to}${m[2]}`.slice(`s${s}/p${i}`.length)];
+        });
+      }
+    } finally { meta.proposals = all; }
+    for (const q of all) if (lost.has(q.pid)) { delete q.lost; delete q.refGone; }
+  }
+
   // ── 차례 새로 고침(proposal type 'toc' — 2026-10-30) ──
 
   async pageLayout(id) { const { doc } = await this._load(id); return getPageLayout(doc); }
@@ -2692,6 +2797,14 @@ export class Service {
   _layoutAttachment(ctx, aid) {
     const bytes = this.attach.bytes(ctx.id, this._att(ctx.meta, aid));
     validateImage(bytes); return bytes;
+  }
+
+  /** 문서 끼워 넣기(insert_document — MCP v3 실험, 2026-11-20 §21)의 첨부 HWPX → HwpxDoc(새로 읽은 사본 — 넣기가 바꾸지 않게) */
+  _layoutDocument(ctx, aid) {
+    const a = this._att(ctx.meta, aid);
+    const bytes = this.attach.bytes(ctx.id, a);
+    try { return new HwpxDoc(containerFromBytesSync(bytes)); }
+    catch (e) { throw new ServiceError('BAD_DOCUMENT', `첨부 ${aid}(${a.name || ''})는 HWPX 문서가 아닙니다 — 빈 서식(download_attachment_file 'template')에 써서 올리세요: ${String(e?.message || e).slice(0, 120)}`); }
   }
 
   _layoutRemap(ctx, mapping, memoKeys, refMapping = []) {
@@ -3422,6 +3535,62 @@ export class Service {
     } };
   }
 
+  /**
+   * 하나씩 [반영]할 때 같은 문단의 다른 대기 바꿈(찾을 글 + occurrence·offset)의 자리 → { ref, before, source, sibs: [{ q, range }] } | null.
+   * 2026-11-20(§19): replace_all 이 한 문단의 같은 낱말 두 곳에 낸 제안(occurrence 1·2)을 카드마다 반영하면 첫 반영 뒤 두 번째가 occurrence 1 이 되는데
+   * 이 길은 옮기지 않아 '찾지 못했습니다'로 실패했다(실제 Codex 결과 223건 중 12건). [모두 반영](_orderedApplier)과 같은 규칙으로 옮긴다 — 다만 겹친 제안은
+   * 건드리지 않는다(예전 그대로 그 제안을 반영할 때 판정 — applyConflict 표시는 일괄 반영의 몫).
+   */
+  _siblingReplaceTargets(ctx, p) {
+    if (p.type !== 'replace' || p.status !== 'pending' || p.lost) return null;
+    const read = (ref) => { try { return this._text(ctx.doc, ref); } catch { return null; } };
+    const ref = this._locate(ctx.doc, { ...p }); const before = read(ref);
+    if (before == null) return null;
+    const source = p.find ? ctx.doc.find(ref, p.find, p.occurrence || 1) : { start: p.offset ?? p.start ?? cpLen(before), end: p.offset ?? p.start ?? cpLen(before) };
+    if (!source) return null;
+    const sibs = [];
+    for (const q of ctx.meta.proposals) {
+      if (q === p || q.status !== 'pending' || q.lost || q.type !== 'replace' || this._locate(ctx.doc, { ...q }) !== ref) continue;
+      const range = q.find ? ctx.doc.find(ref, q.find, q.occurrence || 1) : { start: q.offset ?? q.start ?? cpLen(before), end: q.offset ?? q.start ?? cpLen(before) };
+      if (range) sibs.push({ q, range });
+    }
+    return sibs.length ? { ref, before, source: { start: source.start, end: source.end }, sibs } : null;
+  }
+
+  /** _siblingReplaceTargets 로 잡은 바꿈들을 방금 반영한 바꿈(p) 뒤의 글로 옮긴다 — 규칙은 _orderedApplier 의 apply 안 범위 갱신과 같다(앞은 그대로, 뒤는 길이 차만큼·나눈 문단이면 꼬리 문단으로) */
+  _advanceSiblingReplaces(ctx, p, saved) {
+    if (!saved || p.status !== 'applied') return;
+    const read = (ref) => { try { return this._text(ctx.doc, ref); } catch { return null; } };
+    const now = read(saved.ref); const s = saved.source;
+    if (now == null || now === saved.before) return;
+    for (const { q, range: r } of saved.sibs) {
+      if (q.status !== 'pending') continue;
+      // 자리는 _siblingReplaceTargets 가 잰 문단(saved.ref — 메모가 달린 제안은 _locate 가 고른 메모 자리) 기준
+      let ref = saved.ref; let range;
+      if (r.end <= s.start && !(r.start === r.end && r.start === s.start)) range = r;   // 앞 — 자리 그대로
+      else if (r.start >= s.end) {
+        if (p.split?.refs?.length) {
+          ref = p.split.refs.at(-1);
+          const offset = cpLen(p.split.lines.at(-1)) - (cpLen(saved.before) - s.end);
+          range = { start: offset + r.start - s.end, end: offset + r.end - s.end };
+        } else {
+          const delta = cpLen(now) - cpLen(saved.before);
+          range = { start: r.start + delta, end: r.end + delta };
+        }
+      } else continue;   // 겹침 — 예전 그대로
+      const cur = read(ref);
+      if (cur == null) continue;
+      // 메모가 달린 제안은 반영할 때 _locate 가 메모 자리를 쓴다 — 그 자리가 이 문단이 아니면(나눈 문단에서 메모가 앞 문단에 남은 경우 등) 건드리지 않는다
+      const memoAnchored = !!(q.memo && q.memoId);
+      if (memoAnchored && this._locate(ctx.doc, { ...q }) !== ref) continue;
+      if (q.find) {
+        if (cpSlice(cur, range.start, range.end) !== q.find) continue;
+        q.occurrence = occurrenceAt(cur, q.find, range.start);
+      } else q.offset = range.start;
+      if (ref !== q.ref && !memoAnchored) q.ref = ref;
+    }
+  }
+
   /** 같은 요청의 독립된 서식 제안만, 방금 사람이 반영한 변경 위로 옮긴다. 외부 편집·겹친 글자 범위는 그대로 충돌로 남긴다. */
   _pendingFormatTargets(ctx, p) {
     if (!['replace', 'format'].includes(p.type)) return null;
@@ -3575,7 +3744,7 @@ export class Service {
       }
       const before = docBytesSync(doc), keys = new Map(doc.memos().map(m => [m.id,m.key]));
       let result;
-      try { result = this._engine(() => editPageLayout(doc, p.pageLayout.ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), author })); }
+      try { result = this._engine(() => editPageLayout(doc, p.pageLayout.ops, { attachmentBytes: aid => this._layoutAttachment(ctx, aid), documentOf: aid => this._layoutDocument(ctx, aid), author })); }
       catch (e) {
         // [hwpx-cowork] ops 를 차례로 문서에 하다 가운데서 실패하면(앞 op 는 이미 바뀜) 반영 전 사본으로 되돌린다 — [모두 반영](resolveRequest)이 문서가 그대로인
         // 실패만 그 항목의 실패로 적고 반쯤 바뀌었으면 앞서 반영한 제안까지 통째로 버린다. 엔진 오류(PAGE_LAYOUT 등 — 코드 있는 보통 Error)는 사유가 남게 ServiceError 로
@@ -3762,6 +3931,12 @@ export class Service {
       if (!p.tableKey) throw new ServiceError('GONE', `제안 ${p.pid} 의 표가 지워졌습니다`, 409);
       const res = this._engine(() => doc.editTable(p.tableKey, p.tableEdit.ops));
       p.tableUndo = { before: res.before, ...res.undo };
+      // [hwpx-cowork] 칸 문단 수가 바뀌면(cell_paragraphs — 2026-11-19) 그 칸 뒤 중첩 문단 주소('/n')가 밀린다: meta 의 주소를 옮겨 다른 대기 제안이 제 문단을 따라가게 하고,
+      // 되돌릴 때 쓸 옮김표와 그때 대상 문단을 잃은 제안을 남긴다(_remapCellMoves·_unmapCellMoves)
+      if (res.cellMoves?.length) {
+        const lost = this._remapCellMoves(meta, res.cellMoves);
+        p.tableUndo.cellMoves = res.cellMoves; if (lost.length) p.tableUndo.cellLost = lost;
+      }
       packTableUndo(p.tableUndo);   // 큰 표 XML 은 눌러서(meta.json 이 제안마다 표 크기만큼 커지지 않게)
       p.changeIds = [];
       ctx.formatting = true; ctx.changed.add(bodyRefOf(res.ref));
@@ -3845,8 +4020,15 @@ export class Service {
         const before = new Set(doc.changes().map((c) => c.id));
         // 단위 줄(표 바로 앞 문단)·주석(표준서식: 표 문단 안 [표][줄 바꿈][주석], 그 밖: 표 바로 뒤 문단) — 2026-11-17, §10.4 나-8, engine/captions-notes.js.
         // 넣는 차례: 단위 줄 → 표(단위 줄 뒤) → 주석. 주석은 개체 넣음 표식(_trackInsertedObjects)보다 먼저(차트와 같은 까닭)
+        // like 열쇠는 넣기 전 문서의 주소다(2026-11-20 §20 검증): 본보기의 병합은 넣기 전에 읽고, 단위 줄을 먼저 넣으면 그 뒤 표 주소가 한 칸 밀리므로 옮겨 준다
+        // (예전: 본보기가 넣을 자리 뒤에 있으면 밀린 열쇠로 찾아 병합·칸 모양이 조용히 빠졌다)
+        const likeMerges = !p.table.merges && p.table.like ? this._engine(() => doc.tableMergesLike(p.table.like, p.table.rows.length, p.table.rows[0].length)) : null;
         const unit = p.table.unit ? this._engine(() => insertUnitParagraph(doc, pr.sec, pr.body, p.table.unit, { author, trackBreak: brk })) : null;
-        const res = this._engine(() => doc.insertTableAfter(pr.sec, pr.body + (unit ? 1 : 0), { rows: p.table.rows, headerRows: p.table.headerRows, caption: p.table.caption }, { author, ...(brk ? { trackBreak: true } : {}) }));
+        const like = p.table.like ? shiftTableKey(p.table.like, pr.sec, pr.body, unit ? 1 : 0) : null;
+        const res = this._engine(() => doc.insertTableAfter(pr.sec, pr.body + (unit ? 1 : 0), { rows: p.table.rows, headerRows: p.table.headerRows, caption: p.table.caption, like }, { author, ...(brk ? { trackBreak: true } : {}) }));
+        // 병합(2026-11-20 §20): 준 merges, 없고 like 표와 크기가 같으면 그 표의 병합. 표 고치기의 merge(테두리·글 규칙 그대로)로 — 넣은 표라 변경 추적 없이
+        const merges = p.table.merges || likeMerges;
+        if (merges?.length && res.tableKey) this._engine(() => doc.editTable(res.tableKey, merges.map((s) => { const [r0, c0, r1, c1] = /r(\d+)c(\d+):r(\d+)c(\d+)/.exec(s).slice(1).map(Number); return { op: 'merge', range: { row_from: r0, row_to: r1, col_from: c0, col_to: c1 } }; })));
         const notes = p.table.notes ? this._engine(() => attachNotes(doc, res.ref, p.table.notes, { kind: 'table', author, trackBreak: brk })) : null;
         const shift = (res.bodyShift || (res.captionRef ? 2 : 1)) + (unit ? 1 : 0) + (notes?.ref ? 1 : 0);
         this._remapRefs(meta, pr.sec, (i) => (i > pr.body ? i + shift : i));
@@ -3891,6 +4073,9 @@ export class Service {
   _undoCore(ctx, p, by, detail = '복구') {
     const { doc, meta } = ctx;
     if (p.status !== 'applied') throw new ServiceError('STATE', `적용된 제안만 되돌릴 수 있습니다(지금: ${p.status})`, 409);
+    if (meta.fileReplacedVersion && (p.appliedVersion || 0) < meta.fileReplacedVersion) {
+      throw new ServiceError('STALE', '제안 반영 뒤 문서 파일이 교체되었습니다. 이력에서 해당 파일을 선택하세요.', 409);
+    }
     if (ctx.objectSnapshots?.length) ctx.objectSnapshots.length = 0;   // _applyCore 와 같은 까닭
     const paraPrints = this._paraPrintsBefore(ctx, p);   // [hwpx-cowork] 2026-11-17 L1 — 되돌려 글이 돌아오면 같은 요청 대기 옮기기·지우기 지문도 돌아온다
     const rejectIds = (ids) => {
@@ -4062,6 +4247,8 @@ export class Service {
       const tableBefore = tableUndoBefore(p.tableUndo);
       if (!tableBefore || !p.tableKey) throw new ServiceError('STATE', '되돌릴 표 고치기 기록이 없습니다', 409);
       this._engine(() => doc.restoreTable(p.tableKey, tableBefore, p.tableUndo));
+      // [hwpx-cowork] 칸 문단 다시 짜기를 되돌렸으면 옮겼던 중첩 주소도 되돌린다(2026-11-19)
+      if (p.tableUndo.cellMoves?.length) this._unmapCellMoves(meta, p.tableUndo.cellMoves, p.tableUndo.cellLost || []);
       ctx.changed.add(bodyRefOf(p.tableKey.replace(/#t\d+$/, '')));
     } else if (p.type === 'figure' && p.figure?.nativeChart) {
       const ref = p.insertedRef;
@@ -4155,7 +4342,13 @@ export class Service {
       const ctx = this._ctx(id, doc, meta, by);
       const p = this._prop(meta, pid); const at = nowIso();
       let note;
-      if (action === 'apply') { this._applyCore(ctx, p, by); note = `제안 ${p.pid} 적용`; }
+      if (action === 'apply') {
+        // 하나씩 반영(2026-11-20 §19): 같은 문단의 다른 대기 바꿈의 자리를 반영 뒤로 옮긴다 — [모두 반영](_orderedApplier)은 원래 옮겼다
+        const siblings = this._siblingReplaceTargets(ctx, p);
+        this._applyCore(ctx, p, by);
+        this._advanceSiblingReplaces(ctx, p, siblings);
+        note = `제안 ${p.pid} 적용`;
+      }
       else if (action === 'undo') { this._undoCore(ctx, p, by); note = `제안 ${p.pid} 복구`; }
       else if (action === 'reject') { this._rejectCore(ctx, p, by); note = `제안 ${p.pid} 거절`; }
       else if (action === 'reopen') {
@@ -4262,7 +4455,11 @@ export class Service {
       }
       if (b.table !== undefined) {
         if (p.type !== 'table') throw new ServiceError('BAD_FIELD', 'table 은 표 제안에만 있습니다');
-        p.table = normTable(b.table); changes.push('표');
+        // 편집기에서 칸 글만 고쳐 보내도 병합·본보기(2026-11-20 §20)는 남긴다 — 행·열 수가 바뀌어 병합이 맞지 않으면 병합은 뺀다
+        const prev = p.table || {};
+        const next = { ...b.table, ...(b.table?.merges === undefined && prev.merges ? { merges: prev.merges } : {}), ...(b.table?.like === undefined && prev.like ? { like: prev.like } : {}) };
+        try { p.table = normTable(next); } catch (e) { if (b.table?.merges !== undefined || !next.merges) throw e; p.table = normTable({ ...next, merges: undefined }); }
+        changes.push('표');
       }
       if (b.figure !== undefined) {
         if (p.type !== 'figure') throw new ServiceError('BAD_FIELD', 'figure 는 그림 제안에만 있습니다');
@@ -4431,6 +4628,13 @@ export class Service {
   /** 기록 n(내부 판)의 파일 — 없으면 404 NO_VERSION(글에서는 기록 번호를 '버전'으로 부르지 않는다, §9.1) */
   versionCopy(id, n) { this._meta(id); const b = this.store.versionBytes(id, n); if (!b) throw new ServiceError('NO_VERSION', `요청한 기록 파일이 없습니다: ${MT.clip(String(n ?? ''), 20)}`, 404); return b; }
 
+  /** 교체 전 파일에서 보낸 편집을 새 파일에 섞지 않는다. 문서 큐 안에서 검사한다. */
+  _assertFileVersion(meta, ...versions) {
+    if (!meta.fileReplacedVersion || !versions.some(v => v != null && v < meta.fileReplacedVersion)) return;
+    throw new ServiceError('FILE_REPLACED', '문서가 이력의 파일로 교체되었습니다. 최신 문서를 다시 열어 주세요.', 409,
+      { baseVersion: meta.version, reload: true });
+  }
+
   /** 편집기에서 돌아온 HWPX 를 문단 글 기준으로 비교해 변경 추적으로 합친다. */
   async uploadEdited(id, bytes, { baseVersion, user, live = false, agent } = {}) {
     let edited;
@@ -4440,6 +4644,7 @@ export class Service {
       const { doc, meta } = await this._load(id);
       // 편집본 올리기도 '기준에 바로 적용' 문(§4.3 — REST 는 routes/collab.js 가 먼저 막는다)
       this._assertDirectApply(user, meta, agent, '편집본 올리기(기준 문서 직접 갱신)는 관리자만 할 수 있습니다(설정 changeRequests.allowDirectApply 꺼짐) — 편집기에서 고친 글은 내 수정본으로 저장되고 변경 요청으로 반영합니다');
+      this._assertFileVersion(meta, baseVersion);
       const ctx = this._ctx(id, doc, meta, by);
       // [hwpx-cowork] 구역 수가 다른 편집본(구역 합치기·나누기)은 글 목록 병합(구역마다)으로 맞출 수 없다 — 구역이 없는 쪽 글이 앞 구역에 겹쳐 들어간다.
       // 막고 실시간 편집기(구역 파일까지 맞춘다 — docs/SECTIONS.md)로 보낸다
@@ -4511,226 +4716,48 @@ export class Service {
   }
 
   /** replaceContent 의 속(문서 큐 안에서 부른다 — 이미 큐 안인 PC 파일 맞춤이 직접 부른다) */
-  async _replaceContent(id, bytes, { by, note = '파일로 바꿈', kind = 'upload', after = null } = {}) {
+  async _replaceContent(id, bytes, { by, note = '파일로 바꿈', kind = 'upload', after = null, restore = null } = {}) {
     let next;
     try { next = await HwpxDoc.load(bytes); } catch (e) { throw new ServiceError('BAD_FILE', `HWPX 를 읽지 못했습니다: ${e.message}`); }
     if (!next.sections.length) throw new ServiceError('BAD_FILE', '구역(section)이 없는 파일입니다');
     const meta = this._meta(id);
-    const ctx = this._ctx(id, next, meta, by);
-    ctx.dirty = true; ctx.formatting = true; ctx.bytes = bytes;
-    ctx.milestone = { kind, note };
     meta.locks = {}; meta.liveTouch = {}; meta.breakView = 1;
     for (const p of meta.proposals) {
       if (p.changeIds?.length) p.changeIds = [];
       if (p.split?.changeIds?.length) p.split.changeIds = [];
     }
-    this.store.log(meta, by, 'replace', note);
-    if (typeof after === 'function') ctx.beforeSave = () => after(meta);
-    // _finish 가 서식 커밋 알림(doc changed · formatting)을 보낸다 — 열린 편집기는 새 내용으로 다시 맞춘다
-    const version = await this._finish(ctx, note);
-    return { version, v: ctx.madeMilestone?.v ?? null };
+    this.store.log(meta, by, restore == null ? 'replace' : 'version.restore', note);
+    // 파일의 메모와 변경 추적을 그대로 유지하려고 편집 후처리를 거치지 않는다.
+    await this.store.commit(id, next, { by, note, meta, bytes, milestone: { kind, note }, persist: m => {
+      m.formatVersion = m.version;
+      if (restore != null) m.fileReplacedVersion = m.version;
+      if (after) after(m);
+      this.store.saveMeta(m);
+    } });
+    const version = meta.version;
+    const milestone = meta.milestones.at(-1);
+    const { v } = milestone;
+    this.hub.broadcast(id, { type: 'doc', action: 'changed', version, formatVersion: version, formatting: true, by,
+      changed: [], ...(restore == null ? {} : { restore, v }) });
+    this.hub.broadcast(id, { type: 'doc', action: 'milestone', v, n: version, by, kind });
+    return { version, v };
   }
 
-  /**
-   * 버전 복구(§3.7): v{n} 의 최종본 글(본문 + 구조가 같은 중첩 문단)을 지금 문서에 변경 추적으로 맞춘다.
-   * v{n} 뒤에 적용된 문단 추가·표 제안은 먼저 되돌리고(문단을 지움), 이미 변경 추적이 있어 겹치는 문단은
-   * 그 문단의 변경을 거절한 뒤 맞춘다(그 변경이 제안의 것이면 제안은 '복구' 상태).
-   */
-  async restoreVersion(id, n, user, agent) {
-    n = Number(n);
-    const by = this.authorName(user, agent);
-    this._assertCanEdit(user, this._meta(id));   // 복구도 문서를 고치는 일(V4 §1)
-    const oldBytes = this.versionCopy(id, n);
-    const old = await HwpxDoc.load(oldBytes);
-    const out = await this._tx(id, async () => {
-      const { doc, meta } = await this._load(id);
+  /** 선택한 기록의 HWPX 파일을 그대로 새 현재 문서로 기록한다. */
+  async restoreVersion(id, n, user) {
+    return this._tx(id, async () => {
+      const meta = this._meta(id);
       this._assertCanEdit(user, meta);
-      const ctx = this._ctx(id, doc, meta, by);
-      const v = meta.versions.find((x) => x.n === n);
-      const vAt = v?.at || null;
-      // 사람에게 보이는 이름(§9.4): 그 기록이 이정표면 'v3', 아니면 '10-23 01:16 기록'(시각도 모르는 옛 기록이면 '옛 기록') — 기록 번호 n 은 내지 않는다
-      const msAt = (meta.milestones || []).find((x) => x.n === n) || null;
-      const label = msAt ? `v${msAt.v}` : vAt ? `${MT.fmtTime(vAt)} 기록` : '옛 기록';
-      ctx.milestone = { kind: 'restore', note: msAt ? `v${msAt.v} 내용으로 복구` : `${label}으로 복구` };
-      const report = { changed: [], inserted: [], deleted: [], skipped: [], skippedNested: [], rejected: 0, undone: [], bodyMap: {} };
-      // 1) v{n} 뒤에 적용된 제안은 먼저 되돌린다(글 바꾸기 = 변경 거절, 문단 추가·표 = 넣은 문단 지우기)
-      const touched = [];
-      const later = meta.proposals.filter((p) => p.status === 'applied'
-        && (p.appliedVersion ? p.appliedVersion > n : (vAt && p.appliedAt > vAt)))
-        .sort((a, b) => String(b.appliedAt).localeCompare(String(a.appliedAt)) || b.pid - a.pid);
-      const undoneFirst = [];
-      for (const p of later) {
-        try { this._undoCore(ctx, p, by, `${label} 복구`); report.undone.push(p.pid); undoneFirst.push(p); }
-        catch (e) {
-          if (!(e instanceof ServiceError || e instanceof EngineError)) throw e;
-          // 변경 추적 없이 적용된 제안(V4 §4.2)의 글을 그새 남이 고쳐 글로 되돌리지 못했어도 복구가 그 문단 글을 옛 글로 맞추므로 '복구' 상태로 둔다
-          if (p.status === 'applied' && (p.appliedFinal || p.appliedRange) && e.code === 'STALE') {
-            p.changeIds = []; delete p.appliedRange; delete p.appliedFinal; delete p.autoAccepted;
-            if (p.type !== 'replace') { p.insertedRef = null; p.captionRef = null; if (p.type !== 'table_edit') p.tableKey = null; delete p.binId; delete p.replaced; delete p.tableUndo; delete p.objectUndo; delete p.childSnapshot; }
-            this._markUndone(ctx, p, by, `${label} 복구`); report.undone.push(p.pid);
-          }
-        }
-      }
-      // 2) 글 맞추기: 엔진 병합(복제본에서 먼저 시도) → 기존 변경 추적과 겹쳐 실패하면 문단별로(겹치는 변경은 거절 뒤) 맞춘다
-      const undoneByChange = new Set();
-      ctx.restoreSince = vAt;
-      let merged = null;
-      if (typeof old.bodyTexts === 'function') {
-        const tryMerge = async () => {
-          const work = await doc.clone();
-          try { return { work, rep: work.mergeBodyTexts(old.bodyTexts({ nested: true }), { author: by }) }; }
-          catch (e) { if (!(e instanceof EngineError)) throw e; return null; }
-        };
-        merged = await tryMerge();
-        // 실시간 '고친 글만' 문서(V4 §2.3): 처리 안 된 변경 추적과 겹쳐 못 맞추면 그 변경 추적을 먼저 수락하고 다시(실시간 글의 OVERLAP 규칙과 같다)
-        if (!merged && this._liveFinal(meta) && doc.changes().length) {
-          this._resolveIds(ctx, doc.changes().map((c) => c.id), 'accept', { tolerant: true });
-          merged = await tryMerge();
-        }
-      }
-      if (merged) {
-        ctx.doc = merged.work;
-        const rep = merged.rep;
-        // 실시간 '고친 글만' 문서(V4 §2.3)는 복구가 만든 변경도 곧바로 수락한다(변경 추적을 남기지 않음)
-        if (this._liveFinal(meta)) this._resolveIds(ctx, this._createdIds(ctx.doc, rep), 'accept');
-        Object.assign(report, { changed: rep.changed || [], inserted: rep.inserted || [], deleted: rep.deleted || [], skippedNested: rep.skippedNested || [], bodyMap: rep.bodyMap || {} });
-        for (const [sec, arr] of Object.entries(report.bodyMap)) if (Array.isArray(arr) && arr.some((x, i) => x !== i)) this._remapRefs(meta, Number(sec), (i) => arr[i] ?? i);
-        for (const ref of [...report.changed, ...report.inserted, ...report.deleted]) { const pr = parseRef(ref); if (pr) touched.push({ sec: pr.sec, body: pr.body, nested: ref !== bodyRefOf(ref), ref }); }
-      } else {
-        for (const sec of doc.sections) {
-          const os = old.sections[sec.index]; if (!os) continue;
-          this._restoreSection(ctx, sec.index, os, report, touched, undoneByChange);
-        }
-      }
-      // 먼저 되돌린 제안의 자리(문단 주소는 그동안 _remapRefs 로 새 번호가 되어 있다)
-      for (const p of undoneFirst) {
-        const ref = p.type === 'replace' ? p.ref : p.afterRef; const pr = parseRef(ref);
-        if (pr) touched.push({ sec: pr.sec, body: pr.body, nested: ref !== bodyRefOf(ref), ref });
-      }
-      for (const pid of undoneByChange) {
-        const p = meta.proposals.find((x) => x.pid === pid); if (!p || p.status !== 'applied') continue;
-        this._markUndone(ctx, p, by, `${label} 복구`);
-        report.undone.push(pid);
-      }
-      const count = report.changed.length + report.inserted.length + report.deleted.length;
-      if (!count && !report.undone.length) { this.store.saveMeta(meta); return { version: meta.version, report, unchanged: true }; }
-      ctx.dirty = true;
-      // 3) 첫 바뀐 문단에 복구 메모(이정표면 '[복구] v3(시각) …', 아니면 '[복구] 시각 기록 …')
-      touched.sort((a, b) => a.sec - b.sec || a.body - b.body || (a.nested ? 1 : 0) - (b.nested ? 1 : 0));
-      const first = touched[0];
-      const memoRef = first ? first.ref : null;
-      if (memoRef) {
-        const d = ctx.doc;
-        try {
-          const len = cpLen(d.text(memoRef, 'final'));
-          const paraCount = new Set(touched.map((x) => x.ref)).size || count;
-          this._memoEdit(ctx, memoRef, () => this._engine(() => d.addMemo(memoRef, { start: 0, end: len, author: by, text: MT.renderRestoreMemo({ v: msAt ? msAt.v : null, at: msAt?.at || vAt, by, count: paraCount }) })));
-        } catch (e) { if (!(e instanceof ServiceError || e instanceof EngineError)) throw e; }
-      }
-      this.store.log(meta, by, 'version.restore', `${label}: ${count}문단, 되돌린 제안 ${report.undone.length}`);
-      const version = await this._finish(ctx, ctx.milestone.note);
-      return { version, v: ctx.madeMilestone?.v ?? null, report };
+      const bytes = this.versionCopy(id, n);
+      if (bytes.equals(this.store.currentBytes(id))) return { version: meta.version, unchanged: true };
+
+      const record = meta.versions.find(x => x.n === n);
+      const milestone = meta.milestones?.find(x => x.n === n);
+      const label = milestone ? `v${milestone.v}` : record?.at ? `${MT.fmtTime(record.at)} 기록` : '옛 기록';
+      return this._replaceContent(id, bytes, {
+        by: user.name, note: `${label} 파일로 교체`, kind: 'restore', restore: n,
+      });
     });
-    if (out.unchanged) return out;
-    this.hub.broadcast(id, { type: 'doc', action: 'changed', version: out.version, changed: out.report.changed, inserted: out.report.inserted, deleted: out.report.deleted, by, restore: n, ...(out.v != null ? { v: out.v } : {}) });
-    return { version: out.version, ...(out.v != null ? { v: out.v } : {}), report: out.report };
-  }
-
-  /** 한 구역을 옛 구역(os) 글에 맞춘다 */
-  _restoreSection(ctx, si, os, report, touched, undoneByChange) {
-    const { doc, meta } = ctx; const by = ctx.by;
-    const sec = doc.sections[si];
-    const cur = sec.bodyParas.map((p) => Section.text(p, 'final'));
-    const tgt = os.bodyParas.map((p) => Section.text(p, 'final'));
-    const curN = sec.bodyParas.map((p) => nestedParas(p).map((q) => ({ ref: q.ref, text: Section.text(q, 'final') })));
-    const tgtN = os.bodyParas.map((p) => nestedParas(p).map((q) => Section.text(q, 'final')));
-    const key = (t, ns) => `${t}\u0001${ns.join('\u0002')}`;
-    const blocks = diffArrays(cur.map((t, i) => key(t, curN[i].map((x) => x.text))), tgt.map((t, i) => key(t, tgtN[i])));
-    const pairs = []; const removed = []; const added = [];
-    let ci = 0; let ti = 0;
-    for (let b = 0; b < blocks.length; b++) {
-      const blk = blocks[b]; const cnt = blk.value.length;
-      if (!blk.added && !blk.removed) { for (let k = 0; k < cnt; k++) pairs.push([ci + k, ti + k]); ci += cnt; ti += cnt; continue; }
-      if (blk.removed) {
-        const next = blocks[b + 1]; const addN = next && next.added ? next.value.length : 0;
-        const m = Math.min(cnt, addN);
-        for (let k = 0; k < m; k++) pairs.push([ci + k, ti + k]);
-        for (let k = m; k < addN; k++) added.push({ after: ci + m - 1, ti: ti + k });
-        for (let k = m; k < cnt; k++) removed.push(ci + k);
-        ci += cnt; ti += addN; if (next && next.added) b++;
-        continue;
-      }
-      for (let k = 0; k < cnt; k++) added.push({ after: ci - 1, ti: ti + k });
-      ti += cnt;
-    }
-    const merge = (ref, text) => this._mergeFallback(ctx, ref, text, report, undoneByChange);
-    const bodyTouched = [];
-    for (const [c, t] of pairs) {
-      const ref = `s${si}/p${c}`;
-      if (cur[c] !== tgt[t] && merge(ref, tgt[t])) { report.changed.push(ref); bodyTouched.push({ c, ref: null }); }
-      const cn = curN[c]; const tn = tgtN[t];
-      if (cn.length === tn.length) {
-        for (let k = 0; k < cn.length; k++) if (cn[k].text !== tn[k] && merge(cn[k].ref, tn[k])) { report.changed.push(cn[k].ref); bodyTouched.push({ c, ref: cn[k].ref }); }
-      } else if (cn.map((x) => x.text).join('\u0002') !== tn.join('\u0002')) report.skippedNested.push(ref);
-    }
-    for (const c of removed) {
-      const ref = `s${si}/p${c}`;
-      if (doc.text(ref, 'final') && !this._mergeFallback(ctx, ref, '', report, undoneByChange)) continue;
-      report.deleted.push(ref); bodyTouched.push({ c, ref: null });
-    }
-    // 새 문단: 뒤에서부터 넣는다(같은 자리면 뒤 문단부터)
-    const eff = (a) => Math.max(0, a.after);
-    const sorted = [...added].sort((a, b) => eff(b) - eff(a) || b.ti - a.ti);
-    for (const a of sorted) this._engine(() => doc.insertParagraphAfter(si, eff(a), tgt[a.ti], { author: by }));
-    const map = cur.map((_, i) => i + added.filter((a) => eff(a) < i).length);
-    report.bodyMap[si] = map;
-    if (added.length) this._remapRefs(meta, si, (i) => map[i] ?? i);
-    const rank = new Map();
-    for (const a of [...added].sort((x, y) => eff(x) - eff(y) || x.ti - y.ti)) {
-      const r = rank.get(eff(a)) || 0; rank.set(eff(a), r + 1);
-      const idx = (map[eff(a)] ?? eff(a)) + 1 + r;
-      report.inserted.push(`s${si}/p${idx}`); touched.push({ sec: si, body: idx, ref: `s${si}/p${idx}` });
-    }
-    for (const t of bodyTouched) {
-      const nb = map[t.c] ?? t.c;
-      touched.push({ sec: si, body: nb, nested: !!t.ref, ref: t.ref ? t.ref.replace(/^s\d+\/p\d+/, `s${si}/p${nb}`) : `s${si}/p${nb}` });
-    }
-    // report 의 짝·삭제 문단 주소도 새 번호로
-    const fix = (ref) => { const pr = parseRef(ref); return pr && pr.sec === si ? ref.replace(/^s\d+\/p\d+/, `s${si}/p${map[pr.body] ?? pr.body}`) : ref; };
-    report.changed = report.changed.map((r) => (parseRef(r)?.sec === si ? fix(r) : r));
-    report.deleted = report.deleted.map((r) => (parseRef(r)?.sec === si ? fix(r) : r));
-  }
-
-  /**
-   * 문단 글 맞추기(변경 추적). 기존 변경 추적과 겹쳐 안 되면 그 문단의 변경을 단계별로 거절하고 다시 시도한다:
-   * 적용된 제안의 변경 → 복구할 버전보다 뒤에 생긴 변경 → 나머지 전부.
-   */
-  _mergeFallback(ctx, ref, text, report, undoneByChange) {
-    const { doc } = ctx;
-    const attempt = () => { if (doc.text(ref, 'final') !== text) doc.mergeParagraphText(ref, text, { author: ctx.by }); };
-    try { attempt(); return true; } catch (e) { if (!(e instanceof EngineError)) throw e; }
-    for (const stage of ['proposal', 'recent', 'all']) {
-      let n = 0;
-      try { n = this._rejectParagraphChanges(ctx, ref, report, undoneByChange, stage); } catch (e) { if (!(e instanceof EngineError)) throw e; break; }
-      if (!n) continue;
-      try { attempt(); return true; } catch (e) { if (!(e instanceof EngineError)) throw e; }
-    }
-    report.skipped.push(ref);
-    return false;
-  }
-
-  _rejectParagraphChanges(ctx, ref, report, undoneByChange, stage = 'all') {
-    const { doc, meta } = ctx;
-    const applied = new Set(meta.proposals.filter((p) => p.status === 'applied').flatMap((p) => p.changeIds.map(Number)));
-    const since = ctx.restoreSince ? Math.floor(Date.parse(ctx.restoreSince) / 1000) * 1000 : NaN;
-    const pick = (c) => stage === 'all' || (stage === 'proposal' ? applied.has(c.id) : (Number.isFinite(since) && Date.parse(c.date) > since));
-    // 문단 나눔 변경(kind 'para' — 2026-10-30)은 거절하면 최종 문단이 갈라지거나 합쳐져 복구가 맞춰 둔 문단 번호가 어긋난다 — 글만 거절한다
-    const cids = [...new Set(doc.changes().filter((c) => c.ref === ref && c.kind !== 'para' && !c.paraEnd && pick(c)).map((c) => c.id))].sort((a, b) => b - a);
-    for (const cid of cids) {
-      for (const p of meta.proposals) if (p.status === 'applied' && p.changeIds.map(Number).includes(cid)) undoneByChange.add(p.pid);
-      doc.rejectChange(cid); this._syncChangeIds(meta, doc); report.rejected++;
-    }
-    return cids.length;
   }
 
   /** 이력(§9.4): versions = 기록(내부 판 n — 이정표가 된 기록은 v), activity = 최근 활동, milestones = 사람용 버전(오래된 것부터) */
@@ -5069,7 +5096,7 @@ export class Service {
   _leanHeader() { return { lean: true, note: LEAN_FORMATTING_NOTE }; }
 
   /** MCP 도구 응답 글자 수 한도(관리자 설정 limits.mcpResponseChars) */
-  mcpLimit() { return Number(this.cfg.limits?.mcpResponseChars) || 40000; }
+  mcpLimit() { return Number(this.cfg.limits?.mcpResponseChars) || LIMIT_DEFAULTS.mcpResponseChars; }
 
   /**
    * MCP get_formatting: 문서 서식을 header 꼴(번호 → 값)로. refs 를 주면 그 문단들의 서식 번호 + 관련 항목만(보통 이것),
@@ -5212,6 +5239,10 @@ export class Service {
 
   /** 고른 경로를 지금 쓸 수 있는 경로로: server 는 요청자가 쓸 서버 AI(개인 키·공용)가 있을 때만, agent 는 요청자(owner)의 에이전트가 붙어 있을 때만 */
   _usableRoute(route, owner, r = null) {
+    if (r?.options?.runSettings) {
+      const online = this.agents?.sessions(owner).some(h => h.channel && h.runKind === r.options.runSettings.kind);
+      return r.routeWanted !== 'queue' && online ? 'agent' : 'queue';
+    }
     // 예시 답변 문서는 맞는 예시가 없어도 안내 답(NO_EXAMPLE)으로 끝낸다 — 대기열에 남아 연습 완료를 막지 않게(2026-11-12)
     if (route === 'example') return this._ownAi(r) ? 'example' : 'queue';
     if (this._tutorialApiOnly(owner, r)) {
@@ -5326,7 +5357,7 @@ export class Service {
       r.delivery = null; return null;
     }
     let to = null;
-    try { to = this.agents?.deliver(r.by, 'ai_request', this._agentEvent(meta, r)) || null; } catch (e) { console.error('[agents] ai_request 알림 실패:', e.message); }
+    try { to = this.agents?.deliver(r.by, 'ai_request', this._agentEvent(meta, r), { runKind: r.options?.runSettings?.kind }) || null; } catch (e) { console.error('[agents] ai_request 알림 실패:', e.message); }
     if (to) { r.delivery = { at: nowIso(), session: to.session, agent: to.agent }; return to; }
     r.route = 'queue'; r.delivery = null;
     return null;
@@ -5359,6 +5390,9 @@ export class Service {
       return;
     }
     this._assertTutorialApiActor(r, user, session);
+    if (session && r.options?.runSettings && !this._holdsClaim(r, user, session)) {
+      throw new ServiceError('AI_RUN_REQUIRED', '모델을 지정한 요청은 해당 실행기가 먼저 맡아야 합니다', 409);
+    }
     if (!session || r.status !== 'working' || !r.claim || this._claimExpired(r.claim) || this._holdsClaim(r, user, session)) return;
     throw new ServiceError('CLAIMED', `AI 작업 #${r.rid}은 다른 세션이 처리 중입니다 — 결과를 중복해서 남기지 말고 이 요청은 그만두세요`, 409);
   }
@@ -5444,6 +5478,13 @@ export class Service {
       const info = aids.map((aid) => { const a = this._att(meta, aid); return { aid, name: a.name, kind: a.kind }; });
       const o = body.options || {};
       const options = { count: Math.max(1, Math.min(5, intOr(o.count, 1))), includeInstruction: !!o.includeInstruction };
+      const runSettings = this.aiRun?.requestSettings(user, o.runSettings);
+      if (runSettings) {
+        if (wanted === 'server' || wanted === 'example' || this._exampleDoc(meta) || this._tutorialTour(meta, { by: user.name, tutorial: meta.tutorial })) {
+          throw new ServiceError('BAD_AI_RUN', '이 요청에서는 실행기 모델·추론 강도를 지정할 수 없습니다', 400);
+        }
+        options.runSettings = runSettings;
+      }
       if (o.workflow != null && !['standard', 'content_format'].includes(o.workflow)) throw new ServiceError('INVALID', '지원하지 않는 AI 작업 방식입니다');
       // 내용·형식 나눠 처리(실험)는 켜져 있을 때만 받는다(_contentFormatOn — 기본 끔). 꺼져 있으면 그 선택을 버리고 보통 방식으로 만든다 —
       // 서버를 다시 띄우기 전부터 열려 있던 편집기 창이 예전 선택 칸으로 보낸 요청도 실패하지 않고 그대로 처리되게
@@ -5504,6 +5545,7 @@ export class Service {
       return { ...(await this._runAi(id, prep.rid, prep.input, user, prep.run, prep.ai)), route: 'example', hint: '튜토리얼은 미리 준비한 예시 답변을 보여 줍니다' };
     }
     if (prep.route !== 'server') {
+      if (prep.view.options?.runSettings) return { queued: true, route: prep.route, request: prep.view, hint: '지정한 실행기가 이 요청을 가져가 처리합니다.' };
       if (this._tutorialChatGPTConfigured(prep.view)) return { queued: true, route: prep.route, request: prep.view, hint: this.tutorialChatGPTReady?.() ? '관리자 ChatGPT의 튜토리얼 대기열에 넣었습니다. 처리 결과는 AI 작업 탭에 표시됩니다.' : '튜토리얼 대기열에 저장했습니다. 관리자가 ChatGPT 이벤트를 구독한 뒤 대기 요청을 처리할 수 있습니다.' };
       // 서버 AI 가 켜져 있는데 대기열이면 요청자가 고른 경로(queue·agent) 때문 — '꺼져 있어' 라고 하지 않는다
       const why = wanted === 'agent' ? '내 에이전트가 연결되어 있지 않아 대기열에 넣었습니다'
@@ -5567,7 +5609,8 @@ export class Service {
     }
     // 새 MCP 연결(v2 — 2026-11-17): API 키(OpenAI·Claude·Gemini)도 Codex·Claude Code 실행기와 같은 작업 도구(read·edit·finish)로 처리한다.
     // 예전 연결(아래 — 도구 + 최종 JSON)은 config.ai.mcp = 'v1'(또는 그 키의 ai.mcp 'v1'), 모의 AI·튜토리얼 예시 답변은 늘 예전 길
-    if (this._serverAiV2(ai)) return this._runAiV2(id, rid, input, user, run, ai);
+    const taskSurface = this._serverAiTaskSurface(ai);
+    if (taskSurface) return this._runAiV2(id, rid, input, user, run, ai, taskSurface);
     let result = null; let err = null;
     let apiTools;
     try {
@@ -5681,11 +5724,12 @@ export class Service {
    * 서버 AI·서버에 등록한 개인 키가 새 MCP 연결(v2)로 도는가: 그 AI 에 밝힌 ai.mcp > config.ai.mcp > 기본 'v2'(2026-11-17 — 예전 연결은 'v1' 로 고른다).
    * 도구를 쓰지 않는 모의 AI·runV2 가 없는 실행기(튜토리얼 예시 답변 등)는 예전 길
    */
-  _serverAiV2(ai) {
-    if (!ai?.supportsTools || ai.mock || typeof ai.runV2 !== 'function') return false;
+  _serverAiTaskSurface(ai) {
+    if (!ai?.supportsTools || ai.mock || typeof ai.runV2 !== 'function') return null;
     let fallback = 'v2';
     try { fallback = normalizeMcp(this.cfg?.ai?.mcp) || 'v2'; } catch { /* 틀린 값이면 AiProposer 가 이미 AI 를 꺼 두었다 */ }
-    return (ai.mcp || fallback) === 'v2';
+    const surface = ai.mcp || fallback;
+    return isTaskSurface(surface) ? surface : null;
   }
 
   /**
@@ -5695,15 +5739,15 @@ export class Service {
    * 모델이 끝내지 못했으면(오류·API_MCP_INCOMPLETE) 예전 길처럼 실패로 닫는다(저장된 제안·메모는 남는다).
    * 선점은 예전 길과 같은 이 실행의 서버 선점(run) — 바뀌었으면(취소 → 다시 요청 등) 늦게 끝난 실행은 아무것도 쓰지 않는다
    */
-  async _runAiV2(id, rid, input, user, run, ai) {
+  async _runAiV2(id, rid, input, user, run, ai, surface) {
     const r0 = this._req(this._meta(id), rid);
     const actor = { ...user, agentAttempt: this._attempt(r0), [API_SERVER_RUN]: run };
     const session = `api-${rid}`;   // server/api-service-tools.js 의 메모리 연결 세션 이름(진행 기록이 이 이름으로 요청을 찾는다)
     let result = null; let err = null; let apiTools;
     try {
       // 서버 선점에는 세션이 없어 brief 의 claim(mine:false)은 '남이 맡았다'로 읽힌다 — 실행기가 맡은 것이므로 뺀다
-      const { claim, ...brief } = await this.agentBrief(id, rid, actor, { session });
-      apiTools = await openServiceApiTools({ service: this, user: actor, agent: ai.agentName, docId: id, requestId: rid, attempt: actor.agentAttempt, surface: 'v2',
+      const { claim, ...brief } = await this.agentBrief(id, rid, actor, { session, surface });
+      apiTools = await openServiceApiTools({ service: this, user: actor, agent: ai.agentName, docId: id, requestId: rid, attempt: actor.agentAttempt, surface,
         assertCurrent: async () => { const latest = this._req(this._meta(id), rid); this._assertRequestAttempt(latest, actor); this._assertResultClaim(latest, actor, 'api'); },
         // 끝내는 호출(edit 의 done·finish) 뒤의 요청 상태 — 완료·실패면 고리가 멈춘다(server/api-mcp-tools.js)
         requestStatus: async () => { const latest = this._req(this._meta(id), rid); this._assertRequestAttempt(latest, actor); return { status: latest.status, attempt: this._attempt(latest) }; } });
@@ -6256,7 +6300,7 @@ export class Service {
    * 성공하면 r.claim = { session, agent, by, at, expires }(lease = config.agents.leaseMinutes). 같은 세션이 다시 부르면 lease 연장.
    * opts.session: 머리글 X-Hwpx-Agent-Session(없으면 '사용자|에이전트'), opts.expectPending: 대기 중일 때만(claim_next_request)
    */
-  async startRequest(id, rid, user, agent, { session, expectPending = false, expectAvailable = false, workflow } = {}) {
+  async startRequest(id, rid, user, agent, { session, expectPending = false, expectAvailable = false, workflow, runKind } = {}) {
     const by = this.authorName(user, agent);
     const sess = this._sessionOf(user, agent, session) || `${user.name}|${agent || ''}`;
     const out = await this._tx(id, async () => {
@@ -6283,6 +6327,9 @@ export class Service {
       // claim_next 의 후보는 큐를 기다리는 동안 다른 호출이 맡았을 수 있다(같은 세션의 동시 호출도 포함).
       if (expectAvailable && r.status === 'working' && !this._claimExpired(r.claim, now)) throw new ServiceError('CLAIMED', '그 사이 다른 호출이 이 요청을 맡았습니다', 409);
       const mine = this._holdsClaim(r, user, sess);
+      if (r.options?.runSettings && !mine && (r.by !== user.name || r.options.runSettings.kind !== runKind)) {
+        throw new ServiceError('AI_RUN_REQUIRED', '모델을 지정한 요청은 해당 실행기만 맡을 수 있습니다', 409);
+      }
       if (r.status === 'working' && !mine && !this._claimExpired(r.claim, now)) {
         const c = r.claim; const until = new Date(Date.parse(c.expires));
         const hm = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`;
@@ -6337,20 +6384,22 @@ export class Service {
    * claim_next_request: 내 pending 또는 선점이 만료된 working 중 가장 오래된 요청 하나를 맡는다.
    * 그 사이 다른 세션이 먼저 맡은 요청은 건너뛴다. 없으면 { none: true }. docId 를 주면 그 문서에서만.
    */
-  async claimNextRequest(user, agent, session, docId, { tutorialOnly = false, workflows = [], light = false } = {}) {
+  async claimNextRequest(user, agent, session, docId, { tutorialOnly = false, workflows = [], light = false, runKind } = {}) {
     const sess = this._sessionOf(user, agent, session) || `${user.name}|${agent || ''}`;
     const metas = docId ? [this._meta(docId)] : this._requestMetas().filter((m) => this.canRead(user, m)).map((m) => this._norm(m));
     const cands = [];
     const now = Date.now();
-    const takes = (m, r) => (this._tutorialTour(m, r)
-      ? this._tutorialAgentTakes(user, r, sess) : r.by === user.name || this._sharesWith(user.name, r.by, r));
+    const takes = (m, r) => {
+      if (r.options?.runSettings) return r.by === user.name && r.options.runSettings.kind === runKind;
+      return this._tutorialTour(m, r) ? this._tutorialAgentTakes(user, r, sess) : r.by === user.name || this._sharesWith(user.name, r.by, r);
+    };
     // 실험 방식(content_format) 요청은 그 방식을 안다고 밝힌 연결(workflows)만 맡는다. 실험이 꺼져 있으면 누구에게나 후보로 올려 startRequest 가 실패로 닫게 한다(남아 있지 않게)
     const experimentOff = !this._contentFormatOn();
     // 튜토리얼 예시 요청(r.example)은 어느 실행기의 후보도 아니다 — 서버의 예시 답변만 처리한다(_mayTake)
     for (const m of metas) for (const r of m.requests) if (!r.example && (r.options?.workflow !== 'content_format' || experimentOff || workflows.includes('content_format')) && (!tutorialOnly || (m.tutorialSession === true && m.tutorial === true && !r.example)) && takes(m, r) && (r.status === 'pending' || (r.status === 'working' && this._claimExpired(r.claim, now)))) cands.push({ id: m.id, rid: r.rid, at: String(r.at || '') });
     cands.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id) || a.rid - b.rid);
     for (const c of cands) {
-      try { await this.startRequest(c.id, c.rid, user, agent, { session: sess, expectAvailable: true }); } catch (e) {
+      try { await this.startRequest(c.id, c.rid, user, agent, { session: sess, expectAvailable: true, runKind }); } catch (e) {
         if (e instanceof ServiceError && (e.status === 409 || e.status === 404)) continue;   // 그 사이 맡겨짐·취소됨·지워짐
         throw e;
       }

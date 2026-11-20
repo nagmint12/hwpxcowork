@@ -694,6 +694,21 @@ fn matrix_textbox_lines_need_reflow(para: &Paragraph) -> bool {
         && para.line_segs.len() > 1
 }
 
+/// [#9076] 글자 없는 문단의 저장 줄이 미기입 누름틀 안내문을 넣고 나눈 사다리이고, 그 문단에
+/// 글자처럼 취급 개체가 있는가.
+///
+/// 한/글은 안내문을 문단 글자로 저장하고 인쇄에서는 안내문 없이 줄을 다시 나눈다(#9005).
+/// 안내문만 있던 줄이 사라지고 개체가 앞 줄로 올라오므로 저장 줄로는 개체의 줄을 정할 수 없다.
+/// 개체 줄은 높이가 개체에서 나와, 다시 나눈 사다리가 안내문 없는 한/글 저장값과 같다.
+/// 글자가 있는 문단은 다시 나누면 한/글의 글자 줄 높이를 잃으므로 저장 줄을 그대로 쓴다.
+fn hidden_guide_object_rows_need_reflow(para: &Paragraph) -> bool {
+    para.text.is_empty()
+        && !para.line_segs.is_empty()
+        && para.controls.iter().any(|control| matches!(control, Control::Field(field)
+            if field.guide_residue.as_ref().is_some_and(|residue| !residue.text.is_empty())))
+        && para.controls.iter().any(Control::is_treat_as_char_object)
+}
+
 /// A content-grown, unprotected inline textbox may retain a wrapped cache after
 /// its full text fits the unchanged width. Project both its text and host frame
 /// together; a paint-only collapse would leave the old height in pagination.
@@ -4024,7 +4039,7 @@ impl LayoutEngine {
         // (0=가로, 1=영문 눕힘, 2=영문 세움)
         // 주의: 테이블 셀은 bit 16~18이지만 글상자 LIST_HEADER는 bit 0~2
         let text_direction = (text_box.list_attr & 0x07) as u8;
-        let reflowed_textbox_paragraphs = if should_reflow_matrix_textbox_lines(
+        let reflows_matrix_lines = should_reflow_matrix_textbox_lines(
             matrix_positioned,
             drawing,
             text_box,
@@ -4032,20 +4047,41 @@ impl LayoutEngine {
             inner_area.width,
             inner_area.height,
             self.dpi,
-        ) {
+        );
+        // [#9076] 안내문을 넣고 나눈 개체 줄도 같은 사전 단계에서 이 글상자 폭으로 다시 나눈다.
+        let reflows_hidden_guide_rows = text_direction == 0
+            && inner_area.width > 0.0
+            && text_box
+                .paragraphs
+                .iter()
+                .any(hidden_guide_object_rows_need_reflow);
+        let reflowed_textbox_paragraphs = if reflows_matrix_lines || reflows_hidden_guide_rows {
             let mut paragraphs = text_box.paragraphs.clone();
             for index in 0..paragraphs.len() {
-                if !matrix_textbox_lines_need_reflow(&paragraphs[index]) {
+                let matrix_lines =
+                    reflows_matrix_lines && matrix_textbox_lines_need_reflow(&paragraphs[index]);
+                let hidden_guide_rows = reflows_hidden_guide_rows
+                    && hidden_guide_object_rows_need_reflow(&paragraphs[index]);
+                if !matrix_lines && !hidden_guide_rows {
                     continue;
                 }
                 let previous_end =
                     crate::renderer::composer::paragraph_flow_end(&paragraphs[index]);
-                reflow_matrix_textbox_para(
-                    &mut paragraphs[index],
-                    inner_area.width,
-                    styles,
-                    self.dpi,
-                );
+                if matrix_lines {
+                    reflow_matrix_textbox_para(
+                        &mut paragraphs[index],
+                        inner_area.width,
+                        styles,
+                        self.dpi,
+                    );
+                } else {
+                    textbox_reflow::in_frame(
+                        &mut paragraphs[index],
+                        inner_area.width,
+                        styles,
+                        self.dpi,
+                    );
+                }
                 // 줄 수가 바뀌면 뒤 문단도 새 흐름 끝에서 이어진다. 저장 쪽/글상자
                 // 리셋은 공통 vpos 재계산기가 보존하며 이전 줄의 끝과 구분한다.
                 if crate::renderer::composer::paragraph_flow_end(&paragraphs[index]) != previous_end
@@ -4478,6 +4514,7 @@ impl LayoutEngine {
         let mut para_y = inner_area.y + vert_offset;
         // [hwpx-cowork] 문단마다의 문단 위 y — 떠 있는 표는 글 줄이 아니라 이 자리에 앵커된다.
         let mut hc_para_tops: Vec<f64> = Vec::with_capacity(composed_paras.len());
+        let mut empty_table_flow_bottom: f64 = 0.0;
         for (tb_para_idx, composed) in composed_paras.iter().enumerate() {
             // vpos 기반 수직 위치: 원본 HWP 파일에서는 vertical_pos가 누적 절대값,
             // 편집 후 reflow된 문단은 vertical_pos=0이므로 incremental para_y와 비교하여
@@ -4486,6 +4523,35 @@ impl LayoutEngine {
             // [hwpx-cowork] 문단 기준 자리차지 표가 첫 줄과 겹치면 한/글은 문단 글을 표 띠 아래에서
             // 시작하고, 저장 줄도 그 자리(문단 위 + 띠)를 적는다(글상자 시험지 실측, upstream #8513).
             let host_band = self.cell_host_topbottom_band_bottom(para, composed, styles);
+            // [hwpx-cowork] PK-40987 한/글 2022: 저장 줄 없는 빈 앵커는
+            // 세로 오프셋이 빈 줄보다 길어도 자리차지 표 끝까지 후속 흐름을
+            // 밀어낸다. 이미 계산하는 중첩 개체의 원점과 바깥 여백을 쓴다.
+            let empty_table_band = if crate::renderer::para_has_no_stored_line_segs(para)
+                && para.text.chars().all(|ch| ch.is_whitespace() || ch == '\u{FFFC}')
+            {
+                para.controls
+                    .iter()
+                    .filter_map(|ctrl| match ctrl {
+                        Control::Table(table)
+                            if !table.common.treat_as_char
+                                && table.common.text_wrap == TextWrap::TopAndBottom
+                                && table.common.vert_rel_to == VertRelTo::Para
+                                && table.common.vert_align == VertAlign::Top
+                                && matches!(table.common.horz_rel_to, HorzRelTo::Column | HorzRelTo::Para)
+                                && table.common.horz_align == HorzAlign::Left =>
+                        {
+                            let top = crate::renderer::float_placement::nested_float_vertical_offset(
+                                &table.common, self.dpi,
+                            );
+                            // calc_nested_table_height already includes both outer margins.
+                            Some(top + self.calc_nested_table_height(table, styles))
+                        }
+                        _ => None,
+                    })
+                    .reduce(f64::max)
+            } else {
+                None
+            };
             // [hwpx-cowork] 문단 기준 자리차지 그림·도형도 표와 같다 — 첫 줄과 겹치면 문단 글이
             // 개체 띠(오프셋 + 바깥 위여백 + 높이 + 바깥 아래여백) 아래에서 시작하고 한/글 저장
             // 줄도 그 자리를 적는다. 문단 위(개체 앵커)는 저장 줄 − 띠다. 종전에는 저장 줄을
@@ -4637,13 +4703,18 @@ impl LayoutEngine {
             if let Some(bottom) = empty_host_band_bottom {
                 para_y = para_y.max(bottom);
             }
+            if let Some(band) = empty_table_band {
+                let bottom = hc_para_tops[tb_para_idx] + band;
+                para_y = para_y.max(bottom);
+                empty_table_flow_bottom = empty_table_flow_bottom.max(bottom - inner_area.y);
+            }
         }
 
         if align_by_laid_out_flow {
             let flow_bottom = textbox_node.children[flow_first_child..]
                 .iter()
                 .map(|node| node.bbox.y + node.bbox.height - inner_area.y)
-                .fold(0.0f64, f64::max);
+                .fold(empty_table_flow_bottom, f64::max);
             let free_space =
                 (inner_area.height - content_height_for_align.max(flow_bottom)).max(0.0);
             vert_offset = match text_box.vertical_align {
@@ -4653,6 +4724,13 @@ impl LayoutEngine {
             if vert_offset > 0.0 {
                 for origin in &mut paragraph_origins {
                     *origin += vert_offset;
+                }
+                // [hwpx-cowork] PK-40987 한/글 2022(12.0.0.3146 COM 쪽 그림): 저장 줄 없는 세로 가운데 정렬
+                // 글상자는 문단 기준 자리차지 표도 글과 함께 내린다(가운데 정렬 시험지: T1 308px,
+                // 표 378~454px, A1 460px — 위 정렬 때와 같은 T1→표 간격). 떠 있는 개체가 앵커로 쓰는
+                // 문단 위 y 도 흐름을 옮긴 양만큼 옮긴다. 종전에는 글만 내려가고 표는 위 정렬 자리에 남았다.
+                for top in &mut hc_para_tops {
+                    *top += vert_offset;
                 }
                 for node in &mut textbox_node.children[flow_first_child..] {
                     Self::translate_subtree_y(node, vert_offset);
@@ -4974,12 +5052,29 @@ impl LayoutEngine {
                         .map(|(idx, _)| idx)
                         .unwrap_or(0)
                 };
+                let stream_line_owners = if para.text.is_empty() {
+                    comp.control_line_indices(para)
+                } else {
+                    None
+                };
                 let ctrl_line: Vec<Option<usize>> = para
                     .controls
                     .iter()
                     .enumerate()
                     .map(|(ci, ctrl)| {
                         tac_width(ctrl)?;
+                        // [hwpx-cowork] #9076. Text character positions
+                        // alias every object in a control-only paragraph.
+                        // The stored/reflowed control stream owns their lines.
+                        if para.text.is_empty() {
+                            if let Some(owner) = stream_line_owners.as_ref()
+                                .and_then(|owners| owners.get(ci).copied())
+                                .or_else(|| super::control_line_seg_index(para, ci))
+                                .filter(|&line| line < comp.lines.len())
+                            {
+                                return Some(owner);
+                            }
+                        }
                         Some(line_of(control_text_positions.get(ci).copied()?))
                     })
                     .collect();

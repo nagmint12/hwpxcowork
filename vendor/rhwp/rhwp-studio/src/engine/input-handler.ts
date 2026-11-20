@@ -81,6 +81,12 @@ const DOCUMENT_PAGINATION_INITIAL_START_DELAY_MS = 100;
 const DOCUMENT_PAGINATION_RESTART_COALESCE_DELAY_MS = 200;
 // 첫 fragment 하나 뒤 다음 입력과 후속 step이 겹치지 않게 하는 짧은 settle gap.
 const DOCUMENT_PAGINATION_POST_FIRST_STEP_DELAY_MS = 25;
+/**
+ * [hwpx-cowork] 2026-11-20 뒤쪽 미루기(엔진 `document_core::typeset_tail`)의 한 걸음 시간(ms).
+ * 편집의 쪽 나눔은 편집한 쪽 뒤 두 쪽까지만 하고 남은 쪽을 엔진에 멈춰 둔다. 입력이 쉬는 동안 이 시간씩 이어
+ * 끝내고, 끝나면 화면을 다시 그린다. 한 걸음이 입력 한 번을 이 시간 넘게 막지 않는다.
+ */
+const TYPESET_TAIL_STEP_BUDGET_MS = 8;
 
 export class DocumentAgentRenderCommitError extends Error {
   readonly code = 'RENDER_FAILED';
@@ -323,6 +329,8 @@ export class InputHandler {
   private deferredPaginationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private deferredPaginationPending = false;
   private readonly deferredPaginationRunner: DeferredPaginationRunner;
+  /** [hwpx-cowork] 2026-11-20 엔진에 멈춰 둔 뒤쪽 조판을 쉬는 동안 잇는다(표 칸의 미룬 쪽 나눔과 따로). */
+  private readonly typesetTailRunner: DeferredPaginationRunner;
   private rawTextMutationEffects = new TextMutationEffectAccumulator();
   private pendingFocusedPagePatch: DeferredFocusedPagePatch | null = null;
   /** 쪽/단 나누기 뒤 CanvasView의 새 page offset이 준비되면 캐럿을 다시 드러낸다. */
@@ -516,6 +524,29 @@ export class InputHandler {
       (result) => this.completeResumablePagination(result.pageCount),
       () => this.fallbackFromResumablePagination(),
     );
+    // [hwpx-cowork] 2026-11-20 뒤쪽 미루기: 편집할 때마다(화면 갱신 알림) 엔진에 남은 뒤쪽 조판이 있으면 쉬는 동안 잇는다.
+    this.typesetTailRunner = new DeferredPaginationRunner(
+      {
+        beginDeferredPagination: () => ({
+          ok: true,
+          status: this.wasm.typesetTailPending() ? 'pending' : 'none',
+          revision: 0,
+          fragmentsProcessed: 0,
+          pageCount: this.wasm.pageCount,
+        }),
+        stepDeferredPagination: () => this.wasm.stepTypesetTail(TYPESET_TAIL_STEP_BUDGET_MS),
+        cancelDeferredPagination: () => false,
+      },
+      () => this.completeTypesetTail('typeset-tail-complete'),
+      (result) => {
+        // stale: 엔진이 바뀐 문서를 보고 버렸다(다시 나눴을 수 있다). fallback: 잇다가 예외 — 지금 끝낸다.
+        if (result.status === 'stale') this.completeTypesetTail('typeset-tail-stale');
+        else if (result.status === 'fallback') this.flushTypesetTailIfPending('typeset-tail-fallback');
+      },
+    );
+    this.wasm.setTypesetTailDeferral(true);
+    this.eventBus.on('document-changed', () => this.startTypesetTailIfPending());
+    this.eventBus.on('document-page-invalidated', () => this.startTypesetTailIfPending());
 
     // Hidden input 요소 생성
     // iOS WebKit에서는 <textarea>로 composition 이벤트가 발생하지 않으므로
@@ -3653,6 +3684,45 @@ export class InputHandler {
     this.flushDeferredPaginationIfNeeded('resumable-fallback');
   }
 
+  /** [hwpx-cowork] 2026-11-20 엔진에 멈춰 둔 뒤쪽 조판이 있으면 쉬는 동안 잇게 예약한다(입력이 이어지면 더 미룬다). */
+  private startTypesetTailIfPending(): void {
+    if (!this.wasm.typesetTailPending()) return;
+    this.typesetTailRunner.requestStart(
+      DOCUMENT_PAGINATION_RESTART_COALESCE_DELAY_MS,
+      DOCUMENT_PAGINATION_INITIAL_START_DELAY_MS,
+      DOCUMENT_PAGINATION_POST_FIRST_STEP_DELAY_MS,
+    );
+  }
+
+  /** 뒤쪽 조판이 끝나 쪽 나눔이 바뀌었다 — 표 칸 미룬 쪽 나눔을 마친 때(`completeResumablePagination`)처럼 다시 그린다. */
+  private completeTypesetTail(reason: string): void {
+    this.lastCellKey = null;
+    this.protectedCellHitCache = null;
+    this.eventBus.emit('document-changed', reason);
+    // 한글 조합 중에는 캐럿·조합 상자를 옮기지 않는다 — 편집한 쪽은 멈추기 전에 이미 끝까지 조판했다.
+    if (this.isComposing) return;
+    const position = this.cursor.getPosition();
+    this.cursor.invalidateFocusedCellCursorGeometry();
+    this.cursor.moveTo(position);
+    this.updateCaret();
+  }
+
+  /** [hwpx-cowork] 2026-11-20 저장·인쇄·내보내기 전에 남은 뒤쪽 조판을 지금 끝낸다. 끝낼 것이 있었으면 true. */
+  flushTypesetTailIfPending(reason = 'manual'): boolean {
+    this.typesetTailRunner.cancel();
+    if (!this.wasm.typesetTailPending()) return false;
+    try {
+      const result = this.wasm.flushTypesetTail();
+      if (result.status === 'complete' || result.status === 'stale') {
+        this.completeTypesetTail(`typeset-tail-flush:${reason}`);
+      }
+      return true;
+    } catch (err) {
+      console.warn('[InputHandler] 뒤쪽 조판 마무리 실패:', err);
+      return false;
+    }
+  }
+
   private resetRawTextMutationEffects(): void {
     this.rawTextMutationEffects.clear();
   }
@@ -4609,6 +4679,7 @@ export class InputHandler {
     this.caretLayoutReveal.clear();
     this.cancelDeferredPaginationFlush();
     this.deferredPaginationRunner.cancel();
+    this.typesetTailRunner.cancel(); // [hwpx-cowork] 2026-11-20
     this.deferredPaginationPending = false;
     this.resetRawTextMutationEffects();
     this.isComposing = false;
@@ -4669,6 +4740,7 @@ export class InputHandler {
     }
     this.cancelDeferredPaginationFlush();
     this.deferredPaginationRunner.cancel();
+    this.typesetTailRunner.cancel(); // [hwpx-cowork] 2026-11-20
     this.deferredPaginationPending = false;
     this.resetRawTextMutationEffects();
     this.isComposing = false;

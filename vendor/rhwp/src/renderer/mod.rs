@@ -37,6 +37,7 @@ mod font_fallback;
 pub mod font_metrics_data;
 // [hwpx-cowork] 설치 글꼴 폭 표(scripts/gen-font-metrics.mjs 가 만듦) + 한/글 4 HWPUNIT 격자 셈법
 pub(crate) mod font_metrics_local;
+mod font_metrics_word;
 pub(crate) mod local_font_width;
 pub(crate) mod hancom_fontdb;
 // [hwpx-cowork] Outline-free HFT placement differences, rendered with TTF.
@@ -486,6 +487,9 @@ pub struct TextStyle {
     pub tab_leaders: Vec<TabLeaderInfo>,
     /// HWPX 인라인 탭 확장 데이터 ([width, leader, type, ...])
     pub inline_tabs: Vec<[u16; 7]>,
+    /// [hwpx-cowork] In Word mode a leading tab past the line edge has zero advance.
+    #[serde(skip)]
+    pub word_overflow_tab_at_start: bool,
     /// 양쪽 정렬용: 공백 문자당 추가 간격 (px)
     pub extra_word_spacing: f64,
     /// 이 런 앞부분의 분배 제외 문자 수. 선행 공백과 자동 탭 앞 항목 번호는
@@ -645,7 +649,7 @@ pub struct LeaderGlyph {
 }
 crate::storage::clone_copy!(LeaderGlyph);
 // [hwpx-cowork] 복제도 fork의 표시·계측 정책을 원값 그대로 보존한다.
-crate::storage::clone_fields!(TextStyle, {logical_shade_box, hangul2024_missing_glyphs, paint_font_geometry, paint_ink_bounds, cell_squeeze_overlap, literal_soft_hyphen, text_paint, continuous_shadow, inherited_half_space_em, script_metrics, shadow_offset_percent, space_compression, literal_figure_space, literal_figure_space_em, native_pua_metrics, native_otf_metrics, bidi_layout, emphasis_skip_first_cluster, top_underline_font_size, top_underline_phase, supplemental_metrics, isolated_jamo_font, font_family, font_size, fixed_glyph_advances, source_font_is_hft, source_font_is_ttf, source_verified_hft_bold_tracking, source_hwp3_hft_bold, resolved_font_size, font_position, hft_print_frame, preserve_glyph_ink, color, bold, italic, underline, strikethrough, kerning, letter_spacing, ratio, default_tab_width, tab_stops, auto_tab_right, auto_left_tab_position, available_width, line_x_offset, text_start_offset, right_tab_block_width_override, tab_leaders, inline_tabs, extra_word_spacing, unjustified_leading_spaces, extra_char_spacing, extra_dash_advance, outline_type, shadow_type, shadow_color, shadow_offset_x, shadow_offset_y, emboss, engrave, superscript, subscript, emphasis_dot, underline_shape, strike_shape, underline_color, strike_color, shade_color, font_metric_trusted, glyph_fallback_advance_explicit, metric_font_family, original_glyph_metric_family, font_space_em, layout_half_space, regenerated_font_metrics, hft_hangul_face, hft_font_face, hft_fullwidth_dot, ascii_punct_latin, tab_leader_glyph});
+crate::storage::clone_fields!(TextStyle, {logical_shade_box, hangul2024_missing_glyphs, paint_font_geometry, paint_ink_bounds, cell_squeeze_overlap, literal_soft_hyphen, text_paint, continuous_shadow, inherited_half_space_em, script_metrics, shadow_offset_percent, space_compression, literal_figure_space, literal_figure_space_em, native_pua_metrics, native_otf_metrics, bidi_layout, emphasis_skip_first_cluster, top_underline_font_size, top_underline_phase, supplemental_metrics, isolated_jamo_font, font_family, font_size, fixed_glyph_advances, source_font_is_hft, source_font_is_ttf, source_verified_hft_bold_tracking, source_hwp3_hft_bold, resolved_font_size, font_position, hft_print_frame, preserve_glyph_ink, color, bold, italic, underline, strikethrough, kerning, letter_spacing, ratio, default_tab_width, tab_stops, auto_tab_right, auto_left_tab_position, available_width, line_x_offset, text_start_offset, right_tab_block_width_override, tab_leaders, inline_tabs, word_overflow_tab_at_start, extra_word_spacing, unjustified_leading_spaces, extra_char_spacing, extra_dash_advance, outline_type, shadow_type, shadow_color, shadow_offset_x, shadow_offset_y, emboss, engrave, superscript, subscript, emphasis_dot, underline_shape, strike_shape, underline_color, strike_color, shade_color, font_metric_trusted, glyph_fallback_advance_explicit, metric_font_family, original_glyph_metric_family, font_space_em, layout_half_space, regenerated_font_metrics, hft_hangul_face, hft_font_face, hft_fullwidth_dot, ascii_punct_latin, tab_leader_glyph});
 
 /// [#7418] 영문 슬롯의 기본 메트릭 — [`TextStyle::ascii_punct_latin`] 참조.
 #[derive(Debug, Clone, PartialEq)]
@@ -691,7 +695,8 @@ pub(crate) fn footnote_marker_text_style(base: &TextStyle) -> TextStyle {
     } else {
         12.0
     };
-    // 정렬 간격·탭·꾸밈은 번호 폭에 넣지 않는다 — 글꼴·폭 표·장평·자간·굵기만 이어받는다.
+    // [hwpx-cowork] 한/글 2022: 생성 번호는 글꼴과 장평을 유지한다.
+    // 본문 자간을 늘려도 번호 자체의 전진은 변하지 않는다.
     TextStyle {
         supplemental_metrics: base.supplemental_metrics.clone(),
         hangul2024_missing_glyphs: base.hangul2024_missing_glyphs,
@@ -704,7 +709,6 @@ pub(crate) fn footnote_marker_text_style(base: &TextStyle) -> TextStyle {
         hft_fullwidth_dot: base.hft_fullwidth_dot,
         ascii_punct_latin: base.ascii_punct_latin.clone(),
         font_size: base_size * FOOTNOTE_MARKER_FONT_SCALE,
-        letter_spacing: base.letter_spacing * FOOTNOTE_MARKER_FONT_SCALE,
         ratio: base.ratio,
         bold: base.bold,
         italic: base.italic,
@@ -775,6 +779,7 @@ impl TextStyle {
     /// 원문 앞 조각이 소비한 저장 탭을 건너뛰고 남은 조각의 스타일을 만든다.
     pub(crate) fn for_source_text_fragment(&self, scalar_start: usize, source: &[char]) -> Self {
         let mut style = self.for_text_fragment(scalar_start);
+        style.word_overflow_tab_at_start &= scalar_start == 0;
         let prior_tabs = source
             .iter()
             .take(scalar_start)
@@ -1043,6 +1048,7 @@ impl Default for TextStyle {
             right_tab_block_width_override: None,
             tab_leaders: Vec::new(),
             inline_tabs: Vec::new(),
+            word_overflow_tab_at_start: false,
             extra_word_spacing: 0.0,
             unjustified_leading_spaces: 0,
             extra_char_spacing: 0.0,

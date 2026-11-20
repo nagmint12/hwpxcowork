@@ -4351,7 +4351,8 @@ pub(crate) use text_measurement::{
     char_width_decision, compute_char_positions, compute_glyph_fit_positions, estimate_text_width,
     estimate_text_width_exact, estimate_text_width_unrounded,
     estimate_text_width_unrounded_with_storage, extract_tab_leaders_with_extended,
-    find_next_tab_stop, hancom_regenerated_space_width, has_hft_bold_tracking, is_cjk_char,
+    explicit_non_right_stop_beyond_edge, find_next_tab_stop, hancom_regenerated_space_width,
+    has_hft_bold_tracking, is_cjk_char,
     is_halfwidth_cjk_quote, kopub_declared_space_em, kopub_space_advance_em,
     resolved_letter_spacing, resolved_to_text_style, split_into_clusters,
     trace_char_width_decisions, try_resolved_to_text_style, verified_source_projection_face,
@@ -5335,6 +5336,10 @@ impl LayoutEngine {
         // [hwpx-cowork] 2026-11-04 INSIDE/OUTSIDE 가로 정렬을 이 쪽의 홀짝으로 풀도록 쪽 색인을 정한다.
         let _page_index_scope =
             super::float_placement::layout_page_index_scope(page_content.page_index as u32);
+        // [hwpx-cowork] 2026-11-20 이 쪽의 글자처럼 취급 표 측정(행 높이·줄 점유)도 이 엔진에 걸린 문서의 칸 줄 구성
+        // 기억을 쓴다 — 칸 유닛 배치(`compose_cell_unit_paragraph`)와 같은 기억이다(`composer::reflow_table_memo_scope`).
+        let _reflow_table_memo =
+            super::composer::reflow_table_memo_scope(self.cell_compose_memo.borrow().clone(), None);
         // 바탕쪽이 없는 페이지의 머리말도 현재 용지·본문 좌표계를 소비한다.
         self.prime_page_layout_env(layout);
         // [#6175] 본문 저장 행 admission의 외부-기하 증거 - 조판이 구역당 한 번
@@ -14292,6 +14297,22 @@ impl LayoutEngine {
             let raw_mt = measured_tables
                 .iter()
                 .find(|mt| mt.para_index == para_index && mt.control_index == control_index);
+            let coanchored_frame = self
+                .render_normalization
+                .borrow()
+                .keeps_coanchored_table_frame(para, t, self.profile.get())
+                .then(|| {
+                    raw_mt.and_then(|measured| {
+                        match super::height_measurer::fit_measured_table_coanchored_frame_with_storage(
+                            measured, t, self.dpi, &crate::storage::Unbounded,
+                        ) {
+                            Ok(value) => value,
+                            Err(never) => match never {},
+                        }
+                    })
+                })
+                .flatten();
+            let raw_mt = coanchored_frame.as_ref().or(raw_mt);
             let fitted_visible_mt = if is_current_visible_para_float {
                 raw_mt.map(|measured| {
                     if self.profile.get().session_edited()
@@ -18706,8 +18727,10 @@ impl LayoutEngine {
                     .get(*para_index)
                     .and_then(|para| para.controls.get(*control_index))
                     .and_then(|control| match control {
+                        // [#8660] 다음 쪽 맨 위로 넘긴 비-OLE 도형도 조판이 확정한 앵커를 쓴다.
                         Control::Shape(shape)
-                            if matches!(shape.as_ref(), ShapeObject::Ole(_)) =>
+                            if matches!(shape.as_ref(), ShapeObject::Ole(_))
+                                || !shape.common().treat_as_char =>
                         {
                             col_content
                                 .paragraph_float_placements

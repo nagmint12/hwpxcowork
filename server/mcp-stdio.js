@@ -15,12 +15,13 @@ import { createBridge, installShutdown, redactUrl, parseBridgeArgs, DEFAULT_URL 
 import { createDebugStdioTransport } from './ai-debug.js';
 
 const USAGE = `hwpx-cowork MCP stdio 브리지
-  node server/mcp-stdio.js [--channel] [--v1 [--lean] | --v2 [--tools core|all]] [--url <MCP 주소>] [--token <토큰>] [--agent <이름>] [--no-tools]
+  node server/mcp-stdio.js [--channel] [--v1 [--lean] | --v2 | --v3 [--tools core|all]] [--url <MCP 주소>] [--token <토큰>] [--agent <이름>] [--no-tools]
     --url       서버 MCP 주소(기본 ${DEFAULT_URL}, 또는 HWPX_COWORK_URL)
     --token     내 토큰(또는 환경 변수 HWPX_COWORK_TOKEN — 이쪽을 권장: 명령줄은 다른 프로그램에 보일 수 있다)
     --agent     에이전트 이름(기본: MCP 클라이언트 이름, claude-code → Claude Code)
     --channel   Claude Code 채널 알림 켜기(웹 편집기에서 맡긴 AI 작업이 생기면 세션에 알림)
     (기본)      새 연결: 작업 도구 넷(task 맡기·read 읽기·edit 고치기·finish 끝내기). 요청 내용·읽기는 글과 주소만, 쓰기는 ops 를 한 번에
+    --v3        본문 표를 TSV로 읽는 시험 연결. --mcp 3 과 같다
     --v1        예전 연결(start_request·propose_* 등 예전 도구). --mcp 1 과 같다. --v2·--mcp 2 는 새 연결(기본과 같다)
     --lean      예전 연결의 얇은 흐름: 요청 내용·도구 응답을 모델용으로 짧게 받는다(start_request 가 내용을 줌, 쓰기의 complete 로 완료) — --v2 가 없으면 예전 연결
     --tools     새 연결의 도구 범위: all(기본 — 사람이 정할 일·변경 요청·멀티에이전트 도구 포함) | core(작업 도구와 그림·스킬 파일만)
@@ -36,7 +37,7 @@ process.on('unhandledRejection', (e) => log(`처리 안 된 오류: ${e?.message
 
 const opts = parseBridgeArgs(process.argv.slice(2), process.env);
 if (opts.help) { process.stderr.write(USAGE); process.exit(0); }
-// 연결 종류를 잘못 적었으면(--mcp 3 등) 기본으로 짐작해 붙지 않는다 — 지침과 도구가 어긋나지 않게
+// 연결 종류를 잘못 적었으면(--mcp 4 등) 기본으로 짐작해 붙지 않는다 — 지침과 도구가 어긋나지 않게
 if (opts.bad.length) { log(opts.bad.join(' · ')); process.exit(2); }
 if (opts.unknown.length) log(`모르는 인자는 무시합니다: ${opts.unknown.join(' ')}`);
 
@@ -50,4 +51,4 @@ try {
 }
 installShutdown(bridge, { log });
 await bridge.start(createDebugStdioTransport(StdioServerTransport, { context: { route: opts.channel ? 'claude-channel-wire' : 'stdio-wire', session: bridge.session } }));
-log(`시작 — ${redactUrl(opts.url)} · ${opts.tools ? '도구 중계' : '도구 없음'}${opts.channel ? ' + 알림(채널)' : ''} · ${bridge.surface === 'v2' ? '새 연결(v2)' : bridge.lean ? '예전 연결(얇은 흐름 lean)' : '예전 연결(v1)'}`);
+log(`시작 — ${redactUrl(opts.url)} · ${opts.tools ? '도구 중계' : '도구 없음'}${opts.channel ? ' + 알림(채널)' : ''} · ${bridge.surface === 'v3' ? 'TSV 본문 연결(v3)' : bridge.surface === 'v2' ? '새 연결(v2)' : bridge.lean ? '예전 연결(얇은 흐름 lean)' : '예전 연결(v1)'}`);

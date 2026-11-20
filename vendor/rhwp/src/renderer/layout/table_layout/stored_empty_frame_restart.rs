@@ -64,7 +64,7 @@ impl LayoutEngine {
                 paragraph,
                 cell.text_direction,
                 // [hwpx-cowork] Restart metrics consume the same wrap policy as cell layout.
-                cell.line_wrap,
+                cell.composition_line_wrap(crate::renderer::px_to_hwpunit(inner_width, self.dpi)),
                 inner_width,
                 styles,
             );

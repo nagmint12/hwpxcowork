@@ -4,12 +4,14 @@ use crate::renderer::typeset::{
     FootnoteRef, PageContent, PageItem, PageLayoutInfo, Paragraph, VisibleFloatExclusion,
 };
 /// 후속 원본 줄로 확인하기 전의 실제 문단 소비. 단 밖으로 공개하지 않는다.
+#[derive(Clone)]
 pub(super) struct PendingParagraphOrigin {
     pub(super) paragraph_index: usize,
     pub(super) spacing_before: f64,
     pub(super) flow_start: f64,
     pub(super) flow_end: f64,
 }
+#[derive(Clone)]
 pub(in crate::renderer::typeset) struct StateView {
     pub(in crate::renderer::typeset) deferred_table_successor_start: Option<usize>,
     pub(super) pending_table_terminal_gap: Option<DeferredTableTerminalGap>,
@@ -70,6 +72,9 @@ pub(in crate::renderer::typeset) struct StateView {
     /// [#5699 H1] 이 쪽에서 사다리-미계상 표 밴드 교정으로 확보한 흐름 바닥(px).
     /// 후속 문단의 저장 vpos 후방 스냅이 교정분을 되돌리지 못한다. 쪽 단위 리셋.
     pub(in crate::renderer::typeset) ladder_band_floor: f64,
+    /// [#8948] 같은 문단 블록 표가 측정 높이로 자라 흐름 끝을 TAC 상한보다 실제로 밀어 올린
+    /// 쪽(`pages.len()` 기준). 그 쪽 다음 쪽에서만 옛 저장 쪽 경계를 넘침으로 건넌 것으로 본다.
+    pub(in crate::renderer::typeset) block_table_growth_page: Option<usize>,
     /// [#5699 H1] 이번 단에서 교정 판별이 발동한 표 (para, ctrl) — 단 flush 시
     /// 소속 페이지의 `ladder_band_tables` 로 이관해 렌더러와 판정을 공유한다.
     pub(in crate::renderer::typeset) current_ladder_band_tables: Vec<(usize, usize)>,
@@ -227,6 +232,11 @@ pub(in crate::renderer::typeset) struct StateView {
     /// p1356 뒤 본문을 한 쪽 더 분할한다. layout 순서에는 앞에 있어야 하지만,
     /// typeset 흐름 항목으로는 보이면 안 된다.
     pub(in crate::renderer::typeset) page_start_square_pictures: Vec<DeferredSquarePictureControl>,
+    /// [hwpx-cowork] #8842: overlapping, page-sized pictures that resume one
+    /// per physical page. They leave the beside-text lane intact.
+    pub(in crate::renderer::typeset) pending_picture_pile: Vec<(usize, usize)>,
+    pub(in crate::renderer::typeset) picture_pile_next: usize,
+    pub(super) page_start_pile_picture: Option<(usize, usize)>,
     /// 표 조판 중 fragment별로 각주를 등록한 source 키. caller의 기존 표 완료 뒤
     /// 일괄 등록을 건너뛰어 중복을 막는다.
     pub(in crate::renderer::typeset) fragment_queued_table_footnotes:
@@ -425,6 +435,7 @@ pub(in crate::renderer::typeset) struct StateView {
     pub(in crate::renderer::typeset) vpos_prev_flow_trim_px: f64,
 }
 
+#[derive(Clone)]
 pub(super) struct DeferredTableTerminalGap {
     pub(super) para_index: usize,
     pub(super) control_index: usize,

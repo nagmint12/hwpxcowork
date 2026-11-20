@@ -117,6 +117,7 @@ fn synthetic_lineseg_indent_tree() -> crate::renderer::render_tree::PageRenderTr
         horizontal_shaping_context: None,
         supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false, // [hwpx-cowork] This fixture uses the default compatibility target.
     };
     let page_content = PageContent {
         page_index: 0,

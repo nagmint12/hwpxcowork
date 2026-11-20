@@ -1193,8 +1193,12 @@ pub(crate) fn plan_square_table_host(
 ) -> Option<InlineFlowPlan> {
     use super::float_placement::{signed_hwpunit, ParagraphFloatFlow, ParagraphFloatPlacement};
     use super::layout_frame::FrameExclusionPolicy;
-    use crate::model::shape::{HorzAlign, HorzRelTo, TextFlow, VertAlign, VertRelTo};
-    let uncached = super::is_no_lineseg_visible_text_host(para);
+    use crate::model::shape::{HorzAlign, HorzRelTo, TextFlow, TextWrap, VertAlign, VertRelTo};
+    // [hwpx-cowork] Hancom 2022 keeps the empty anchor's one line beside a
+    // Square table if a usable side lane exists. The table has its own frame.
+    let invisible_unstored = super::para_has_no_stored_line_segs(para)
+        && !para.text.chars().any(|ch| ch > '\u{001F}' && ch != '\u{FFFC}' && !ch.is_whitespace());
+    let uncached = super::is_no_lineseg_visible_text_host(para) || invisible_unstored;
     if !uncached
         && (!para
             .text
@@ -1210,6 +1214,17 @@ pub(crate) fn plan_square_table_host(
         matches!(c, Control::Table(t)
         if !t.common.treat_as_char && t.layout_text_wrap() == crate::model::shape::TextWrap::Square) // [hwpx-cowork] 2026-11-04 표 TIGHT/THROUGH = SQUARE
     })?;
+    let independent_companion = |control: &Control| {
+        let common = match control {
+            Control::Picture(picture) => &picture.common,
+            Control::Shape(shape) => shape.common(),
+            _ => return false,
+        };
+        uncached && !common.treat_as_char
+            && (matches!(common.text_wrap, TextWrap::InFrontOfText | TextWrap::BehindText)
+                || (common.text_wrap == TextWrap::Square
+                    && matches!(common.vert_rel_to, VertRelTo::Page | VertRelTo::Paper)))
+    };
     if para.controls.iter().enumerate().any(|(i, c)| {
         i != control
             && !super::composer::control_is_width_neutral_marker(c)
@@ -1217,6 +1232,7 @@ pub(crate) fn plan_square_table_host(
                     && matches!(p.common.text_wrap,
                         crate::model::shape::TextWrap::InFrontOfText
                             | crate::model::shape::TextWrap::BehindText))
+            && !independent_companion(c)
     }) {
         return None;
     }
@@ -1232,6 +1248,11 @@ pub(crate) fn plan_square_table_host(
     let Control::Table(table) = &para.controls[control] else {
         return None;
     };
+    if invisible_unstored && super::unstored_empty_square_table_host_geometry_px(
+        para, table, column_width, styles, Some(style), dpi,
+    ).is_some() {
+        return None;
+    }
     let measured = tables
         .iter()
         .find(|m| m.para_index == para_index && m.control_index == control)?;
@@ -1268,6 +1289,12 @@ pub(crate) fn plan_square_table_host(
         HorzAlign::Center => ref_left + (ref_width - object_width) / 2.0 + offset,
         HorzAlign::Right | HorzAlign::Outside => ref_left + ref_width - object_width - offset,
     };
+    if invisible_unstored {
+        let minimum_side = hwpunit_to_px(1440, dpi);
+        if outer_left < minimum_side && column_width - (outer_left + object_width) < minimum_side {
+            return None;
+        }
+    }
     let box_ = super::composer::ParagraphBox::body_for_style(column_width, Some(style), dpi);
     let stored_rows = stored_square_rows::source(para, control, table, measured, &box_, dpi);
     let spacing_before =
@@ -1342,7 +1369,24 @@ pub(crate) fn plan_square_table_host(
     }
     // Following paragraphs can use the free side of the same object. The
     // object remains an exclusion and fit budget; it is not a text advance.
-    let end = spacing_before + hwpunit_to_px(frame.top, dpi) + style.spacing_after;
+    let mut rows = rows;
+    let mut flow_end = frame.top;
+    if invisible_unstored && rows.len() == 1 {
+        if let Some((height, spacing, _)) =
+            super::unstored_overlay_table_host_line_metrics(para, styles, Some(style))
+        {
+            let row = &mut rows[0];
+            let height = px_to_hwpunit(height, dpi);
+            if height > row.line_height {
+                row.baseline_distance += height - row.line_height;
+                row.text_height = row.text_height.max(height);
+                row.line_height = height;
+                row.line_spacing = px_to_hwpunit(spacing, dpi);
+                flow_end = flow_end.max(row.vertical_pos + row.line_height + row.line_spacing);
+            }
+        }
+    }
+    let end = spacing_before + hwpunit_to_px(flow_end, dpi) + style.spacing_after;
     Some(InlineFlowPlan {
         stored_empty_host: false,
         stored_float_host: false,

@@ -1,5 +1,6 @@
 // 내 PC 의 구독 AI(ChatGPT 로그인 Codex·Claude 로그인 Claude Code) 또는 API 키로 자동 처리한다. 중앙 config·토큰 파일은 읽거나 쓰지 않는다.
 // 권하는 차례(2026-11-13): 구독 AI(codex·claude-code — 추가 비용 없음) → Google CLI → API 키(사용료 별도)
+import { isTaskSurface } from '../server/tool-profiles.js';
 import { AiProposer, AI_GATEWAYS, AI_EFFORTS, apiBaseUrl } from '../server/ai.js';
 import { CodexProposer, CODEX_EFFORTS } from '../server/codex-ai.js';
 import { GoogleCliProposer } from '../server/google-cli-ai.js';
@@ -32,7 +33,7 @@ const HELP = `개인 AI 자동 처리 실행기
   필수 환경 변수: HWPX_COWORK_TOKEN
   --check: 로그인·서버 연결·필수 도구만 확인하고 종료(요청 선점·모델 호출 없음)
   MCP 연결(모든 제공자): --mcp 2(기본) = 새 MCP 연결 — 작업 도구 넷(task·read·edit·finish, 짧은 요청 내용·한 번에 쓰기),
-    --mcp 1 = 예전 연결(start_request·propose_* 등). 환경 변수 HWPX_COWORK_MCP 로도 정합니다(명령줄이 먼저). Google CLI 는 MCP 를 쓰지 않아 영향이 없습니다
+    --mcp 3 = 문서 본문과 TSV 표(시험 연결), --mcp 1 = 예전 연결(start_request·propose_* 등). 환경 변수 HWPX_COWORK_MCP 로도 정합니다(명령줄이 먼저). Google CLI 는 MCP 를 쓰지 않아 영향이 없습니다
   codex: Codex CLI 설치 후 codex login으로 본인 ChatGPT 계정 로그인. API 키는 사용하지 않음.
     선택: --codex-command <codex 실행 파일 경로> 또는 HWPX_COWORK_CODEX_COMMAND
   API 제공자는 해당 키 환경 변수도 필요:
@@ -76,7 +77,7 @@ export function parseWorkerArgs(argv, env = process.env) {
   // docs/MCP_REDESIGN_2026-11-16.md), 1 = 예전 연결. 명령줄 --mcp 가 환경 변수 HWPX_COWORK_MCP 보다 먼저다.
   // 실행기 자신의 대기열 연결(server/worker.js)은 이 값과 상관없이 예전 연결(X-Hwpx-Mcp: 1)이다. Google CLI(gemini-cli·antigravity)는 MCP 를 쓰지 않아 받기만 한다
   options.mcp = String(options.mcp || env.HWPX_COWORK_MCP || '2').trim();
-  if (!['1', '2'].includes(options.mcp)) throw new Error('--mcp 는 1(예전 연결) 또는 2(새 연결 — 작업 도구 넷)입니다');
+  if (!['1', '2', '3'].includes(options.mcp)) throw new Error('--mcp 는 1(예전 연결), 2(기본), 3(TSV) 중 하나입니다');
   if (claudeCode) {
     // claude-code 는 본인 Claude 구독 로그인으로 공식 Claude Code(claude -p)를 부른다 — API 연결 방식은 없다(환경 변수의 API 설정도 넘기지 않음)
     if (!claudeCli) throw new Error(CLAUDE_MISSING);
@@ -126,14 +127,14 @@ export function parseWorkerArgs(argv, env = process.env) {
 export function createWorkerAi(options, env = process.env) {
   if (options.provider === 'claude-code') {
     if (!claudeCli) throw new Error(CLAUDE_MISSING);
-    return new claudeCli.ClaudeCodeProposer({ model: options.model, effort: options.effort || undefined, command: options.command || undefined, mcp: options.mcp === '2' ? 'v2' : null }, { env });
+    return new claudeCli.ClaudeCodeProposer({ model: options.model, effort: options.effort || undefined, command: options.command || undefined, mcp: options.mcp }, { env });
   }
   if (['gemini-cli', 'antigravity'].includes(options.provider)) return new GoogleCliProposer({ provider: options.provider, model: options.model, command: options.command }, { env });
   return options.provider === 'codex'
-    ? new CodexProposer({ model: options.model, effort: options.effort || undefined, command: options.command, mcp: options.mcp === '2' ? 'v2' : null }, { env })
+    ? new CodexProposer({ model: options.model, effort: options.effort || undefined, command: options.command, mcp: options.mcp }, { env })
     // API 제공자도 같은 --mcp 를 받는다(2026-11-17): ai.mcp 'v2' = 모델에게 새 연결 도구를, 'v1' = 예전 도구를 준다(그 쓰임은 server/ai.js normalizeMcp —
     // null 은 '정하지 않음'이라 --mcp 1 은 'v1' 로 밝혀 넘긴다. 이 값을 모르는 판은 보지 않고 예전 도구로 처리한다)
-    : new AiProposer({ ai: { provider: options.provider, model: options.model, gateway: options.gateway, baseUrl: options.baseUrl, effort: options.effort, workspace: options.workspace, enabled: true, maxProposals: 10, mcp: options.mcp === '2' ? 'v2' : options.mcp === '1' ? 'v1' : null } }, { key: options.key });
+    : new AiProposer({ ai: { provider: options.provider, model: options.model, gateway: options.gateway, baseUrl: options.baseUrl, effort: options.effort, workspace: options.workspace, enabled: true, maxProposals: 10, mcp: options.mcp ? `v${options.mcp}` : null } }, { key: options.key });
 }
 
 /** 요청·메모에 남는 처리자 이름: 'OpenAI API', 'OpenAI API (게이트웨이)' */
@@ -156,10 +157,11 @@ export async function checkWorkerConnection(worker, { fetchImpl = globalThis.fet
   if (!response.ok) throw Object.assign(new Error('중앙 서버 주소와 본인 HWPX 토큰을 확인하세요.'), { code: 'PREFLIGHT_FAILED' });
   const user = await response.json();
   // 새 MCP 연결(--mcp 2)은 서버가 그 연결을 알아야 한다(/api/config features.mcp2)
-  if (worker.ai?.mcpSurface === 'v2') {
+  if (isTaskSurface(worker.ai?.mcpSurface)) {
     const config = await fetchImpl(`${apiBaseFrom(worker.url)}/api/config`, { redirect: 'error', signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     // 2026-11-17 부터 --mcp 2 가 기본이라 옛 중앙 서버에서는 인자 없이 띄워도 여기서 멈춘다 — 예전 연결로 쓰는 길(--mcp 1)을 함께 알린다
-    if (!config?.features?.mcp2) throw Object.assign(new Error('중앙 서버를 최신 버전으로 업데이트하세요. --mcp 2(새 MCP 연결 — 기본)를 지원하지 않는 서버입니다. 업데이트 전까지는 --mcp 1(예전 연결)로 실행하세요.'), { code: 'PREFLIGHT_FAILED' });
+    if (worker.ai.mcpSurface === 'v3' && !config?.features?.mcp3) throw Object.assign(new Error('이 서버는 --mcp 3(TSV 표 읽기)를 지원하지 않습니다. v3 시험 서버를 지정하세요.'), { code: 'PREFLIGHT_FAILED' });
+    if (worker.ai.mcpSurface === 'v2' && !config?.features?.mcp2) throw Object.assign(new Error('중앙 서버를 최신 버전으로 업데이트하세요. --mcp 2(새 MCP 연결 — 기본)를 지원하지 않는 서버입니다. 업데이트 전까지는 --mcp 1(예전 연결)로 실행하세요.'), { code: 'PREFLIGHT_FAILED' });
   }
   const client = await worker.connected();
   const tools = []; let cursor; const seen = new Set();

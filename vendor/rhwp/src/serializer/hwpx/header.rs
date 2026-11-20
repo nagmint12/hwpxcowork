@@ -35,13 +35,14 @@ use super::SerializeError;
 
 /// `header.xml` 바이트 생성. Stage 1 진입점.
 pub fn write_header(doc: &Document, ctx: &SerializeContext) -> Result<Vec<u8>, SerializeError> {
-    write_header_with_storage(doc, ctx, &crate::storage::Unbounded)
+    write_header_with_storage(doc, ctx, &crate::storage::Unbounded, false)
 }
 
 pub(crate) fn write_header_with_storage<S: crate::storage::Storage>(
     doc: &Document,
     ctx: &SerializeContext,
     storage: &S,
+    for_hancom_clipboard: bool,
 ) -> Result<Vec<u8>, SerializeError>
 where
     S::Error: std::fmt::Display,
@@ -95,23 +96,18 @@ where
 
     write_begin_num(&mut w, &doc.doc_properties, storage)?;
 
+    let physical_units = doc.hwpx_aux_entry("version.xml")
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .is_none_or(crate::parser::hwpx::physical_para_margin_units_from_version);
     // <hh:refList>: 모든 리소스 테이블을 감싸는 컨테이너
     start_tag(&mut w, "hh:refList", storage)?;
     write_fontfaces(&mut w, &doc.doc_info, ctx, storage)?;
     write_border_fills(&mut w, &doc.doc_info, ctx, storage)?;
     write_char_properties(&mut w, &doc.doc_info, ctx, storage)?;
-    write_tab_properties(&mut w, &doc.doc_info, storage)?;
+    write_tab_properties(&mut w, &doc.doc_info, for_hancom_clipboard && !physical_units, storage)?;
     write_numberings(&mut w, &doc.doc_info, storage)?;
     write_bullets(&mut w, &doc.doc_info, ctx, storage)?;
-    write_para_properties(
-        &mut w,
-        &doc.doc_info,
-        ctx,
-        doc.hwpx_aux_entry("version.xml")
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
-            .is_none_or(crate::parser::hwpx::physical_para_margin_units_from_version),
-        storage,
-    )?;
+    write_para_properties(&mut w, &doc.doc_info, ctx, physical_units, storage)?;
     write_styles(&mut w, &doc.doc_info, ctx, storage)?;
     // memoProperties(메모 모양 정의: 테두리/색상)는 refList 마지막 자식으로,
     // parse_memo_shape가 만드는 extra_records(HWPTAG_MEMO_SHAPE, hwpx→hwp5
@@ -771,6 +767,7 @@ fn shadow_type_str(t: u8) -> &'static str {
 fn write_tab_properties<W: Write, S: crate::storage::Storage>(
     w: &mut Writer<W>,
     doc_info: &DocInfo,
+    legacy_tab_items: bool,
     storage: &S,
 ) -> Result<(), SerializeError>
 where
@@ -786,7 +783,7 @@ where
         storage,
     )?;
     for (idx, td) in doc_info.tab_defs.iter().enumerate() {
-        write_tab_pr(w, idx as u16, td, storage)?;
+        write_tab_pr(w, idx as u16, td, legacy_tab_items, storage)?;
     }
     end_tag(w, "hh:tabProperties", storage)?;
     Ok(())
@@ -796,6 +793,7 @@ fn write_tab_pr<W: Write, S: crate::storage::Storage>(
     w: &mut Writer<W>,
     id: u16,
     td: &TabDef,
+    legacy_tab_items: bool,
     storage: &S,
 ) -> Result<(), SerializeError>
 where
@@ -816,7 +814,14 @@ where
     } else {
         start_tag_attrs(w, "hh:tabPr", &attrs_ref, storage)?;
         for tab in &td.tabs {
-            write_tab_item_switch(w, tab, storage)?;
+            if legacy_tab_items {
+                // [hwpx-cowork] Hancom 2022 reads the 1.2 copy's tab position
+                // in legacy units. A half-value case moves the stop halfway
+                // across the page when the native clipboard fragment opens.
+                write_tab_item(w, tab, false, storage)?;
+            } else {
+                write_tab_item_switch(w, tab, storage)?;
+            }
         }
         end_tag(w, "hh:tabPr", storage)?;
     }
@@ -1198,9 +1203,9 @@ where
             if stored.line_spacing_type != LineSpacingType::Percent {
                 stored.line_spacing = stored.line_spacing.saturating_mul(2);
             }
-            write_para_pr(w, idx as u16, &stored, storage)?;
+            write_para_pr(w, idx as u16, &stored, physical_margin_units, storage)?;
         } else {
-            write_para_pr(w, idx as u16, ps, storage)?;
+            write_para_pr(w, idx as u16, ps, physical_margin_units, storage)?;
         }
     }
     end_tag(w, "hh:paraProperties", storage)?;
@@ -1211,6 +1216,7 @@ fn write_para_pr<W: Write, S: crate::storage::Storage>(
     w: &mut Writer<W>,
     id: u16,
     ps: &ParaShape,
+    physical_margin_units: bool,
     storage: &S,
 ) -> Result<(), SerializeError>
 where
@@ -1311,11 +1317,14 @@ where
     // margin + lineSpacing 은 한컴 원본과 동일하게 <hp:switch>(case/default)로 감싼다.
     //
     // [#4898] 단, 원본 HWPX 가 switch 없이 평문으로 적었으면 그 표기를 지킨다. 한글은
-    // 패키지 xmlVersion 1.4 이상의 물리 여백만 공통 IR의 절반으로 되쓴다.
-    // 고정 줄간격은 여백과 별도 계약이므로 기존 평문 저장값을 유지한다.
-    if ps.hwpx_plain_para_margin {
-        write_para_margin(w, ps, ps.hwpx_plain_para_margin_physical, storage)?;
-        write_para_line_spacing(w, ps, false, storage)?;
+    // [hwpx-cowork] 실문서A 목차의 1.2 평문 왼쪽 여백 3200은 1.5 문서에서 1600(16pt)이다.
+    // 붙여넣은 문단도 출력 패키지의 판본으로 쓴다. 신판 평문 한 칸에 못 담는 홀수 고정 길이는
+    // 한/글의 HwpUnitChar case/default 쌍으로 원래 정밀도를 보존한다(#3368·#8676).
+    let exact_plain = !physical_margin_units
+        || ps.line_spacing_type == LineSpacingType::Percent || ps.line_spacing % 2 == 0;
+    if ps.hwpx_plain_para_margin && exact_plain {
+        write_para_margin(w, ps, physical_margin_units, storage)?;
+        write_para_line_spacing(w, ps, physical_margin_units, storage)?;
     } else {
         write_para_margin_switch(w, ps, storage)?;
     }
@@ -1808,7 +1817,7 @@ mod tests {
 
         let write = |ps: &ParaShape| {
             let mut w: Writer<Vec<u8>> = Writer::new(Vec::new());
-            write_para_pr(&mut w, 0, ps, &crate::storage::Unbounded).expect("write_para_pr");
+            write_para_pr(&mut w, 0, ps, true, &crate::storage::Unbounded).expect("write_para_pr");
             String::from_utf8(w.into_inner()).unwrap()
         };
         // [hwpx-cowork] 2026-11-04 편집기에서 '문단 머리 없음'을 고르면 switch 를 버리고 평문 NONE.
@@ -2479,10 +2488,8 @@ mod tests {
     }
 
     #[test]
-    fn write_tab_pr_emits_tab_item_switch_case_default() {
-        // [#3551] tabItem 은 한컴 원본과 동일하게 <hp:switch>(case=저장값/2 +
-        // unit="HWPUNIT", default=저장값) 로 나가야 한다. 종전엔 switch 없이
-        // hh:tabItem 만 방출해 실물 문서에서 tabItem 이 정확히 절반이 됐다.
+    fn write_tab_pr_preserves_switches_except_for_old_hancom_clipboard_input() {
+        // [#3551] case=물리 단위, default=기존 저장값을 쓴다.
         use crate::model::style::{TabDef, TabItem};
 
         let mut td = TabDef::default();
@@ -2492,9 +2499,13 @@ mod tests {
             fill_type: 0,
         }];
 
-        let mut writer = Writer::new(Vec::new());
-        write_tab_pr(&mut writer, 2, &td, &crate::storage::Unbounded).expect("write tabPr");
-        let xml = String::from_utf8(writer.into_inner()).unwrap();
+        let write = |legacy_tab_items| {
+            let mut writer = Writer::new(Vec::new());
+            write_tab_pr(&mut writer, 2, &td, legacy_tab_items, &crate::storage::Unbounded)
+                .expect("write tabPr");
+            String::from_utf8(writer.into_inner()).unwrap()
+        };
+        let xml = write(false);
 
         assert!(
             xml.contains(
@@ -2513,6 +2524,12 @@ mod tests {
             1,
             "탭 1개당 switch 1개: {xml}"
         );
+        // [hwpx-cowork] 구판에서 같은 위치는 한/글 2022가 읽는 저장값 그대로다.
+        let legacy = write(true);
+        assert_eq!(
+            legacy,
+            r#"<hh:tabPr id="2" autoTabLeft="0" autoTabRight="0"><hh:tabItem pos="3288" type="LEFT" leader="NONE"/></hh:tabPr>"#
+        );
     }
 
     #[test]
@@ -2525,7 +2542,7 @@ mod tests {
         ps.line_spacing_type = LineSpacingType::Percent;
 
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 1, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 1, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
 
         // case: HwpUnitChar required-namespace + 절반 값 + hc: 네임스페이스
@@ -2576,7 +2593,7 @@ mod tests {
         ps.attr2 = 1 << 5; // eAsianNum = 1
 
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 1, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 1, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
 
         assert!(
@@ -2607,7 +2624,7 @@ mod tests {
         ps.attr2 = 1 << 5; // autoSpaceKrNum = 1
 
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 1, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 1, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
 
         assert!(
@@ -2627,7 +2644,7 @@ mod tests {
         // 신규 생성 기본 ParaShape 의 vertical 만 검증).
         let ps = ParaShape::default();
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 0, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 0, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
         assert!(
             xml.contains(r#"vertical="BASELINE""#),
@@ -2782,7 +2799,7 @@ mod tests {
         // condense=20 (bits9..15), fontLineHeight=1 (bit22), snapToGrid=0 (bit8 clear)
         ps.attr1 = (20 << 9) | (1 << 22);
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 0, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 0, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
         assert!(
             xml.contains(r#"condense="20""#),
@@ -2800,7 +2817,7 @@ mod tests {
         // snapToGrid=1 (bit8 set), condense=0
         ps.attr1 = 1 << 8;
         let mut writer = Writer::new(Vec::new());
-        write_para_pr(&mut writer, 0, &ps, &crate::storage::Unbounded).expect("write paraPr");
+        write_para_pr(&mut writer, 0, &ps, true, &crate::storage::Unbounded).expect("write paraPr");
         let xml = String::from_utf8(writer.into_inner()).unwrap();
         assert!(
             xml.contains(r#"snapToGrid="1""#) && xml.contains(r#"condense="0""#),

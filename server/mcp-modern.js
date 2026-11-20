@@ -64,7 +64,7 @@ export async function handleModernMcp({ req, res, user, principal, events, servi
       } else {
       const info = meta[key('clientInfo')] || { name: 'chatgpt', version: 'mcp2' };
       const client = new Client(info);
-      const server = createMcpServer({ service, user, version, agentName, agentSession, trackOperation, lean, surface: surface === 'v2' ? 'v2' : null, toolset });
+      const server = createMcpServer({ service, user, version, agentName, agentSession, trackOperation, lean, surface, toolset });
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       try {
         await server.connect(serverTransport); await client.connect(clientTransport);

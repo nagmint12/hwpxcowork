@@ -224,7 +224,151 @@ function charProps(header, shapeId, list = fonts(header)) {
     strikeout: !!strike && STRIKE_SHAPES.includes(attrXml(strike, 'shape', 'NONE')), superscript: elements(xml, 'hh:supscript').length > 0, subscript: elements(xml, 'hh:subscript').length > 0,
     ratioPct: pct('hh:ratio') ?? 100, spacingPct: pct('hh:spacing') ?? 0, shadeColor: attrXml(xml, 'shadeColor', 'none') };
 }
-function modernUnits(doc) { return Number(attrXml(doc.container.getText('version.xml'), 'xmlVersion', '1.5')) >= 1.4; }
+function modernUnits(doc) {
+  const version = attrXml(doc.container.getText('version.xml'), 'xmlVersion', '').match(/^(\d+)\.(\d+)$/);
+  return !!version && (+version[1] > 1 || (+version[1] === 1 && +version[2] >= 4));
+}
+
+const unitNamespace = 'http://www.hancom.co.kr/hwpml/2016/HwpUnitChar';
+const lengthSpacing = new Set(['FIXED', 'BETWEEN_LINES', 'SPACE_ONLY', 'SPACEONLY', 'AT_LEAST', 'MINIMUM']);
+const marginLength = /^(?:hc:)?(?:intent|left|right|prev|next)$/;
+const isUnitCase = (tag) => (attrXml(tag.xml, 'hp:required-namespace') || attrXml(tag.xml, 'required-namespace', '')).includes('HwpUnitChar');
+
+// [hwpx-cowork] 구판 리더는 호환 case를 닫을 때 앞서 읽은 평문 길이도 반감한다.
+// 신판으로 옮기기 전에 그 값을 해소하고, 구판으로 쓸 때는 실제로 남은 case만큼 보상한다.
+function adjustLegacyPlainLengths(xml, reading) {
+  const switches = elements(xml, 'hp:switch');
+  const unitSwitches = switches.filter(sw => elements(sw.xml, 'hp:case').some(isUnitCase));
+  if (!unitSwitches.length) return xml;
+  const edits = [];
+  const adjust = (start, end) => {
+    if (switches.some(sw => start > sw.start && start < sw.blockEnd)) return;
+    const later = unitSwitches.filter(sw => sw.start > start).length;
+    if (!later) return;
+    const tag = xml.slice(start, end);
+    const raw = attrXml(tag, 'value');
+    if (raw === null || !/^-?\d+$/.test(raw)) return;
+    const scale = 2 ** later;
+    const value = reading ? Math.trunc(Number(raw) / scale) : Number(raw) * scale;
+    if (value < -2147483648 || value > 2147483647) fail('FORMAT_UNSUPPORTED', '대상 서식 버전의 문단 길이 범위를 넘습니다');
+    edits.push({ start, end, text: setAttrs(tag, { value }) });
+  };
+  for (const margin of elements(xml, 'hh:margin')) {
+    for (const token of scan(margin.xml)) {
+      if ((token.type === 'selfclose' || token.type === 'open') && marginLength.test(token.name)) {
+        adjust(margin.start + token.start, margin.start + token.end);
+      }
+    }
+  }
+  for (const line of elements(xml, 'hh:lineSpacing')) {
+    if (lengthSpacing.has(attrXml(line.xml, 'type'))) adjust(line.start, line.end);
+  }
+  return applyDisjoint(xml, edits);
+}
+
+// 1.2의 평문/호환 case와 1.4 이후의 물리 단위를 한/글 ParaShape 저장값을 거쳐 옮긴다.
+// 탭 위치, 줄 간격 비율, 테두리와 다른 네임스페이스를 위한 switch는 판본 단위의 대상이 아니다.
+function convertParaUnits(xml, toModern) {
+  if (toModern) xml = adjustLegacyPlainLengths(xml, true);
+  const edits = [];
+  const lengths = [];
+  const margins = elements(xml, 'hh:margin');
+  for (const margin of margins) {
+    for (const token of scan(margin.xml)) {
+      if (!['selfclose', 'open'].includes(token.type) || !marginLength.test(token.name)) continue;
+      lengths.push({ name: token.name.split(':').pop(), start: margin.start + token.start, end: margin.start + token.end });
+    }
+  }
+  for (const line of elements(xml, 'hh:lineSpacing')) {
+    if (lengthSpacing.has(attrXml(line.xml, 'type'))) lengths.push(line);
+  }
+  const switches = elements(xml, 'hp:switch').map(sw => ({
+    ...sw, cases: elements(sw.xml, 'hp:case'), fallback: elements(sw.xml, 'hp:default')[0],
+    selected: [], defaults: new Map(),
+  }));
+  const inside = (offset, el) => el && offset > el.start && offset < el.blockEnd;
+  const write = (item, value, unit) => {
+    if (value === item.value && (unit === undefined || unit === item.unit)) return;
+    // 구판의 호환 default는 case의 두 배다. 범위를 넘긴 정수로 문서를 쓰지 않는다.
+    if (value < -2147483648 || value > 2147483647) fail('FORMAT_UNSUPPORTED', '대상 서식 버전의 문단 길이 범위를 넘습니다');
+    const patch = unit === undefined ? { value } : { value, unit };
+    edits.push({ start: item.start, end: item.end, text: setAttrs(item.tag, patch) });
+  };
+  const encode = (item, stored) => {
+    if (!toModern) return write(item, stored, item.line ? undefined : 'HWPUNIT');
+    if (item.line) return write(item, Math.trunc(stored / 2));
+    write(item, Math.floor(stored / 2), stored % 2 ? 'CHAR' : 'HWPUNIT');
+  };
+  for (const item of lengths) {
+    item.tag = xml.slice(item.start, item.end);
+    const raw = attrXml(item.tag, 'value');
+    if (raw === null || !/^-?\d+$/.test(raw)) continue;
+    item.value = Number(raw); item.unit = attrXml(item.tag, 'unit'); item.line = item.name === 'hh:lineSpacing';
+    const sw = switches.find(s => inside(item.start, s));
+    if (sw) {
+      const offset = item.start - sw.start;
+      if (inside(offset, sw.fallback)) sw.defaults.set(item.name, item);
+      else if (sw.cases.some(c => inside(offset, c) && isUnitCase(c))) sw.selected.push(item);
+      continue;
+    }
+    // 단위 없는 평문 여백과 hh:margin 자체 속성은 양쪽 모두 원래 저장값이다.
+    if (!item.line && !['CHAR', 'HWPUNIT'].includes(item.unit)) continue;
+    if (item.line && toModern && item.value % 2) {
+      // 신판 평문 정수 한 칸에 못 담는 길이. 인접한 평문 여백도 한/글 저장본처럼
+      // 같은 분기에 두며 default에는 구판의 원래 정수를 넣는다.
+      const margin = margins.find(m => m.blockEnd <= item.start && !xml.slice(m.blockEnd, item.start).trim());
+      const paired = margin && !/\b(?:left|right|indent|prev|next)\s*=/.test(xml.slice(margin.start, margin.end))
+        && lengths.filter(t => inside(t.start, margin)).every(t => ['HWPUNIT', 'CHAR'].includes(t.unit));
+      const begin = `<hp:switch><hp:case hp:required-namespace="${unitNamespace}">`;
+      const fallbackMargin = paired ? xml.slice(margin.start, item.start) : '';
+      if (paired) edits.push({ start: margin.start, text: begin });
+      // HwpUnitChar 분기의 lineSpacing은 한/글이 쓰는 빈 요소 형식으로 내보낸다.
+      const line = item.tag.replace(/\s*\/?>$/, '/>');
+      const half = rootAttrs(line, { value: Math.trunc(item.value / 2) });
+      edits.push({ start: item.start, end: item.blockEnd, text: `${paired ? '' : begin}${half}</hp:case><hp:default>${fallbackMargin}${line}</hp:default></hp:switch>` });
+    } else {
+      encode(item, toModern ? item.value : item.value * 2 + Number(!item.line && item.unit === 'CHAR'));
+    }
+  }
+  for (const sw of switches) {
+    const written = new Set();
+    for (const item of sw.selected) {
+      const other = sw.defaults.get(item.name);
+      const exact = other && other.value !== item.value && Math.abs(other.value - item.value * 2) <= 1;
+      const combined = exact ? other.value : item.value * 2 + Number(!item.line && item.unit === 'CHAR');
+      const stored = toModern ? Math.trunc(combined / 2) : combined;
+      // 줄 간격 하나의 두 표기만 있는 switch는 구판 평문의 정수 한 칸으로 충분하다.
+      // 구판 리더는 이런 case에서도 이미 읽은 별도 평문 여백까지 반감한다.
+      if (!toModern && item.line && exact && sw.cases.length === 1 && sw.selected.length === 1 &&
+          attrXml(item.tag, 'type') === attrXml(other.tag, 'type') &&
+          scan(sw.xml).every(t => !t.name || ['hp:switch', 'hp:case', 'hp:default', 'hh:lineSpacing'].includes(t.name))) {
+        edits.push({ start: sw.start, end: sw.blockEnd, text: rootAttrs(item.xml, { value: stored }) });
+        continue;
+      }
+      encode(item, stored);
+      if (other && !written.has(other)) {
+        // 독립된 대체값은 그 비율을 보존한다. 통상적인 반감 쌍은 default에 정확한 저장값이 있다.
+        const fallback = exact ? (toModern ? stored : stored * 2) : (toModern ? Math.trunc(other.value / 2) : other.value * 2);
+        write(other, fallback); written.add(other);
+      }
+    }
+  }
+  const converted = applyDisjoint(xml, edits);
+  return toModern ? converted : adjustLegacyPlainLengths(converted, false);
+}
+
+/** 원본을 수정하지 않고 대상 xmlVersion에서 읽을 수 있는 서식 머리를 돌려준다. */
+export function formattingPartsFor(source, target) {
+  const modern = modernUnits(target);
+  if (modernUnits(source) === modern) return null;
+  const xml = source.header.xml;
+  const edits = elements(xml, 'hh:paraPr').map(p => ({ start: p.start, end: p.blockEnd, text: convertParaUnits(p.xml, modern) }));
+  const original = source.container.getText('version.xml');
+  const targetPart = target.container.getText('version.xml');
+  const revision = attrXml(targetPart, 'xmlVersion');
+  const versionXml = original && revision ? rootAttrs(original, { xmlVersion: revision }) : targetPart;
+  return { header: new source.header.constructor(applyDisjoint(xml, edits)), versionXml };
+}
 function paragraphContext(xml) {
   const preferred = elements(xml, 'hp:case').find(t => attrXml(t.xml, 'hp:required-namespace', '').includes('HwpUnitChar'));
   return preferred ? { xml: preferred.xml, isCase: true } : { xml: elements(xml, 'hp:default')[0]?.xml || xml, isCase: false };
@@ -1022,7 +1166,6 @@ export function defineStyle(doc, { name, baseStyle, type = 'PARA', format = {}, 
 
 function formattingCopyEdits(doc, source, sourceRef, targetRef, sourceInfo, before, imported) {
   if (sourceInfo.text !== before.text) fail('FORMAT_CONFLICT', '원본과 대상의 글이 달라 서식을 정확한 범위에 복사할 수 없습니다');
-  if (modernUnits(source) !== modernUnits(doc)) fail('FORMAT_UNSUPPORTED', '서식 단위 버전이 다른 문서 간 복사는 지원하지 않습니다');
   const paraPrId = imported('paraPr', sourceInfo.paraPrId); const styleId = imported('style', sourceInfo.styleId);
   const desired = sourceInfo.runs.flatMap(r => Array(r.end - r.start).fill(imported('charPr', r.charPrId)));
   const emptyId = sourceInfo.emptyCharPrId === null ? null : imported('charPr', sourceInfo.emptyCharPrId);
@@ -1034,8 +1177,8 @@ function formattingCopyEdits(doc, source, sourceRef, targetRef, sourceInfo, befo
 
 /** 본문·표 셀 등 서로 다른 문단들의 서식을 구역마다 한 번만 재해석해 복사한다. 전체 검증 뒤에만 반영한다. */
 export async function copyFormattingBatch(doc, source, pairs) {
-  const snapshot = owner => ({ header: owner.header.xml, sections: owner.sections.map(sec => ({ sec, xml: sec.xml })) });
-  const unchanged = (owner, before) => owner.header.xml === before.header && owner.sections.length === before.sections.length && before.sections.every(({ sec, xml }, i) => owner.sections[i] === sec && sec.xml === xml);
+  const snapshot = owner => ({ header: owner.header.xml, revision: owner.container.revision, sections: owner.sections.map(sec => ({ sec, xml: sec.xml })) });
+  const unchanged = (owner, before) => owner.header.xml === before.header && owner.container.revision === before.revision && owner.sections.length === before.sections.length && before.sections.every(({ sec, xml }, i) => owner.sections[i] === sec && sec.xml === xml);
   const targetBefore = snapshot(doc); const sourceBefore = snapshot(source);
   const seen = new Set();
   for (const { sourceRef, targetRef } of pairs) {
@@ -1068,7 +1211,6 @@ export async function copyFormattingBatch(doc, source, pairs) {
  * 같은 정의의 번호로 바꾼 조각(없는 정의는 이 문서 머리에 더한다 — copyFormattingFrom 과 같은 규칙). 머리를 고쳤으면 doc.header 에 반영한다.
  */
 export function importFormattingRefs(doc, source, xml) {
-  if (modernUnits(source) !== modernUnits(doc)) fail('FORMAT_UNSUPPORTED', '서식 단위 버전이 다른 문서 간 복사는 지원하지 않습니다');
   const { header, imported, remember } = formatImporter(doc, source);
   const edits = [];
   for (const t of scan(xml)) if (t.type === 'open' || t.type === 'selfclose') {
@@ -1098,6 +1240,8 @@ function formatImporter(doc, source) {
   }
   const header = new doc.header.constructor(doc.header.xml); const temp = { header, container: doc.container };
   const sourceXml = source.header.xml; const sourceRevision = source.container?.revision;
+  const converted = formattingPartsFor(source, doc);
+  const from = converted ? { header: converted.header, container: source.container } : source;
   const mapping = new Map(); const active = new Set();
   const fontCandidates = new Map();
   const candidates = new Map();
@@ -1125,7 +1269,7 @@ function formatImporter(doc, source) {
       if (header.block('borderFill', '0')) fail('FORMAT_UNSUPPORTED', '대상 문서에 borderFill 0 정의가 있어 테두리/채움 없음 참조를 안전하게 복사할 수 없습니다');
       mapping.set(key, '0'); return '0';
     }
-    const original = shape(source.header, tag, sourceId); const semantic = semanticShape(source, tag, sourceId); const wanted = hash(semantic);
+    const original = shape(from.header, tag, sourceId); const semantic = semanticShape(from, tag, sourceId); const wanted = hash(semantic);
     const candidate = definitions(tag).get(wanted);
     if (candidate !== undefined) { mapping.set(key, candidate); return candidate; }
     if (/\bbinaryItemIDRef\s*=/.test(original)) fail('FORMAT_UNSUPPORTED', '그림 자원을 참조하는 서식은 대상 문서에 같은 자원이 있어야 복사할 수 있습니다');

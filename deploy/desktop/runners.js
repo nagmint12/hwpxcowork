@@ -50,7 +50,7 @@ function settingsPanel(r) {
   ])];
   if (r.mcp) {
     const select = el('select', { title: '다음에 켤 때부터 적용됩니다', onchange: (e) => void act('update-runner', { id: r.id, mcp: Number(e.target.value) }) },
-      [el('option', { value: '2', text: '새 연결(v2)' }), el('option', { value: '1', text: '예전 연결(v1)' })]);
+      [el('option', { value: '2', text: '새 연결(v2)' }), el('option', { value: '3', text: '표를 TSV로 읽기(v3)' }), el('option', { value: '1', text: '예전 연결(v1)' })]);
     select.value = String(r.mcp);
     parts.push(el('label', { class: 'field inline' }, [el('span', { text: '연결' }), select]));
   }

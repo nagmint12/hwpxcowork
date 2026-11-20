@@ -1025,6 +1025,33 @@ impl TypesetEngine {
                 st.base_available_height(),
                 self.dpi,
             );
+        // 같은 빈 문단의 앞 자리차지 표 뒤에 남은 공간이 글줄 한 줄(줄 높이, 줄간격 제외)보다
+        // 작으면 한/글은 그 글줄을 다음 쪽으로 넘기고, 거기서 이 표 아래로 다시 민다.
+        // 웹한글기안기 합성 스윕(앞 표 뒤 잔여 0.6·8.9px → 표 끝 뒤 빈 쪽, 15.1·25.0px → 없음,
+        // 줄 높이 13.3px)과 같은 형상. 이월 여부는 아래 두 이월 경로가 정하므로 여기서는
+        // 이월 직전 잔여만 잰다.
+        let flow_position_before_defer = (st.pages.len(), st.current_column);
+        let host_line_lacks_room_after_same_para_float = !para_has_visible_text(para)
+            && is_para_topbottom_float(&table.common)
+            && fmt
+                .line_heights
+                .first()
+                .is_some_and(|&line_h| (table_available - st.current_height) + 0.5 < line_h)
+            && st.current_items.iter().any(|it| match it {
+                PageItem::Table {
+                    para_index,
+                    control_index,
+                }
+                | PageItem::PartialTable {
+                    para_index,
+                    control_index,
+                    ..
+                } if *para_index == para_idx && *control_index < ctrl_idx => matches!(
+                    para.controls.get(*control_index),
+                    Some(Control::Table(t)) if is_para_topbottom_float(&t.common)
+                ),
+                _ => false,
+            });
         if empty_opening_row_frame.is_none()
             // The same authenticated opening box that scan/paint consume fits
             // the real note boundary. An earlier safety-band probe must not
@@ -1109,11 +1136,21 @@ impl TypesetEngine {
             };
             // NO_LS 블록 호스트의 작은 글자 상자는 자식 첫 유닛의 수용 근거가
             // 아니다. 실제 컷이 요구하는 높이까지 들어가야 현재 쪽을 유지한다.
-            let min_content = min_content.max(
-                layout_engine
-                    .reflow_row_opening_cut_height(row_geometry_table, 0, styles)
-                    .unwrap_or(0.0),
-            );
+            let opening_cut_height = layout_engine
+                .reflow_row_opening_cut_height(row_geometry_table, 0, styles)
+                .unwrap_or(0.0);
+            let min_content = min_content.max(opening_cut_height);
+            // [hwpx-cowork] #9060 한/글 2022: 첫 저장 재시작 앞의 줄은
+            // 쪽 끝에서 줄간격을 남기지 않는다. 실제 행 컷과 칸 여백으로
+            // 판정하고, 저장 재시작이 없는 100/101HU 경계는 그대로 둔다.
+            let first_unit_before_stored_break_fits = first_row_splittable
+                && remaining_on_page_for_first_unit < min_content
+                && layout_engine.first_row_before_saved_restart_fits(
+                    row_geometry_table,
+                    remaining_on_page_for_first_unit,
+                    mt.max_padding_for_row(0),
+                    styles,
+                );
             // [Task #1046 Stage 3] 다행(多行) 표의 비분할 첫 행/블록이 잔여공간엔 안
             // 들어가지만 fresh 페이지엔 통째 들어가면 다음 페이지로 이월한다. 첫 행은
             // 행 내부 분할이 안 되고(=is_row_splittable=false) 표에 후속 행 경계가 있어
@@ -1257,7 +1294,8 @@ impl TypesetEngine {
             }
             if stored_page_top_tac_table
                 || (!first_row_splittable && !first_row_force_splittable)
-                || remaining_on_page_for_first_unit < min_content
+                || (remaining_on_page_for_first_unit < min_content
+                    && !first_unit_before_stored_break_fits)
                 || multirow_clean_defer
             {
                 // 첫 내용이 실제로 이월되는 계산된 빈 호스트는 원자 셀 밴드와
@@ -1385,6 +1423,8 @@ impl TypesetEngine {
                 st.advance_column_or_new_page();
             }
         }
+        let host_line_trails_table = host_line_lacks_room_after_same_para_float
+            && (st.pages.len(), st.current_column) != flow_position_before_defer;
 
         // [Task #1811] visible-host RowBreak 자리차지 표가 현재 쪽에서 곧바로 부분
         // 분할되면, layout 단계의 fragment host 후처리보다 먼저 문서 흐름의 host 텍스트
@@ -1789,6 +1829,7 @@ impl TypesetEngine {
                 && ft.table_footnotes.len() >= 8
                 && declared_table_height > 0.0
                 && total_rows_h > declared_table_height * 2.0,
+            host_line_trails_table,
         };
         let source = BlockTableContinuationSource {
             para_index: para_idx,

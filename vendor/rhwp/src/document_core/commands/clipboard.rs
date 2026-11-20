@@ -594,7 +594,14 @@ impl DocumentCore {
             super::hancom_paste_styles::adapt_styles_for_hancom_paste(&mut doc);
         }
         super::bin_data_prune::prune_unreferenced_bin_data(&mut doc);
-        crate::serializer::serialize_hwpx(&doc).map_err(|e| {
+        // [hwpx-cowork] Use legacy tab items for the COM conversion of old HWPX.
+        // Portable and HTML copies keep the tab definition used by live saves.
+        let bytes = if hancom && !presentation {
+            crate::serializer::hwpx::serialize_hwpx_for_hancom_clipboard(&doc)
+        } else {
+            crate::serializer::serialize_hwpx(&doc)
+        };
+        bytes.map_err(|e| {
             HwpError::RenderError(format!("선택 영역 내보내기 실패: {}", e))
         })
     }

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // 개인 에이전트 작업 공간 준비(docs/V3_SPEC.md §2.4, 사용자 안내: docs/AGENT_SETUP.md)
-//   node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v2|--v1] [--no-claude] [--no-server] [--no-registry]
+//   node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v3|--v2|--v1] [--no-claude] [--no-server] [--no-registry]
 //   · 연결 종류(2026-11-17 사용자 결정 — 기본 새 연결): 새 MCP 연결(작업 도구 넷 task·read·edit·finish — docs/MCP_REDESIGN_2026-11-16.md)로 준비한다 —
 //     브리지 인자 --v2, CLAUDE.md 는 agent/CLAUDE.md(예전 연결 지침이면 CLAUDE.v1.md 로 남기고 바꾼다 — 어느 연결 것인지 모르는 지침은 그대로).
 //     --v1 은 예전 연결(브리지 --v1 --lean, CLAUDE.md 는 남겨 둔 CLAUDE.v1.md 또는 agent/v1/CLAUDE.md)로 준비한다.
-//     둘 다 없으면 지금 .mcp.json 이 --v1 로 고른 예전 연결일 때만 그대로 두고, 그 밖(처음·--v2·예전 기본 --lean·인자 없는 옛 항목)은 새 연결이다
+//     --v3은 TSV 시험 연결이다. 선택 인자가 없으면 기존 작업 공간의 명시적 연결을 유지하고 처음에는 v2를 쓴다
 //   · <dir>/.mcp.json 에 hwpx 항목을 쓴다(이 PC 의 절대 경로로 브리지 실행, --channel, 토큰은 ${HWPX_COWORK_TOKEN} 참조) — 다른 항목은 그대로 둔다
 //   · <dir> 가 이 프로젝트의 agent/ 가 아니면 CLAUDE.md·.claude/settings.json 본보기를 복사한다(이미 있으면 그대로)
 //   · 위 폴더들의 CLAUDE.md(개발 메모)를 에이전트 세션이 읽지 않게 <dir>/.claude/settings.local.json 의 claudeMdExcludes 에 넣는다
@@ -58,8 +58,8 @@ export function claudeAdvice(versionText, platform = process.platform) {
  * v2(기본) = 새 연결(--v2). 예전 연결은 --v1 --lean — --v1 은 사람이 고른 예전 연결이라는 표시(다시 준비할 때 그대로 둔다),
  * --lean = 얇은 흐름(요청 내용·도구 응답을 모델용으로 짧게 — docs/MCP_LEAN_FLOW_2026-11-10.md, agent/v1/CLAUDE.md 가 이 흐름을 쓴다)
  */
-export function mcpEntry(bridgePath, url, filesDir = null, { v2 = true } = {}) {
-  return { command: 'node', args: [bridgePath, '--channel', ...(v2 ? ['--v2'] : ['--v1', '--lean']), '--url', url, ...(filesDir ? ['--files-dir', filesDir] : [])], env: { HWPX_COWORK_TOKEN: TOKEN_REF } };
+export function mcpEntry(bridgePath, url, filesDir = null, { v2 = true, surface = v2 ? 'v2' : 'v1' } = {}) {
+  return { command: 'node', args: [bridgePath, '--channel', ...(surface === 'v1' ? ['--v1', '--lean'] : [`--${surface}`]), '--url', url, ...(filesDir ? ['--files-dir', filesDir] : [])], env: { HWPX_COWORK_TOKEN: TOKEN_REF } };
 }
 /**
  * .mcp.json 항목이 고른 연결: 'v2'(--v2·--mcp 2) | 'v1'(--v1·--mcp 1 — 사람이 고른 예전 연결) | null(고르지 않음 — 처음, 또는 예전 기본 --lean·인자 없는 옛 항목).
@@ -69,8 +69,8 @@ export function entrySurface(entry) {
   const args = Array.isArray(entry?.args) ? entry.args.map(String) : [];
   let picked = null;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--v1' || args[i] === '--mcp=1' || (args[i] === '--mcp' && args[i + 1] === '1')) picked = 'v1';
-    else if (args[i] === '--v2' || args[i] === '--mcp=2' || (args[i] === '--mcp' && args[i + 1] === '2')) picked = 'v2';
+    const version = /^(?:--v|--mcp=)([123])$/.exec(args[i])?.[1] || (args[i] === '--mcp' ? args[i + 1] : null);
+    if (['1', '2', '3'].includes(version)) picked = `v${version}`;
   }
   return picked;
 }
@@ -130,7 +130,7 @@ export async function checkMcp(url, token, { timeoutMs = 5000, surface = null } 
   const res = await fetch(url, {
     method: 'POST',
     // surface: 준비하는 연결 종류를 브리지처럼 밝혀 그 연결의 initialize 를 본다(옛 서버는 모르는 머리글이라 그대로 답한다)
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(surface === 'v1' || surface === 'v2' ? { 'X-Hwpx-Mcp': surface === 'v2' ? '2' : '1' } : {}) },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(['v1', 'v2', 'v3'].includes(surface) ? { 'X-Hwpx-Mcp': surface.slice(1) } : {}) },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -164,7 +164,7 @@ export function ancestorMemoryFiles(dir) {
 }
 
 function parseArgs(argv) {
-  const o = { dir: null, url: null, user: null, claude: true, server: true, registry: true, v2: null, help: false, unknown: [] };
+  const o = { dir: null, url: null, user: null, claude: true, server: true, registry: true, surface: null, help: false, unknown: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = String(argv[i]);
     const eq = a.startsWith('--') ? a.indexOf('=') : -1;
@@ -177,8 +177,7 @@ function parseArgs(argv) {
       case '--no-claude': o.claude = false; break;
       case '--no-server': o.server = false; break;
       case '--no-registry': o.registry = false; break;
-      case '--v2': o.v2 = true; break;
-      case '--v1': o.v2 = false; break;
+      case '--v1': case '--v2': case '--v3': o.surface = key.slice(2); break;
       case '-h': case '--help': o.help = true; break;
       default: o.unknown.push(a);
     }
@@ -217,9 +216,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const o = parseArgs(argv);
   const out = (s = '') => console.log(s);
   if (o.help) {
-    out('node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v2|--v1] [--no-claude] [--no-server] [--no-registry]');
-    out('  연결 종류: 기본은 새 MCP 연결(작업 도구 넷 — task·read·edit·finish, --v2 와 같다). --v1 = 예전 연결(start_request·propose_* 등).');
-    out('  생략하면 지금 작업 공간이 --v1 로 고른 예전 연결일 때만 그대로 두고, 그 밖에는 새 연결로 준비합니다');
+    out('node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v3|--v2|--v1] [--no-claude] [--no-server] [--no-registry]');
+    out('  연결 종류: 기본은 새 MCP 연결(작업 도구 넷 — task·read·edit·finish, --v2 와 같다). --v1 = 예전 연결(start_request·propose_* 등), --v3 = 본문 표를 TSV로 읽는 시험 연결.');
+    out('  생략하면 작업 공간에 저장한 버전을 유지합니다. 새 작업 공간의 기본은 v2입니다');
     out('  개인 에이전트(Claude Code 채널) 작업 공간을 준비합니다. 자세한 안내: docs/AGENT_SETUP.md');
     return 0;
   }
@@ -242,12 +241,15 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const dir = path.resolve(o.dir || templateDir);
   const bridgePath = path.join(root, 'server', 'mcp-stdio.js').split(path.sep).join('/');
   const mcpFile = path.join(dir, '.mcp.json');
-  // 연결 종류(2026-11-17 — 기본 새 연결): --v2/--v1 을 주면 그대로, 아니면 지금 .mcp.json 이 --v1 로 고른 예전 연결일 때만 그대로 두고 그 밖은 새 연결.
+  // 명시적 버전 인자, 새 주소의 ?v=, 작업 공간에 저장된 선택, 기본 v2 순이다.
   // 예전 기본(--lean)·인자 없는 옛 항목은 사람이 고른 것이 아니라 새 기본으로 바꾼다(예전 연결은 밝힐 때만 쓴다 — 사용자 결정)
   const before = fs.existsSync(mcpFile) ? readJson(mcpFile) : undefined;
   const oldEntry = before && typeof before === 'object' && !Array.isArray(before) ? before.mcpServers?.[SERVER_NAME] : undefined;
   const kept = entrySurface(oldEntry);
-  const v2 = o.v2 ?? (kept ? kept === 'v2' : true);
+  const urlVersion = new URL(url).searchParams.get('v');
+  const urlSurface = ['1', '2', '3'].includes(urlVersion) ? `v${urlVersion}` : null;
+  const surface = o.surface || (o.url && urlSurface) || kept || urlSurface || 'v2';
+  const v2 = surface !== 'v1';
   // 소스 폴더(시험과 묶음 스크립트가 함께 있는 곳)의 agent/ 는 배포 묶음·공개 저장소·시험이 읽는 본보기(새 연결)다. 그 자리에서 예전 연결로 바꾸면
   // 본보기 CLAUDE.md 가 예전 연결용 글로 바뀌어 묶음과 시험이 어긋난다 — 예전 연결 작업 공간은 다른 폴더에 만든다(설치본의 agent/ 는 그 자리에서 바꿔도 된다)
   const sourceTree = fs.existsSync(path.join(root, 'tests', 'channel_bridge.mjs')) && fs.existsSync(path.join(root, 'scripts', 'package-portable.mjs'));
@@ -259,7 +261,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   out('hwpx-cowork 개인 에이전트(Claude Code 채널) 준비');
   out(`  작업 공간: ${dir}`);
   if (fixed.note) out(`  ! ${fixed.note}: ${redactUrl(url)}`);
-  if (o.v2 == null && v2 && oldEntry && !kept) out('  ! 예전 기본(예전 연결)으로 준비된 작업 공간을 새 기본(새 연결 — 작업 도구 넷)으로 바꿉니다. 예전 연결을 계속 쓰려면 --v1 로 다시 실행하세요');
+  if (o.surface == null && v2 && oldEntry && !kept) out('  ! 예전 기본(예전 연결)으로 준비된 작업 공간을 새 기본(새 연결 — 작업 도구 넷)으로 바꿉니다. 예전 연결을 계속 쓰려면 --v1 로 다시 실행하세요');
 
   // 1) .mcp.json — hwpx 항목만 바꾸고 나머지는 그대로
   let cfg = fs.existsSync(mcpFile) ? readJson(mcpFile) : {};
@@ -273,12 +275,12 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const old = cfg.mcpServers[SERVER_NAME];
   if (entryHasLiteralToken(old)) out('! 예전 hwpx 항목에 토큰이 글자 그대로 적혀 있어 지웠습니다(환경 변수 참조로 바꿈). 그 파일이 다른 곳에 퍼졌다면 관리자에게 새 토큰을 받으세요');
   const filesDir = path.join(dir, 'work').split(path.sep).join('/');   // 에이전트의 로컬 파일 작업 폴더(.claude/settings.json 이 이 폴더만 쓰기·실행을 허용)
-  const entry = mcpEntry(bridgePath, url, filesDir, { v2 });
+  const entry = mcpEntry(bridgePath, url, filesDir, { surface });
   const same = JSON.stringify(old ?? null) === JSON.stringify(entry);
   cfg.mcpServers[SERVER_NAME] = entry;
   fs.mkdirSync(dir, { recursive: true });
   writeJson(mcpFile, cfg);
-  out(`  ✓ .mcp.json ${same ? '그대로(이미 같음)' : '저장'} — 브리지 ${bridgePath} · 서버 ${redactUrl(url)} · ${v2 ? '새 연결(--v2, 작업 도구 넷)' : '예전 연결(--v1 --lean)'} · 토큰은 환경 변수 참조만`);
+  out(`  ✓ .mcp.json ${same ? '그대로(이미 같음)' : '저장'} — 브리지 ${bridgePath} · 서버 ${redactUrl(url)} · ${surface === 'v3' ? 'TSV 연결(--v3)' : v2 ? '새 연결(--v2, 작업 도구 넷)' : '예전 연결(--v1 --lean)'} · 토큰은 환경 변수 참조만`);
 
   // 1-1) 지침(CLAUDE.md)을 연결에 맞춘다. 본보기: 새 연결 = agent/CLAUDE.md, 예전 연결 = agent/v1/CLAUDE.md(2026-11-17 — 그 전에는 agent/CLAUDE.md 가 예전 연결,
   //      agent/v2/CLAUDE.md 가 새 연결이었다). 없으면 본보기를 쓴다. 새 연결로 바꿀 때 예전 지침(본보기를 고쳐 쓴 것 포함)은 CLAUDE.v1.md 로 남기고 바꾸고,
@@ -401,7 +403,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
         }
         out(`  ✓ ${parts.join(' · ')}`);
         // 새 연결(기본)은 서버가 그 연결을 알아야 한다(/api/config features.mcp2). 옛 서버는 예전 도구로 답해 새 연결용 지침(CLAUDE.md)과 맞지 않는다
-        if (v2 && !c.body.features?.mcp2) out('  ✗ 이 서버는 새 연결(--v2)을 모릅니다 — 서버를 최신 버전으로 올린 뒤 쓰세요. 지금 띄우면 예전 도구로 답해 지침과 맞지 않습니다(예전 연결로 준비: node scripts/setup-agent.mjs --v1)');
+        if (surface === 'v3' && !c.body.features?.mcp3) { mcpBad = true; out('  ✗ 이 서버는 MCP v3(TSV)를 지원하지 않습니다. v3 시험 서버 주소를 지정하세요.'); }
+        if (surface === 'v2' && !c.body.features?.mcp2) out('  ✗ 이 서버는 새 연결(--v2)을 모릅니다 — 서버를 최신 버전으로 올린 뒤 쓰세요. 지금 띄우면 예전 도구로 답해 지침과 맞지 않습니다(예전 연결로 준비: node scripts/setup-agent.mjs --v1)');
       }
     } catch (e) {
       reachable = false;
@@ -410,7 +413,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     // 브리지가 도구를 부를 주소 그 자체를 본다(/api/config 만 보면 /mcp 가 빠진 주소도 ✓ 가 된다)
     if (reachable) {
       try {
-        const m = await checkMcp(url, token, { surface: v2 ? 'v2' : 'v1' });
+        const m = await checkMcp(url, token, { surface });
         if (m.level === 'ok') out(`  ✓ MCP 주소 ${redactUrl(url)} — ${[m.server?.name, m.server?.version].filter(Boolean).join(' ') || '응답 확인'}`);
         else if (m.level === 'reachable') out(`  ✓ MCP 주소 ${redactUrl(url)} 가 답합니다(토큰이 있어야 도구를 씁니다)`);
         else if (m.level === 'token') out(`  ! MCP 주소 ${redactUrl(url)} 는 맞지만 토큰을 받지 않습니다(401) — 그 서버의 내 토큰인지 확인하세요`);

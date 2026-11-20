@@ -805,6 +805,10 @@ export class HwpDocument {
     flushDeferredPagination(): string;
     flushProgressiveOpen(): string;
     /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 지금 끝낸다.
+     */
+    flushTypesetTail(): string;
+    /**
      * 같은 cmap 판정으로 아직 공급되지 않은 글리프만 다음 후보에 전달한다.
      */
     fontMissingText(bytes: Uint8Array, face_index: number, text: string): string | undefined;
@@ -1320,7 +1324,7 @@ export class HwpDocument {
     /**
      * 문서의 메모를 문서 순서대로 반환한다.
      *
-     * 반환: `[{id,index,author,date,text,place,sectionIndex,paraIndex,
+     * 반환: `[{id,index,parentId,author,date,text,place,sectionIndex,paraIndex,
      * startCharIdx,endCharIdx,path,page,editable,readOnlyReason}]`
      */
     getMemoList(): string;
@@ -2041,6 +2045,10 @@ export class HwpDocument {
      * `path_json` = `[{"controlIndex":N,"cellIndex":N,"cellParaIndex":N}, …]`.
      */
     insertMemoByPath(section_idx: number, para_idx: number, path_json: string, start_char_idx: number, end_char_idx: number, json: string): string;
+    /**
+     * 부모 메모의 기준 글에 댓글을 단다. `json` = `{author,text}`.
+     */
+    insertMemoReply(parent_id: number, json: string): string;
     /**
      * 새 번호 지정 컨트롤 삽입 (쪽 > 새 번호로 시작)
      */
@@ -3044,6 +3052,15 @@ export class HwpDocument {
      */
     setTitleMark(json: string): string;
     /**
+     * [hwpx-cowork] 2026-11-20 구역 조판 체크포인트를 끄거나 켠다(견줌·되돌림용). 끄면 늘 처음부터 조판한다.
+     */
+    setTypesetResumeEnabled(enabled: boolean): void;
+    /**
+     * [hwpx-cowork] 2026-11-20 뒤쪽 미루기를 켜거나 끈다(편집기만 켠다 — `document_core::typeset_tail`).
+     * 켜면 편집의 쪽 나눔이 편집한 쪽 근처까지만 하고 남은 작업을 `stepTypesetTail` 로 잇게 남길 수 있다.
+     */
+    setTypesetTailDeferral(enabled: boolean): void;
+    /**
      * 디버그 오버레이 표시 여부를 설정한다.
      */
     set_debug_overlay(enabled: boolean): void;
@@ -3142,6 +3159,11 @@ export class HwpDocument {
     stepDeferredPagination(fragment_budget: number): string;
     stepProgressiveOpen(paragraph_budget: number): string;
     /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 `budgetMs` 동안(최소 한 걸음) 잇는다.
+     * `{"ok":true,"status":"none"|"pending"|"complete"|"stale","pageCount"}`. complete 면 쪽 나눔이 바뀌었다.
+     */
+    stepTypesetTail(budget_ms: number): string;
+    /**
      * 현재 WASM 빌드에서 PDF 입력을 사용할 수 있는지 문서 생성 전에 조회한다.
      */
     static supportsPdfImport(): boolean;
@@ -3180,6 +3202,16 @@ export class HwpDocument {
      * 반환값: JSON `{"ok":true,"sourceRows":N,"sourceCols":N,"targetRows":N,"targetCols":N}`
      */
     transposeTableCellsInPlace(section_idx: number, parent_para_idx: number, control_idx: number): string;
+    /**
+     * [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용) 통계(시험·진단용):
+     * `{"enabled","resumed","full","skippedParagraphs","verifyChecks","verifyMismatches"}`.
+     * resumed = 체크포인트에서 이어 간 구역 조판 수, skippedParagraphs = 그때 다시 하지 않은 앞 문단 수(누적).
+     */
+    typesetResumeStats(): string;
+    /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판이 있는가.
+     */
+    typesetTailPending(): boolean;
     /**
      * GroupShape를 풀어 자식 개체들을 개별로 복원한다.
      */
@@ -3498,6 +3530,7 @@ export interface InitOutput {
     readonly hwpdocument_findOrCreateFontIdForLang: (a: number, b: number, c: number, d: number) => number;
     readonly hwpdocument_flushDeferredPagination: (a: number) => [number, number, number, number];
     readonly hwpdocument_flushProgressiveOpen: (a: number) => [number, number];
+    readonly hwpdocument_flushTypesetTail: (a: number) => [number, number];
     readonly hwpdocument_fontMissingText: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly hwpdocument_fontMissingTextWithSpaces: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly hwpdocument_fontSupportsText: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -3758,6 +3791,7 @@ export interface InitOutput {
     readonly hwpdocument_insertHyperlinkEx: (a: number, b: number, c: number) => [number, number, number];
     readonly hwpdocument_insertMemo: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly hwpdocument_insertMemoByPath: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+    readonly hwpdocument_insertMemoReply: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_insertNewNumber: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_insertPageBreak: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_insertParagraph: (a: number, b: number, c: number) => [number, number, number, number];
@@ -3958,6 +3992,8 @@ export interface InitOutput {
     readonly hwpdocument_setTableProperties: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_setTextBoxAt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_setTitleMark: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly hwpdocument_setTypesetResumeEnabled: (a: number, b: number) => void;
+    readonly hwpdocument_setTypesetTailDeferral: (a: number, b: number) => void;
     readonly hwpdocument_set_debug_overlay: (a: number, b: number) => void;
     readonly hwpdocument_set_respect_vpos_reset: (a: number, b: number) => void;
     readonly hwpdocument_snapshotCapacity: (a: number) => number;
@@ -3976,6 +4012,7 @@ export interface InitOutput {
     readonly hwpdocument_splitTableCellsInRangeEx: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_stepDeferredPagination: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_stepProgressiveOpen: (a: number, b: number) => [number, number];
+    readonly hwpdocument_stepTypesetTail: (a: number, b: number) => [number, number];
     readonly hwpdocument_supportsPdfImport: () => number;
     readonly hwpdocument_swapPictureTransform: (a: number, b: number) => [number, number];
     readonly hwpdocument_swapTable: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -3984,6 +4021,8 @@ export interface InitOutput {
     readonly hwpdocument_textToLogicalOffset: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly hwpdocument_toggleHideHeaderFooter: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_transposeTableCellsInPlace: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly hwpdocument_typesetResumeStats: (a: number) => [number, number];
+    readonly hwpdocument_typesetTailPending: (a: number) => number;
     readonly hwpdocument_ungroupShape: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_unlockAllObjectsH2022: (a: number) => [number, number, number, number];
     readonly hwpdocument_updateAllTablesOfContents: (a: number) => [number, number, number, number];

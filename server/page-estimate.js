@@ -20,7 +20,9 @@ import { layoutChecker, pageEstimateEnabled } from './layout-check.js';
 export const PAGES_BASIS = '편집기 조판 어림 — 한/글과 다를 수 있다';
 // maxChars: 머리글·구역 XML 글자 합(사본 직렬화·읽기는 한 덩어리로 서버 스레드에서 돈다 — 2026-11-17 측정: 10쪽 연습 보고서 35만 자 9ms, 5쪽 논문 21만 자 5ms).
 // budgetMs: 사본에서 만들기·반영 흉내의 벽시계 한도(30ms 마다 물러나며 돈다 — P1 논문 대기 제안 54건 1.7초, 가장 긴 한 덩어리 91ms). maxPending: 그보다 많으면 흉내하지 않는다
-const LIMITS = { maxChars: 6_000_000, maxPending: 300, budgetMs: 6000, waitMs: 20000 };
+// checkBudgetMs(2026-11-20 §19): 모델이 일부러 묻는 검사(dry_run·done 직전 완료 막기)의 한도 — 65쪽 문서·제안 159~204건이 6초 안에 끝나지 않아 apply_failed 가 비어 보였다.
+// 30ms 마다 물러나며 돌므로 서버 스레드를 묶지는 않는다. 바꿈 제안만이면 반영 충돌은 글 범위 검사(server/mcp2/apply-check.js)가 끝까지 보므로 이 한도는 쪽 수 어림에만 쓰인다
+const LIMITS = { maxChars: 6_000_000, maxPending: 300, budgetMs: 6000, checkBudgetMs: 20000, waitMs: 20000 };
 const FULL_LAST_PAGE = 0.9;
 const FULL_NOTE = '마지막 쪽이 거의 찼다 — 한/글에서는 한 쪽 넘칠 수 있다(편집기 조판 어림). 쪽 수가 꼭 맞아야 하면 여유를 둔다';
 // 거의 빈 쪽(2026-11-17 작업 Q — artifacts/mcp-round3-20261117/codex/REPORT-G3.md 문제 2): 마지막 쪽이 아닌 쪽 가운데 본문이 SPARSE_FILL 보다 적게 찬 쪽.
@@ -59,13 +61,15 @@ function sandbox(service, extraBytes) {
   return sim;
 }
 
+const dropUndef = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
 export const pageEstimateMethods = {
   /**
    * 쪽 수 어림 → 영수증용 { now, all_applied?, last_page_fill?, sections?, pending?, apply_failed?, note?, skipped?, basis } (던지지 않는다 — 안 되면 skipped 에 이유).
    * rid: 이 요청의 대기 제안(열린 항목·비교안 아닌 것 — [모두 반영]과 같은 고르기)을 반영해 본다. pids: rid 없는 저장에서 이번에 만든 제안.
    * steps(dry_run): server/mcp2/ops.js prepareOps 의 단계 — 사본에서 제안을 만든 뒤 함께 반영한다 → 반환에 made·failed(만들기 실패 op) 를 더한다.
    */
-  async agentEstimate(id, { rid = null, pids = [], steps = null, author = '서버' } = {}) {
+  async agentEstimate(id, { rid = null, pids = [], steps = null, author = '서버', check = false } = {}) {
     const dry = Array.isArray(steps);
     const out = { basis: PAGES_BASIS };
     let sim = null;
@@ -96,11 +100,13 @@ export const pageEstimateMethods = {
       });
       if (snap.gone) return result({ skipped: snap.gone });
       // ② 사본에서 제안 만들기(dry_run)·반영 흉내 — 서버 스레드, 시간 한도
-      if (snap.want && snap.structure) out.note = `${snap.tooBig.replace(' 반영 흉내를 하지 않았다', '')} 사본 반영 흉내 대신 조판 작업자에서 구조 op(개체 → 본문·쪽 구성)만 반영해 어림했다${snap.structure.others ? ` — 다른 대기 제안·op ${snap.structure.others}건은 넣지 않았다` : ''}`;
-      else if (snap.want && snap.tooBig) out.note = snap.tooBig;
+      if (snap.want && snap.structure) { out.note = `${snap.tooBig.replace(' 반영 흉내를 하지 않았다', '')} 사본 반영 흉내 대신 조판 작업자에서 구조 op(개체 → 본문·쪽 구성)만 반영해 어림했다${snap.structure.others ? ` — 다른 대기 제안·op ${snap.structure.others}건은 넣지 않았다` : ''}`; out.stopped = '문서가 커서 사본 반영 흉내를 하지 않았다'; }
+      else if (snap.want && snap.tooBig) { out.note = snap.tooBig; out.stopped = snap.tooBig; }
       else if (snap.want) {
-        sim = await this._simulateAll(id, { bytes: snap.bytes, meta: snap.meta, rid: rid != null ? Number(rid) : null, pids, steps, author, deadline: t0 + lim.budgetMs });
-        if (sim.abort) { out.note = sim.abort; sim.after = null; }
+        const budget = check ? Math.max(lim.budgetMs, lim.checkBudgetMs || 0) : lim.budgetMs;
+        sim = await this._simulateAll(id, { bytes: snap.bytes, meta: snap.meta, rid: rid != null ? Number(rid) : null, pids, steps, author, deadline: t0 + budget });
+        // stopped(2026-11-20 §19): 흉내가 중간에 멈췄음을 글(note)만이 아니라 칸으로도 — apply_failed 가 비어도 '실패 없음'이 아니다(영수증 맨 위 apply_check 가 이것을 본다)
+        if (sim.abort) { out.note = sim.abort; out.stopped = sim.abort; sim.after = null; }
       }
       // ③ 조판(작업자 스레드)
       const docs = []; const cached = nowCache.get(snap.key);
@@ -110,7 +116,9 @@ export const pageEstimateMethods = {
       else if (snap.want && snap.structure) docs.push({ bytes: snap.bytes, ops: snap.structure.lists, covered: true });
       let res = { ok: true, results: [] };
       if (docs.length) res = await layoutChecker().estimate(docs, { waitMs: lim.waitMs, sparseBelow: SPARSE_FILL });
-      if (!res.ok) return result({ skipped: BUSY[res.reason] || `쪽 수를 빼었다(${res.error || res.reason})` });
+      // 조판 작업자가 바빠도 반영 흉내의 결과(실패할 제안)는 버리지 않는다(2026-11-20 §19 — 예전에는 쪽 수와 함께 apply_failed 도 빠져 완료 막기가 지나갔다)
+      if (!res.ok) return result(dropUndef({ skipped: BUSY[res.reason] || `쪽 수를 빼었다(${res.error || res.reason})`, stopped: out.stopped,
+        ...(sim && !sim.abort ? { pending: sim.applied + sim.applyFailed.length } : {}), ...(sim?.applyFailed?.length ? { apply_failed: sim.applyFailed.slice(0, 10) } : {}) }));
       const now = cached || res.results[0];
       if (!cached) remember(snap.key, now);
       let after = docs.length > (cached ? 0 : 1) ? res.results[cached ? 0 : 1] : null;

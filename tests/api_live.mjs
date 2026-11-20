@@ -1287,8 +1287,8 @@ try {
   const vAcc = await V.res(`${DX}/changes/accept-all`, { method: 'POST' });
   ok(vRes.status === 403 && vRes.data.error === 'FORBIDDEN' && vAcc.status === 403 && vAcc.data.error === 'FORBIDDEN', '수정 권한이 없으면 버전 복구·변경 추적 수락도 403');
   const rsX = await A(`${DX}/versions/1/restore`, { method: 'POST' });
-  ok(rsX.v != null && (await bodyTexts(A, dX.id)).join('\n') === (await HwpxDoc.load(await buildMainDoc())).bodyTexts()[0].join('\n') && (await A(`${DX}/changes`)).length === 0,
-    `버전 복구(v1)도 실시간·고친 글만이면 변경 추적 없이 글만 되돌림(v${rsX.v})`);
+  ok(rsX.v != null && (await A(`${DX}/file?kind=tracked`)).equals(await A(`${DX}/file?kind=version&n=1`)) && (await A(`${DX}/changes`)).length === 0,
+    `실시간·고친 글만 문서의 v1 파일로 교체(v${rsX.v})`);
   // 30분 지난 마지막 작성자는 잊는다(덮어써도 알릴 사람 없음)
   const hY1 = await makeHead(B, dX.id, (d) => replaceIn(d, 's0/p6', '기대 효과를', '기대 효과는'));
   const hY2 = await makeHead(A, dX.id, (d) => replaceIn(d, 's0/p6', '기대 효과를', '기대 효과도'));

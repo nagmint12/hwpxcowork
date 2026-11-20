@@ -443,6 +443,7 @@ impl Allocation<'_> {
             bin_data_content,
             extra_streams,
             hwpx_aux_entries,
+            memo_parents,
             is_hwp3_variant: _,
             is_hwpx_variant: _,
             provenance: _,
@@ -470,6 +471,7 @@ impl Allocation<'_> {
             }
         }
         self.record_work(&(extra_streams, hwpx_aux_entries))?;
+        self.payload::<(u32, u32)>(memo_parents.len())?;
         self.0.check().map_err(PdfImportError::backend)?;
         Ok(value.clone())
     }

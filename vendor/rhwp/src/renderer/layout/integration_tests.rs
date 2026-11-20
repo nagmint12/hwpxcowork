@@ -116,6 +116,7 @@ mod tests {
             horizontal_shaping_context: None,
             supplemental_metrics: None,
         hangul2024_missing_glyphs: false,
+        word_compat_target: false, // [hwpx-cowork] This fixture uses the default compatibility target.
         };
 
         let page_content = PageContent {

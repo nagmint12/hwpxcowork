@@ -67,11 +67,40 @@ const run = (cmd, args) => {
   if (r.status !== 0) fail(`${path.basename(cmd)} ${args.join(' ')} 실패(종료 코드 ${r.status ?? r.signal})`);
 };
 
+// [hwpx-cowork] 2026-11-19 빌드 캐시를 다른 소스 폴더가 마지막으로 썼으면 작업공간 crate 를 반드시 다시 컴파일한다.
+// cargo 는 작업공간 안 crate 의 지문을 작업공간 기준 상대 경로로 매긴다. 그래서 소스 폴더 둘(vendor/rhwp 와 git worktree)이
+// 한 --target-dir 를 쓰면 같은 이름의 산출물을 서로 '최신'으로 보고, 소스 파일의 수정 시각이 산출물보다 이르면 다시 컴파일하지 않는다.
+// 11-19 15:52 운영 빌드가 이렇게 다른 작업 폴더가 옛 소스로 만든 rhwp-ooxml-chart 를 그대로 썼다(차트 값 축 수정이 소스에는
+// 있고 WASM 에는 없었다 — 로그에 `Compiling rhwp-ooxml-chart` 줄이 없었다). 캐시마다 '마지막으로 쓴 소스 폴더'를 적어 두고,
+// 다르면 작업공간 crate 의 lib 뿌리 파일 수정 시각을 지금으로 올려 cargo 가 그 crate 들을 이 소스로 다시 만들게 한다
+// (내용은 그대로, 지우는 것 없음). 이 표식은 이 스크립트로 만든 빌드만 안다 — 손으로 cargo 를 같은 캐시·같은 프로필로 돌렸다면
+// 캐시를 따로 주는 것(`--target-dir artifacts/<작업>/target`)이 확실하다. 동시에 도는 다른 빌드가 같은 캐시의 rhwp.wasm 을
+// 바꿔 놓을 수도 있으므로 배포할 빌드는 전용 캐시를 권한다.
+const cacheMarker = path.join(targetDir, `.cowork-last-source-wasm32-${profile}.txt`);
+const lastSource = fs.existsSync(cacheMarker) ? fs.readFileSync(cacheMarker, 'utf8').trim() : null;
+const cacheHasBuild = fs.existsSync(path.join(targetDir, 'wasm32-unknown-unknown', profile));
+let workspaceRefreshed = [];
+if (cacheHasBuild && lastSource !== vendor) {
+  const meta = spawnSync(cargo, ['metadata', '--no-deps', '--format-version', '1', '--locked'], { cwd: vendor, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+  if (meta.status !== 0) fail(`cargo metadata 실패 — 작업공간 crate 를 알 수 없어 캐시 재사용을 믿을 수 없습니다: ${(meta.stderr || '').trim().split(/\r?\n/).at(-1) ?? ''}`);
+  const now = new Date();
+  for (const member of JSON.parse(meta.stdout).packages) {
+    for (const target of member.targets.filter((item) => item.kind.some((kind) => /lib$/.test(kind)))) {
+      if (!fs.existsSync(target.src_path)) continue; // 부분 체크아웃에서 빠진 crate
+      fs.utimesSync(target.src_path, now, now);
+      workspaceRefreshed.push(member.name);
+    }
+  }
+  workspaceRefreshed = [...new Set(workspaceRefreshed)];
+  console.log(`[build-engine] 이 캐시를 마지막으로 쓴 소스가 다릅니다(${lastSource ?? '기록 없음'}) — 작업공간 crate ${workspaceRefreshed.length}개를 이 소스로 다시 컴파일합니다`);
+}
+
 const t0 = Date.now();
 console.log(`[build-engine] cargo build --lib --target wasm32-unknown-unknown --profile ${profile} ${featureArgs.join(' ')}`.trimEnd());
 run(cargo, ['build', '--locked', '--lib', '--target', 'wasm32-unknown-unknown', '--profile', profile, ...featureArgs, '--target-dir', targetDir]);
 const wasm = path.join(targetDir, 'wasm32-unknown-unknown', profile, 'rhwp.wasm');
 if (!fs.existsSync(wasm)) fail(`빌드 결과가 없습니다: ${wasm}`);
+fs.writeFileSync(cacheMarker, `${vendor}\n`);
 
 // 새 pkg 를 옆에 만든 뒤 바꿔 넣는다(실패하면 기존 pkg 그대로)
 const next = `${pkg}.next`;
@@ -94,6 +123,8 @@ fs.writeFileSync(path.join(pkg, 'cowork-engine.json'), JSON.stringify({
   wasmBindgen: have,
   features: withPdf ? 'default' : 'console_error_panic_hook,wasm-api',
   nameSection: keepNames,
+  // 빌드 캐시와 그 캐시를 앞서 쓴 소스(다르면 작업공간 crate 를 다시 컴파일했다 — 위 설명)
+  targetDir: path.relative(root, targetDir), cacheLastSource: lastSource && path.relative(root, lastSource), workspaceRefreshed,
 }, null, 2));
 const mb = (fs.statSync(path.join(pkg, 'rhwp_bg.wasm')).size / 1048576).toFixed(1);
 console.log(`[build-engine] 완료 ${((Date.now() - t0) / 1000).toFixed(0)}s → ${path.relative(root, pkg)} (wasm ${mb}MB, ${profile}). 다음: npm run build:studio`);

@@ -91,13 +91,21 @@ pub fn serialize_hwpx(doc: &Document) -> Result<Vec<u8>, SerializeError> {
 /// HWPX 직렬화 바이트와 바로 그 산출물의 내용 손실을 함께 반환한다 (#4430).
 pub fn serialize_hwpx_with_report(doc: &Document) -> Result<SerializedDocument, SerializeError> {
     let (writer, report) =
-        serialize_hwpx_into(doc, HwpxZipWriter::new(), &crate::storage::Unbounded, None)?;
+        serialize_hwpx_into(doc, HwpxZipWriter::new(), &crate::storage::Unbounded, None, false)?;
     Ok(SerializedDocument::new(writer.into_inner(), report))
+}
+
+/// [hwpx-cowork] HWPX input for the Hancom COM conversion to Hwp Native.
+pub(crate) fn serialize_hwpx_for_hancom_clipboard(doc: &Document) -> Result<Vec<u8>, SerializeError> {
+    let (writer, report) =
+        serialize_hwpx_into(doc, HwpxZipWriter::new(), &crate::storage::Unbounded, None, true)?;
+    report.write_warnings_to_stderr();
+    Ok(writer.into_inner())
 }
 
 /// [hwpx-cowork] Worker에서 압축할 동일 XML 패키지.
 pub fn serialize_hwpx_uncompressed(doc: &Document) -> Result<Vec<u8>, SerializeError> {
-    let (writer, report) = serialize_hwpx_into(doc, HwpxZipWriter::uncompressed(), &crate::storage::Unbounded, None)?;
+    let (writer, report) = serialize_hwpx_into(doc, HwpxZipWriter::uncompressed(), &crate::storage::Unbounded, None, false)?;
     report.write_warnings_to_stderr();
     Ok(writer.into_inner())
 }
@@ -118,6 +126,7 @@ where
         HwpxZipWriter::with_writer(writer),
         storage,
         Some(reservation),
+        false,
     )?;
     report.write_warnings_to_stderr();
     Ok(writer.into_inner())
@@ -128,6 +137,7 @@ fn serialize_hwpx_into<W: std::io::Write + std::io::Seek, S: crate::storage::Sto
     mut z: HwpxZipWriter<W>,
     storage: &S,
     reservation: Option<std::sync::Arc<dyn crate::storage::Reservation>>,
+    for_hancom_clipboard: bool,
 ) -> Result<(W, crate::serializer::ContentLossReport), SerializeError>
 where
     S::Error: std::fmt::Display,
@@ -149,7 +159,7 @@ where
     )?;
 
     // 3. Contents/header.xml — Stage 1 동적 생성 (IR 기반)
-    let header_xml = header::write_header_with_storage(doc, &ctx, storage)?;
+    let header_xml = header::write_header_with_storage(doc, &ctx, storage, for_hancom_clipboard)?;
     z.write_deflated("Contents/header.xml", &header_xml)?;
     let mut hwp3_page_ownership =
         crate::model::hwp3_page_ownership::PageOwnership::for_document(doc, &header_xml);
@@ -328,6 +338,14 @@ where
     {
         z.write_deflated(crate::model::hyperlink_format::HWPX_ENTRY, &bytes)?;
     }
+    // 메모 댓글 관계(한컴 Contents/memoExtended.xml). 문서에 남은 메모끼리만 쓴다.
+    let memo_links = crate::model::memo_extended::live_links(doc);
+    if !memo_links.is_empty() {
+        z.write_deflated(
+            crate::model::memo_extended::HWPX_ENTRY,
+            crate::model::memo_extended::encode_hwpx(&memo_links).as_bytes(),
+        )?;
+    }
 
     // 7. META-INF/container.rdf — header + every section part.
     // Hancom uses this RDF graph alongside content.hpf; a stale one-section
@@ -486,12 +504,13 @@ where
             is_embedded: entry.is_embedded,
         });
     }
-    let content_hpf = content::write_content_hpf_with_scripts(
+    let content_hpf = content::write_content_hpf_with_parts(
         &section_hrefs,
         &content_bin_entries,
         &master_items,
         doc.hwpx_aux_entry("Contents/content.hpf"),
         &converted_script_items,
+        !memo_links.is_empty(),
     )?;
     z.write_deflated("Contents/content.hpf", &content_hpf)?;
 

@@ -80,6 +80,51 @@ test('개인 worker: snapshot·실시간 알림을 합쳐 내 요청만 FIFO 직
   } finally { gate.resolve(); await worker.stop(); await srv.stop(); }
 });
 
+test('요청별 모델 설정: 지정한 실행기만 맡고 다시 요청에도 같은 값을 사용한다', { timeout: 15000 }, async () => {
+  const { srv, api, id, D, create } = await setup();
+  const calls = [];
+  const codex = makeWorker(srv, {
+    runKind: 'codex',
+    runSettings: { model: 'gpt-cli', effort: 'low', modelSelection: 'auto' },
+    setRunSettings(settings) { this.settings = settings; },
+    async run(input) { calls.push({ instruction: input.instruction, ...this.settings }); return result(); },
+  });
+  const other = makeWorker(srv, {
+    runKind: 'claude-code',
+    runSettings: { model: 'sonnet', effort: 'low' },
+    setRunSettings() {},
+    async run(input) { calls.push({ instruction: input.instruction, worker: 'claude-code' }); return result(); },
+  });
+  const runSettings = { kind: 'codex', model: 'gpt-chosen', effort: 'xhigh' };
+  try {
+    const bad = await api.res(`${D}/requests`, { method: 'POST', body: { kind: 'review', target: { ref: 's0/p1' },
+      route: 'server', options: { runSettings } } });
+    assert.equal(bad.status, 400);
+    other.start();
+    await until(async () => (await api('/api/agent/status')).me.sessions.some(s => s.runKind === 'claude-code'), '다른 실행기 연결');
+    const chosen = await create('지정 모델', { route: 'auto', options: { runSettings } });
+    assert.equal(chosen.route, 'queue');
+    assert.deepEqual(chosen.options.runSettings, runSettings);
+    assert.equal((await other.callJson('claim_next_request', { doc_id: id, run_kind: 'claude-code' })).none, true);
+    assert.equal((await other.callJson('claim_next_request', { doc_id: id })).none, true, '이전 실행기도 건너뜀');
+    await assert.rejects(other.callJson('start_request', { doc_id: id, request_id: chosen.rid }), { code: 'AI_RUN_REQUIRED' });
+
+    codex.start();
+    await until(() => codex.stats().completed === 1, '지정한 실행기가 대기 요청 완료');
+    await until(async () => (await api('/api/agent/status')).me.sessions.some(s => s.runKind === 'codex'), '지정 실행기 연결');
+    const delivered = await create('연결된 실행기', { route: 'auto', options: { runSettings } });
+    assert.equal(delivered.route, 'agent');
+    assert.equal(delivered.delivery.session, codex.session);
+    await until(() => codex.stats().completed === 2, '전달된 요청 완료');
+    await api(`${D}/requests/${chosen.rid}/retry`, { method: 'POST' });
+    await until(() => codex.stats().completed === 3, '재시도 완료');
+    assert.deepEqual(calls, ['지정 모델', '연결된 실행기', '지정 모델'].map(instruction => ({
+      instruction, model: 'gpt-chosen', effort: 'xhigh', modelSelection: 'manual',
+    })));
+    assert.deepEqual((await api('/api/me/ai-run')).settings, {});
+  } finally { await Promise.all([codex.stop(), other.stop()]); await srv.stop(); }
+});
+
 test('개인 worker: 취소 신호가 늦은 AI 결과를 버리고 다음 요청을 처리', { timeout: 15000 }, async () => {
   const { srv, api, D, create } = await setup(); const late = deferred(); const inputs = [];
   const worker = makeWorker(srv, { async run(input, { signal }) {

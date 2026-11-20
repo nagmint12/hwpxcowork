@@ -24,6 +24,24 @@ async function mcp(srv, name, args) {
   return res.isError ? { error: text } : (/^[[{]/.test(text) ? JSON.parse(text) : { text });
 }
 
+test('AI 응답 기본 한도는 10만 자이며 저장한 한도가 우선한다', { timeout: 30000 }, async () => {
+  const srv = await startServer({ ai: 'off' });
+  try {
+    const A = srv.api('admin');
+    const defaults = await A('/api/admin/limits');
+    assert.equal(defaults.defaults.mcpResponseChars, 100_000);
+    assert.equal(defaults.limits.mcpResponseChars, 100_000);
+    assert.equal(defaults.saved.mcpResponseChars, null);
+
+    await A('/api/admin/limits', { method: 'PATCH', body: { limits: { mcpResponseChars: 40_000 }, revision: defaults.revision } });
+    await srv.restart({ ai: 'off' });
+    const saved = await A('/api/admin/limits');
+    assert.equal(saved.defaults.mcpResponseChars, 100_000);
+    assert.equal(saved.saved.mcpResponseChars, 40_000);
+    assert.equal(saved.limits.mcpResponseChars, 40_000);
+  } finally { await srv.stop(); }
+});
+
 test('get_request·get_formatting: 서식은 번호 + 관련 header 만, 응답 한도를 관리자가 바꾸면 바로 줄인다', { skip: !hasSample && '2025 표본 없음', timeout: 120000 }, async () => {
   const srv = await startServer({ ai: 'off' });
   try {
@@ -32,10 +50,10 @@ test('get_request·get_formatting: 서식은 번호 + 관련 header 만, 응답 
     const table = (await A(`${D}/tables`))[0];
     const cell = table.cells.find((c) => c.refs?.length && c.text)?.refs[0];
     const req = (await A(`${D}/requests`, { method: 'POST', body: { kind: 'instruct', instruction: '이 칸의 서식을 다른 표와 맞춰줘', route: 'queue', target: { ref: cell } } })).request;
-    // 기본(4만 자): 문단은 번호만, 관련 header 만, 전체 목록 없음
+    // 기본(10만 자): 문단은 번호만, 관련 header 만, 전체 목록 없음
     const full = await mcp(srv, 'get_request', { doc_id: doc.id, request_id: req.rid });
     assert.ok(!('formattingCatalog' in full) && full.formattingHeader && !full.truncated);
-    assert.ok(size(full) <= 40000, `${size(full)}자`);
+    assert.ok(size(full) <= 100_000, `${size(full)}자`);
     const used = new Set(full.contextItems.flatMap((c) => (c.runs || []).map((r) => r.charPrId)));
     assert.deepEqual(new Set(full.formattingHeader.charPr.map((c) => c.id)).isSupersetOf(used), true, '쓰인 글자모양 번호는 모두 header 에 있다');
     assert.ok(full.contextItems.every((c) => c.ref === '…' || (c.styleId != null && Array.isArray(c.runs) && !('formatting' in c))));
@@ -55,7 +73,7 @@ test('get_request·get_formatting: 서식은 번호 + 관련 header 만, 응답 
     assert.equal(para.paragraphs[0].ref, cell); assert.ok(para.header.charPr.some((c) => c.id === para.paragraphs[0].runs[0].charPrId));
     // 관리자가 한도를 5천 자로 → 다음 호출부터 줄인다(대상 문단은 남김)
     const L = await A('/api/admin/limits');
-    assert.deepEqual([L.limits.mcpResponseChars, L.defaults.mcpResponseChars], [40000, 40000]); assert.ok(L.guide.client);
+    assert.deepEqual([L.limits.mcpResponseChars, L.defaults.mcpResponseChars], [100_000, 100_000]); assert.ok(L.guide.client);
     const bad = await A.res('/api/admin/limits', { method: 'PATCH', body: { limits: { mcpResponseChars: 4000 }, revision: L.revision } });
     assert.deepEqual([bad.status, bad.data.error], [400, 'INVALID_LIMITS']);
     const saved = await A('/api/admin/limits', { method: 'PATCH', body: { limits: { mcpResponseChars: 5000 }, revision: L.revision } });

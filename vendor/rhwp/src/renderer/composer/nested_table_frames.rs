@@ -61,6 +61,18 @@ pub(crate) fn recompose_cell_lines_with_nested_tables_with_storage<S: crate::sto
 ) -> Result<(), S::Error> {
     let stored_geometry_policy = stored_geometry_policy.into();
     let original = source;
+    // A single authored row that the cell admits as compressed already
+    // supplies the correct vertical metrics. Do not rebuild its partition.
+    if cell_line_wrap == crate::model::table::CELL_LINE_WRAP_SQUEEZE
+        && composed.lines.len() == 1
+        && !source.stored_text_partition_is_dirty()
+        && !crate::renderer::para_has_no_stored_line_segs(source)
+    {
+        super::apply_cell_line_wrap_squeeze(composed, source, width, cell_line_wrap, styles, dpi);
+        if composed.cell_line_wrap_squeeze {
+            return Ok(());
+        }
+    }
     // 표의 물리 폭이 바뀌면 이전 폭으로 저장한 host 줄도 재사용할 수 없다.
     // 모델은 보존하고 같은 셀 폭에서 글자·개체 슬롯을 함께 다시 구성한다.
     let width_projection = (!stored_geometry_policy.preserve_hwp3_origins

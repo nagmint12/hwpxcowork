@@ -2,6 +2,9 @@
 // API 실행기(OpenAI·Claude·Gemini API — 개인 실행기·서버 개인 키·서버 공용 AI)와 Codex CLI 실행기가 같은 목록을 읽는다.
 // 실행기는 문서·요청·시도를 고정(bind)하고, 사람이 정할 일(반영·수락·거절·되돌리기)은 맡지 않는다.
 
+/** task/read/edit/finish를 공유하는 연결. 읽기 표현은 연결별로 정한다. */
+export const isTaskSurface = surface => surface === 'v2' || surface === 'v3';
+
 /** 배정된 문서 안 읽기(doc_id 고정) */
 export const DOC_READ = Object.freeze(['read_document', 'search_document', 'get_formatting', 'get_writing_guide', 'get_page_layout', 'read_skill_resource',
   'list_memos', 'list_proposals', 'list_changes', 'list_attachments', 'read_attachment', 'list_figures', 'list_tables', 'preview_figure', 'get_history', 'list_fields', 'get_edit_capabilities']);

@@ -79,6 +79,30 @@ pub(super) fn plan(
     None
 }
 
+/// [hwpx-cowork] #9025: an unstored title whose other objects do not consume line flow.
+pub(super) fn unstored_overlay_title_host(para: &Paragraph) -> bool {
+    use crate::model::control::Control;
+    use crate::model::shape::{CommonObjAttr, TextWrap, VertRelTo};
+    let overlay = |attr: &CommonObjAttr| {
+        !attr.treat_as_char
+            && matches!(attr.text_wrap, TextWrap::InFrontOfText | TextWrap::BehindText)
+    };
+    let off_flow = |attr: &CommonObjAttr| {
+        overlay(attr)
+            || (!attr.treat_as_char && matches!(attr.vert_rel_to, VertRelTo::Page | VertRelTo::Paper))
+    };
+    crate::renderer::para_has_no_stored_line_segs(para)
+        && para_has_non_whitespace_text(para)
+        && para.controls.iter().any(|ctrl| matches!(ctrl, Control::Table(table) if overlay(&table.common)))
+        && para.controls.iter().all(|ctrl| match ctrl {
+            Control::Table(table) => overlay(&table.common),
+            Control::Picture(picture) => off_flow(&picture.common),
+            Control::Shape(shape) => off_flow(shape.common()),
+            Control::SectionDef(_) | Control::ColumnDef(_) | Control::Header(_) | Control::Footer(_) => true,
+            _ => false,
+        })
+}
+
 /// [#7047] 글자 없는 데코레이션(글앞/글뒤) 표 host 문단이 저장 사다리에서 차지한
 /// 줄 전진량(HWPUNIT).
 ///

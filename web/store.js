@@ -544,6 +544,7 @@ export function createDocStore(id) {
     for (const k of Object.keys(t)) if (t[k] === undefined) delete t[k];
     const body = { kind: c.kind, preset: c.kind === 'polish' ? c.preset || 'concise' : null, instruction: c.instruction || '', target: t, attachments: [...c.attachments], options: { count: c.kind === 'suggest' ? Number(c.count) || 1 : undefined, includeInstruction: !!c.includeInstruction }, summary: null };
     if (c.route) body.route = c.route;
+    if (c.runSettings) body.options.runSettings = c.runSettings;
     if (c.kind === 'instruct' && c.workflow === 'content_format' && state.config?.features?.contentFormatWorkflow) body.options.workflow = 'content_format';
     if (c.tutorialStep) body.tutorialStep = c.tutorialStep;   // 튜토리얼 6 의 단계(연결이 없으면 그 단계의 예시 답변)
     if (c.format) body.options.format = c.format;
@@ -770,14 +771,11 @@ export function createDocStore(id) {
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     return { name: fileName, headers: r.headers };
   }
-  /**
-   * 버전·기록 복구(서버는 기록 n 을 받는다). 알림은 사람용 이름으로 — 'v3 내용으로 복구했습니다(v5 · 변경 추적, 문단 2개)'·
-   * '10-23 01:16 기록 내용으로 …'(label 을 주면 그것). 응답의 v = 복구로 생긴 새 버전(바뀐 것이 없으면 없음)
-   */
-  async function restoreVersion(n, label = null) {
+  /** 선택한 버전·기록에 저장된 파일로 교체한다. */
+  async function replaceVersion(n, label = null) {
     const name = label || versionLabel(n);
     const r = await call(() => api(`${base}/versions/${n}/restore`, { method: 'POST' }));
-    toast(r?.unchanged ? `${josa(name, '과/와')} 같습니다(바뀐 것 없음)` : `${name} 내용으로 복구했습니다(${r?.v != null ? `v${r.v} · ` : ''}변경 추적, 문단 ${r?.report?.changed?.length ?? '?'}개)`);
+    toast(r.unchanged ? `${name}의 파일과 현재 파일이 같습니다.` : `${name}의 파일로 교체했습니다${r.v != null ? ` (v${r.v})` : ''}.`);
     return r;
   }
 
@@ -1206,7 +1204,7 @@ export function createDocStore(id) {
     s, id, base, on, emit, refresh, byRef, textOf, request, proposal, attachment, memo, cr, proposalsOf, commentsOf, isCellRef, hasTable,
     targetForParagraph, targetFromCw, targetProblem: (t, kind) => targetProblem(t, kind, { realtime: realtime() }),
     addMemo, editMemo, deleteMemo, replyMemo, askAiFromMemo, resolveMemo, applyProposal, rejectProposal, undoProposal, reopenProposal, patchProposal, resolveChange,
-    createRequest, patchRequest, cancelRequest, retryRequest, uploadFiles, deleteAttachment, attachmentText, download, restoreVersion,
+    createRequest, patchRequest, cancelRequest, retryRequest, uploadFiles, deleteAttachment, attachmentText, download, replaceVersion,
     progress, canResolve, resolveRequest, recoverRequest, proposalDone, saveMilestone, versionLabel,
     openComposer, openPopover, openReply, closeWindow, windowHasText, connect, close,
     isMe, colorOf, setMyCr, adoptedByMe,

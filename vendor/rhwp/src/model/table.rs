@@ -310,6 +310,34 @@ impl Cell {
         total
     }
 
+    /// [hwpx-cowork] A clean, saved one-line cell can still use its original
+    /// compressed row after lineWrap is set to BREAK. Hancom 2022 keeps the
+    /// row when its stored width and available one-row height still match.
+    pub(crate) fn composition_line_wrap(&self, inner_width_hu: i32) -> u8 {
+        if self.line_wrap != 0 || self.dirty_flag || self.text_direction != 0 {
+            return self.line_wrap;
+        }
+        let [paragraph] = self.paragraphs.as_slice() else { return self.line_wrap };
+        let [line] = paragraph.line_segs.as_slice() else { return self.line_wrap };
+        if paragraph.stored_text_partition_is_dirty() || paragraph.cell_format_vpos_dirty
+            || paragraph.text.is_empty() || paragraph.text.contains(['\t', '\n'])
+            || !paragraph.controls.is_empty()
+            || line.tag & crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY != 0
+            || line.text_start != 0 || line.vertical_pos != 0 || line.column_start != 0
+            || line.line_height <= 0 || line.segment_width <= 0
+            || line.segment_width.abs_diff(inner_width_hu) > 2
+        {
+            return self.line_wrap;
+        }
+        let inner_height = i64::from(self.height) - i64::from(self.stored_vertical_padding_hu());
+        let line_height = i64::from(line.line_height);
+        if inner_height >= line_height && inner_height < 2 * line_height + i64::from(line.line_spacing) {
+            CELL_LINE_WRAP_SQUEEZE
+        } else {
+            self.line_wrap
+        }
+    }
+
     /// 1×1 표의 선언된 바깥 높이는 유일한 셀의 물리 높이이기도 하다.
     /// 여러 쪽에 걸치는 표도 셀에는 작은 초기 행 높이를 저장할 수 있다.
     /// 이 초기값만으로 판단하면 실제 안 여백이 축소된다(#7406, PrEP 39–40쪽:
@@ -1580,18 +1608,18 @@ impl Table {
         &self,
         storage: &S,
     ) -> Result<HwpUnit, S::Error> {
-        // [hwpx-cowork] HWPX 표는 한/글 실측에 따라 칸 폭에서 다시 센다.
-        if self.common.hwpx_size_rule { return Ok(self.layout_width_hu()); }
-        Ok({
-            if let Some(width) = self.closed_inline_grid_width_hu_with_storage(storage)? {
-                return Ok(width);
-            }
-            if self.common.width > 0 {
-                self.common.width
-            } else {
-                self.get_column_widths_with_storage(storage)?.iter().sum()
-            }
-        })
+        // [hwpx-cowork] 한/글 2022는 완결된 HWPX 표의 줄 점유에도 셀 안 여백과
+        // 최소 내용 폭을 적용한다. 행 구획이 열려 있으면 기존 HWPX 행 합을 쓴다.
+        if let Some(width) = self.closed_cell_grid_width_hu_with_storage(storage)? {
+            return Ok(width);
+        }
+        if self.common.hwpx_size_rule {
+            return Ok(self.layout_width_hu());
+        }
+        if self.common.width > 0 {
+            return Ok(self.common.width);
+        }
+        Ok(self.get_column_widths_with_storage(storage)?.iter().sum())
     }
     pub fn get_column_widths(&self) -> Vec<HwpUnit> {
         match self.get_column_widths_with_storage(&crate::storage::Unbounded) {

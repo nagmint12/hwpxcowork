@@ -2,25 +2,30 @@
 //   agentTake(맡기) · agentBrief(요청 내용 — 짧게) · agentRead(읽기 보기) · agentEdit(ops 를 제안으로) · agentFinish(완료·실패)
 // 문서를 바꾸는 일은 모두 지금 있는 서비스 길(proposeMany·propose·addMemo·completeRequest …)로 한다 — 여기서는 읽고, 풀고, 영수증을 줄일 뿐이다.
 // 주의: _read·_tx 는 문서별 대기열이라 겹쳐 부르면 멈춘다(server/store.js withDoc) — _read 안에서는 대기열을 타는 서비스 메서드를 부르지 않는다.
+import { createHash } from 'node:crypto';
 import { HwpxDoc } from '../../engine/doc.js';
 import { docBytesSync, containerFromBytesSync } from '../../engine/toc.js';
-import { editPageLayout } from '../../engine/page-layout.js';
+import { editPageLayout, elements } from '../../engine/page-layout.js';
+import { HwpxContainer } from '../../engine/container.js';
 import { ServiceError } from '../service.js';
 import { needsFormatting } from '../ai.js';
 import { imageForModel } from '../image-convert.js';
-import { docMap, textLines, pageLines, layoutLines, outlineLines, tableLines, rangePicker } from './views.js';
-import { parseOps, prepareOps, opsGuide, nativeChartAsked, NATIVE_CHART_TODO } from './ops.js';
+import { docMap, textLines, pageLines, layoutLines, outlineLines, tableLines, cellLines, rangePicker } from './views.js';
+import { tsvTableLines, pageTsvLines, findTsvLines } from './tsv-view.js';
+import { parseOps, prepareOps, opsGuide, opGuide, nativeChartAsked, NATIVE_CHART_TODO } from './ops.js';
 import { standardStyleNames } from '../../engine/page-layout.js';
 import { namedStyle, styleDefinitions, styleUsage, styleHeading, styleDetail } from '../../engine/formatting.js';
 import { pageEstimateMethods } from '../page-estimate.js';
 import { withdrawMethods, pidRanges } from '../proposal-withdraw.js';
+import * as MT from '../memotext.js';
+import { replaceRange, rangeConflicts, shortText } from './apply-check.js';
 
 const VERIFY_NOTE = Symbol.for('hwpx-cowork.verifyNote');
 const STOP = new Set(['REQUEST_CLOSED', 'ATTEMPT_CHANGED', 'CLAIMED', 'CLAIM_REQUIRED', 'NOT_OWNER']);
 const BRIEF_CONTEXT_CHARS = 6000;
 // 완료 막기 안내(agentEdit done — 2026-11-17 REPORT.md 문제 1)
 const BLOCKED_NOTE = '요청을 완료하지 않았습니다(저장은 됐다) — [모두 반영]하면 apply_failed 의 제안이 실패한다. withdraw 로 그 제안을 거두고 고쳐 다시 내거나, 먼저 반영돼야 할 제안이 앞 번호가 되게 다시 낸 뒤 done 을 다시 준다';
-/** pages.apply_failed(반영에서 실패할 제안)를 영수증 맨 위 칸으로도 올린다 — pages 안에 묻혀 모델이 지나치지 않게(2026-11-17 같은 문제) */
+/** pages.apply_failed(반영에서 실패할 제안)를 영수증 맨 위 칸으로도 올린다 — pages 안에 묻혀 모델이 지나치지 않게(2026-11-17 같은 문제). v3 는 _withApplyCheck 가 apply_check 와 함께 한다(2026-11-20 §19) */
 const liftFailed = (o) => (o?.pages?.apply_failed?.length ? { apply_failed: o.pages.apply_failed, ...o } : o);
 // 한 호출은 다 저장되거나 하나도 저장되지 않는다(2026-11-17 — docs/MCP_REDESIGN_2026-11-16.md §10.4 나-4)
 const NOT_SAVED = '저장하지 못할 op 가 있어 아무것도 저장하지 않았습니다 — failed 의 op 를 고쳐 ops 전체를 다시 내세요';
@@ -34,9 +39,77 @@ const BRIEF_WHOLE_CHARS = 12000;
 /** 이 지침(표준서식 작성 지침)의 예전 도구 이름을 새 연결의 op 로 읽는 법 — read view='guide' 응답 앞에 붙인다 */
 const GUIDE_NAMES_NOTE = "이 지침의 도구 이름은 예전 연결의 것이다. 새 연결에서는 이렇게 읽는다: propose_insert(after_ref, paragraphs) → edit 의 {op:'insert', after, paragraphs:[{text, style}]}(blank=true → text:''), format.styleId → style(스타일 이름), get_formatting → read(view='format', at), propose_changes → {op:'replace'}, propose_table → {op:'table'}, propose_table_edit → {op:'table_edit'}, propose_figure → {op:'figure'}(차트·그래프도 그림으로 직접 그린다), propose_toc_update → {op:'toc'}, read_document → read, get_writing_guide(part='spec') → read(view='guide', id='spec'). 표 앞 단위 줄·표 아래 주석 → table 의 unit·notes(insert 로 따로 넣지 않는다), 문단·절 지우기·옮기기 → {op:'delete_paragraphs'}·{op:'move_paragraphs'}, 같은 낱말 모두 바꾸기 → {op:'replace_all'}.";
 const dropEmpty = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length))));
-const escapeContext = (s) => String(s).replace(/<(\/?)(document_context)/gi, '＜$1$2');
-const wrapContext = (s) => `<document_context>\n${escapeContext(s)}\n</document_context>`;
+const wrapContext = (value, surface = 'v2') => {
+  const tags = surface === 'v3' ? /<(\/?)(document_context|request_brief)(?=[\s/>])/gi : /<(\/?)(document_context)/gi;
+  return `<document_context>\n${String(value).replace(tags, '＜$1$2')}\n</document_context>`;
+};
 const clip = (s, max) => { const t = [...String(s ?? '')]; return t.length > max ? `${t.slice(0, max).join('')}…` : t.join(''); };
+
+// 같은 보기라도 문서·검색어·범위가 다르면 같은 행 번호가 다른 글을 가리킨다.
+function tsvCursorKey(docId, view, at, item = null, find = null) {
+  const address = cellAddress(at) || at || null;
+  return createHash('sha256').update(JSON.stringify([docId, view, address, item, find])).digest('hex').slice(0, 16);
+}
+function tsvCursor(view, version, page, key) {
+  return `v3:${view}:${version}:${page.to}:${page.offset}:${key}`;
+}
+
+function tsvBriefContext(doc, docId, version, target, refs, budget) {
+  const body = doc.sections.flatMap(s => s.bodyParas);
+  const selected = new Set(refs);
+  const scope = target.scope === 'document';
+  let at = null;
+  if (scope && (target.from != null || target.to != null)) {
+    const slice = body.slice(Number(target.from) || 0, target.to == null ? undefined : Number(target.to));
+    if (!slice.length) return { context: '', more: null };
+    at = `${slice[0].ref}..${slice.at(-1).ref}`;
+  } else if (!scope && refs.length) {
+    const owners = new Set(refs.map(ref => ref.split('/').slice(0, 2).join('/')));
+    const indices = body.flatMap((p, i) => owners.has(p.ref) ? [i] : []);
+    if (indices.length) {
+      const first = indices[0], last = indices.at(-1);
+      let left = first, right = last;
+      while (left > 0 && first - left < 2 && body[left - 1].ref.split('/')[0] === body[first].ref.split('/')[0]) left--;
+      while (right + 1 < body.length && right - last < 2 && body[right + 1].ref.split('/')[0] === body[last].ref.split('/')[0]) right++;
+      at = `${body[left].ref}..${body[right].ref}`;
+    }
+  }
+  const { lines } = textLines(doc, { pick: rangePicker(at), surface: 'v3' });
+  const whole = scope && budget === BRIEF_CONTEXT_CHARS;
+  let page = pageTsvLines(lines, { maxChars: whole ? BRIEF_WHOLE_CHARS : budget });
+  if (whole && !page.done) page = pageTsvLines(lines, { maxChars: budget });
+  // 선택이 긴 표 아래쪽이면 그 행에서 시작한다. *나 들여쓰기를 셀 값으로 섞지 않는다.
+  if (!scope && selected.size && !page.done) {
+    const targetLine = lines.findIndex(l => selected.has(l.ref) || (l.kind === 'tsv' && l.cells.some(c => c.refs.some(ref => selected.has(ref)))));
+    if (targetLine >= page.to) page = pageTsvLines(lines, { from: targetLine, maxChars: budget });
+  }
+  const more = page.done ? null : `이어 읽기 read(view='text'${at ? `, at='${at}'` : ''}, cursor='${tsvCursor('text', version, page, tsvCursorKey(docId, 'text', at))}')`;
+  return { context: page.text, more };
+}
+
+// ── 읽기의 표 칸(2026-11-19 — docs/MCP_REDESIGN_2026-11-16.md §17) ──
+// 실제 Codex 요청 3건 모두 read(at:{table,row,col})가 입력 검사에서 거절됐다(칸 주소는 edit 만 받았다). 칸 문단 주소('s0/p3/n9')로 읽어도 표 전체 줄이
+// 다시 왔다. 칸 주소·칸 문단 주소로 읽으면 그 칸의 문단을 주소와 함께 준다
+/** 표 칸 주소({table,row,col} — 객체 또는 그 JSON 글: 글만 받는 클라이언트는 JSON 글로 보낸다) → { table, row, col } | null */
+const cellAddress = (at) => {
+  let v = at;
+  if (typeof v === 'string' && /^\s*\{/.test(v)) { try { v = JSON.parse(v); } catch { return null; } }
+  return v && typeof v === 'object' && !Array.isArray(v) && typeof v.table === 'string' && Number.isInteger(v.row) && Number.isInteger(v.col) && v.row >= 0 && v.col >= 0 ? { table: v.table, row: v.row, col: v.col } : null;
+};
+/** 읽기의 at 이 가리키는 표 칸 → { t, c, mark(물어본 칸 문단 주소 | null) } | null(칸 주소·칸 문단 주소가 아님). 칸 주소인데 그 표·칸이 없으면 던진다 */
+function cellOfAt(doc, at) {
+  const addr = cellAddress(at);
+  if (addr) {
+    const t = doc.tables().find((x) => x.key === addr.table);
+    const c = t?.cells.find((x) => addr.row >= x.row && addr.row < x.row + x.rowSpan && addr.col >= x.col && addr.col < x.col + x.colSpan);
+    if (!c) throw new ServiceError(t ? 'NO_CELL' : 'NO_TABLE', t ? `표 ${addr.table} 에 (${addr.row}, ${addr.col}) 칸이 없습니다(${t.rows}×${t.cols}, 0부터)` : `표를 찾지 못했습니다: ${addr.table}(read view='tables')`);
+    return { t, c, mark: null };
+  }
+  if (typeof at !== 'string' || !/^s\d+\/p\d+(?:\/n\d+)+$/.test(at.trim())) return null;
+  const ref = at.trim();
+  for (const t of doc.tables()) { const c = t.cells.find((x) => x.refs.includes(ref)); if (c) return { t, c, mark: ref }; }
+  return null;
+}
 
 const TODO = {
   review: () => '문제점·개선점은 edit 의 memo 로, 꼭 고칠 표현만 replace 로 남긴다.',
@@ -70,7 +143,7 @@ function compactSaved(rows, summaries = []) {
     if (j - i >= 2 || s) {
       const run = rows.slice(i, j + 1); if (s) used.add(x.op);
       const tables = [...new Set(run.map((r) => r.table))];
-      out.push(dropEmpty({ op: x.op, ...(s ? { replaced: s.replaced, paragraphs: s.paragraphs, where: s.where, not_searched: s.not_searched } : { count: run.length }), pids: pidRanges(run.map((r) => r.pid)), ...(s && run.length !== s.replaced ? { count: run.length } : {}), table: tables.length === 1 ? tables[0] : null, status: x.status }));
+      out.push(dropEmpty({ op: x.op, ...(s ? { replaced: s.replaced, merged: s.merged, paragraphs: s.paragraphs, where: s.where, not_searched: s.not_searched } : { count: run.length }), pids: pidRanges(run.map((r) => r.pid)), ...(s && run.length !== s.replaced ? { count: run.length } : {}), table: tables.length === 1 ? tables[0] : null, status: x.status }));
       i = j + 1;
     } else { out.push(x); i++; }
   }
@@ -84,14 +157,15 @@ function compactReports(reports) {
   // numbers = 숫자 토큰 보존 검사를 지난 수(붙거나 갈라지면 제안이 만들어지지 않는다)
   const bgText = (b) => (!b ? null : [b.removed ? `${n(b.removed)}장 지움` : '', b.behind ? `${n(b.behind)}장 글 뒤로${b.content ? `(내용으로 보여 지우지 않음 ${n(b.content)}장)` : ''}` : ''].filter(Boolean).join(' · ') || null);
   const coverText = (c) => (!c?.count ? null : `글 앞 개체 ${n(c.count)}개가 옮긴 글 영역에 겹친다(${c.items.map((x) => `${x.ref} ${x.name} ${x.mm}mm`).join(' · ')}${c.count > c.items.length ? ' …' : ''}) — 글을 가릴 수 있다: remove_rest 로 지우거나, 쪽 배경이면 background:'behind'`);
-  return (reports || []).map((r) => dropEmpty({ tables: r.tables, paragraphs: r.paragraphs, removed: r.removed, removed_rest: r.removedRest || null, kept: r.kept || null,
+  return (reports || []).map((r) => (r.inserted ? dropEmpty({ document: r.inserted, after: r.after, paragraphs: r.paragraphs, tables: r.tables || null, figures: r.figures || null, shapes: r.shapes || null, chars: r.chars, memos_dropped: r.memos || null, first: r.first })   // 문서 끼워 넣기(v3 실험 — §21)
+    : dropEmpty({ tables: r.tables, paragraphs: r.paragraphs, removed: r.removed, removed_rest: r.removedRest || null, kept: r.kept || null,
     backgrounds: bgText(r.backgrounds), warning: coverText(r.covering),
     dropped: r.dropped.length ? { count: r.dropped.length, why: [...new Set(r.dropped.map((d) => d.why))].join('·'), sample: r.dropped.slice(0, 5).map((d) => clip(d.text, 20)) } : null,
     // 쪽을 넘어 이은 표(join_pages 기본 true — 되풀이 머리행은 dropped 의 '되풀이 머리행'으로 센다)
     joined: r.tables.some((t) => t.pages > 1) ? `쪽을 넘는 표 ${r.tables.filter((t) => t.pages > 1).length}개를 한 표로 이었다(쪽마다 따로는 join_pages:false)` : null,
     sections: r.sections[0] !== r.sections[1] ? `${r.sections[0]} → ${r.sections[1]}` : null, margins_mm: r.margins,
     numbers: r.text.numbers != null ? `숫자 ${n(r.text.numbers)}개 그대로` : null,
-    text: `옮긴 글자 ${n(r.text.moved)} + 버린 글자 ${n(r.text.dropped)}${r.text.removedWithObjects ? ` + 남은 개체와 함께 지운 글자 ${n(r.text.removedWithObjects)}` : ''} = 원문 글상자·본문 글자 ${n(r.text.source)}(빠진 글자 ${r.text.lost})` }));
+    text: `옮긴 글자 ${n(r.text.moved)} + 버린 글자 ${n(r.text.dropped)}${r.text.removedWithObjects ? ` + 남은 개체와 함께 지운 글자 ${n(r.text.removedWithObjects)}` : ''} = 원문 글상자·본문 글자 ${n(r.text.source)}(빠진 글자 ${r.text.lost})` })));
 }
 
 export const agentServiceMethods = {
@@ -106,7 +180,7 @@ export const agentServiceMethods = {
    * 요청 내용(모델용 — 글과 주소만): 지시·대상·문서 얼개·대상 주변 글(문서 전체 대상이면 앞부분, 글이 글상자에 든 문서면 배치 요약)·할 일 한 줄.
    * 서식 번호·이력·해결 통계는 싣지 않는다(서식은 read view='format').
    */
-  async agentBrief(id, rid, user, { session = null, budget = BRIEF_CONTEXT_CHARS } = {}) {
+  async agentBrief(id, rid, user, { session = null, budget = BRIEF_CONTEXT_CHARS, surface = 'v2' } = {}) {
     return this._read(id, async () => {
       const { doc, meta } = await this._load(id);
       const r = this._req(meta, rid);
@@ -116,7 +190,9 @@ export const agentServiceMethods = {
       const refs = Array.isArray(t.refs) && t.refs.length ? t.refs : (t.ref ? [t.ref] : []);
       const map = docMap(doc, { title: meta.title });
       let context = ''; let more = null;
-      if (map.stats.floating) {
+      if (surface === 'v3') {
+        ({ context, more } = tsvBriefContext(doc, id, meta.version, t, refs, budget));
+      } else if (map.stats.floating) {
         const page = pageLines(layoutLines(doc, { detail: false }).lines, { maxChars: budget });
         context = page.text;
         if (!page.done) more = `배치 요약이 길어 줄였다(${page.to}/${page.total}줄) — read(view='layout', cursor='layout:${meta.version}:${page.to}')`;
@@ -135,7 +211,8 @@ export const agentServiceMethods = {
         for (const x of refs) { const m = /^s(\d+)\/p(\d+)/.exec(x); if (!m) continue; const cur = ranges.get(Number(m[1])) || [Infinity, -Infinity]; ranges.set(Number(m[1]), [Math.min(cur[0], Number(m[2]) - 2), Math.max(cur[1], Number(m[2]) + 2)]); }
         const { lines } = textLines(doc, { pick: (s, b) => { const g = ranges.get(s); return !!g && b >= g[0] && b <= g[1]; } });
         const targets = new Set(refs);
-        const isTarget = (l) => !!l.ref && (targets.has(l.ref) || [...targets].some((x) => l.ref.startsWith(`${x}/`) || (t.tableKey && l.table === t.tableKey)));
+        // 대상 표시: 그 문단(문단을 펼친 칸의 문단 줄 포함)과 그 문단 안의 것. 2026-11-19: 표 줄에 문단 주소가 생겨 '대상 표의 모든 줄' 조건은 뺐다(대상 칸 문단만 * 로)
+        const isTarget = (l) => !!l.ref && (targets.has(l.ref) || [...targets].some((x) => l.ref.startsWith(`${x}/`)));
         const marked = lines.map((l) => ({ text: `${isTarget(l) ? '*' : ' '}${l.text}` }));
         const page = pageLines(marked, { maxChars: budget });
         context = page.text;
@@ -148,13 +225,13 @@ export const agentServiceMethods = {
       }
       const whole = !scope && refs.length === 1 && t.text && (() => { try { return doc.text(refs[0], 'final') === t.text; } catch { return false; } })();
       const target = scope ? dropEmpty({ scope: '문서 전체', from: t.from, to: t.to })
-        : dropEmpty({ ref: t.ref, refs: refs.length > 1 ? refs : null, text: whole ? null : (t.text || null), whole: whole || null, start: whole ? null : t.start, end: whole ? null : t.end, table: t.tableKey || null, cell });
+        : dropEmpty({ ref: t.ref || (surface === 'v3' && refs.length === 1 ? refs[0] : null), refs: refs.length > 1 ? refs : null, text: whole ? null : (t.text || null), whole: whole || null, start: whole ? null : t.start, end: whole ? null : t.end, table: t.tableKey || null, cell });
       const closed = r.status === 'done' || r.status === 'cancelled';
       const count = Number(r.options?.count) || 1;
       const styleRequest = !v.instructionHidden && /글머리\s*표|빈\s*네모|채운\s*네모|개요\s*수준|문단\s*(번호|테두리)|탭\s*(위치|간격)|(?:같은|동일)\s*스타일/u.test(String(v.instruction || r.followUp?.instruction || ''));
       const todo = closed ? `이 요청은 이미 ${r.status === 'done' ? '완료' : '취소'}되었다 — 더 손대지 않는다.` : [
         r.followUp ? '이 요청은 메모에 사람이 단 답장이다 — follow_up.memo_text(앞 작업 메모, 자료)의 맥락을 이어 instruction 대로 실제 결과를 낸다.' : '',
-        map.stats.floating ? "context 는 배치 요약이다(문단마다 읽힌 줄·표, 마지막 줄 = 옮기면 생길 표·문단). 글상자를 본문·표로 옮기는 일이면 이것으로 충분하다 — 바로 objects_to_body 를 쓰고(먼저 결과를 보려면 dry_run), 줄·칸을 자세히 보려면 read(view='layout', at='s0/p0')." : '',
+        map.stats.floating ? (surface === 'v3' ? "떠 있는 글상자·선의 줄 배치는 read(view='layout')으로 읽는다." : "context 는 배치 요약이다(문단마다 읽힌 줄·표, 마지막 줄 = 옮기면 생길 표·문단). 글상자를 본문·표로 옮기는 일이면 이것으로 충분하다 — 바로 objects_to_body 를 쓰고(먼저 결과를 보려면 dry_run), 줄·칸을 자세히 보려면 read(view='layout', at='s0/p0').") : '',
         (TODO[r.kind] || TODO.instruct)(count),
         // 한/글 차트 개체는 op 목록에 없다(server/mcp2/ops.js HIDDEN_OPS) — 지시가 그것을 가리켜 말했을 때만 꼴을 볼 길을 알린다(2026-11-18)
         !v.instructionHidden && (nativeChartAsked(v.instruction) || nativeChartAsked(r.followUp?.instruction)) ? NATIVE_CHART_TODO : '',
@@ -169,6 +246,7 @@ export const agentServiceMethods = {
       const existing = r.proposals.length || r.comments.length || r.resultAttachments.length
         ? { proposals: this._reqProposals(meta, r).filter((p) => !['rejected', 'undone', 'superseded'].includes(p.status)).length, memos: r.comments.length, files: r.resultAttachments.length, note: "이어받은 요청 — read(view='proposals') 로 이미 낸 결과를 보고 남은 일만 한다" } : null;
       return dropEmpty({
+        ...(surface === 'v3' ? { surface } : {}),
         doc_id: id, request_id: r.rid, attempt: v.attempt ?? 1, title: meta.title, status: r.status, kind: r.kind, label: v.label,
         ...(v.instructionHidden ? { instruction_hidden: true } : { instruction: v.instruction || '' }),
         options: dropEmpty({ count: count > 1 ? count : null, format: r.options?.format || null }),
@@ -176,7 +254,7 @@ export const agentServiceMethods = {
         follow_up: r.followUp ? dropEmpty({ memo_id: r.followUp.memoId, request: r.followUp.rid, memo_text: r.followUp.memoText, instruction: r.followUp.instruction }) : null,
         attachments: (v.attachments || []).map((a) => dropEmpty({ id: a.aid, name: a.name, kind: a.kind, chars: a.chars, deleted: a.deleted || null })),
         existing,
-        map: map.text, context: wrapContext(context), more, todo,
+        map: map.text, context: wrapContext(context, surface), more, todo,
         claim: claim && (!claim.mine || claim.expired) ? dropEmpty({ mine: !!claim.mine, agent: claim.agent, by: claim.by, expires: claim.expires, expired: claim.expired || null }) : null,
       });
     });
@@ -186,33 +264,46 @@ export const agentServiceMethods = {
    * 읽기 보기 → { text } | { content }(그림 첨부).
    * view: text(기본) · layout · outline · map · tables · objects · format · memos · proposals · changes · fields · figures · attachments · attachment · page · guide · history · requests
    */
-  async agentRead(id, { view = 'text', at = null, find = null, cursor = null, maxChars = null, item = null, detail = null, status = null } = {}, user) {
+  async agentRead(id, { view = 'text', at = null, find = null, cursor = null, maxChars = null, item = null, detail = null, status = null, surface = 'v2' } = {}, user) {
     const limit = Math.max(1000, Math.min(Number(maxChars) || 20000, this.mcpLimit() - 600));
     const compact = (v) => ({ text: JSON.stringify(v) });
     const paged = ['text', 'layout', 'outline', 'tables', 'objects'];
     if (paged.includes(view) || view === 'map') {
       return this._read(id, async () => {
         const { doc, meta } = await this._load(id);
-        let from = 0;
-        if (cursor) {
+        const tsv = surface === 'v3' && (view === 'text' || view === 'tables');
+        const key = tsv ? tsvCursorKey(id, view, at, item, find) : null;
+        let from = 0, offset = 0;
+        if (cursor && tsv) {
+          const match = /^v3:(text|tables):(\d+):(\d+):(\d+):([\da-f]+)$/.exec(cursor);
+          if (!match || match[1] !== view || match[5] !== key) throw new ServiceError('BAD_CURSOR', '같은 v3 문서·보기·범위·검색의 cursor를 보내세요');
+          if (Number(match[2]) !== meta.version) throw new ServiceError('READ_CHANGED', '이어 읽는 동안 문서가 바뀌었습니다. 처음부터 다시 읽으세요', 409);
+          from = Number(match[3]); offset = Number(match[4]);
+        } else if (cursor) {
           const m = /^([a-z]+):(\d+):(\d+)$/.exec(String(cursor));
           if (!m || m[1] !== view) throw new ServiceError('BAD_CURSOR', `이 보기(${view})의 cursor 가 아닙니다 — 응답에 적힌 cursor 를 그대로, 같은 view·at 으로 보내세요`);
           if (Number(m[2]) !== meta.version) throw new ServiceError('READ_CHANGED', '이어 읽는 동안 문서가 바뀌었습니다. 필요한 범위를 처음부터 다시 읽으세요', 409);
           from = Number(m[3]);
         }
-        const pick = rangePicker(at);
+        // 표 칸(칸 주소 {table,row,col}·칸 문단 주소 's0/p3/n9')을 물었으면 그 칸의 문단을 주소와 함께 준다(본문 보기만 — 2026-11-19, 위 cellOfAt)
+        const cell = view === 'text' ? cellOfAt(doc, at) : null;
+        const pick = cell ? null : rangePicker(at && typeof at === 'object' && !Array.isArray(at) ? JSON.stringify(at) : at);
         if (view === 'map') return { text: docMap(doc, { title: meta.title }).text };
         let lines; let head = '';
         if (view === 'text') {
-          const out = textLines(doc, { pick });
-          lines = out.lines; head = `본문 문단 ${out.bodyTotal.toLocaleString('ko-KR')}개`;
-          if (find != null && String(find) !== '') {
+          if (cell) { const one = cellLines(doc, cell.t, cell.c, { mark: cell.mark }); lines = one.lines; head = one.head; }
+          else { const out = textLines(doc, { pick, surface }); lines = out.lines; head = `본문 문단 ${out.bodyTotal.toLocaleString('ko-KR')}개`; }
+          if (tsv && find) {
+            lines = findTsvLines(lines, find);
+            head += ` — 「${clip(find, 30)}」 검색 결과 ${lines.length}건`;
+            if (!lines.length) lines = [{ text: '(찾는 글이 없습니다)' }];
+          } else if (find != null && String(find) !== '') {
+            // 찾는 글이 든 줄만. 표 안의 줄(줄·문단을 펼친 칸의 문단 — kind)이 맞으면 그 표의 머리 줄(▦)을 한 번 앞세운다
             const needle = String(find).toLowerCase(); const hit = []; let table = null; let tablePushed = false;
             for (const l of lines) {
-              const isHead = /^\s*▦ /.test(l.text); if (isHead) { table = l; tablePushed = false; }
-              const isRow = /^\s+r\d+ \|/.test(l.text); if (!isRow && !isHead) table = null;
+              const isHead = l.kind === 'table'; if (isHead) { table = l; tablePushed = false; } else if (!l.table) table = null;
               if (!l.text.toLowerCase().includes(needle)) continue;
-              if (isRow && table && !tablePushed) { hit.push(table); tablePushed = true; }
+              if (!isHead && l.table && table && !tablePushed) { hit.push(table); tablePushed = true; }
               if (!(isHead && tablePushed)) hit.push(l);
               if (isHead) tablePushed = true;
             }
@@ -227,7 +318,13 @@ export const agentServiceMethods = {
           const tables = doc.tables();
           if (item) {
             const t = tables.find((x) => x.key === item); if (!t) throw new ServiceError('NO_TABLE', `표를 찾지 못했습니다: ${item} (read view='tables' 의 열쇠)`);
-            lines = [{ text: `▦ ${t.key} 표 ${t.rows}×${t.cols}${t.caption?.text ? ` 「${clip(t.caption.text, 80)}」` : ''}` }, ...tableLines(t).map((x) => ({ text: x }))];
+            // 칸 안 문단 나눔(¶)·문단 많은 칸의 문단별 주소는 본문 보기와 같다(views.js tableLines)
+            const textOf = (ref) => { try { return doc.text(ref, 'final'); } catch { return ''; } };
+            lines = tsv ? tsvTableLines(t) : [{ text: `▦ ${t.key} 표 ${t.rows}×${t.cols}${t.caption?.text ? ` 「${clip(t.caption.text, 80)}」` : ''}` }, ...tableLines(t, { textOf }).map((x) => ({ text: x }))];
+            if (tsv && find) {
+              lines = findTsvLines(lines, find);
+              if (!lines.length) lines = [{ text: '(찾는 글이 없습니다)' }];
+            }
           } else lines = tables.length ? tables.map((t) => ({ text: `${t.key} ${t.rows}×${t.cols}${t.caption?.text ? ` 「${clip(t.caption.text.replace(/\s+/g, ' '), 80)}」` : ''}` })) : [{ text: '(표가 없습니다)' }];
           head = item ? '' : `표 ${tables.length}개 — 칸 글은 id=표 열쇠`;
         } else {   // objects
@@ -241,9 +338,12 @@ export const agentServiceMethods = {
           if (!lines.length) lines = [{ text: '(표·그림·도형이 없습니다)' }];
           head = '문단이 가진 개체';
         }
-        const page = pageLines(lines, { from, maxChars: limit });
-        const tail = page.done ? '' : `\n…이어 읽기(${page.to}/${page.total}줄): read(view='${view}'${at ? `, at='${at}'` : ''}${find ? ', find=…' : ''}${item ? `, id='${item}'` : ''}, cursor='${view}:${meta.version}:${page.to}')`;
-        return { text: `${head ? `${head}${from ? `(줄 ${from}부터)` : ''}\n` : ''}${wrapContext(page.text)}${tail}` };
+        if (tsv && cursor && (!Number.isSafeInteger(from) || !Number.isSafeInteger(offset) || from >= lines.length || (offset && offset >= lines[from].text.length))) throw new ServiceError('BAD_CURSOR', 'v3 이어 읽기 위치가 범위를 벗어났습니다');
+        const page = tsv ? pageTsvLines(lines, { from, offset, maxChars: limit }) : pageLines(lines, { from, maxChars: limit });
+        const atText = at == null || at === '' ? '' : `, at=${typeof at === 'string' ? `'${at}'` : JSON.stringify(at)}`;
+        const next = tsv ? tsvCursor(view, meta.version, page, key) : `${view}:${meta.version}:${page.to}`;
+        const tail = page.done ? '' : `\n…이어 읽기(${page.to}/${page.total}줄): read(view='${view}'${atText}${find ? (tsv ? `, find=${JSON.stringify(find)}` : ', find=…') : ''}${item ? `, id='${item}'` : ''}, cursor='${next}')`;
+        return { text: `${head ? `${head}${from ? `(줄 ${from}부터)` : ''}\n` : ''}${wrapContext(page.text, surface)}${tail}` };
       });
     }
     // 문서의 스타일 목록(2026-11-18 — docs/MCP_REDESIGN_2026-11-16.md §15): 이름과 쓰인 문단 수, 표준서식 스타일 가운데 없는 것과 들여오는 길.
@@ -278,20 +378,32 @@ export const agentServiceMethods = {
       });
     }
     if (view === 'format') {
-      let refs = Array.isArray(at) ? at : at ? String(at).split(',').map((s) => s.trim()).filter(Boolean) : null;
+      // 2026-11-19: 표 칸 주소({table,row,col} — JSON 글로 와도)는 그 칸의 문단 전체, 칸 문단 범위('s0/p3/n9..n28')는 그 사이 칸 문단으로 푼다.
+      // 실제 Opus 실행이 칸 주소의 JSON 글을 줬다가 NO_TABLE, 칸 문단 범위를 줬다가 엉뚱하게 본문 문단(s0/p3) 서식을 받았다
+      const cellAddr = cellAddress(at);
+      let refs = cellAddr ? [cellAddr] : Array.isArray(at) ? at : at ? String(at).split(',').map((s) => s.trim()).filter(Boolean) : null;
       if (!refs?.length) throw new ServiceError('BAD_ARGS', "view='format' 은 at 에 서식을 볼 문단 주소(들)를 줍니다(예: at='s0/p3' 또는 's0/p3,s0/p4'). 스타일 이름만 필요하면 view='text' 의 〔 〕 로 충분합니다");
       // 범위('s1/p3..p9')·구역('s2')은 다른 보기처럼 그 안의 본문 문단으로 푼다(2026-11-16 밤 실험: 범위를 주면 NO_PARAGRAPH 였다)
       // 2026-11-17(§10.4 나-n 작은 버그): 역슬래시가 빠진 /..|^sd+$/ 는 모든 주소(표 칸 's0/p3/n2' 포함)를 범위로 보고 본문 문단으로 바꿨다 —
       // 범위는 '..' 가 든 것, 구역은 's숫자' 하나뿐인 것만
       // 2026-11-18: 표 열쇠('s0/p3#t0')는 그 표의 머리행·첫 자료행 칸 문단으로(칸 서식은 줄마다 대개 같다 — 표 전체를 다 싣지 않는다), '*' 는 모든 본문 문단으로 푼다.
       // 실제 Codex 실행이 표 열쇠·'*' 를 줬다가 NO_PARAGRAPH 를 받았다
-      const isTable = (x) => /#t\d+/.test(String(x));
-      const isRange = (x) => String(x).includes('..') || /^s\d+$/.test(String(x)) || String(x) === '*' || isTable(x);
+      const isCell = (x) => !!x && typeof x === 'object';
+      const isTable = (x) => !isCell(x) && /#t\d+/.test(String(x));
+      const nestedRange = (x) => (isCell(x) ? null : /^(s\d+\/p\d+(?:\/n\d+)*)\/n(\d+)\s*\.\.\s*(?:\1\/)?n(\d+)$/.exec(String(x).trim()));
+      const isRange = (x) => isCell(x) || String(x).includes('..') || /^s\d+$/.test(String(x)) || String(x) === '*' || isTable(x);
       if (refs.some(isRange)) {
         refs = await this._read(id, async () => {
           const { doc } = await this._load(id); const out = []; let tables = null;
           for (const x of refs) {
             if (!isRange(x)) { out.push(x); continue; }
+            if (isCell(x)) { out.push(...cellOfAt(doc, x).c.refs); continue; }
+            const nr = nestedRange(x);
+            if (nr) {
+              // 칸 문단 범위: 있는 문단까지만(끝 번호를 넉넉히 줘도 된다)
+              for (let k = Number(nr[2]); k <= Number(nr[3]) && out.length <= 200; k++) { const r = `${nr[1]}/n${k}`; try { doc.resolve(r); } catch { break; } out.push(r); }
+              continue;
+            }
             if (isTable(x)) {
               tables ??= doc.tables(); const t = tables.find((k) => k.key === String(x));
               if (!t) throw new ServiceError('NO_TABLE', `표를 찾지 못했습니다: ${x}(read view='tables')`);
@@ -304,7 +416,7 @@ export const agentServiceMethods = {
           }
           return out;
         });
-        if (!refs.length) throw new ServiceError('NO_PARAGRAPH', `그 범위에 본문 문단이 없습니다: ${Array.isArray(at) ? at.join(',') : at}`);
+        if (!refs.length) throw new ServiceError('NO_PARAGRAPH', `그 범위에 문단이 없습니다: ${Array.isArray(at) ? at.join(',') : typeof at === 'string' ? at : JSON.stringify(at)}`);
         if (refs.length > 200) throw new ServiceError('BAD_ARGS', `view='format' 은 한 번에 문단 200개까지입니다(범위 안 ${refs.length}개) — 범위를 줄이세요`);
       }
       const fmt = await this.getFormatting(id, { refs, breaks: true });   // 쪽 나눔이 걸린 문단은 pageBreakBefore:true(format op 의 같은 키로 끄고 켠다)
@@ -313,7 +425,7 @@ export const agentServiceMethods = {
       return compact(fmt);
     }
     if (view === 'memos') return compact((await this.memos(id, user)).map((m) => dropEmpty({ id: m.id, ref: m.ref, by: m.author, text: clip(m.body ?? m.text ?? '', 400), link: m.link, replies: m.thread?.replies?.length || null, resolved: m.thread?.resolved ? true : null })));
-    if (view === 'proposals') return compact((await this.listProposals(id, status || undefined)).map((p) => dropEmpty({ pid: p.pid, type: p.type, status: p.status, ref: p.ref || p.afterRef, request: p.rid, find: p.find ? clip(p.find, 60) : null, with: p.replace != null ? clip(p.replace, 80) : null, text: p.text ? clip(p.text, 80) : null, labels: p.pageLayout?.labels || p.tableEdit?.labels || null })));
+    if (view === 'proposals') return compact((await this.listProposals(id, status || undefined)).map((p) => dropEmpty({ pid: p.pid, type: p.type, status: p.status, ref: p.ref || p.afterRef, request: p.rid, find: p.find ? clip(p.find, 60) : null, with: p.replace != null ? clip(p.replace, 80) : null, text: p.text ? clip(p.text, 80) : null, labels: p.pageLayout?.labels || (p.tableEdit?.labels ? p.tableEdit.labels.map((l) => clip(l, 160)) : null) })));
     if (view === 'changes') return compact(await this.changes(id));
     if (view === 'fields') return compact((await this.fields(id)).map(({ id: fid, ...f }) => f));
     if (view === 'figures') return compact(await this.listFigures(id));
@@ -334,7 +446,10 @@ export const agentServiceMethods = {
     // 쪽 구성 + 쪽 수 어림(2026-11-17, §10.4 나-7 — server/page-estimate.js). id=요청 번호면 그 요청의 대기 제안을 모두 반영한 쪽 수도
     if (view === 'page') return compact({ ...(await this.pageLayout(id)), pages: await this.agentEstimate(id, { rid: item != null && /^\d+$/.test(String(item)) ? Number(item) : null }) });
     if (view === 'guide') {
-      if (item && ['ops', 'table_edit', 'chart', 'page', 'styles'].includes(item)) return { text: opsGuide(item) };
+      if (item && ['ops', 'table_edit', 'chart', 'page', 'styles', 'document'].includes(item)) return { text: opsGuide(item, surface) };
+      // op 이름으로 물으면 그 op 의 자세한 꼴(2026-11-19 — 실제 Codex 실행이 id='replace' 로 물었다가 표준서식 작성 지침 4천 자를 받았다)
+      const one = item ? opGuide(item, surface) : null;
+      if (one) return { text: one };
       return compact({ names: GUIDE_NAMES_NOTE, ...(await this.writingGuide(id, { part: item === 'spec' ? 'spec' : 'guide' })) });
     }
     if (view === 'history') return compact(await this.history(id));
@@ -343,14 +458,15 @@ export const agentServiceMethods = {
   },
 
   /** 쪽 구성·개체 → 본문 ops 를 사본에서 미리 해 본다(문서는 그대로) → { labels, result, after(결과 문서 앞부분) } */
-  async agentPreviewStructure(id, ops, author) {
+  async agentPreviewStructure(id, ops, author, surface = 'v2') {
     return this._read(id, async () => {
       const { doc, meta } = await this._load(id);
       const clone = new HwpxDoc(containerFromBytesSync(docBytesSync(doc)));
-      const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: (aid) => this._layoutAttachment({ id, meta }, aid), author }));
+      const dry = this._engine(() => editPageLayout(clone, ops, { attachmentBytes: (aid) => this._layoutAttachment({ id, meta }, aid), documentOf: (aid) => this._layoutDocument({ id, meta }, aid), author }));
       // 스타일 들여오기·여러 문단 서식만이면(2026-11-18) 글·주소가 그대로라 뒤 글을 싣지 않는다 — 무엇이 몇 곳인지는 labels 에 있다
       if (ops.every((op) => op.op === 'styles' || op.op === 'restyle')) return { labels: dry.labels };
-      const page = pageLines(textLines(clone).lines, { maxChars: 3000 });
+      const lines = textLines(clone, { surface }).lines;
+      const page = (surface === 'v3' ? pageTsvLines : pageLines)(lines, { maxChars: 3000 });
       return { labels: dry.labels, result: compactReports(dry.reports), after: `${page.text}${page.done ? '' : `\n… (${page.total}줄 가운데 ${page.to}줄)`}` };
     });
   },
@@ -365,16 +481,20 @@ export const agentServiceMethods = {
    * → { saved: [{ op, pid, ref, status? } | { op, pids:'12-15', count }], withdrawn?, structure?, failed?: [{ op, error }], completed?, pages, … }
    *   같은 op 에서 잇달아 저장된 제안은 한 줄(pids 범위 — 그 번호로 다시 거둘 수 있다, §10.4 나-10), replace_all 은 replaced·paragraphs·where
    */
-  async agentEdit(id, { ops, rid = null, dryRun = false, done = null, session = null } = {}, user, agent) {
+  async agentEdit(id, { ops, rid = null, dryRun = false, done = null, session = null, surface = 'v2' } = {}, user, agent) {
     const nothing = (errors) => ({ saved: [], failed: errors.map((e) => ({ op: e.index, error: e.error })), note: NOT_SAVED });
     // 빈 ops(2026-11-17 작업 Q — REPORT-G3.md: Z01 의 첫 edit 가 쪽 수만 보려는 ops:[] dry_run 이라 꼴 오류로 응답 한 번을 버렸다):
     // dry_run 이면 쪽 수 어림만(지금 문서·이 요청의 대기 제안을 모두 반영하면), 아니면 오류
     if (Array.isArray(ops) && !ops.length) {
       if (!dryRun) return nothing([{ index: 0, error: 'ops 가 비었습니다 — 쪽 수만 보려면 dry_run:true' }]);
       this.assertDocRead(id, user);
-      return { dry_run: true, checked: 0, pages: await this.agentEstimate(id, { rid, author: this.authorName(user, agent) }) };
+      if (surface !== 'v3') return { dry_run: true, checked: 0, pages: await this.agentEstimate(id, { rid, author: this.authorName(user, agent) }) };
+      // v3(2026-11-20 §19): 글 범위 반영 검사·긴 한도·apply_check
+      const check = await this._read(id, async () => { const { doc, meta } = await this._load(id); return this._textApplyCheck(doc, meta, rid, []); });
+      const pages = await this.agentEstimate(id, { rid, author: this.authorName(user, agent), check: true });
+      return this._withApplyCheck({ dry_run: true, checked: 0, pages }, check, pages);
     }
-    const parsed = parseOps(ops);
+    const parsed = parseOps(ops, { surface });
     if (parsed.errors.length) return nothing(parsed.errors);
     const author = this.authorName(user, agent);
     const prep = await this._read(id, async () => {
@@ -382,7 +502,8 @@ export const agentServiceMethods = {
       // 이 요청이 앞선 호출에서 낸, 아직 대기 중인 objects_to_body 제안 — 같은 문단의 개체 지우기를 뒤에 따로 제안하지 않게 prepareOps 에 알린다
       const earlier = rid == null ? [] : meta.proposals.filter((p) => p.rid === Number(rid) && p.type === 'page_layout' && p.status === 'pending')
         .flatMap((p) => (p.pageLayout?.ops || []).filter((op) => op.op === 'objects_to_body').map((op) => ({ pid: p.pid, at: op.at })));
-      const out = this._engine(() => prepareOps(doc, parsed.ok, { earlier }));
+      const v3 = surface === 'v3';
+      const out = this._engine(() => prepareOps(doc, parsed.ok, { earlier, textRanges: v3, surface }));
       // 거두기 대상(같은 요청·같은 작성자·대기 — server/proposal-withdraw.js)과 메모·답글을 붙일 자리는 저장 전에 본다(만들기 흉내는 메모를 만들지 않는다)
       for (const s of out.steps) {
         if (s.kind === 'withdraw') {
@@ -394,6 +515,11 @@ export const agentServiceMethods = {
           try { this._range(doc, s.input.ref, { find: s.input.find, occurrence: s.input.occurrence }); } catch (e) { if (!e?.code) throw e; out.errors.push({ index: s.index, error: `ops[${s.index}] memo: ${e.message}` }); }
         } else if (s.kind === 'reply' && !doc.memos().some((m) => m.id === s.input.memoId)) out.errors.push({ index: s.index, error: `ops[${s.index}] memo: 답글을 달 메모가 없습니다: ${s.input.memoId}(read view='memos' 의 id)` });
       }
+      // 글 범위 반영 검사(2026-11-20 §19): 이 요청의 앞선 대기 제안과 이번 바꿈이 [모두 반영]에서 겹치는가 — 겹치면 이번 호출을 저장하지 않는다(뒤 것이 STALE)
+      // v3(실험 연결)에서만 — v2 기본 연결의 계약은 그대로(check = null)
+      const wd = out.steps.find((s) => s.kind === 'withdraw');
+      out.check = v3 ? this._textApplyCheck(doc, meta, rid, out.steps, new Set(wd?.targets || [])) : null;
+      for (const c of out.check?.newConflicts || []) out.errors.push({ index: c.op, error: `ops[${c.op}] replace: ${c.ref} 의 「${shortText(c.find)}」 는 이 요청이 앞서 낸 대기 제안 #${c.pid} 와 같은 글을 고칩니다 — [모두 반영]에서 뒤 것이 실패합니다. 같은 호출에 withdraw(pids:[${c.pid}])를 넣고 한 op 로 합쳐 내세요` });
       out.errors.sort((a, b) => a.index - b.index);
       return out;
     });
@@ -405,21 +531,27 @@ export const agentServiceMethods = {
       if (sums.length) out.replace_all = sums;
       if (wstep) out.withdraw = { pids: pidRanges(wstep.targets) || null, count: wstep.targets.length };
       const st = prep.steps.find((s) => s.kind === 'structure');
-      if (st) out.structure = { ops: opList(st.indexes), ...(await this.agentPreviewStructure(id, st.ops, author)) };
+      if (st) out.structure = { ops: opList(st.indexes), ...(await this.agentPreviewStructure(id, st.ops, author, surface)) };
       // 2026-11-17(§10.4 나-7·나-9): 사본에서 제안을 만들고 이 요청의 앞선 대기 제안과 함께 반영해 본다 — 저장해도 실패할 op(failed)·반영에서 실패할 제안·쪽 수.
       // 한도를 넘으면 made 가 없고 예전 안내 글 그대로(server/page-estimate.js)
-      const est = await this.agentEstimate(id, { rid, steps: prep.steps, author });
+      // check: 모델이 일부러 묻는 검사라 긴 한도(server/page-estimate.js checkBudgetMs). 바꿈만이면 반영 충돌은 글 범위 검사가 끝까지 봤다 — 흉내는 쪽 수 몫
+      const est = await this.agentEstimate(id, { rid, steps: prep.steps, author, check: !!prep.check });
+      const stopped = est.pages?.stopped;
       if (est.made != null) {
         out.made = est.made; if (est.failed?.length) out.failed = est.failed; if (est.skipped_ops?.length) out.skipped_ops = est.skipped_ops;
-        out.note = `저장하지 않았습니다. 사본에서 제안 ${est.made}건을 만들어${rid != null ? ' 이 요청의 대기 제안과 함께' : ''} 반영해 보았습니다 — failed 가 있으면 저장할 때 아무것도 저장되지 않는다, pages.apply_failed = 반영에서 실패할 제안.`;
+        // 2026-11-20 §19: 흉내가 시간 한도로 멈췄는데도 '반영해 보았습니다'라고 해 모델이 결과를 믿지 못하고 dry_run 을 거듭했다 — 멈췄으면 그렇게 말한다
+        out.note = stopped
+          ? `저장하지 않았습니다. 사본에서 제안 ${est.made}건을 만들다가(또는 반영해 보다가) 멈췄습니다(${stopped}) — 반영 검사 결과는 apply_check, failed 가 있으면 저장할 때 아무것도 저장되지 않는다.`
+          : `저장하지 않았습니다. 사본에서 제안 ${est.made}건을 만들어${rid != null ? ' 이 요청의 대기 제안과 함께' : ''} 반영해 보았습니다 — failed 가 있으면 저장할 때 아무것도 저장되지 않는다, apply_failed = 반영에서 실패할 제안.`;
       }
-      else {
+      // 흉내가 중간에 멈췄을 때 만들기 검사를 다시 하는 것은 v3 만(2026-11-20 — v2 는 예전 그대로 걸리는 시간·응답)
+      if (est.made == null || (stopped && prep.check)) {
         // 쪽 수 어림이 꺼졌거나 한도를 넘었으면 저장 전 검사(만들어 보기)만이라도 — 저장할 때 아무것도 저장되지 않을 op 를 미리 안다(2026-11-17 §10.4 나-4)
         const pre = await this._agentPreflight(id, { rid, steps: prep.steps, author });
         if (pre.failed.length) out.failed = pre.failed;
       }
       out.pages = est.pages;
-      return liftFailed(out);
+      return prep.check ? this._withApplyCheck(out, prep.check, est.pages) : liftFailed(out);
     }
     // ② 저장 전 검사(사본에서 만들어 보기 — 실제 문서·meta·방송은 그대로)
     const pre = await this._agentPreflight(id, { rid, steps: prep.steps, author });
@@ -491,14 +623,18 @@ export const agentServiceMethods = {
     const out = dropEmpty({ saved, withdrawn, structure, notes: prep.notes });
     const shown = (o) => dropEmpty({ ...o, saved: compactSaved(sortOps(o.saved || []), sums) });
     // 영수증 끝에 쪽 수 어림(2026-11-17, §10.4 나-7 — 지금 쪽 수와 이 요청의 대기 제안을 모두 반영하면 쪽 수). 저장 고리와 떨어진 한 번의 호출이라 옮기기 쉽다
-    const withPages = async (o, pages = null) => liftFailed({ ...shown(o), pages: pages || await this.agentEstimate(id, { rid, pids: rid == null ? made : [], author }) });
+    // apply_check(2026-11-20 §19): 반영 검사를 끝까지 했는지 맨 위에 — 이번 호출이 저장된 뒤에도 겹침은 앞선 대기 제안끼리만 남을 수 있다(이번 것과의 겹침은 저장 전에 거절)
+    const withPages = async (o, pages = null) => { const pg = pages || await this.agentEstimate(id, { rid, pids: rid == null ? made : [], author }); const r = { ...shown(o), pages: pg }; return prep.check ? this._withApplyCheck(r, prep.check, pg) : liftFailed(r); };
     if (done != null && String(done).trim() !== '') {
       if (rid == null) return withPages({ ...out, completed: false, complete_note: 'done 은 request_id 와 함께 씁니다' });
       // 완료 막기(2026-11-17 — artifacts/mcp-round3-20261117/codex/REPORT.md 문제 1): X02 는 영수증 pages.apply_failed 가 [모두 반영]의 실패를 미리 알렸는데
       // 같은 호출의 done 으로 완료돼, 모델이 알아챈 뒤의 withdraw·다시 내기가 REQUEST_CLOSED 로 막혔다(틀린 결과·사실과 다른 요약이 남음).
       // 완료 전에 반영 흉내를 하고 실패할 제안이 있으면 완료하지 않는다(저장은 그대로). 흉내를 건너뛰면(꺼짐·한도·바쁨) 예전처럼 완료한다
-      const est = await this.agentEstimate(id, { rid, author });
-      if (est.apply_failed?.length) return withPages({ ...out, completed: false, complete_note: BLOCKED_NOTE }, est);
+      // 2026-11-20 §19: 바꿈만이면 글 범위 검사로 정한다(사본 흉내는 큰 문서에서 시간 한도로 멈춰 실패를 못 봤다). 다른 종류가 섞이면 흉내를 긴 한도로
+      // v2: 예전 그대로(흉내 6초 — 건너뛰면 완료). v3: 아래
+      const textOnly = prep.check?.textOnly;
+      const est = await this.agentEstimate(id, { rid, author, check: !!prep.check && !textOnly });
+      if (prep.check?.oldConflicts?.length || est.apply_failed?.length) return withPages({ ...out, completed: false, complete_note: BLOCKED_NOTE }, est);
       const pendingBefore = new Set((await this.listProposals(id)).filter((p) => p.rid === Number(rid) && p.status === 'pending').map((p) => p.pid));
       try {
         const view = await this.completeRequest(id, rid, { summary: String(done), session }, user, agent);
@@ -514,6 +650,102 @@ export const agentServiceMethods = {
       }
     }
     return withPages(out);
+  },
+
+  /**
+   * 문서 끼워 넣기(MCP v3 실험 — 2026-11-20, docs/MCP_REDESIGN_2026-11-16.md §21)에 쓰는 파일 → { name, bytes }.
+   * which 'document' = 이 문서 사본(최종본 — 변경 추적을 수락한 것): 모델이 제목·표 XML 을 그대로 본떠 올 때.
+   * which 'template' = 이 문서의 머리(스타일·글자·문단 모양·테두리)·바탕쪽·쪽 설정만 가진 빈 문서: 구역마다 첫 문단의 구역 정의(hp:secPr)와
+   *   구역 조판 부호(단·머리말·꼬리말·쪽 번호 — 맨 바깥 hp:ctrl)만 든 빈 문단 하나. 표준서식이 아니라 이 문서의 스타일로 쓰게 한다(사용자 결정).
+   */
+  async documentFile(id, which) {
+    // 문서 잠금 안에서는 사본만 만들고 압축(deflate — 무압축이면 사본이 원문의 2~3배)은 잠금 밖에서 한다
+    const out = await this._read(id, async () => {
+      const { doc, meta } = await this._load(id);
+      const copy = new HwpxDoc(containerFromBytesSync(docBytesSync(doc)));
+      if (copy.changes().length) copy.acceptAll();
+      const base = String(meta.title || 'document').replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 60) || 'document';
+      if (which === 'document') return { name: `${base}-사본.hwpx`, doc: copy };
+      const SECTION_CTRL = /^<hp:ctrl>\s*<hp:(?:colPr|header|footer|pageNum|pageHiding|pageNumCtrl|newNum)\b/;
+      for (const sec of copy.sections) {
+        const p0 = sec.bodyParas[0]; if (!p0) continue;
+        const x0 = sec.xml.slice(p0.start, p0.end);
+        const outer = (name) => { const all = elements(x0, name); return all.filter((e) => !all.some((o) => o !== e && o.start <= e.start && o.end >= e.end)).map((e) => e.xml); };
+        const head = x0.slice(0, x0.indexOf('>') + 1);
+        const pa = (k) => (new RegExp(`\\s${k}="([^"]*)"`).exec(head) || [])[1] ?? '0';
+        const cp = (/<hp:run\b[^>]*\bcharPrIDRef="(\d+)"/.exec(x0) || [])[1] ?? '0';
+        const keep = [...outer('hp:secPr'), ...outer('hp:ctrl').filter((c) => SECTION_CTRL.test(c))];
+        const blank = `<hp:p id="0" paraPrIDRef="${pa('paraPrIDRef')}" styleIDRef="${pa('styleIDRef')}" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${cp}">${keep.join('')}</hp:run></hp:p>`;
+        sec.load(sec.xml.slice(0, p0.start) + blank + sec.xml.slice(sec.bodyParas.at(-1).end));
+      }
+      // 본문이 쓰던 그림 파일은 뺀다(바탕쪽·머리말이 쓰는 것은 남는다) — 11-20 실측: 빼지 않으면 빈 서식이 원문 그림을 다 실어 올릴 때마다 2.4MB
+      const hpf = copy.container.getText('Contents/content.hpf') || '';
+      for (const m of [...hpf.matchAll(/<opf:item\b[^>]*\bid="([^"]+)"[^>]*\bhref="BinData\/[^"]+"/g)]) copy.removeUnusedBinary(m[1]);
+      return { name: `${base}-빈 서식.hwpx`, doc: copy };
+    });
+    const { doc } = out, enc = new TextEncoder(), files = new Map(doc.container.files);
+    files.set('Contents/header.xml', enc.encode(doc.header.xml));
+    doc.sections.forEach((s, i) => files.set(doc.sectionNames[i], enc.encode(s.xml)));
+    return { name: out.name, bytes: await new HwpxContainer(files, [...doc.container.order]).save() };
+  },
+
+  /**
+   * 글 범위 반영 검사(2026-11-20 — docs/MCP_REDESIGN_2026-11-16.md §19, 규칙 server/mcp2/apply-check.js) → {
+   *   textOnly(이 요청의 대기 제안 + 이번 제안이 모두 바꿈 — 이 검사만으로 [모두 반영]의 겹침 실패를 끝까지 안다), total(그 바꿈 수),
+   *   newConflicts: [{ op, pid, ref, find }](이번 바꿈이 앞선 대기 제안 #pid 와 겹침 — 저장하지 않는다), oldConflicts: [{ pid, with }](앞선 대기 제안끼리 겹침 — 완료를 막는다) }.
+   * [모두 반영]과 같은 고르기(열린 항목·비교안 아님·대기)·차례(제안 번호, 이번 것은 그 뒤 만드는 차례). withdrawn = 이번 호출이 거둘 제안 번호.
+   * 같은 호출 안의 겹침은 prepareOps(checkTextRanges)가 이미 오류로 냈다.
+   */
+  _textApplyCheck(doc, meta, rid, steps = [], withdrawn = new Set()) {
+    const r = rid != null ? meta.requests.find((x) => x.rid === Number(rid)) : null;
+    const pend = r ? MT.requestItems(this._reqProposals(meta, r)).filter((x) => x.state === 'open' && x.gid == null)
+      .flatMap((x) => x.list.filter((p) => p.status === 'pending' && !withdrawn.has(p.pid))).sort((a, b) => a.pid - b.pid) : [];
+    const fresh = steps.filter((s) => s.kind === 'proposals').flatMap((s) => s.items);
+    // [모두 반영]에 드는 다른 종류(구조·그림·차트 — 비교안(alternatives)은 들지 않는다)가 있으면 이 검사만으로는 끝까지 알 수 없다
+    const others = steps.some((s) => ['structure', 'chart', 'figure'].includes(s.kind));
+    const textOnly = !others && pend.every((p) => p.type === 'replace' && !p.lost) && fresh.every((x) => x.input?.type === 'replace');
+    const entries = [];
+    for (const p of pend) {
+      if (p.type !== 'replace' || p.lost) continue;
+      const ref = this._locate(doc, { ...p });
+      const g = ref ? replaceRange(doc, { ...p, ref }) : null;
+      if (g) entries.push({ ref, ...g, pid: p.pid, find: p.find });
+    }
+    for (const x of fresh) {
+      if (x.input?.type !== 'replace' || !x.input.ref) continue;
+      const g = replaceRange(doc, x.input);
+      if (g) entries.push({ ref: x.input.ref, ...g, op: x.index, find: x.input.find });
+    }
+    const newConflicts = []; const oldConflicts = [];
+    for (const { first, later } of rangeConflicts(entries)) {
+      if (later.op != null && first.pid != null) newConflicts.push({ op: later.op, pid: first.pid, ref: later.ref, find: later.find });
+      else if (later.pid != null) oldConflicts.push({ pid: later.pid, with: first.pid });
+      // 이번 것끼리(op·op)는 prepareOps 가 냈다
+    }
+    return { textOnly, total: entries.length, newConflicts, oldConflicts };
+  },
+
+  /**
+   * 영수증 맨 위의 반영 검사 한 줄(2026-11-20 §19) — 모델이 apply_failed 가 비었다고 '실패 없음'으로 읽지 않게, 검사를 끝까지 했는지와 방법을 밝힌다.
+   * check: _textApplyCheck 결과, pages: agentEstimate 결과(pending = 사본 반영 흉내를 끝까지 함, stopped = 멈춤)
+   */
+  _applyCheckLine(check, pages) {
+    const failedN = (check?.oldConflicts?.length || 0) + (pages?.apply_failed?.length || 0);
+    if (failedN) return `실패 — [모두 반영]에서 실패할 제안 ${failedN}건(apply_failed)`;
+    if (check?.textOnly) return check.total ? `통과 — 이 요청의 바꿈 제안 ${check.total}건을 글 범위로 끝까지 검사했다(서로 겹치지 않는다)` : '검사할 제안 없음';
+    if (pages?.stopped) return `끝까지 못 함 — ${pages.stopped}. apply_failed 가 비어도 실패가 없다는 뜻이 아니다(바꿈끼리의 겹침은 글 범위로 검사했다)`;
+    if (pages?.pending != null) return `통과 — 사본에 이 요청의 대기 제안 ${pages.pending}건을 반영해 보았다`;
+    return `하지 않음 — ${pages?.skipped || '쪽 수 어림이 빠졌다'}(바꿈끼리의 겹침은 글 범위로 검사했다)`;
+  },
+
+  /** 영수증에 apply_check 와 글 범위 검사가 찾은 실패(apply_failed — 앞선 대기 제안끼리 겹침)를 싣는다. liftFailed 처럼 실패를 맨 위로 */
+  _withApplyCheck(o, check, pages) {
+    const statics = (check?.oldConflicts || []).map((c) => ({ pid: c.pid, error: `오류(STALE): 같은 요청의 대기 제안 #${c.with} 와 같은 글을 고친다 — 둘 중 하나를 withdraw 로 거두고 합쳐 다시 내세요` }));
+    const fromSim = pages?.apply_failed || [];
+    const seen = new Set(statics.map((x) => x.pid));
+    const failed = [...statics, ...fromSim.filter((x) => x.pid == null || !seen.has(x.pid))];
+    const res = { ...(failed.length ? { apply_failed: failed } : {}), apply_check: this._applyCheckLine(check, pages), ...o };
+    return res;
   },
 
   /**

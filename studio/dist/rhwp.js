@@ -3703,6 +3703,22 @@ export class HwpDocument {
         }
     }
     /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 지금 끝낸다.
+     * @returns {string}
+     */
+    flushTypesetTail() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_flushTypesetTail(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 같은 cmap 판정으로 아직 공급되지 않은 글리프만 다음 후보에 전달한다.
      * @param {Uint8Array} bytes
      * @param {number} face_index
@@ -6286,7 +6302,7 @@ export class HwpDocument {
     /**
      * 문서의 메모를 문서 순서대로 반환한다.
      *
-     * 반환: `[{id,index,author,date,text,place,sectionIndex,paraIndex,
+     * 반환: `[{id,index,parentId,author,date,text,place,sectionIndex,paraIndex,
      * startCharIdx,endCharIdx,path,page,editable,readOnlyReason}]`
      * @returns {string}
      */
@@ -9745,6 +9761,32 @@ export class HwpDocument {
             return getStringFromWasm0(ptr3, len3);
         } finally {
             wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * 부모 메모의 기준 글에 댓글을 단다. `json` = `{author,text}`.
+     * @param {number} parent_id
+     * @param {string} json
+     * @returns {string}
+     */
+    insertMemoReply(parent_id, json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_insertMemoReply(this.__wbg_ptr, parent_id, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -14740,6 +14782,21 @@ export class HwpDocument {
         }
     }
     /**
+     * [hwpx-cowork] 2026-11-20 구역 조판 체크포인트를 끄거나 켠다(견줌·되돌림용). 끄면 늘 처음부터 조판한다.
+     * @param {boolean} enabled
+     */
+    setTypesetResumeEnabled(enabled) {
+        wasm.hwpdocument_setTypesetResumeEnabled(this.__wbg_ptr, enabled);
+    }
+    /**
+     * [hwpx-cowork] 2026-11-20 뒤쪽 미루기를 켜거나 끈다(편집기만 켠다 — `document_core::typeset_tail`).
+     * 켜면 편집의 쪽 나눔이 편집한 쪽 근처까지만 하고 남은 작업을 `stepTypesetTail` 로 잇게 남길 수 있다.
+     * @param {boolean} enabled
+     */
+    setTypesetTailDeferral(enabled) {
+        wasm.hwpdocument_setTypesetTailDeferral(this.__wbg_ptr, enabled);
+    }
+    /**
      * 디버그 오버레이 표시 여부를 설정한다.
      * @param {boolean} enabled
      */
@@ -15198,6 +15255,24 @@ export class HwpDocument {
         }
     }
     /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 `budgetMs` 동안(최소 한 걸음) 잇는다.
+     * `{"ok":true,"status":"none"|"pending"|"complete"|"stale","pageCount"}`. complete 면 쪽 나눔이 바뀌었다.
+     * @param {number} budget_ms
+     * @returns {string}
+     */
+    stepTypesetTail(budget_ms) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_stepTypesetTail(this.__wbg_ptr, budget_ms);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 현재 WASM 빌드에서 PDF 입력을 사용할 수 있는지 문서 생성 전에 조회한다.
      * @returns {boolean}
      */
@@ -15361,6 +15436,32 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용) 통계(시험·진단용):
+     * `{"enabled","resumed","full","skippedParagraphs","verifyChecks","verifyMismatches"}`.
+     * resumed = 체크포인트에서 이어 간 구역 조판 수, skippedParagraphs = 그때 다시 하지 않은 앞 문단 수(누적).
+     * @returns {string}
+     */
+    typesetResumeStats() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_typesetResumeStats(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판이 있는가.
+     * @returns {boolean}
+     */
+    typesetTailPending() {
+        const ret = wasm.hwpdocument_typesetTailPending(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * GroupShape를 풀어 자식 개체들을 개별로 복원한다.
@@ -16351,6 +16452,10 @@ function __wbg_get_imports() {
             const ret = new ImageData(getClampedArrayU8FromWasm0(arg0, arg1), arg2 >>> 0, arg3 >>> 0);
             return ret;
         }, arguments); },
+        __wbg_now_8b265300afd5f2b9: function() {
+            const ret = Date.now();
+            return ret;
+        },
         __wbg_of_598c0ff0cd48a890: function(arg0, arg1) {
             const ret = Array.of(arg0, arg1);
             return ret;

@@ -30,6 +30,9 @@ pub use native_pua_fonts::NativePuaFontRequest;
 mod font_environment;
 // [hwpx-cowork] 문서 열기의 읽기 전용 미리보기와 최종 조판 작업.
 mod progressive_open;
+// [hwpx-cowork] 2026-11-20 뒤쪽 미루기 — 편집한 쪽 근처까지만 바로 조판하고 나머지는 쉬는 동안.
+mod typeset_tail;
+pub use typeset_tail::TypesetTailState;
 mod note_pages; // [hwpx-cowork] 쪽마다 새로 각주 번호
 mod host_font_environment;
 mod loaded_frame_restore;
@@ -160,6 +163,38 @@ pub(crate) enum DeferredPaginationTargetStatus {
     Superseded,
     TargetMissing,
     StructureChanged,
+}
+
+/// [hwpx-cowork] 2026-11-20 구역 조판 체크포인트와 그것을 만든 입력의 표지. 표지가 지금과 다르면 쓰지 않는다.
+pub(crate) struct TypesetCheckpointStore {
+    pub(crate) checkpoints: crate::renderer::typeset::SectionCheckpoints,
+    /// 그때의 원본 문단·구성 목록 주소. 알려진 문단 넣기·지우기만 갱신한다 — 다른 길(문서 교체·구역 재구성)로
+    /// 목록이 바뀌면 주소가 달라져 다시 쓰지 않는다.
+    pub(crate) paragraphs_ptr: usize,
+    pub(crate) composed_ptr: usize,
+    /// 측정 환경 표지(`layout_environment_stamp`)와 쪽 나눔 선택.
+    pub(crate) environment: u64,
+    pub(crate) layout_generation: u64,
+    pub(crate) respect_vpos_reset: bool,
+    pub(crate) normalized: bool,
+}
+
+/// [hwpx-cowork] 2026-11-20 앞쪽 재사용의 켜고 끄기·검증 모드·통계.
+#[derive(Default)]
+pub(crate) struct TypesetResumeControl {
+    pub(crate) disabled: std::cell::Cell<bool>,
+    pub(crate) verify: std::cell::Cell<bool>,
+    pub(crate) resumed: std::cell::Cell<u64>,
+    pub(crate) full: std::cell::Cell<u64>,
+    pub(crate) skipped_paragraphs: std::cell::Cell<u64>,
+    pub(crate) verify_checks: std::cell::Cell<u64>,
+    pub(crate) verify_mismatches: std::cell::Cell<u64>,
+    pub(crate) first_mismatch: std::cell::RefCell<Option<String>>,
+    /// [hwpx-cowork] 2026-11-20 뒤쪽을 미룬 조판 수와 쉬는 동안 마무리한 수(`typeset_tail`).
+    pub(crate) tail_parked: std::cell::Cell<u64>,
+    pub(crate) tail_completed: std::cell::Cell<u64>,
+    /// 문단 내용으로 찾는 조판 기억을 버린 횟수(스타일·글꼴 측정 환경 변경). 체크포인트는 같은 세대에서만 쓴다.
+    pub(crate) layout_generation: std::cell::Cell<u64>,
 }
 
 pub(crate) struct PendingPaginationJob {
@@ -297,6 +332,18 @@ pub struct DocumentCore {
     pub(crate) deferred_pagination_descriptor: Option<DeferredPaginationDescriptor>,
     /// [#2424] 공개 pagination과 분리된 shadow continuation job.
     pub(crate) pending_pagination_job: Option<PendingPaginationJob>,
+    // [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용 — `renderer::typeset::section::checkpoints`).
+    pub(crate) typeset_checkpoints: Vec<Option<TypesetCheckpointStore>>,
+    /// 구역마다 '이 번호 앞의 문단은 지난 구역 조판 뒤로 바뀌지 않았다'. `None` = 모름(처음부터 조판),
+    /// `Some(usize::MAX)` = 알려진 변경 없음(구역이 다른 길로 dirty 가 됐으면 역시 처음부터).
+    pub(crate) typeset_unchanged_before: Vec<Option<usize>>,
+    pub(crate) typeset_resume: TypesetResumeControl,
+    /// [hwpx-cowork] 2026-11-20 뒤쪽 미루기: 편집기가 켠다(기본 끔 — 서버·다른 사용처는 늘 끝까지 바로 조판).
+    pub(crate) typeset_tail_deferral: bool,
+    /// 멈춘 구역 조판(뒤쪽은 지난 조판의 잠정 쪽). 다음 쪽 나눔이 시작하면 버린다.
+    pub(crate) typeset_tail_job: Option<typeset_tail::TypesetTailJob>,
+    /// 끝낸 멈춘 작업의 결과 — 다음 쪽 나눔이 조판 대신 받아 후처리한다.
+    pub(crate) typeset_tail_completed: Option<(usize, PaginationResult)>,
     // [hwpx-cowork] 칸 문단 줄 구성 기억(`renderer::composer::cell_compose_memo`) — 측정·조판·쪽 나무가 함께 쓴다.
     // 스타일 값·글꼴 측정 환경이 바뀔 때만 비운다(2026-11-19 — 그 전에는 글 편집을 마무리하는 쪽 나눔만 남겼다).
     pub(crate) cell_compose_memo:
@@ -346,6 +393,10 @@ pub struct DocumentCore {
     /// 복원은 문서를 통째로 갈아끼워 같은 id 가 다른 바이트를 가리키게 만들 수 있다.
     /// 그래서 그림을 새로 등록할 때와 스냅샷을 되돌릴 때 세대를 올린다.
     pub(crate) bin_data_epoch: u32,
+    /// [#8941] 불러온 원본이 처음부터 참조 없이 지니고 있던 `BinData` 의 storage id.
+    ///
+    /// HWPX 저장은 편집으로 참조가 끊긴 그림만 버리고, 이 항목들은 원본 그대로 옮긴다.
+    pub(crate) loaded_unreferenced_bin_data: std::collections::BTreeSet<u16>,
     /// Batch 모드 플래그 — true이면 paginate() 스킵
     pub(crate) batch_mode: bool,
     /// 셀 문단 서식으로 무효화된 vpos. RowBreak 조각별 첫 변경부터 한 번만 갱신한다.
@@ -575,6 +626,10 @@ impl DocumentCore {
     /// [hwpx-cowork] 보충 측정값(화면 글꼴 실측)만 바뀜 — 그 값을 읽는 조판 기억을 버린다.
     /// 보충 측정 요청의 기억은 측정값을 읽지 않으므로 남긴다.
     pub(crate) fn invalidate_measured_layout_memos(&self) {
+        // [hwpx-cowork] 2026-11-20 구역 조판 체크포인트도 이 세대가 같을 때만 쓴다.
+        self.typeset_resume
+            .layout_generation
+            .set(self.typeset_resume.layout_generation.get().wrapping_add(1));
         self.cell_compose_memo.invalidate();
         self.paragraph_format_memo.invalidate();
         self.stored_rows_memo.invalidate();
@@ -754,6 +809,12 @@ impl DocumentCore {
             deferred_pagination_revision: 0,
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
+            typeset_checkpoints: Vec::new(),
+            typeset_unchanged_before: Vec::new(),
+            typeset_resume: Default::default(),
+            typeset_tail_deferral: false,
+            typeset_tail_job: None,
+            typeset_tail_completed: None,
             cell_compose_memo: Default::default(),
             paragraph_format_memo: Default::default(),
             stored_rows_memo: std::sync::Arc::new(
@@ -770,6 +831,7 @@ impl DocumentCore {
             layer_tree_json_cache: RefCell::new(Vec::new()),
             page_layer_tree_cache: RefCell::new(Vec::new()),
             bin_data_epoch: 0,
+            loaded_unreferenced_bin_data: std::collections::BTreeSet::new(),
             batch_mode: false,
             pending_cell_format_vpos: false,
             event_log: Vec::new(),

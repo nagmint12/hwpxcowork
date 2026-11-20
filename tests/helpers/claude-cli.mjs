@@ -35,7 +35,10 @@ const prompt = Buffer.concat(chunks).toString('utf8');
 const value = (flag) => args[args.indexOf(flag) + 1];
 const mcp = JSON.parse(fs.readFileSync(value('--mcp-config'), 'utf8'));
 const state = { pid: process.pid, args, prompt, cwd: process.cwd(), env: process.env, mcp, systemPrompt: value('--system-prompt') };
-if (prompt.includes('<document_context>')) state.requestContext = JSON.parse(prompt.split('<document_context>')[1].split('</document_context>')[0]);
+if (mode === 'v3') {
+  state.requestContext = JSON.parse(prompt.split('<request_brief>')[1].split('</request_brief>')[0]);
+  state.documentContext = prompt.split('<document_context>')[1].split('</document_context>')[0];
+} else if (prompt.includes('<document_context>')) state.requestContext = JSON.parse(prompt.split('<document_context>')[1].split('</document_context>')[0]);
 const failure = (e) => { state.error = e?.stack || String(e); fs.writeFileSync(receipt, JSON.stringify(state)); process.exit(2); };
 process.on('uncaughtException', failure); process.on('unhandledRejection', failure);
 fs.writeFileSync(receipt, JSON.stringify(state));
@@ -57,8 +60,8 @@ if (mode === 'workspace') {
  } finally {await c.close();await transport.close()}
  say({type:'result',subtype:'success',is_error:false,result:'stage completed',usage:{input_tokens:200,output_tokens:20,cache_read_input_tokens:40}});process.exit(0);
 }
-if (mode === 'v2') {
-  // 새 MCP 연결(server/mcp2.js — 작업 도구 넷): 첫 입력의 요청 내용(brief)만으로 일하고 edit 한 번(done)으로 끝낸다.
+if (mode === 'v2' || mode === 'v3') {
+  // 새 MCP 연결은 brief를 받은 뒤 필요한 문서를 읽고 edit(done)으로 끝낸다.
   // 진짜 claude 의 stream-json 처럼 응답마다 assistant(tool_use·usage)와 user(tool_result) 줄을 낸다(scripts/agent-run-once.mjs 집계 예행연습용)
   const c = new Client({ name: 'claude-code-test', version: 'test' });
   const transport = new StdioClientTransport({ command: server.command, args: server.args, env: process.env, stderr: 'pipe' });
@@ -82,11 +85,14 @@ if (mode === 'v2') {
     };
     await call('read_document', {}, { expectError: true });   // 예전 도구는 새 연결에 없다
     assert.ok((await c.callTool({ name: 'edit', arguments: { doc_id: 'another-document', ops: [{ op: 'memo', at: 's0/p0', text: 'x' }] } })).isError, '다른 문서는 거절');
-    state.map = await call('read', { view: 'map' });
-    const ops = String(brief.map || '').includes('⚠') ? [{ op: 'objects_to_body' }]
-      : brief.target?.ref ? [{ op: 'replace', at: brief.target.ref, whole: true, with: '자동 검토한 문장' }]
+    if (mode === 'v3') state.documentRead = await call('read', { view: 'text' });
+    else state.map = await call('read', { view: 'map' });
+    const targetRef = mode === 'v3' ? 's0/p1' : brief.target?.ref;
+    const ops = mode === 'v2' && String(brief.map || '').includes('⚠') ? [{ op: 'objects_to_body' }]
+      : targetRef ? [{ op: 'replace', at: targetRef, whole: true, with: '자동 검토한 문장' }]
       : [{ op: 'memo', at: 's0/p0', text: 'Claude 새 연결 검토 의견입니다.' }];
     state.receipt = JSON.parse(await call('edit', { ops, done: 'Claude 새 연결로 처리했습니다.' }));
+    if (mode === 'v3') assert.equal(state.receipt.completed, true, JSON.stringify(state.receipt));
     say({ type: 'assistant', message: { id: 'msg_end', content: [{ type: 'text', text: '처리했습니다.' }], usage: { input_tokens: 5, cache_read_input_tokens: 4000, cache_creation_input_tokens: 0, output_tokens: 8 } } });
     state.toolCount = n; fs.writeFileSync(receipt, JSON.stringify(state));
   } finally { await c.close(); }

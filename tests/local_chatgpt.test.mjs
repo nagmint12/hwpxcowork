@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { CodexProposer } from '../server/codex-ai.js';
 import { parseLocalArgs, resolveLocalSettings, checkLocal, startLocal, localStatus, stopLocal, runLocal } from '../scripts/local-chatgpt.mjs';
 
 async function setup({ authenticated = true, serverUser = '시험 사용자' } = {}) {
@@ -22,8 +23,8 @@ async function setup({ authenticated = true, serverUser = '시험 사용자' } =
     launches.push({ file, args, options });
     const pid = 900000 + launches.length; active.add(pid);
     const handle = new EventEmitter(); handle.pid = pid; handle.unref = () => {};
-    const childOptions = resolveLocalSettings(parseLocalArgs(args.slice(1)), { root, env: {} });
-    tasks.push(Promise.resolve().then(() => runLocal(childOptions, { ...dependencies, pid })).finally(() => active.delete(pid)));
+    const childOptions = resolveLocalSettings(parseLocalArgs(args.slice(1)), { root, env: options.env });
+    tasks.push(Promise.resolve().then(() => runLocal(childOptions, { ...dependencies, env: options.env, pid })).finally(() => active.delete(pid)));
     return handle;
   };
   return { root, settings, dependencies, launches, active, counts: () => ({ started, stopped }),
@@ -66,6 +67,36 @@ test('로컬 ChatGPT: 읽기 전용 check→백그라운드 시작→중복 차�
     assert.ok(!state.includes('private-test-token')); assert.ok(!log.includes('private-test-token'));
     assert.equal((await stopLocal(s.settings, s.dependencies)).alreadyStopped, true);
   } finally { if (localStatus(s.settings, s.dependencies).running) await stopLocal(s.settings, s.dependencies); await s.close(); }
+});
+
+test('로컬 ChatGPT: 백그라운드 --run은 선택한 MCP v3와 기본 v2를 받고 환경의 토큰은 받지 않는다', async (t) => {
+  t.mock.method(CodexProposer.prototype, 'check', async () => ({ ready: true, authMode: 'chatgpt', version: 'test' }));
+  for (const [requested, expected] of [[undefined, '2'], ['3', '3']]) {
+    const s = await setup();
+    try {
+      s.dependencies.env = { HWPX_COWORK_TOKEN: 'other-private-token', OPENAI_API_KEY: 'other-key' };
+      if (requested != null) s.dependencies.env.HWPX_COWORK_MCP = requested;
+      delete s.dependencies.aiFactory;
+      const makeWorker = s.dependencies.workerFactory;
+      const workerConfig = [];
+      s.dependencies.workerFactory = (options) => {
+        workerConfig.push({ surface: options.ai.mcpSurface, token: options.token });
+        return makeWorker(options);
+      };
+
+      assert.equal((await startLocal(s.settings, s.dependencies)).ready, true);
+      const [launch] = s.launches;
+      assert.equal(launch.args[1], '--run');
+      assert.equal(launch.options.env.HWPX_COWORK_MCP, expected);
+      assert.equal(launch.options.env.HWPX_COWORK_TOKEN, undefined);
+      assert.equal(launch.options.env.OPENAI_API_KEY, undefined);
+      assert.ok(!launch.args.join(' ').includes('private-test-token'));
+      assert.deepEqual(workerConfig, [{ surface: `v${expected}`, token: 'private-test-token' }]);
+    } finally {
+      if (localStatus(s.settings, s.dependencies).running) await stopLocal(s.settings, s.dependencies);
+      await s.close();
+    }
+  }
 });
 
 test('로컬 ChatGPT: 정확한 사용자·서버 사용자·로그인 사전 점검 실패 시 자동 처리 시작 안 함', async () => {

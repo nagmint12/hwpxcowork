@@ -4,6 +4,7 @@
 //   ctx = { app, service, hub, config, store, wrap, auth, raw, bodyBytes, safeDecode, pkg, root }
 //   설치할 때 stdout 에 쓰지 않는다(포트 0 이면 stdout 첫 줄이 'LISTENING <port>' 이어야 한다 — 로그는 console.error).
 import { AgentRegistry } from '../agents.js';
+import { RUN_KINDS } from '../ai-run.js';
 
 const SESSION_RE = /^[A-Za-z0-9_-]{1,64}$/;   // 세션 id(브리지가 만든 무작위 값) — MCP 머리글 X-Hwpx-Agent-Session 과 같은 규칙
 const PING_MS = 20000;                          // ': ping' 주기(프록시·브라우저가 쉬는 연결을 끊지 않게)
@@ -36,6 +37,7 @@ export function installAgentRoutes(ctx) {
     const q = req.query || {};
     const agent = clean(one(q.agent), 40) || 'AI';
     const client = clean(one(q.client), 80);
+    const runKind = RUN_KINDS.find(k => k.id === one(q.run_kind))?.id;
     const channel = ['1', 'true', 'yes', 'on'].includes(String(one(q.channel) ?? '').trim().toLowerCase());
     const given = String(one(q.session) ?? '').trim();
     if (given && !SESSION_RE.test(given)) return res.status(400).json({ error: 'BAD_SESSION', message: 'session 은 영문·숫자·_- 로 64자 이하여야 합니다' });
@@ -54,7 +56,7 @@ export function installAgentRoutes(ctx) {
     res.on('close', cleanup);
     res.on('error', cleanup);
     try {
-      handle = registry.connect(req.user, { session, agent, client, channel }, res);
+      handle = registry.connect(req.user, { session, agent, client, channel, runKind }, res);
       registry.send(handle, 'hello', { user: req.user.name, session, server: pkg?.version ?? null });
       let requests = [];
       try { requests = service.agentSnapshot(req.user); } catch (e) { console.error('[agents] snapshot 실패:', e.message); }

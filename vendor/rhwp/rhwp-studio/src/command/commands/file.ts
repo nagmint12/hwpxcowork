@@ -124,6 +124,8 @@ function flushDeferredPaginationBeforeExplicitOutput(
   const inputHandler = services.getInputHandler();
   if (!inputHandler) return;
   inputHandler.flushDeferredPaginationIfNeeded(reason);
+  // [hwpx-cowork] 2026-11-20 엔진에 멈춰 둔 뒤쪽 조판도 끝낸다(인쇄는 모든 쪽을 그린다).
+  inputHandler.flushTypesetTailIfPending(reason);
   if (inputHandler.hasDeferredPaginationPending()) {
     throw new Error(`출력 전 페이지네이션을 완료하지 못했습니다 (${reason})`);
   }

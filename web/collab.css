@@ -194,6 +194,16 @@ button.pill.ver:hover:not(:disabled) { border-color: #a9c3ea; background: var(--
 .hist-rec { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; font-size: 12px; padding: 2px 0 2px 10px; border-left: 2px solid var(--line-soft); margin-left: 2px; }
 .hist-rec .linkish { font-size: 11.5px; }
 .hist-act > summary { cursor: pointer; list-style: revert; }
+.hist-applied > summary { cursor: pointer; font-weight: 600; }
+.hist-applied summary span { margin-left: 4px; }
+.hist-applied-tools, .hist-applied-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.hist-applied-tools input { flex: 1 1 11rem; min-width: 0; }
+.hist-applied-tools select { max-width: 100%; }
+.hist-applied-row { border-top: 1px solid var(--line-soft); padding: 8px 0; overflow-wrap: anywhere; }
+.hist-applied-row .linkish { text-align: left; }
+.hist-applied-text { margin: 5px 0 0; }
+.hist-applied-text dt { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.hist-applied-text dd { margin: 0; white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; }
 
 /* ── 검토 탭 ── */
 .rt-filters { margin-bottom: 6px; }

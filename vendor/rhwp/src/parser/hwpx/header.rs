@@ -980,10 +980,10 @@ fn parse_para_shape(
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Empty(ref ce)) => {
-                    parse_para_shape_child(ce, &mut ps);
+                    parse_plain_para_shape_child(ce, &mut ps, physical_plain_margin);
                 }
                 Ok(Event::Start(ref ce)) => {
-                    match parse_para_shape_child(ce, &mut ps) {
+                    match parse_plain_para_shape_child(ce, &mut ps, physical_plain_margin) {
                         ParaShapeChildKind::Margin => {
                             // [#4898] switch 밖 평문 여백 — 원본 표기를 보존한다.
                             ps.hwpx_plain_para_margin = true;
@@ -1002,7 +1002,7 @@ fn parse_para_shape(
                                 ps.hwpx_plain_para_margin = plain_margin;
                             }
                         }
-                        ParaShapeChildKind::Other => {}
+                        ParaShapeChildKind::LineSpacing | ParaShapeChildKind::Other => {}
                     }
                 }
                 Ok(Event::End(ref ee)) => {
@@ -1045,7 +1045,26 @@ fn parse_para_shape(
 enum ParaShapeChildKind {
     Margin,
     Switch,
+    LineSpacing,
     Other,
+}
+
+fn parse_plain_para_shape_child(
+    ce: &quick_xml::events::BytesStart,
+    ps: &mut ParaShape,
+    physical_units: bool,
+) -> ParaShapeChildKind {
+    let kind = parse_para_shape_child(ce, ps);
+    // [hwpx-cowork] #8676 한/글 2022: 평문 고정 2000의 두 줄 피치는
+    // 1.2에서 13px, 1.4에서 27px다. 1.4의 물리 단위만 IR로 환산하며
+    // 나중에 나온 호환 분기가 선택되면 그 분기의 단위 해석을 그대로 쓴다.
+    if kind == ParaShapeChildKind::LineSpacing
+        && physical_units
+        && ps.line_spacing_type != LineSpacingType::Percent
+    {
+        ps.line_spacing = ps.line_spacing.saturating_mul(2);
+    }
+    kind
 }
 
 fn parse_para_shape_child(
@@ -1113,7 +1132,7 @@ fn parse_para_shape_child(
                     _ => {}
                 }
             }
-            ParaShapeChildKind::Other
+            ParaShapeChildKind::LineSpacing
         }
         b"border" => {
             for attr in ce.attributes().flatten() {

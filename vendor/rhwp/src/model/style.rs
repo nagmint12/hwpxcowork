@@ -869,6 +869,34 @@ pub struct SolidFill {
     pub pattern_type: i32,
 }
 
+impl SolidFill {
+    // [hwpx-cowork] #8978 한/글 2022: HWP5의 무늬 0~5와 기존 HWPX/API의
+    // 무늬 1~6을 파일 경계에서 변환한다. 대각선 두 방향은 OWPML 이름에 맞춘다.
+    pub(crate) fn pattern_from_hwp5(value: i32) -> i32 {
+        match value {
+            0 => 1,
+            1 => 2,
+            2 => 4,
+            3 => 3,
+            4 => 5,
+            5 => 6,
+            _ => -1,
+        }
+    }
+
+    pub(crate) fn pattern_for_hwp5(&self) -> i32 {
+        match self.pattern_type {
+            1 => 0,
+            2 => 1,
+            3 => 3,
+            4 => 2,
+            5 => 4,
+            6 => 5,
+            _ => -1,
+        }
+    }
+}
+
 /// 그러데이션 채우기
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GradientFill {
