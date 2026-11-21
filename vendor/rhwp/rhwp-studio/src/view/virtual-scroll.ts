@@ -140,7 +140,7 @@ export class VirtualScroll {
 
   /** 페이지 크기 정보로 오프셋 배열을 구축한다 */
   setPageDimensions(
-    pages: PageInfo[],
+    pages: Pick<PageInfo, 'width' | 'height'>[], // [hwpx-cowork] 화면 밖 쪽의 상세 여백은 필요 없다.
     zoom = 1.0,
     viewportWidth = 0,
     arrangement: PageArrangement = DEFAULT_PAGE_ARRANGEMENT,

@@ -1,6 +1,9 @@
 type Exporter = {
   exportHwpx(): Uint8Array;
   exportHwpxUncompressed?(): Uint8Array | null;
+  prepareAsyncExport?(pause?: () => Promise<void>): Promise<void>;
+  beginHwpxSave?(): { step(units: number): boolean; finish(): Uint8Array; free(): void } | null;
+  readonly documentGeneration?: number;
 };
 type Job = { resolve: (bytes: Uint8Array) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 
@@ -51,17 +54,46 @@ export function primeHwpxCompression(bytes?: Uint8Array): void {
   } catch { /* An unavailable cache must not interrupt document opening. */ }
 }
 
-/** Capture synchronously before yielding, so continued typing cannot change
- * this save's snapshot. Old engine builds and Worker-blocked browsers retain
- * the original exporter. The host's existing changeSeq check keeps later edits
- * dirty even when a fallback export captures a more recent document.
- */
-async function captureAndCompress(exporter: Exporter): Promise<Uint8Array> {
+function yieldForInput(): Promise<void> {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (scheduler?.yield) return scheduler.yield();
+  if (typeof MessageChannel === 'undefined') return new Promise(resolve => setTimeout(resolve, 0));
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); };
+    channel.port2.postMessage(0);
+  });
+}
+
+async function captureSnapshot(exporter: Exporter, checkDocument: () => void): Promise<Uint8Array | null> {
+  const save = exporter.beginHwpxSave?.();
+  if (!save) return exporter.exportHwpxUncompressed?.() ?? null;
+  try {
+    while (true) {
+      await yieldForInput();
+      checkDocument();
+      const start = performance.now();
+      do { if (save.step(16)) {
+        await yieldForInput();
+        checkDocument();
+        return save.finish();
+      } } while (performance.now() - start < 4);
+    }
+  } finally { save.free(); }
+}
+
+async function captureAndCompress(exporter: Exporter, checkDocument: () => void): Promise<Uint8Array> {
+  // Save/Back can return to the input loop before preparing package bytes.
+  // The host revision fence keeps intervening edits dirty until acknowledged.
+  await yieldForInput();
+  checkDocument();
+  await exporter.prepareAsyncExport?.(yieldForInput);
+  checkDocument();
   if (typeof exporter.exportHwpxUncompressed !== 'function') return exporter.exportHwpx();
   const target = getWorker();
   if (!target) return exporter.exportHwpx();
   const start = performance.now();
-  const bytes = exporter.exportHwpxUncompressed();
+  const bytes = await captureSnapshot(exporter, checkDocument);
   if (!bytes) return exporter.exportHwpx();
   performance.measure('cowork.export.snapshot', { start, end: performance.now() });
   const id = ++nextId;
@@ -80,6 +112,7 @@ async function captureAndCompress(exporter: Exporter): Promise<Uint8Array> {
     }
     return result;
   } catch (error) {
+    checkDocument();
     stopWorker(error instanceof Error ? error : new Error(String(error)));
     console.warn('[cowork] 저장 작업자 오류 — 기본 내보내기로 다시 시도합니다');
     return exporter.exportHwpx();
@@ -87,15 +120,21 @@ async function captureAndCompress(exporter: Exporter): Promise<Uint8Array> {
 }
 
 export async function exportHwpxOffThread(exporter: Exporter): Promise<Uint8Array> {
+  const owner = exporter.documentGeneration;
+  const generation = documentGeneration;
+  const checkDocument = () => {
+    if (owner !== exporter.documentGeneration || generation !== documentGeneration) throw new Error('저장할 문서가 바뀌었습니다.');
+  };
   // Do not queue large snapshots. Waiting callers capture only when the single
   // compressor is available. Their host changeSeq predates that later snapshot,
   // so any intervening input remains dirty and is saved again conservatively.
   while (activeExport) {
     try { await activeExport; } catch { /* the next caller can retry */ }
   }
-  const run = captureAndCompress(exporter);
+  checkDocument();
+  const run = captureAndCompress(exporter, checkDocument);
   activeExport = run;
-  try { return await run; }
+  try { const bytes = await run; checkDocument(); return bytes; }
   finally { if (activeExport === run) activeExport = null; }
 }
 

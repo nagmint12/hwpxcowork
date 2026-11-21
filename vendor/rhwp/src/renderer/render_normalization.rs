@@ -171,6 +171,40 @@ pub(crate) struct TableHostProjection {
 }
 
 impl RenderNormalizationOverlay {
+    // [hwpx-cowork] 독립 행 표의 구간 조판에도 원본 표와 칸이 가진 재조판 이력을 전달한다.
+    // 원본 포인터나 전체 문서의 투영을 복제하지 않는다.
+    pub(crate) fn for_row_band(&self, source: &Table, band: &Table, start: usize) -> Option<Self> {
+        let key = source as *const Table as usize;
+        let local = band as *const Table as usize;
+        if self.nested_table_widths_by_pointer.contains_key(&key)
+            || self.stored_nested_text_frames_by_pointer.contains_key(&key)
+            || self.expanded_inline_host_tables_by_pointer.contains(&key)
+            || self.nested_tables_with_reflowed_hosts.contains(&key)
+        {
+            return None;
+        }
+        let mut result = Self::default();
+        if let Some(host) = self.table_host(source) {
+            result.register_table_host(band, host);
+        }
+        if self.table_text_reflowed(source) {
+            result.register_text_reflowed_table(band);
+        }
+        if self.rebased_table_frames_by_pointer.contains(&key) {
+            result.rebased_table_frames_by_pointer.insert(local);
+        }
+        if let Some(scope) = self.rendered_cell_frame_changes.get(&key) {
+            result.rendered_cell_frame_changes.insert(
+                local,
+                band.cells
+                    .iter()
+                    .filter(|c| scope.contains(&(c.row + start as u16, c.col)))
+                    .map(|c| (c.row, c.col))
+                    .collect(),
+            );
+        }
+        Some(result)
+    }
     pub(crate) fn register_table_host(&mut self, table: &Table, host: TableHostProjection) {
         self.table_hosts_by_pointer.insert(table as *const Table as usize, host);
     }

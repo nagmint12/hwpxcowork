@@ -1610,6 +1610,7 @@ export class CursorState {
           this._fnCharOffset,
         );
         if (noteRect) {
+          this._fnPageNum = noteRect.pageIndex; // [hwpx-cowork] 논리 주석 위치가 배치된 최신 쪽
           this.rect = noteRect;
           return;
         }

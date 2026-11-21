@@ -8,7 +8,8 @@ import { ModalDialog } from './dialog';
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { EventBus } from '@/core/event-bus';
 import type { CommandServices } from '@/command/types';
-import { applyThroughRouter } from './dialog-apply';
+import { PageSourceCommand } from '@/engine/command';
+import { applyCommandThroughRouter, applyThroughRouter } from './dialog-apply';
 import { HIDE_FIELDS, hideFlagsFromEngine, hideFlagsToArgs, type HideFlags, type HideKey } from './h2022-format-model';
 
 export class PageHideDialog extends ModalDialog {
@@ -66,6 +67,27 @@ export class PageHideDialog extends ModalDialog {
     for (const f of HIDE_FIELDS) next[f.key] = this.checks.get(f.key)!.checked;
     const same = HIDE_FIELDS.every((f) => next[f.key] === this.initial[f.key]);
     const apply = () => this.wasm.setPageHide(this.target.sec, this.target.para, hideFlagsToArgs(next));
+    if (same) return true;
+    if (this.wasm.supportsPageSourceEdits?.()) {
+      return applyCommandThroughRouter({
+        services: this.services,
+        label: 'PageHideDialog',
+        command: ih => ({
+          kind: 'command',
+          command: new PageSourceCommand('pageHide', ih.getCursorPosition(), wasm => {
+            const old = wasm.capturePageHide(this.target.sec, this.target.para);
+            try {
+              apply();
+              return old;
+            } catch (error) {
+              old.free();
+              throw error;
+            }
+          }),
+        }),
+        fallback: () => { apply(); this.eventBus.emit('document-changed'); },
+      });
+    }
     return applyThroughRouter({
       services: this.services,
       label: 'PageHideDialog',

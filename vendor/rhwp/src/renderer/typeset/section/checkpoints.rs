@@ -54,8 +54,39 @@ pub(crate) struct SectionCheckpoints {
 }
 
 impl SectionCheckpoints {
+    // [hwpx-cowork] 점진 열기에서도 같은 입력 표지와 재개 상태를 만든다. 첫 편집이
+    // 구역 전체를 한 번 더 조판해야만 앞쪽을 재사용할 수 있었던 비용을 없앤다.
+    pub(crate) fn at_open(engine: &TypesetEngine, input: &SectionTypesetInput<'_>, job: &SectionTypesetJob) -> Self {
+        Self {
+            summary: begin_summary(engine, input, job),
+            hf_entries: hf_entries_summary(job),
+            last_content_para_idx: job.last_content_para_idx,
+            paragraph_count: job.paragraph_count,
+            points: Vec::new(),
+        }
+    }
+
+    pub(crate) fn record_open_step(&mut self, job: &SectionTypesetJob) {
+        record_checkpoint(&mut self.points, job);
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.points.len()
+    }
+}
+
+// [hwpx-cowork] 사본은 닫힌 쪽과 문단별 배치 기록까지 소유한다. 모든 두 쪽에서
+// 누적 상태를 복제하면 한 구역이 길어질수록 메모리가 제곱으로 늘어난다. 입력 문단
+// 수로 저장 간격을 정해 한 구역의 누적 사본 수를 제한한다. 실행 조각의 예산과는 별개다.
+fn record_checkpoint(points: &mut Vec<Checkpoint>, job: &SectionTypesetJob) {
+    const SAMPLES: usize = 16;
+    let (prior_para, prior_page) = points.last().map_or((0, 0), |p| {
+        (p.job.next_para_idx, p.job.closed_page_count())
+    });
+    if job.closed_page_count().saturating_sub(prior_page) >= CHECKPOINT_PAGES
+        && job.next_para_idx.saturating_sub(prior_para) >= job.paragraph_count.div_ceil(SAMPLES)
+    {
+        points.push(Checkpoint { job: std::sync::Arc::new(job.clone()) });
     }
 }
 
@@ -199,6 +230,16 @@ fn hf_entries_summary(job: &SectionTypesetJob) -> Vec<(usize, String)> {
 }
 
 impl TypesetEngine {
+    // [hwpx-cowork] 자연 쪽 나눔이 밀린 경우 편집한 쪽을 먼저 발행하고,
+    // 같은 원본과 조판 옵션을 쓰는 작업을 기존 유휴 조판기가 예산별로 끝낸다.
+    pub(crate) fn start_flow_tail(&self, input: &SectionTypesetInput<'_>) -> ParkedSection {
+        let job = self.begin_section(input);
+        ParkedSection {
+            summary: begin_summary(self, input, &job),
+            hf_entries: hf_entries_summary(&job), job, kept: Vec::new(), resumed_from: None,
+        }
+    }
+
     /// [hwpx-cowork] 구역 조판 — 지난 조판의 체크포인트에서 이어 갈 수 있으면 이어 간다(모듈 설명).
     pub(crate) fn typeset_section_resumable_with_storage<S: crate::storage::Storage>(
         &self,
@@ -275,7 +316,7 @@ impl TypesetEngine {
             }
             let closed = job.closed_page_count();
             if record && !seeking {
-                kept.push(Checkpoint { job: std::sync::Arc::new(job.clone()) });
+                record_checkpoint(&mut kept, &job);
             }
             let Some((floor, delta)) = tail.as_ref().map(|(_, floor, delta)| (*floor, *delta)) else {
                 continue;
@@ -297,7 +338,7 @@ impl TypesetEngine {
             if closed > edit + 1 + TAIL_PAGES_AFTER_EDIT + TAIL_ALIGN_EXTRA_PAGES {
                 // 맞는 경계가 없다(한 줄이 끝까지 밀린다) — 끝까지 바로 조판한다(사본은 다시 종전 간격으로).
                 tail = None;
-                kept.push(Checkpoint { job: std::sync::Arc::new(job.clone()) });
+                record_checkpoint(&mut kept, &job);
                 continue;
             }
             if !job.is_quiet() {
@@ -314,7 +355,7 @@ impl TypesetEngine {
                 continue;
             };
             // 다음 편집이 이 근처에서 다시 시작할 수 있게 멈춘 상태를 사본으로 남긴다.
-            kept.push(Checkpoint { job: std::sync::Arc::new(job.clone()) });
+            record_checkpoint(&mut kept, &job);
             let (Some(summary), Some(hf_entries)) = (summary, hf_entries) else {
                 unreachable!("record 일 때만 미룬다");
             };
@@ -383,7 +424,7 @@ impl TypesetEngine {
         let done =
             self.step_section_with_storage(&mut parked.job, input, usize::MAX, CHECKPOINT_PAGES, storage)?;
         if !done {
-            parked.kept.push(Checkpoint { job: std::sync::Arc::new(parked.job.clone()) });
+            record_checkpoint(&mut parked.kept, &parked.job);
         }
         Ok(done)
     }
@@ -403,7 +444,7 @@ impl TypesetEngine {
         let ParkedSection { mut job, mut kept, summary, hf_entries, resumed_from } = parked;
         // 남은 문단이 있으면(마무리를 한 번에 부른 경우) 끝까지 한다.
         while !self.step_section_with_storage(&mut job, input, usize::MAX, CHECKPOINT_PAGES, storage)? {
-            kept.push(Checkpoint { job: std::sync::Arc::new(job.clone()) });
+            record_checkpoint(&mut kept, &job);
         }
         let mut result = self.finish_section_with_storage(job, input, storage)?;
         let mut outcome_verify = (false, false, None);
@@ -775,9 +816,10 @@ fn previous_comparable(
     }
     // 머리말·꼬리말 목록: 바뀐 자리 앞은 그대로, 뒤는 문단 수 차이만큼 옮겨 같아야 한다.
     let delta = fresh.paragraph_count as i64 - previous.paragraph_count as i64;
-    let current = hf_entries_summary(fresh);
-    current.len() == hf_entries.len()
-        && current.iter().zip(hf_entries).all(|((new_para, new), (old_para, old))| {
+    // [hwpx-cowork] 새 머리말 목록은 저장했던 목록과 비교한다. 현재 목록끼리 비교하면
+    // 머리말 앞에 문단을 넣을 때 재개가 잘못 거절되고, 내용 변경은 반대로 놓칠 수 있다.
+    hf_entries.len() == previous.hf_entries.len()
+        && hf_entries.iter().zip(&previous.hf_entries).all(|((new_para, new), (old_para, old))| {
             new == old
                 && if *old_para < floor {
                     new_para == old_para

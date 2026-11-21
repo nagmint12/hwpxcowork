@@ -7429,6 +7429,11 @@ pub(crate) fn recalculate_section_vpos(
             prev_delta
         };
 
+        // [hwpx-cowork] 마지막 변조 문단을 지나 원래 위치와 다시 만났다. 남은 원본 경계는
+        // 앞 이동량(0)을 잇거나 저장 좌표로 리셋한다. 줄 없는 문단을 건너도 앞 end의 이동량은 0이다.
+        if !para_modified && delta == 0 && ignore_reset_range.as_ref().is_none_or(|range| pi >= range.end) {
+            break;
+        }
         // 다음 문단의 리셋 감지 기준은 "이동 전(저장)" first/end 로 기록한다.
         let orig_first = current_start;
         let orig_end = seg_end(&paragraphs[pi]);

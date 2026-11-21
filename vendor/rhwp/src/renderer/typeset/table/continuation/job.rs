@@ -211,6 +211,44 @@ impl TypesetEngine {
         if !job.context.is_complete() {
             return None;
         }
+        Some(self.publish_table_fragments(job, paragraphs, section_index))
+    }
+
+    // [hwpx-cowork] 앞 조각의 실제 cut과 남은 행 높이에서 기존 표 조판기를 이어간다.
+    pub(crate) fn resume_table_band(
+        &self,
+        job: &mut ResumableTablePaginationJob,
+        row: usize,
+        cut: &[usize],
+        height: Option<f64>,
+    ) {
+        let cursor = &mut job.context.cursor;
+        cursor.row = row;
+        cursor.is_continuation = true;
+        cursor.fragments_emitted = 1;
+        cursor.start_cut = cut.to_vec();
+        cursor.start_row_height_override = height;
+        job.context.prepared.first_anchor_offset_consumed = true;
+    }
+
+    // [hwpx-cowork] 다음 입력/유휴 조각은 마지막으로 발행한 실제 컷에서 이어간다.
+    pub(crate) fn table_band_cursor(
+        job: &ResumableTablePaginationJob,
+    ) -> Option<(usize, Vec<usize>, Option<f64>)> {
+        let c = &job.context.cursor;
+        // [hwpx-cowork] 블록/걸침의 물리 원장은 단순 행·줄 컷으로 재현할 수 없다.
+        (!c.start_cut_is_block
+            && c.straddle_page_bands.is_empty()
+            && c.stored_block_frame.is_none())
+        .then(|| (c.row, c.start_cut.clone(), c.start_row_height_override))
+    }
+
+    pub(crate) fn publish_table_fragments(
+        &self,
+        job: ResumableTablePaginationJob,
+        paragraphs: &[Paragraph],
+        section_index: usize,
+    ) -> PaginationResult {
         let mut state = job.context.into_flow_state();
         if !state.current_items.is_empty() {
             state.flush_column_always();
@@ -219,7 +257,7 @@ impl TypesetEngine {
         let (hf_entries, page_number_pos) =
             Self::collect_header_footer_controls(paragraphs, section_index);
         state.finalize_pages(&hf_entries, &page_number_pos, paragraphs);
-        Some(state.into_result())
+        state.into_result()
     }
 
     pub(crate) fn resumable_table_target(job: &ResumableTablePaginationJob) -> (usize, usize) {

@@ -3288,6 +3288,7 @@ crate::storage::clone_copy!(DumpFormattedParagraphHeight);
 mod controls;
 #[path = "typeset/inline_flow.rs"]
 mod inline_flow;
+pub(crate) use inline_flow::plan::replay_inline_owner; // [hwpx-cowork] 편집한 문단의 줄 계획 갱신
 mod notes;
 pub(crate) use notes::endnotes::content::endnote_first_para_render_offset;
 mod paragraph;

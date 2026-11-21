@@ -47,6 +47,13 @@ pub struct Paragraph {
     /// before layout/editing and clears it; explicit references remain intact.
     #[serde(skip_serializing)]
     pub hwpx_missing_para_shape: bool,
+    /// [hwpx-cowork] 원본 서식은 확정되었고 저장 글줄·조합만 갱신할 차례다.
+    /// 문단 삽입·이동 때 원본과 같이 움직이며 파일이나 원본 무결성에 포함하지 않는다.
+    #[serde(skip_serializing)]
+    pub interactive_format_dirty: bool,
+    /// [hwpx-cowork] 취소선·밑줄처럼 줄 경계를 보존하는 서식과 글자 크기 변경을 구분한다.
+    #[serde(skip)]
+    pub interactive_format_reflow: bool,
     /// 문단 스타일 ID 참조
     pub style_id: u8,
     /// 단 나누기 종류
@@ -3275,6 +3282,8 @@ impl Paragraph {
             char_count: new_char_count,
             para_shape_id: self.para_shape_id,
             hwpx_missing_para_shape: self.hwpx_missing_para_shape,
+            interactive_format_dirty: self.interactive_format_dirty,
+            interactive_format_reflow: self.interactive_format_reflow,
             style_id: self.style_id,
             column_type: ColumnBreakType::None,
             raw_break_type: 0,

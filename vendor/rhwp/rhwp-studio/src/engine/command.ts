@@ -3,6 +3,8 @@ import type {
   DeferredFocusedPagePatch,
   RemovedParaMeta,
   WasmBridge,
+  BodyRangeHistory,
+  ParagraphHistory,
 } from '@/core/wasm-bridge';
 import type { DocumentPosition, CharProperties, ParaProperties, CellPathLike, CellPathEntry, SectionDef, CellProperties } from '@/core/types';
 import type { HeaderFooterTextPosition, CellBlockSelectionState } from './cursor';
@@ -282,6 +284,10 @@ export type OperationDescriptor =
       kind: 'snapshot';
       operationType: string;
       operation: (wasm: WasmBridge) => DocumentPosition | null;
+      /** [hwpx-cowork] 단일 쪽 나누기 명령이 제공하는 선형 복원 ID. */
+      captureBefore?: (wasm: WasmBridge) => number;
+      /** [hwpx-cowork] 성공한 구조 편집이 이전 글 입력의 현재 쪽 조판을 인수했다. */
+      ownsPriorTextPagination?: boolean;
       /** 본문 좌표와 분리된 HF/FN 편집 문맥. undo/redo 뒤 같은 문맥으로 돌아간다. */
       editContext?: EditContext;
       /** 최초 실행/redo 뒤 복원할 문맥. 함수형이면 최초 mutation 결과를 반영해 지연 계산한다. */
@@ -1038,17 +1044,30 @@ export class InsertTabCommand implements EditCommand {
 export class SplitParagraphCommand implements EditCommand {
   readonly type = 'splitParagraph';
   readonly timestamp = Date.now();
+  private effects = NO_TEXT_MUTATION_EFFECTS;
+  private noOp = false;
 
   constructor(private position: DocumentPosition) {}
 
   execute(wasm: WasmBridge): DocumentPosition {
     const { sectionIndex: sec, paragraphIndex: para, charOffset } = this.position;
+    this.effects = NO_TEXT_MUTATION_EFFECTS;
     const result = JSON.parse(wasm.splitParagraph(sec, para, charOffset));
+    this.noOp = !result.ok;
     if (result.ok) {
+      this.effects = IMMEDIATE_TEXT_MUTATION_EFFECTS; // [hwpx-cowork] 현재 쪽을 발행한 뒤의 꼬리 작업은 idle로 잇는다.
       return { sectionIndex: sec, paragraphIndex: result.paraIdx, charOffset: 0 };
     }
     return this.position;
   }
+
+  consumeTextMutationEffects(): TextMutationEffects {
+    const effects = this.effects;
+    this.effects = NO_TEXT_MUTATION_EFFECTS;
+    return effects;
+  }
+
+  isNoOp(): boolean { return this.noOp; } // [hwpx-cowork] 거절된 Enter는 기존 입력 타이머와 히스토리를 보존한다.
 
   undo(wasm: WasmBridge): DocumentPosition {
     const { sectionIndex: sec, paragraphIndex: para } = this.position;
@@ -1358,6 +1377,54 @@ interface ParaFormatEntry {
   endOffset: number;
   beforeRuns: CharShapeRun[];
   afterRuns?: CharShapeRun[];
+}
+
+/** [hwpx-cowork] 쪽·바탕쪽·주석 설정의 변경된 원본만 기억하고 되돌린다. */
+export class PageSourceCommand implements EditCommand {
+  readonly timestamp = Date.now();
+  private history?: ParagraphHistory;
+  constructor(
+    readonly type: 'pageHide' | 'editMasterText' | 'footnoteShape' | 'endnoteShape',
+    private position: DocumentPosition,
+    private apply: (wasm: WasmBridge) => ParagraphHistory,
+  ) {}
+  execute(wasm: WasmBridge): DocumentPosition {
+    if (this.history) return this.undo(wasm);
+    this.history = this.apply(wasm);
+    return { ...this.position };
+  }
+  undo(wasm: WasmBridge): DocumentPosition {
+    if (!this.history) throw new Error('쪽 편집 이력이 없습니다.');
+    if (this.type === 'pageHide') wasm.swapPageHide(this.history);
+    else if (this.type === 'editMasterText') wasm.swapMasterText(this.history);
+    else wasm.swapNoteShape(this.history);
+    return { ...this.position };
+  }
+  discard(): void { this.history?.free(); this.history = undefined; }
+  mergeWith(): null { return null; }
+}
+
+/** [hwpx-cowork] 서식의 논리 범위·원래 속성을 엔진이 소유한다. 쪽은 조판 우선순위뿐이다. */
+export class BodyRangeFormatCommand implements EditCommand {
+  readonly timestamp = Date.now();
+  private history?: BodyRangeHistory;
+  constructor(
+    readonly type: 'applyCharFormat' | 'applyParaFormat',
+    private start: DocumentPosition, private end: DocumentPosition,
+    private props: Record<string, unknown>, private focusPage: () => number,
+  ) {}
+  execute(wasm: WasmBridge): DocumentPosition {
+    if (this.history) return this.undo(wasm);
+    this.history = wasm.applyBodyRangeFormat(this.start, this.end, this.props, this.focusPage());
+    return { ...this.start };
+  }
+  undo(wasm: WasmBridge): DocumentPosition {
+    if (this.history) wasm.swapBodyRangeFormat(this.history, this.focusPage());
+    return { ...this.start };
+  }
+  isNoOp(): boolean { return this.history?.isEmpty() ?? true; }
+  discard(): void { this.history?.free(); this.history = undefined; }
+  mergeWith(): null { return null; }
 }
 
 export class ApplyCharFormatCommand implements EditCommand {
@@ -3195,6 +3262,7 @@ export class SnapshotCommand implements EditCommand {
     private cursorAfter: DocumentPosition,
     private operation: ((wasm: WasmBridge) => DocumentPosition | null) | null,
     private readonly undoSelection: EditSelectionSnapshot | null = null,
+    private readonly captureBefore?: (wasm: WasmBridge) => number,
   ) {
     this.type = `snapshot:${operationType}`;
   }
@@ -3223,7 +3291,7 @@ export class SnapshotCommand implements EditCommand {
 
     // 최초 실행: before 저장 → 작업 수행 (after 는 undo 시점에 잡는다)
     this.executed = true;
-    this.beforeId = wasm.saveSnapshot();
+    this.beforeId = this.captureBefore?.(wasm) ?? wasm.saveSnapshot();
     // [Task #2328] operation 이 throw 하면 커맨드가 히스토리에 등록되지 못해 discard
     // 주체가 사라진다 → 스냅샷 영구 누수(orphan → WASM 무통보 축출 재발). 아래 catch 가
     // before 를 대칭적으로 해제한다.
@@ -3277,7 +3345,7 @@ export class SnapshotCommand implements EditCommand {
     // "현재 문서 == 이 명령 실행 직후 상태" 라는 뜻이므로 실행 시점에 찍은 것과 값이 같다.
     if (this.afterId === null && !this.redoUnavailable) {
       try {
-        this.afterId = wasm.saveSnapshot();
+        this.afterId = (this.beforeId === null ? undefined : wasm.saveRedoSnapshot?.(this.beforeId)) ?? wasm.saveSnapshot(); // [hwpx-cowork]
       } catch {
         // 저장 실패로 **되돌리기 자체를 막지 않는다.** undo 는 수행하고 redo 만 포기한다 —
         // 여기서 던지면 사용자의 Ctrl+Z 가 아무 일도 못 하고 히스토리 엔트리까지 잃는다.

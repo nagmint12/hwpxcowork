@@ -518,6 +518,7 @@ impl DocumentCore {
         control_idx: usize,
         props_json: &str,
     ) -> Result<String, HwpError> {
+        let window = self.flow_window_before(section_idx, parent_para_idx); // [hwpx-cowork] 개체가 들어 있는 줄의 이전 쪽 경계
         let stored_end_before = self
             .document
             .sections
@@ -668,8 +669,22 @@ impl DocumentCore {
         // 리플로우
         let section = &mut self.document.sections[section_idx];
         section.raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        if !caption_created
+            && !caption_removed
+            && super::json_numbering_type(props_json).is_none()
+            && !should_migrate_to_inline
+            && !should_migrate_to_floating
+        {
+            if window.is_some() {
+                self.recompose_paragraph(section_idx, parent_para_idx);
+                self.paginate_flow_edit(window, 0);
+            } else {
+                self.recompose_edited_object_owner(section_idx, parent_para_idx); // [hwpx-cowork] 그림의 본문 소유자
+            }
+        } else {
+            self.recompose_section(section_idx);
+            self.paginate_if_needed();
+        }
         // [Task #1151 v5] page tree cache invalidate — 다른 picture/shape setter (셀 shape
         // by_path / 셀 picture by_path / header-footer picture / shape 등) 모두 호출하나
         // 본 본문 picture setter 만 누락되어 있어 studio 가 stale page tree 반환 → tac toggle
@@ -1541,6 +1556,24 @@ impl DocumentCore {
             }
         }
 
+        // [hwpx-cowork] 한/글 HWPX 그림의 명시한 표시 크기는 hp:sz가 정한다.
+        // 새 원본 픽셀과 crop은 그 프레임의 그리기만 바꾼다. 투영 사본이 있는 문서는 다시 구성한다.
+        let fixed_frame = self.typeset_tail_deferral
+            && !self.typeset_resume.disabled.get()
+            && !self.typeset_resume.verify.get()
+            && !self.batch_mode
+            && !self.dirty_sections.contains(&true)
+            && self
+                .render_normalization
+                .sections
+                .get(section_idx)
+                .is_some_and(Option::is_none)
+            && cell_path.is_empty()
+            && self
+                .resolve_picture_control_ref(section_idx, parent_para_idx, control_idx)
+                .is_ok_and(|p| {
+                    p.common.hwpx_size_rule && p.common.width > 0 && p.common.height > 0
+                });
         let position_id = self.register_embedded_bin_data(image_data, extension);
 
         {
@@ -1575,8 +1608,9 @@ impl DocumentCore {
 
         let section = &mut self.document.sections[section_idx];
         section.raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        if !fixed_frame {
+            self.recompose_edited_object_owner(section_idx, parent_para_idx); // [hwpx-cowork] 바뀐 그림의 프레임
+        }
         self.invalidate_page_tree_cache();
         self.event_log.push(DocumentEvent::PictureResized {
             section: section_idx,

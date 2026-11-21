@@ -131,6 +131,8 @@ impl TypesetEngine {
                 control_index: en_ref.control_index,
                 cell_path: en_ref.cell_path.clone(),
                 note_para_index: ep_idx,
+                render_offset: endnote_start,
+                compact_spacing: compact_no_separator_spacing, // [hwpx-cowork]
                 tail_leading_consumed_hu: 0,
             });
             last_render_endnote_para_local_idx = Some(en_para_local_idx);
@@ -1452,6 +1454,8 @@ impl TypesetEngine {
                         control_index: en_ref.control_index,
                         cell_path: en_ref.cell_path.clone(),
                         note_para_index: ep_idx + 1,
+                        render_offset: endnote_start,
+                        compact_spacing: false, // [hwpx-cowork] 이 경로는 저장 간격을 그대로 쓴다.
                         tail_leading_consumed_hu: 0,
                     });
                     last_render_endnote_para_local_idx = Some(st.endnote_paragraphs.len() - 1);

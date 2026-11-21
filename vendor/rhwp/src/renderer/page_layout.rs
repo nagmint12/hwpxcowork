@@ -36,7 +36,7 @@ pub struct PageLayoutInfo {
 crate::storage::clone_fields!(PageLayoutInfo, {page_width, page_height, header_area, body_area, column_areas, column_direction, footnote_area, footer_area, dpi, separator_type, separator_width, separator_color, pagination_tolerance_px});
 
 /// 레이아웃 영역 (픽셀 단위)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LayoutRect {
     pub x: f64,
     pub y: f64,

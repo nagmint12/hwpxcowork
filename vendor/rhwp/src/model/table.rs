@@ -819,6 +819,12 @@ impl Table {
         &self,
         storage: &S,
     ) -> Result<Vec<i32>, S::Error> {
+        #[cfg(test)]
+        PARAGRAPH_FRAME_OWNER_WIDTHS_CALLS.with(|calls| calls.set(calls.get() + 1));
+        // [hwpx-cowork] 같은 물리 열로 빈틈 없이 닫힌 행에는 화해할 잔여 폭이 없다.
+        if self.has_direct_cell_widths() {
+            return storage.collect(self.cells.iter().map(|c| c.width as i32));
+        }
         let mut owners = self.fallback_paragraph_frame_owner_widths_with_storage(storage)?;
         for (row, frames) in self
             .closing_row_frames_with_storage(storage)?
@@ -838,9 +844,6 @@ impl Table {
         &self,
         storage: &S,
     ) -> Result<Vec<i32>, S::Error> {
-        #[cfg(test)]
-        PARAGRAPH_FRAME_OWNER_WIDTHS_CALLS.with(|calls| calls.set(calls.get() + 1));
-
         let to_i32 = |width: u64| width.min(i32::MAX as u64) as i32;
         let mut owners =
             storage.collect(self.cells.iter().map(|cell| to_i32(u64::from(cell.width))))?;
@@ -1786,10 +1789,109 @@ impl Table {
         &mut self,
         storage: &S,
     ) -> Result<(), S::Error> {
-        self.row_sizes = storage.collect(
-            (0..self.row_count).map(|r| self.cells.iter().filter(|c| c.row == r).count() as i16),
-        )?;
+        // [hwpx-cowork] 모든 행마다 모든 칸을 다시 순회하지 않고 원본 행의
+        // 앵커를 한 번씩 센다. i16 저장 표현과 범위 밖 원점 처리도 종전과 같다.
+        let mut counts = storage.filled(usize::from(self.row_count), 0i16)?;
+        for cell in &self.cells {
+            if let Some(count) = counts.get_mut(usize::from(cell.row)) {
+                *count = count.wrapping_add(1);
+            }
+        }
+        self.row_sizes = counts;
         Ok(())
+    }
+
+    // [hwpx-cowork] 행 내부 칸 주소를 소스 순서의 슬라이스로 바로 읽을 수 있는 형상.
+    pub(crate) fn row_major_unmerged(&self) -> bool {
+        let cols = usize::from(self.col_count);
+        cols != 0
+            && self.row_count != 0
+            && self.cells.len() == usize::from(self.row_count) * cols
+            && self.cells.chunks_exact(cols).enumerate().all(|(r, row)| {
+                row.iter().enumerate().all(|(c, cell)| {
+                    cell.row_span == 1
+                        && cell.col_span == 1
+                        && usize::from(cell.row) == r
+                        && usize::from(cell.col) == c
+                })
+            })
+    }
+
+    // [hwpx-cowork] 한/글과 대조한 closing_row_frames의 물리 폭·행 종단을 그대로 확인한다.
+    pub(crate) fn has_direct_cell_widths(&self) -> bool {
+        if self.cell_spacing != 0
+            || self.cells.len() > MAX_TABLE_GRID_CELLS
+            || self.col_count == 0
+            || self.row_count == 0
+        {
+            return false;
+        }
+        let cols = usize::from(self.col_count);
+        if !self.row_major_unmerged() {
+            // [hwpx-cowork] 가로·세로 병합도 동일한 물리 열의 합이면 잔여 폭이 없다.
+            // 빈틈/겹침, 순서가 다른 원점, 단일 열의 증거가 없는 경우는 원래 폭 해결기를 쓴다.
+            if self.cell_grid.len() != usize::from(self.row_count) * cols
+                || self.cell_grid.len() > MAX_TABLE_GRID_CELLS
+                || self.cell_grid.iter().any(Option::is_none)
+            {
+                return false;
+            }
+            let mut widths = vec![0u32; cols];
+            let mut previous = None;
+            for (i, c) in self.cells.iter().enumerate() {
+                let end_col = usize::from(c.col) + usize::from(c.col_span);
+                let end_row = usize::from(c.row) + usize::from(c.row_span);
+                if c.row_span == 0
+                    || c.col_span == 0
+                    || end_col > cols
+                    || end_row > usize::from(self.row_count)
+                    || c.width == 0
+                    || c.width > i32::MAX as u32
+                    || self.physical_cell_width_hu(c) != c.width
+                    || previous.is_some_and(|p| p >= (c.row, c.col))
+                {
+                    return false;
+                }
+                previous = Some((c.row, c.col));
+                for row in usize::from(c.row)..end_row {
+                    if self.cell_grid[row * cols + usize::from(c.col)..row * cols + end_col]
+                        .iter()
+                        .any(|v| *v != Some(i))
+                    {
+                        return false;
+                    }
+                }
+                if c.col_span == 1 {
+                    let width = &mut widths[usize::from(c.col)];
+                    if *width != 0 && *width != c.width {
+                        return false;
+                    }
+                    *width = c.width;
+                }
+            }
+            if widths.contains(&0) {
+                return false;
+            }
+            let mut ends = vec![0u64];
+            for width in widths {
+                ends.push(ends.last().copied().unwrap() + u64::from(width));
+            }
+            return ends[cols] == u64::from(self.common.width)
+                && self.cells.iter().all(|c| {
+                    let start = usize::from(c.col);
+                    ends[start + usize::from(c.col_span)] - ends[start] == u64::from(c.width)
+                });
+        }
+        let first = &self.cells[..cols];
+        first.iter().map(|c| u64::from(c.width)).sum::<u64>() == u64::from(self.common.width)
+            && self.cells.chunks_exact(cols).all(|row| {
+                row.iter().zip(first).all(|(c, first)| {
+                    c.width > 0
+                        && c.width <= i32::MAX as u32
+                        && c.width == first.width
+                        && self.physical_cell_width_hu(c) == c.width
+                })
+            })
     }
 
     /// 행을 삽입한다.

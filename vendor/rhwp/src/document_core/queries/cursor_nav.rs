@@ -1827,6 +1827,32 @@ impl DocumentCore {
     ///
     /// cell_ctx: Some((ppi, ci, cei)) 면 셀 내부, None 이면 본문.
     /// start/end_para_idx: 셀 내부일 때는 cellParaIndex.
+    /// [hwpx-cowork] 전체 선택의 논리 끝점은 보존하고 강조는 실제 그리는 한 쪽만 계산한다.
+    pub(crate) fn body_selection_on_page(&mut self, page: u32, start: (usize, usize, usize), end: (usize, usize, usize)) -> Result<String, HwpError> {
+        use crate::renderer::pagination::PageItem;
+        self.prepare_format_page(page);
+        let (content, _, _) = self.find_page(page)?;
+        let section = content.section_index;
+        if section < start.0 || section > end.0 || start > end {
+            return Ok(r#"{"rects":[],"tables":[]}"#.into());
+        }
+        let body = &self.document.sections[section].paragraphs;
+        let Some(last) = body.len().checked_sub(1) else { return Ok(r#"{"rects":[],"tables":[]}"#.into()) };
+        let (first, from) = if section == start.0 { (start.1, start.2) } else { (0, 0) };
+        let (last, to) = if section == end.0 { (end.1, end.2) } else { (last, navigable_text_len(&body[last])) };
+        let rects = self.get_selection_rects_native(section, first, from, last, to, None, Some((page, page)))?;
+        let mut tables = std::collections::BTreeSet::new();
+        for item in content.column_contents.iter().flat_map(|c| &c.items) {
+            let (PageItem::Table { para_index, control_index } | PageItem::PartialTable { para_index, control_index, .. }) = item else { continue };
+            let Some(host) = body.get(*para_index) else { continue };
+            if let Some(offset) = crate::document_core::helpers::find_control_text_positions(host).get(*control_index) {
+                let at = (section, *para_index, *offset);
+                if start <= at && at < end { tables.insert((section, *para_index, *control_index)); }
+            }
+        }
+        Ok(format!(r#"{{"rects":{},"tables":{}}}"#, rects, serde_json::json!(tables)))
+    }
+
     pub(crate) fn get_selection_rects_native(
         &self,
         section_idx: usize,
@@ -2415,9 +2441,12 @@ impl DocumentCore {
         let lookup_para = cell_target
             .map(SelectionCellTarget::parent_para_idx)
             .unwrap_or(start_para_idx);
-        let full_page_nums = self.find_pages_for_paragraph(section_idx, lookup_para)?;
+        // [hwpx-cowork] 본문에 명시된 단일 표시 쪽은 그 쪽만 그리는 계약이다. 셀의 정확도 힌트와 구분한다.
+        let viewport_page = page_hints.filter(|(a, b)| cell_target.is_none() && a == b).map(|v| v.0);
+        let full_page_nums = if let Some(page) = viewport_page { vec![page] }
+            else { self.find_pages_for_paragraph(section_idx, lookup_para)? };
         // 끝 문단이 다른 페이지에 있을 수 있으므로 추가
-        if cell_target.is_none() && end_para_idx != start_para_idx {
+        if viewport_page.is_none() && cell_target.is_none() && end_para_idx != start_para_idx {
             if let Ok(end_pages) = self.find_pages_for_paragraph(section_idx, end_para_idx) {
                 for &p in &end_pages {
                     if !full_page_nums.contains(&p) {
@@ -2499,7 +2528,7 @@ impl DocumentCore {
         let page_nums = narrowed_pages.unwrap_or(page_nums);
 
         let selection_tree = |pn| {
-            if used_hints {
+            if used_hints || viewport_page.is_some() {
                 return self.build_page_tree_cached(pn);
             }
             // 본문은 렌더·캐럿 질의가 이미 만든 유효한 트리만 재사용한다.
@@ -2584,7 +2613,17 @@ impl DocumentCore {
         let mut rendered_segments = 0usize;
         let mut last_segment_page: Option<u32> = None;
 
-        for para_idx in start_para_idx..=end_para_idx {
+        let visible;
+        let paragraphs: Box<dyn Iterator<Item = usize> + '_> = if let Some(page) = viewport_page {
+            let (content, _, _) = self.find_page(page)?;
+            visible = content.column_contents.iter().flat_map(|col| &col.items)
+                .filter(|item| !matches!(item, crate::renderer::pagination::PageItem::EndnoteSeparator { .. }))
+                .map(|item| item.para_index())
+                .filter(|p| *p >= start_para_idx && *p <= end_para_idx && *p < self.document.sections[section_idx].paragraphs.len())
+                .collect::<std::collections::BTreeSet<_>>();
+            Box::new(visible.into_iter())
+        } else { Box::new(start_para_idx..=end_para_idx) };
+        for para_idx in paragraphs {
             let para = match cell_target {
                 Some(SelectionCellTarget::Flat {
                     parent_para_idx,
@@ -2639,7 +2678,7 @@ impl DocumentCore {
             }
 
             // 본문 문단이 다른 페이지에 있을 수 있으므로 트리 캐시에 추가
-            if cell_target.is_none() {
+            if cell_target.is_none() && viewport_page.is_none() {
                 if let Ok(pp) = self.find_pages_for_paragraph(section_idx, para_idx) {
                     for &pn in &pp {
                         if !tree_cache.iter().any(|(p, _)| *p == pn) {

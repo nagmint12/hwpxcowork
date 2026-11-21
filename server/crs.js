@@ -412,6 +412,18 @@ export class ChangeRequests {
     // 넣을 글(내 글)은 XML 에 못 넣는 제어 문자를 뺀 것 — 편집기 내보내기에 섞여 들어온 U+0001 등이 기준 문서 XML 을 깨지 않게.
     // 반영·다시 맞추기는 이 함수가 돌려준 글(target·text)만 쓴다
     const mine = MT.xmlSafe(h.newText);
+    if (h.type === 'masterText') {
+      const curRef = map ? map.ref(h.ref) : h.ref;
+      const section = secOf(curRef);
+      const address = { ...h.master, section };
+      const currentText = section == null ? null : cur.masterText(address);
+      const at = { curRef, currentText, address, state: 'ok' };
+      if (currentText == null) return { ...at, state: 'gone', kind: 'conflict', reason: 'GONE', message: '바탕쪽 문단이 사라졌습니다.' };
+      if (currentText === mine) return { ...at, kind: 'skip', reason: 'SAME' };
+      const merged = merge3(h.baseText, mine, currentText);
+      if (!merged.ok) return { ...at, kind: 'conflict', reason: 'OVERLAP', message: '같은 바탕쪽 글을 두 사람이 수정했습니다.' };
+      return { ...at, kind: 'edit', target: merged.text };
+    }
     if (h.type === 'insert') {
       const at = map ? map.insertAfter(h.afterRef ?? null, secOf(h.ref) ?? 0) : null;
       if (!at) return { curRef: null, state: 'gone', currentText: null, kind: 'conflict', reason: 'GONE', message: '문단을 넣을 자리를 지금 문서에서 찾지 못했습니다' };
@@ -980,6 +992,11 @@ export class ChangeRequests {
     cr.hunks.forEach((h, order) => {
       const p = this._place(h, map, cur, null);
       const note = (reason, message) => conflicts.push(conflictOut(h, { ...p, reason, message }));
+      if (h.type === 'masterText') {
+        if (p.kind === 'edit') work.writeMasterText(p.address, p.target, source, h.master);
+        else if (p.kind === 'conflict') note(p.reason, p.message);
+        return;
+      }
       if (h.type === 'insert') {
         if (p.kind === 'insert') structural.push({ kind: 'insert', sec: p.sec, after: p.after, key: Math.max(0, p.after) + 0.5, text: p.text, order, h });
         else note(p.reason, p.message);
@@ -1298,6 +1315,14 @@ export class ChangeRequests {
       const recs = []; const skipped = []; const late = [];
       for (const { h, p } of placed) {
         if (p.kind === 'skip') { skipped.push({ hid: h.hid, reason: p.reason }); continue; }
+        if (h.type === 'masterText' && p.kind === 'edit') {
+          doc.writeMasterText(p.address, p.target, source, h.master);
+          ctx.dirty = true;
+          ctx.formatting = true;
+          const body = doc.text(p.curRef, 'final');
+          recs.push({ ref: p.curRef, hid: h.hid, kind: 'changed', ids: [], before: body, after: body, formatUndo: null });
+          continue;
+        }
         if (p.kind !== 'edit' || p.object || p.removePictures) continue;   // 그림 속성·조판 부호·그림 지우기는 글을 다 고친 뒤(아래)
         let ids;
         let formatUndo = null;

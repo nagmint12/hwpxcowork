@@ -438,6 +438,70 @@ fn collect_external_image_references(document: &Document) -> Vec<ExternalImageRe
     references.into_values().collect()
 }
 
+/// [hwpx-cowork] 저장용 사본만 소유한다. 이벤트 사이에 원래 편집기를 계속 수정할 수 있다.
+#[wasm_bindgen]
+pub struct HwpxSaveSession {
+    inner: Option<crate::serializer::hwpx::cooperative::Save>,
+}
+
+// [hwpx-cowork] 범위 명령의 역연산만 보관한다. 다른 문서의 같은 문단 번호로 돌려 쓰지 않는다.
+/// [hwpx-cowork] 반복해서 그려지는 바탕쪽에도 원본 문단 하나와 그 역연산만 있다.
+#[wasm_bindgen]
+pub struct MasterTextHistory {
+    owner: u64,
+    section: usize,
+    master: usize,
+    path: crate::document_core::master_edit::MasterPath,
+    saved: crate::model::paragraph::Paragraph,
+}
+
+#[wasm_bindgen]
+pub struct NoteShapeHistory {
+    owner: u64,
+    section: usize,
+    endnote: bool,
+    saved: crate::model::footnote::FootnoteShape,
+}
+
+#[wasm_bindgen]
+pub struct PageHideHistory {
+    owner: u64,
+    section: usize,
+    paragraph: usize,
+    saved: crate::model::paragraph::Paragraph,
+}
+
+#[wasm_bindgen]
+pub struct BodyRangeFormatHistory {
+    owner: u64,
+    inner: crate::document_core::range_format::BodyFormat,
+}
+
+#[wasm_bindgen]
+impl BodyRangeFormatHistory {
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+}
+
+#[wasm_bindgen]
+impl HwpxSaveSession {
+    pub fn step(&mut self, units: usize) -> Result<bool, JsValue> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("저장이 끝났습니다."))?
+            .step(units)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .take()
+            .ok_or_else(|| JsValue::from_str("저장이 끝났습니다."))?
+            .finish()
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
 /// WASM에서 사용할 HWP 문서 래퍼
 ///
 /// 도메인 로직은 `DocumentCore`에 구현되어 있으며,
@@ -1181,17 +1245,19 @@ impl HwpDocument {
 
     /// 특정 페이지를 SVG 문자열로 렌더링한다.
     #[wasm_bindgen(js_name = renderPageSvg)]
-    pub fn render_page_svg(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn render_page_svg(&mut self, page_num: u32) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.render_page_svg_native(page_num).map_err(|e| e.into())
     }
 
     /// 명시적인 출력 profile로 특정 페이지를 SVG 문자열로 렌더링한다.
     #[wasm_bindgen(js_name = renderPageSvgWithProfile)]
     pub fn render_page_svg_with_profile(
-        &self,
+        &mut self,
         page_num: u32,
         profile: &str,
     ) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         let profile = crate::paint::RenderProfile::parse(profile)
             .ok_or_else(|| JsValue::from_str(&format!("unsupported render profile: {profile}")))?;
         self.render_page_svg_layer_with_profile_native(page_num, profile)
@@ -1200,19 +1266,22 @@ impl HwpDocument {
 
     /// 특정 페이지를 HTML 문자열로 렌더링한다.
     #[wasm_bindgen(js_name = renderPageHtml)]
-    pub fn render_page_html(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn render_page_html(&mut self, page_num: u32) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.render_page_html_native(page_num).map_err(|e| e.into())
     }
 
     /// 특정 페이지를 Canvas 명령 수로 반환한다.
     #[wasm_bindgen(js_name = renderPageCanvas)]
-    pub fn render_page_canvas(&self, page_num: u32) -> Result<u32, JsValue> {
+    pub fn render_page_canvas(&mut self, page_num: u32) -> Result<u32, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.render_page_canvas_native(page_num)
             .map_err(|e| e.into())
     }
 
     #[wasm_bindgen(js_name = renderPageCanvasLegacy)]
-    pub fn render_page_canvas_legacy(&self, page_num: u32) -> Result<u32, JsValue> {
+    pub fn render_page_canvas_legacy(&mut self, page_num: u32) -> Result<u32, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.render_page_canvas_legacy_native(page_num)
             .map_err(|e| e.into())
     }
@@ -1224,11 +1293,12 @@ impl HwpDocument {
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen(js_name = renderPageToCanvas)]
     pub fn render_page_to_canvas(
-        &self,
+        &mut self,
         page_num: u32,
         canvas: &HtmlCanvasElement,
         scale: f64,
     ) -> Result<(), JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         use crate::renderer::layer_renderer::LayerRenderer;
         use crate::renderer::web_canvas::WebCanvasRenderer;
 
@@ -1312,12 +1382,13 @@ impl HwpDocument {
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen(js_name = renderPageToCanvasFiltered)]
     pub fn render_page_to_canvas_filtered(
-        &self,
+        &mut self,
         page_num: u32,
         canvas: &HtmlCanvasElement,
         scale: f64,
         layer_kind: &str,
     ) -> Result<(), JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.render_page_to_canvas_filtered_with_profile(
             page_num, canvas, scale, layer_kind, "screen",
         )
@@ -1326,13 +1397,14 @@ impl HwpDocument {
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen(js_name = renderPageToCanvasFilteredWithProfile)]
     pub fn render_page_to_canvas_filtered_with_profile(
-        &self,
+        &mut self,
         page_num: u32,
         canvas: &HtmlCanvasElement,
         scale: f64,
         layer_kind: &str,
         profile: &str,
     ) -> Result<(), JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         render_patch_boundary::render_page_to_canvas_filtered_with_profile(
             self, page_num, canvas, scale, layer_kind, profile,
         )
@@ -1403,7 +1475,8 @@ impl HwpDocument {
 
     /// 페이지 렌더 트리를 JSON 문자열로 반환한다.
     #[wasm_bindgen(js_name = getPageRenderTree)]
-    pub fn get_page_render_tree(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn get_page_render_tree(&mut self, page_num: u32) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         let tree = self
             .build_page_tree_cached(page_num)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -1622,6 +1695,32 @@ impl HwpDocument {
         self.get_page_info_native(page_num).map_err(|e| e.into())
     }
 
+    /// [hwpx-cowork] 가상 스크롤에 필요한 실제 조판 용지 크기를 연속 구간별로 전달한다.
+    /// 표시 정밀도는 getPageInfo와 같고, 여백·제본·쪽 번호는 보이는 쪽에서 직접 조회한다.
+    #[wasm_bindgen(js_name = getPageSizeRuns)]
+    pub fn get_page_size_runs(&self) -> String {
+        use std::fmt::Write;
+        let mut runs = String::from("[");
+        let mut last = None;
+        let mut count = 0usize;
+        let emit = |runs: &mut String, count, (width, height): (f64, f64)| {
+            if runs.len() > 1 { runs.push(','); }
+            write!(runs, "[{count},{width:.1},{height:.1}]").unwrap();
+        };
+        for page in self.core.pagination.iter().flat_map(|s| &s.pages) {
+            let size = (page.layout.page_width, page.layout.page_height);
+            if last != Some(size) {
+                if let Some(old) = last { emit(&mut runs, count, old); }
+                last = Some(size);
+                count = 0;
+            }
+            count += 1;
+        }
+        if let Some(old) = last { emit(&mut runs, count, old); }
+        runs.push(']');
+        runs
+    }
+
     /// 구역의 용지 설정(PageDef)을 HWPUNIT 원본값으로 반환한다.
     #[wasm_bindgen(js_name = getPageDef)]
     pub fn get_page_def(&self, section_idx: u32) -> Result<String, JsValue> {
@@ -1711,14 +1810,16 @@ impl HwpDocument {
     /// 두 X 배열은 런 원점 기준 Unicode scalar 경계(N+1개)이며,
     /// 표시 인덱스는 선택·커서·편집 오프셋으로 사용할 수 없다 (#7909).
     #[wasm_bindgen(js_name = getPageTextLayout)]
-    pub fn get_page_text_layout(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn get_page_text_layout(&mut self, page_num: u32) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.get_page_text_layout_native(page_num)
             .map_err(|e| e.into())
     }
 
     /// 컨트롤(표, 이미지 등) 레이아웃 정보를 반환한다.
     #[wasm_bindgen(js_name = getPageControlLayout)]
-    pub fn get_page_control_layout(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn get_page_control_layout(&mut self, page_num: u32) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.get_page_control_layout_native(page_num)
             .map_err(|e| e.into())
     }
@@ -2105,7 +2206,11 @@ impl HwpDocument {
     pub fn typeset_resume_stats(&self) -> String {
         let control = &self.core.typeset_resume;
         format!(
-            "{{\"enabled\":{},\"resumed\":{},\"full\":{},\"skippedParagraphs\":{},\"verifyChecks\":{},\"verifyMismatches\":{},\"firstMismatch\":{},\"tailDeferral\":{},\"tailParked\":{},\"tailCompleted\":{},\"tailPending\":{}}}",
+            "{{\"tablePaints\":{},\"tableWindows\":{},\"lastTableWindowPages\":{},\"lastTableWindowRows\":{},\"flowWindowEdits\":{},\"flowWindowSections\":{},\"enabled\":{},\"resumed\":{},\"full\":{},\"skippedParagraphs\":{},\"verifyChecks\":{},\"verifyMismatches\":{},\"firstMismatch\":{},\"tailDeferral\":{},\"tailParked\":{},\"tailCompleted\":{},\"tailPending\":{}}}",
+            control.table_paints.get(), // [hwpx-cowork] 원본 행을 그대로 투영해 실제로 그린 횟수
+            control.table_windows.get(), control.window_pages.get(), control.window_rows.get(), // [hwpx-cowork]
+            control.flow_window_edits.get(), // [hwpx-cowork]
+            self.core.flow_sections.iter().flatten().count(),
             !control.disabled.get(),
             control.resumed.get(),
             control.full.get(),
@@ -2132,6 +2237,10 @@ impl HwpDocument {
     pub fn typeset_tail_pending(&self) -> bool {
         self.core.typeset_tail_pending()
     }
+
+    /// [hwpx-cowork] 편집 중에 화면 조판을 동기 저장 장벽으로 바꾸지 않도록 구분한다.
+    #[wasm_bindgen(js_name = interactiveLayoutPending)]
+    pub fn interactive_layout_pending(&self) -> bool { self.core.interactive_layout_pending() }
 
     /// [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판을 `budgetMs` 동안(최소 한 걸음) 잇는다.
     /// `{"ok":true,"status":"none"|"pending"|"complete"|"stale","pageCount"}`. complete 면 쪽 나눔이 바뀌었다.
@@ -3737,7 +3846,8 @@ impl HwpDocument {
     ///
     /// 반환: JSON `{"sectionIndex":N,"paragraphIndex":N,"charOffset":N}`
     #[wasm_bindgen(js_name = hitTest)]
-    pub fn hit_test(&self, page_num: u32, x: f64, y: f64) -> Result<String, JsValue> {
+    pub fn hit_test(&mut self, page_num: u32, x: f64, y: f64) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 보이는 쪽·다음 쪽의 미완 서식을 먼저 반영
         self.hit_test_native(page_num, x, y).map_err(|e| e.into())
     }
 
@@ -4089,6 +4199,34 @@ impl HwpDocument {
             control_idx as usize,
         )
         .map_err(|e| e.into())
+    }
+
+    /// [hwpx-cowork] 줄 삽입 뒤 새 캐럿의 모델 위치를 표 전체의 쪽 그림 없이 구한다.
+    #[wasm_bindgen(js_name = getTableCellIndexAt)]
+    pub fn get_table_cell_index_at(
+        &self,
+        section: u32,
+        para: u32,
+        control: u32,
+        row: u32,
+        col: u32,
+    ) -> Option<u32> {
+        let host = self
+            .core
+            .document
+            .sections
+            .get(section as usize)?
+            .paragraphs
+            .get(para as usize)?;
+        let crate::model::control::Control::Table(table) = host.controls.get(control as usize)?
+        else {
+            return None;
+        };
+        let (row, col) = (u16::try_from(row).ok()?, u16::try_from(col).ok()?);
+        if row >= table.row_count || col >= table.col_count {
+            return None;
+        }
+        table.cell_index_at(row, col).map(|i| i as u32)
     }
 
     /// 표 셀의 행/열/병합 정보를 반환한다.
@@ -5786,6 +5924,44 @@ impl HwpDocument {
     pub fn get_endnote_shape(&self, section_idx: u32) -> Result<String, JsValue> {
         self.get_endnote_shape_native(section_idx as usize)
             .map_err(|e| e.into())
+    }
+
+    // [hwpx-cowork] 주석 모양 창이 바꾸는 것은 구역 정의 하나다. 계산된 번호는
+    // 열기와 같은 규칙으로 재생성하고 HWPX의 원래 구분선·문자 슬롯은 그대로 복원한다.
+    #[wasm_bindgen(js_name = captureNoteShape)]
+    pub fn capture_note_shape(&self, section: usize, endnote: bool) -> Result<NoteShapeHistory, JsValue> {
+        let section_def = &self.core.document.sections.get(section)
+            .ok_or_else(|| JsValue::from_str("주석 모양의 구역을 찾을 수 없습니다."))?.section_def;
+        let saved = if endnote { &section_def.endnote_shape } else { &section_def.footnote_shape };
+        Ok(NoteShapeHistory { owner: self.core.split_cell_doc_id, section, endnote, saved: saved.clone() })
+    }
+
+    #[wasm_bindgen(js_name = swapNoteShape)]
+    pub fn swap_note_shape(&mut self, history: &mut NoteShapeHistory) -> Result<(), JsValue> {
+        if history.owner != self.core.split_cell_doc_id {
+            return Err(JsValue::from_str("다른 문서의 주석 모양 이력입니다."));
+        }
+        let idx = history.section;
+        let section = self.core.document.sections.get_mut(idx)
+            .ok_or_else(|| JsValue::from_str("주석 모양의 구역을 찾을 수 없습니다."))?;
+        let shape = if history.endnote { &mut section.section_def.endnote_shape } else { &mut section.section_def.footnote_shape };
+        std::mem::swap(shape, &mut history.saved);
+        if history.endnote {
+            let code = DocumentCore::footnote_shape_number_format_code(shape.number_format);
+            DocumentCore::sync_paragraph_endnotes_with_shape(&mut section.paragraphs, code, shape.prefix_char, shape.suffix_char);
+        }
+        section.raw_stream = None;
+        self.core.sync_section_def_controls_from_section(idx);
+        self.core.recompose_note_owners(idx);
+        self.core.request_interactive_layout();
+        if history.endnote {
+            self.core.refresh_endnote_numbers(idx);
+        } else {
+            self.core.refresh_footnote_numbers(idx);
+        }
+        self.core.paginate_if_needed();
+        self.core.invalidate_page_tree_cache();
+        Ok(())
     }
 
     /// 미주 모양을 적용한다.
@@ -7680,6 +7856,12 @@ impl HwpDocument {
     /// 본문 선택 영역의 줄별 사각형을 반환한다.
     ///
     /// 반환: JSON 배열 `[{"pageIndex":N,"x":F,"y":F,"width":F,"height":F}, ...]`
+    #[wasm_bindgen(js_name = getBodySelectionOnPage)]
+    pub fn body_selection_on_page_api(&mut self, page: u32, section: usize, paragraph: usize, offset: usize,
+        end_section: usize, end_paragraph: usize, end_offset: usize) -> Result<String, JsValue> {
+        self.core.body_selection_on_page(page, (section, paragraph, offset), (end_section, end_paragraph, end_offset)).map_err(Into::into)
+    }
+
     #[wasm_bindgen(js_name = getSelectionRects)]
     pub fn get_selection_rects(
         &self,
@@ -7986,8 +8168,9 @@ impl HwpDocument {
     /// 자동 적용하여 한컴 호환성과 자기 재로드 페이지 보존을 보장한다 (#178).
     /// HWP 출처는 어댑터가 no-op 이므로 기존 동작과 동일.
     #[wasm_bindgen(js_name = exportHwp)]
-    pub fn export_hwp(&self) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hwp(&mut self) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwp_with_adapter_snapshot()
             .map_err(|e| e.into())
     }
@@ -7998,8 +8181,9 @@ impl HwpDocument {
     /// byte-only로 유지되며, autosave/embed/history/compare/hwpctl/digest 등 별도
     /// 소비자는 아직 보고서를 받지 않는다.
     #[wasm_bindgen(js_name = exportHwpWithReport)]
-    pub fn export_hwp_with_report(&self) -> Result<DocumentExport, JsValue> {
+    pub fn export_hwp_with_report(&mut self) -> Result<DocumentExport, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwp_with_adapter_snapshot_with_report()
             .map(DocumentExport::from)
             .map_err(JsValue::from)
@@ -8010,8 +8194,9 @@ impl HwpDocument {
     /// browser UI는 암호를 저장하지 않고 저장 시점에만 전달한다. HWPX 출처 문서는 일반
     /// HWP 저장과 동일하게 HWPX-to-HWP adapter를 먼저 적용한다.
     #[wasm_bindgen(js_name = exportHwpWithPassword)]
-    pub fn export_hwp_with_password_wasm(&self, password: &str) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hwp_with_password_wasm(&mut self, password: &str) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwp_with_adapter_with_password(password.as_bytes())
             .map_err(|e| e.into())
     }
@@ -8019,10 +8204,11 @@ impl HwpDocument {
     /// 비밀번호 HWP 바이트 + 내용 손실 보고 (#4430).
     #[wasm_bindgen(js_name = exportHwpWithPasswordAndReport)]
     pub fn export_hwp_with_password_and_report_wasm(
-        &self,
+        &mut self,
         password: &str,
     ) -> Result<DocumentExport, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwp_with_adapter_snapshot_with_password_and_report(password.as_bytes())
             .map(DocumentExport::from)
             .map_err(JsValue::from)
@@ -8030,23 +8216,40 @@ impl HwpDocument {
 
     /// Document IR을 HWPX(ZIP+XML)로 직렬화하여 반환한다.
     #[wasm_bindgen(js_name = exportHwpx)]
-    pub fn export_hwpx(&self) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hwpx(&mut self) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwpx_native().map_err(|e| e.into())
     }
 
     /// [hwpx-cowork] Assemble the normal export package without ZIP compression
     /// so a Web Worker can compress this immutable snapshot off the UI thread.
     #[wasm_bindgen(js_name = exportHwpxUncompressed)]
-    pub fn export_hwpx_uncompressed(&self) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hwpx_uncompressed(&mut self) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwpx_uncompressed_native().map_err(|e| e.into())
+    }
+
+    // [hwpx-cowork] 동기 저장과 같은 원본 준비·표시 하한·문단 ID로 파일을 만든다.
+    #[wasm_bindgen(js_name = beginHwpxSave)]
+    pub fn begin_hwpx_save(&mut self) -> Result<Option<HwpxSaveSession>, JsValue> {
+        self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
+        if !crate::serializer::hwpx::cooperative::can_split(&self.core.document) {
+            return Ok(None);
+        }
+        let save = self.core.hwpx_document_for_export(|doc| {
+            crate::serializer::hwpx::cooperative::Save::new(doc.clone())
+        })?;
+        Ok(save.map(|inner| HwpxSaveSession { inner: Some(inner) }))
     }
 
     /// HWPX 바이트와 이번 산출물의 내용 손실을 같은 결과로 반환한다 (#4430).
     #[wasm_bindgen(js_name = exportHwpxWithReport)]
-    pub fn export_hwpx_with_report(&self) -> Result<DocumentExport, JsValue> {
+    pub fn export_hwpx_with_report(&mut self) -> Result<DocumentExport, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwpx_native_with_report()
             .map(DocumentExport::from)
             .map_err(JsValue::from)
@@ -8054,8 +8257,9 @@ impl HwpDocument {
 
     /// 문서를 ODF AES-256-CBC/PBKDF2 비밀번호 보호 HWPX로 내보낸다.
     #[wasm_bindgen(js_name = exportHwpxWithPassword)]
-    pub fn export_hwpx_with_password_wasm(&self, password: &str) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hwpx_with_password_wasm(&mut self, password: &str) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwpx_native_with_password(password.as_bytes())
             .map_err(|e| e.into())
     }
@@ -8063,10 +8267,11 @@ impl HwpDocument {
     /// 비밀번호 HWPX 바이트 + 내용 손실 보고 (#4430).
     #[wasm_bindgen(js_name = exportHwpxWithPasswordAndReport)]
     pub fn export_hwpx_with_password_and_report_wasm(
-        &self,
+        &mut self,
         password: &str,
     ) -> Result<DocumentExport, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hwpx_native_with_password_and_report(password.as_bytes())
             .map(DocumentExport::from)
             .map_err(JsValue::from)
@@ -8074,8 +8279,9 @@ impl HwpDocument {
 
     /// HML 원본의 공통 IR을 HWPML 2.91 XML로 직렬화하여 반환한다.
     #[wasm_bindgen(js_name = exportHml)]
-    pub fn export_hml(&self) -> Result<Vec<u8>, JsValue> {
+    pub fn export_hml(&mut self) -> Result<Vec<u8>, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         self.export_hml_native()
             .map_err(|error| JsValue::from_str(&format_hml_export_error(&error)))
     }
@@ -8095,8 +8301,9 @@ impl HwpDocument {
     /// 본 함수는 검증 메타데이터만 반환하며 bytes 자체는 별도 호출 (`exportHwp`) 로 받아야 한다.
     /// 검증과 실제 사용을 분리하여 호출자가 결과에 따라 다른 동작을 취할 수 있도록 한다.
     #[wasm_bindgen(js_name = exportHwpVerify)]
-    pub fn export_hwp_verify(&self) -> Result<String, JsValue> {
+    pub fn export_hwp_verify(&mut self) -> Result<String, JsValue> {
         self.core.require_progressive_open_complete()?;
+        self.core.finish_interactive_layout_for_export();
         let v = self.serialize_hwp_with_verify().map_err(JsValue::from)?;
         Ok(format!(
             "{{\"bytesLen\":{},\"pageCountBefore\":{},\"pageCountAfter\":{},\"recovered\":{}}}",
@@ -8266,6 +8473,30 @@ impl HwpDocument {
     #[wasm_bindgen(js_name = saveSnapshot)]
     pub fn save_snapshot(&mut self) -> u32 {
         self.save_snapshot_native()
+    }
+
+    // [hwpx-cowork] 실제 Undo 직전 상태를 해당 명령의 범위에 맞춰 보존한다.
+    #[wasm_bindgen(js_name = saveRedoSnapshot)]
+    pub fn capture_redo_snapshot(&mut self, before: u32) -> u32 {
+        self.save_redo_snapshot(before)
+    }
+
+    // [hwpx-cowork] Ctrl+Enter 입력 직전에만 사용하는 선형 Undo. ID 수명은 호환된다.
+    #[wasm_bindgen(js_name = savePageBreakUndo)]
+    pub fn capture_page_break(&mut self, section: usize, para: usize, offset: usize) -> u32 {
+        self.save_page_break_undo(section, para, offset)
+    }
+
+    // [hwpx-cowork] 평평한 표의 Ctrl+Enter에 사용하며 구형/복합 표는 범용 스냅샷을 사용한다.
+    #[wasm_bindgen(js_name = saveInsertRowUndo)]
+    pub fn capture_insert_row(
+        &mut self,
+        section: usize,
+        para: usize,
+        control: usize,
+        after: u16,
+    ) -> u32 {
+        self.save_insert_row_undo(section, para, control, after)
     }
 
     /// 지정 ID의 스냅샷으로 Document를 복원한다.
@@ -9615,6 +9846,98 @@ impl HwpDocument {
     }
 
     /// 감추기 설정
+    /// [hwpx-cowork] 홀·짝, 마지막 쪽, 이전 구역에서 상속한 바탕쪽도 실제 렌더 소유자를 사용한다.
+    #[wasm_bindgen(js_name = getPageMasterText)]
+    pub fn get_page_master_text(&self, page_num: u32) -> Result<String, JsValue> {
+        let (page, _, _) = self.core.find_page(page_num)?;
+        let mut paragraphs = Vec::new();
+        for owner in page.active_master_page.iter().chain(&page.extra_master_pages) {
+            let master = &self.core.document.sections[owner.section_index].section_def.master_pages[owner.master_page_index];
+            for (index, entry) in crate::document_core::master_edit::entries(master, 0).into_iter().enumerate() {
+                paragraphs.push(serde_json::json!({"section":owner.section_index,"master":owner.master_page_index,
+                    "paragraph":index,"text":entry.paragraph.text}));
+            }
+        }
+        Ok(serde_json::Value::Array(paragraphs).to_string())
+    }
+
+    #[wasm_bindgen(js_name = replaceMasterText)]
+    pub fn replace_master_text(&mut self, section: usize, master: usize, paragraph: usize,
+        expected: &str, next: &str) -> Result<MasterTextHistory, JsValue> {
+        let sec = self.core.document.sections.get(section).ok_or_else(|| JsValue::from_str("구역을 찾을 수 없습니다."))?;
+        let source = sec.section_def.master_pages.get(master).ok_or_else(|| JsValue::from_str("바탕쪽을 찾을 수 없습니다."))?;
+        let page = &sec.section_def.page_def;
+        let fallback_width = page.width.saturating_sub(page.margin_left).saturating_sub(page.margin_right);
+        let entry = crate::document_core::master_edit::entries(source, fallback_width as i32)
+            .into_iter().nth(paragraph).ok_or_else(|| JsValue::from_str("바탕쪽 문단을 찾을 수 없습니다."))?;
+        let path = entry.path;
+        let original = entry.paragraph;
+        if original.text != expected || next.contains(['\n', '\r']) {
+            return Err(JsValue::from_str("현재 바탕쪽 문단과 일치하는 한 문단을 입력해 주세요."));
+        }
+        let before: Vec<char> = expected.chars().collect();
+        let after: Vec<char> = next.chars().collect();
+        let prefix = before.iter().zip(&after).take_while(|(a,b)| a == b).count();
+        let suffix = before[prefix..].iter().rev().zip(after[prefix..].iter().rev()).take_while(|(a,b)| a == b).count();
+        let end = before.len() - suffix;
+        if original.control_text_positions().iter().any(|&index| prefix <= index && index < end) {
+            return Err(JsValue::from_str("개체 표식 양쪽의 글은 나누어 수정해 주세요."));
+        }
+        let width = crate::renderer::hwpunit_to_px(entry.width,self.core.dpi);
+        let styles = self.core.resolve_render_styles();
+        let saved = original.clone();
+        let mut edited = saved.clone();
+        edited.delete_text_at(prefix, end - prefix);
+        edited.insert_text_at(prefix, &after[prefix..after.len()-suffix].iter().collect::<String>());
+        // [hwpx-cowork] 저장 줄이 없는 글상자는 그리기와 재열기 모두 글상자의 안쪽
+        // 프레임에서 줄을 나눈다. 편집 때 본문용 줄 힌트를 주면 그때만 폭이 달라진다.
+        if path.in_textbox() && saved.line_segs.is_empty() {
+            edited.line_segs.clear();
+        } else {
+            let box_ = crate::renderer::composer::ParagraphBox::body_for_style(
+                width, styles.para_styles.get(edited.para_shape_id as usize), self.core.dpi,
+            );
+            crate::renderer::composer::reflow_line_segs(&mut edited, box_, &styles, self.core.dpi);
+        }
+        *path.resolve_mut(&mut self.core.document.sections[section].section_def.master_pages[master])
+            .ok_or_else(|| JsValue::from_str("바탕쪽 문단을 찾을 수 없습니다."))? = edited;
+        self.core.document.sections[section].raw_stream = None;
+        self.core.sync_section_def_controls_from_section(section);
+        self.core.invalidate_page_tree_cache();
+        Ok(MasterTextHistory {owner:self.core.split_cell_doc_id, section, master, path, saved})
+    }
+
+    #[wasm_bindgen(js_name = swapMasterText)]
+    pub fn swap_master_text(&mut self, history: &mut MasterTextHistory) -> Result<(), JsValue> {
+        if history.owner != self.core.split_cell_doc_id { return Err(JsValue::from_str("다른 문서의 바탕쪽 이력입니다.")); }
+        let paragraph = self.core.document.sections.get_mut(history.section)
+            .and_then(|s| s.section_def.master_pages.get_mut(history.master)).and_then(|m| history.path.resolve_mut(m))
+            .ok_or_else(|| JsValue::from_str("바탕쪽 문단을 찾을 수 없습니다."))?;
+        std::mem::swap(paragraph, &mut history.saved);
+        self.core.document.sections[history.section].raw_stream = None;
+        self.core.sync_section_def_controls_from_section(history.section);
+        self.core.invalidate_page_tree_cache();
+        Ok(())
+    }
+
+    /// [hwpx-cowork] 쪽 감추기 Undo는 컨트롤 원래 순서와 원시 레코드를 포함한 소유 문단 하나만 기억한다.
+    #[wasm_bindgen(js_name = capturePageHide)]
+    pub fn capture_page_hide(&self, section: usize, paragraph: usize) -> Result<PageHideHistory, JsValue> {
+        let saved = self.core.document.sections.get(section).and_then(|s| s.paragraphs.get(paragraph))
+            .ok_or_else(|| JsValue::from_str("감추기 문단을 찾을 수 없습니다."))?.clone();
+        Ok(PageHideHistory { owner: self.core.split_cell_doc_id, section, paragraph, saved })
+    }
+
+    #[wasm_bindgen(js_name = swapPageHide)]
+    pub fn swap_page_hide(&mut self, history: &mut PageHideHistory) -> Result<(), JsValue> {
+        if history.owner != self.core.split_cell_doc_id { return Err(JsValue::from_str("다른 문서의 쪽 감추기 이력입니다.")); }
+        let paragraph = self.core.document.sections.get_mut(history.section).and_then(|s| s.paragraphs.get_mut(history.paragraph))
+            .ok_or_else(|| JsValue::from_str("감추기 문단을 찾을 수 없습니다."))?;
+        std::mem::swap(paragraph, &mut history.saved);
+        self.core.refresh_page_hide(history.section, history.paragraph);
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = setPageHide)]
     pub fn set_page_hide(
         &mut self,
@@ -9708,6 +10031,19 @@ impl HwpDocument {
     ) -> Result<String, JsValue> {
         self.set_numbering_restart_native(section_idx as usize, para_idx as usize, mode, start_num)
             .map_err(|e| e.into())
+    }
+
+    // [hwpx-cowork] 선택한 원본 범위를 한 번에 전달하며 편집 쪽은 표시 우선순위로만 쓴다.
+    #[wasm_bindgen(js_name = applyBodyRangeFormat)]
+    pub fn apply_body_range_format_api(&mut self, s:u32,p:u32,o:u32, end_s:u32,end_p:u32,end_o:u32,props:&str,page:u32) -> Result<BodyRangeFormatHistory,JsValue> {
+        let inner = self.core.apply_body_range_format((s as usize,p as usize,o as usize),
+            (end_s as usize,end_p as usize,end_o as usize),props,page)?;
+        Ok(BodyRangeFormatHistory { owner:self.core.split_cell_doc_id,inner })
+    }
+    #[wasm_bindgen(js_name = swapBodyRangeFormat)]
+    pub fn swap_body_range_format_api(&mut self, saved:&mut BodyRangeFormatHistory, page:u32) -> Result<(),JsValue> {
+        if saved.owner != self.core.split_cell_doc_id { return Err(JsValue::from_str("이 서식 이력은 다른 문서에 속합니다.")); }
+        self.core.swap_body_range_format(&mut saved.inner,page).map_err(Into::into)
     }
 
     #[wasm_bindgen(js_name = applyParaFormat)]
@@ -10559,7 +10895,7 @@ impl HwpViewer {
 
     /// 특정 페이지 SVG 렌더링
     #[wasm_bindgen(js_name = renderPageSvg)]
-    pub fn render_page_svg(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn render_page_svg(&mut self, page_num: u32) -> Result<String, JsValue> {
         self.document.render_page_svg(page_num)
     }
 
@@ -10572,7 +10908,7 @@ impl HwpViewer {
     /// 명시적인 출력 profile로 특정 페이지 SVG 렌더링
     #[wasm_bindgen(js_name = renderPageSvgWithProfile)]
     pub fn render_page_svg_with_profile(
-        &self,
+        &mut self,
         page_num: u32,
         profile: &str,
     ) -> Result<String, JsValue> {
@@ -10582,7 +10918,7 @@ impl HwpViewer {
 
     /// 특정 페이지 HTML 렌더링
     #[wasm_bindgen(js_name = renderPageHtml)]
-    pub fn render_page_html(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn render_page_html(&mut self, page_num: u32) -> Result<String, JsValue> {
         self.document.render_page_html(page_num)
     }
 }

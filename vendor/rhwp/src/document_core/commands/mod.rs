@@ -53,6 +53,7 @@ mod h2022_format;
 mod section_ops;
 mod table_ops;
 mod text_editing;
+pub(crate) use text_editing::PageBreakUndo; // [hwpx-cowork] 쪽 나누기 전용 선형 실행 취소
 // [hwpx-cowork] 글상자 높이 자동 늘림(한/글 protect=0 규칙) — 조판 준비 때 한 번
 mod textbox_autogrow;
 // [hwpx-cowork] 묶음 조판 높이 = 자식 범위(한/글 실측)

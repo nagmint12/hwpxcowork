@@ -343,8 +343,11 @@ pub struct EndnoteParaSource {
     /// 줄의 물리 합집합을 재발행하면서 같은 전진 안에서 이미 소비한 후행 간격.
     /// 원본 파일 속성이 아니라 fit과 배치가 공유하는 미주 끝줄의 투영 결과다.
     pub tail_leading_consumed_hu: i32,
+    // [hwpx-cowork] 원본 미주가 편집될 때 직전 쪽의 표시 투영을 같은 입력으로 갱신한다.
+    pub render_offset: i32,
+    pub compact_spacing: bool,
 }
-crate::storage::clone_fields!(EndnoteParaSource, {section_index, para_index, control_index, cell_path, note_para_index, tail_leading_consumed_hu});
+crate::storage::clone_fields!(EndnoteParaSource, {section_index, para_index, control_index, cell_path, note_para_index, tail_leading_consumed_hu, render_offset, compact_spacing});
 
 impl EndnoteParaSource {
     /// 같은 미주 컨트롤에서 나온 문단인가(내부 문단 번호는 보지 않는다).
@@ -2018,6 +2021,9 @@ impl PageContent {
     /// 문단 번호가 든 값을 모두 같은 만큼 옮긴다. 필드를 `..` 없이 풀어 써서 쪽 구조에 필드가 늘면 여기서
     /// 컴파일이 멈춘다.
     pub(crate) fn into_shifted(self, offset: i32) -> PageContent {
+        // [hwpx-cowork] 표 안 Enter는 본문 문단 번호를 바꾸지 않는다. 이때 뒤쪽 쪽의
+        // 문단별 위치·구성 맵도 그대로 옮길 수 있다.
+        if offset == 0 { return self; }
         let shift = move |pi: usize| (pi as i64 + offset as i64).max(0) as usize;
         let PageContent {
             page_index,

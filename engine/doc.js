@@ -18,7 +18,12 @@ export { validateFormatSpec } from './formatting.js';
 
 const SUBLIST_ATTRS = 'id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"';
 
+import { masterTextAt, masterTextChanges, writeMasterText } from './master-text.js';
+
 export class HwpxDoc {
+  masterText(address) { return masterTextAt(this, address); }
+  writeMasterText(address, text, source, sourceAddress) { return writeMasterText(this, address, text, applyEdits, source, sourceAddress); }
+
   static async load(buffer) { return new HwpxDoc(await HwpxContainer.load(buffer)); }
 
   // 붙여넣기·수정본 병합의 비교와 적용이 같은 단위의 서식 정의를 보게 한다.
@@ -2448,7 +2453,9 @@ export class HwpxDoc {
       const map = new Map();
       for (const m of xml.matchAll(/<hh:borderFill\b([^>]*?)(?:\/>|>[\s\S]*?<\/hh:borderFill>)/g)) {
         const v = /\sid="([^"]*)"/.exec(m[1])?.[1];
-        if (v != null) map.set(v, shortHash(m[0].replace(/\sid="[^"]*"/, '')));
+        // [hwpx-cowork] HWPX 저장기가 빈 태그 공백과 속성 순서를 바꿀 수 있다.
+        // 정의 자체 번호만 빼고 선·색·채우기의 전체 요소와 속성값을 비교한다.
+        if (v != null) map.set(v, shortHash(canonLines(m[0].replace(/\sid="[^"]*"/, '')).join('\n')));
       }
       this._bfKeys = { xml, map };
     }
@@ -3963,11 +3970,12 @@ export async function diffDocs(baseDoc, headDoc, { anchorFirst = false, yieldEve
     await sameUpTo(Infinity);
     if (bs.length) prevRef = bs[bs.length - 1].ref;
   }
+  hunks.push(...masterTextChanges(base, head));
   // hid: 같은 열쇠(종류·자리·새 글)가 또 나오면 차례 번호를 더한다(예: 같은 문단 뒤에 빈 문단 둘).
   // 새 글을 열쇠에 넣는 까닭은 Hunk typedef 설명(자리만으로 셈하면 같은 자리 다른 글의 수정본을 가려내지 못한다)
   const seen = new Map();
   for (const h of hunks) {
-    const key = `${h.type}\u0001${h.type === 'insert' ? (h.afterRef ?? '') : h.ref}\u0001${h.newText}${h.newFormatFingerprint ? `\u0001${h.newFormatFingerprint}` : ''}${h.newObjectPrint ? `\u0001${h.newObjectPrint}` : ''}`;
+    const key = `${h.type}${h.master ? JSON.stringify(h.master) : ''}\u0001${h.type === 'insert' ? (h.afterRef ?? '') : h.ref}\u0001${h.newText}${h.newFormatFingerprint ? `\u0001${h.newFormatFingerprint}` : ''}${h.newObjectPrint ? `\u0001${h.newObjectPrint}` : ''}`;
     const n = seen.get(key) || 0; seen.set(key, n + 1);
     h.hid = `h${shortHash(n ? `${key}\u0001${n}` : key)}`;
   }
@@ -4727,8 +4735,9 @@ const CANON_ATTR = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
  */
 function canonLines(xml, { skipTags = new Set(), skipAttrs = new Set(), mapAttr = null } = {}) {
   const out = []; const stack = [{ path: '', counts: new Map(), skip: false }];
-  CANON_TOK.lastIndex = 0; let m;
-  while ((m = CANON_TOK.exec(xml))) {
+  // [hwpx-cowork] 쪽 테두리 참조의 실제 내용을 읽을 때 같은 정규화기가 중첩 호출된다.
+  // 각 XML의 반복자가 자신의 위치를 소유해야 캐시 유무와 관계없이 같은 지문을 얻는다.
+  for (const m of xml.matchAll(CANON_TOK)) {
     const [, close, tag, attrs, self, text] = m;
     const top = stack[stack.length - 1];
     if (text != null) {
@@ -4783,8 +4792,7 @@ function pictureCanon(xml) {
 /** 첫 요소(root)의 바로 아래 자식 요소들 [{ tag, start, end }](head 안 자리) */
 function topChildren(xml) {
   const out = []; let depth = 0; let cur = null;
-  CANON_TOK.lastIndex = 0; let m;
-  while ((m = CANON_TOK.exec(xml))) {
+  for (const m of xml.matchAll(CANON_TOK)) {
     const [all, close, tag, , self] = m;
     if (!tag) continue;
     if (close) { depth--; if (depth === 1 && cur) { cur.end = m.index + all.length; out.push(cur); cur = null; } continue; }

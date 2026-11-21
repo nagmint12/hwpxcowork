@@ -10,6 +10,10 @@
 // 돌려주는 값 { crs } 는 index.js 가 ctx.collab 으로 담는다(service.crs 로도 둔다 — MCP 등 다른 경로가 같은 객체를 쓰게).
 import { ChangeRequests } from '../crs.js';
 import { LiveEditor } from '../live.js';
+import path from 'node:path';
+import fs from 'node:fs';
+import { DepartureSaves } from '../departure-saves.js';
+import { ServiceError } from '../service.js';
 
 /** { resolved } 본문 → 불(없으면 true = 해결). 'false'·'0'·0 은 false */
 const truthy = (v) => (v === undefined ? true : !(v === false || v === 0 || /^(false|0|no)$/i.test(String(v))));
@@ -21,6 +25,34 @@ export function installCollabRoutes(ctx) {
   // v0.4 실시간 수정(docs/V4_SPEC.md §2.2): 밀어 넣기 — crs 의 기록 문서·정렬 지도·덩어리 자리를 같이 쓴다
   const live = new LiveEditor({ service, crs });
   service.live = live;
+  const save = (mode, id, bytes, args, user) => mode === 'live'
+    ? live.push(id, bytes, { ...args, user }) : crs.saveDraft(id, bytes, { ...args, user });
+  const departures = new DepartureSaves({
+    directory: path.join(store.dataDir, 'departure-saves'),
+    track: ctx.trackOperation,
+    apply: (record, bytes) => {
+      const user = config.users.find(person => person.name === record.owner);
+      if (!user) throw new ServiceError('FORBIDDEN', '저장을 요청한 계정을 확인할 수 없습니다.', 403);
+      service.assertDocRead(record.doc, user);
+      return save(record.mode, record.doc, bytes, record.args, user);
+    },
+  });
+  departures.resume();
+  function receive(mode) {
+    return wrap(async (req, res) => {
+      const id = req.params.id;
+      const args = mode === 'live' ? { base: req.query.base, seq: req.query.seq, loaded: req.query.loaded }
+        : { base: req.query.base, rev: req.query.rev };
+      const bytes = bodyBytes(req);
+      const key = req.query.departure;
+      if (key === undefined) return res.json(await save(mode, id, bytes, args, req.user));
+      const meta = service._meta(id);
+      if (mode === 'live') live._gate(meta, req.user);
+      else service._assertCanEdit(req.user, meta);
+      departures.accept(key, { doc: id, owner: req.user.name, mode, args }, bytes);
+      return res.status(202).json({ receipt: key });
+    });
+  }
   const D = '/api/docs/:id';
   const CR = `${D}/change-requests/:cid`;
 
@@ -38,7 +70,7 @@ export function installCollabRoutes(ctx) {
   // PATCH { editMode?, editors?, track?, exportKind?, aiMemo?, aiQuick? } → { settings } — 관리자·문서를 올린 사람(403 FORBIDDEN), 값 검사 400 BAD_SETTING
   app.patch(`${D}/settings`, auth, wrap(async (req, res) => res.json(await service.patchSettings(req.params.id, req.body, req.user))));
   // PUT ?base=<편집기 기준 기록 n>&seq=<이 창의 차례>&loaded=<편집기 문서를 연 판 — 메모 맞추기>(본문 HWPX — index.js 가 JSON 해석을 건너뛴다)
-  app.put(`${D}/live`, auth, raw, wrap(async (req, res) => res.json(await live.push(req.params.id, bodyBytes(req), { base: req.query.base, seq: req.query.seq, loaded: req.query.loaded, user: req.user }))));
+  app.put(`${D}/live`, auth, raw, receive('live'));
 
   // ── 내 수정본 ──
   app.get(`${D}/drafts/mine`, auth, wrap(async (req, res) => res.json(await crs.mine(req.params.id, req.user))));
@@ -53,7 +85,22 @@ export function installCollabRoutes(ctx) {
     res.send(Buffer.from(f.bytes));
   }));
   // ?rev=<읽어 온 판>: 그 사이 다른 창이 저장·버리기·다시 맞추기를 했으면 409 DRAFT_STALE { rev, updatedAt }(rev 를 안 주면 예전처럼 확인 없음)
-  app.put(`${D}/drafts/mine`, auth, raw, wrap(async (req, res) => res.json(await crs.saveDraft(req.params.id, bodyBytes(req), { base: req.query.base, rev: req.query.rev, user: req.user }))));
+  app.put(`${D}/drafts/mine`, auth, raw, receive('review'));
+  app.get(`${D}/departure-saves`, auth, wrap(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ files: departures.failedCopies(req.params.id, req.user.name), pending: departures.pending(req.params.id, req.user.name) });
+  }));
+  app.get(`${D}/departure-saves/:key`, auth, wrap(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await departures.result(req.params.key, req.params.id, req.user.name));
+  }));
+  app.get(`${D}/departure-saves/:key/file`, auth, wrap(async (req, res) => {
+    const record = departures.owned(req.params.key, req.params.id, req.user.name);
+    if (record.state !== 'failed') throw new ServiceError('NO_RECOVERY_FILE', '복구가 필요한 접수본이 없습니다.', 404);
+    const bytes = await fs.promises.readFile(departures.file(record.key, '.hwpx'));
+    res.set({ 'Content-Type': 'application/vnd.hancom.hwpx', 'Cache-Control': 'no-store',
+      'Content-Disposition': 'attachment; filename="recovery.hwpx"' }).send(bytes);
+  }));
   app.delete(`${D}/drafts/mine`, auth, wrap(async (req, res) => res.json(await crs.discard(req.params.id, req.user))));
   app.post(`${D}/drafts/mine/rebase`, auth, wrap(async (req, res) => res.json(await crs.rebase(req.params.id, req.user))));
 

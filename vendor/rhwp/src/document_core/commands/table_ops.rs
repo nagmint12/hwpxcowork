@@ -78,16 +78,47 @@ impl DocumentCore {
         row_idx: u16,
         below: bool,
     ) -> Result<String, HwpError> {
+        self.insert_table_row_with_state(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            row_idx,
+            below,
+            None,
+        )
+    }
+
+    // [hwpx-cowork] 첫 편집과 Redo의 행 주소·표식·화면을 같은 경로로 반영한다.
+    pub(in crate::document_core) fn insert_table_row_with_state(
+        &mut self,
+        section_idx: usize,
+        parent_para_idx: usize,
+        control_idx: usize,
+        row_idx: u16,
+        below: bool,
+        restored: Option<crate::document_core::table_window::InsertRowRedo>,
+    ) -> Result<String, HwpError> {
+        let window = self.row_structure_before(section_idx, parent_para_idx, control_idx, row_idx); // [hwpx-cowork]
         let (row_count, col_count) = self.mutate_table_structure(
             section_idx,
             parent_para_idx,
             control_idx,
             super::border_paint_structure::StructureEdit::InsertRow(row_idx, below),
         )?;
+        if let Some(state) = restored {
+            state.apply(self);
+        }
 
         self.document.sections[section_idx].raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        if let Some(seed) = window {
+            self.recompose_paragraph(section_idx, parent_para_idx);
+            if !self.apply_row_structure(seed, usize::from(row_idx) + usize::from(below), true) {
+                self.paginate_if_needed();
+            }
+        } else {
+            self.recompose_section(section_idx);
+            self.paginate_if_needed();
+        }
 
         self.event_log.push(DocumentEvent::TableRowInserted {
             section: section_idx,
@@ -139,6 +170,7 @@ impl DocumentCore {
         control_idx: usize,
         row_idx: u16,
     ) -> Result<String, HwpError> {
+        let window = self.row_structure_before(section_idx, parent_para_idx, control_idx, row_idx); // [hwpx-cowork]
         let (row_count, col_count) = self.mutate_table_structure(
             section_idx,
             parent_para_idx,
@@ -147,8 +179,15 @@ impl DocumentCore {
         )?;
 
         self.document.sections[section_idx].raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        if let Some(seed) = window {
+            self.recompose_paragraph(section_idx, parent_para_idx);
+            if !self.apply_row_structure(seed, usize::from(row_idx), false) {
+                self.paginate_if_needed();
+            }
+        } else {
+            self.recompose_section(section_idx);
+            self.paginate_if_needed();
+        }
 
         self.event_log.push(DocumentEvent::TableRowDeleted {
             section: section_idx,

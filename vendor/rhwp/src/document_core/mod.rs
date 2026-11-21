@@ -30,8 +30,13 @@ pub use native_pua_fonts::NativePuaFontRequest;
 mod font_environment;
 // [hwpx-cowork] 문서 열기의 읽기 전용 미리보기와 최종 조판 작업.
 mod progressive_open;
+pub(crate) mod master_edit; // [hwpx-cowork] 실제 바탕쪽·표 셀·글상자 원본 주소
+mod interactive_layout; // [hwpx-cowork] 편집 원본과 마지막 발행된 쪽의 수명을 구분한다.
+pub(crate) mod range_format;
 // [hwpx-cowork] 2026-11-20 뒤쪽 미루기 — 편집한 쪽 근처까지만 바로 조판하고 나머지는 쉬는 동안.
 mod typeset_tail;
+mod table_window; // [hwpx-cowork] 표 중간 칸의 쪽 우선 조판
+mod flow_window; // [hwpx-cowork] 독립된 본문 흐름 구간의 구조 편집
 pub use typeset_tail::TypesetTailState;
 mod note_pages; // [hwpx-cowork] 쪽마다 새로 각주 번호
 mod host_font_environment;
@@ -192,6 +197,11 @@ pub(crate) struct TypesetResumeControl {
     pub(crate) first_mismatch: std::cell::RefCell<Option<String>>,
     /// [hwpx-cowork] 2026-11-20 뒤쪽을 미룬 조판 수와 쉬는 동안 마무리한 수(`typeset_tail`).
     pub(crate) tail_parked: std::cell::Cell<u64>,
+    pub(crate) flow_window_edits: std::cell::Cell<u64>, // [hwpx-cowork]
+    pub(crate) table_windows: std::cell::Cell<u64>, // [hwpx-cowork] 실제 표 조각 발행 수·최근 작업량
+    pub(crate) window_pages: std::cell::Cell<usize>,
+    pub(crate) table_paints: std::cell::Cell<u64>, // [hwpx-cowork] 측정한 행 조각으로 실제 그린 쪽
+    pub(crate) window_rows: std::cell::Cell<usize>,
     pub(crate) tail_completed: std::cell::Cell<u64>,
     /// 문단 내용으로 찾는 조판 기억을 버린 횟수(스타일·글꼴 측정 환경 변경). 체크포인트는 같은 세대에서만 쓴다.
     pub(crate) layout_generation: std::cell::Cell<u64>,
@@ -253,6 +263,16 @@ pub(crate) struct RenderNormalizationState {
     pub(crate) text_reflowed_tables: table_reflow_owners::TableReflowOwners,
     pub(crate) loaded_frames: Option<loaded_frame_restore::LoadedFrames>,
     pub(crate) overlay: Arc<RenderNormalizationOverlay>,
+}
+
+// [hwpx-cowork] 범용 ID는 전체 상태를, 편집기가 쪽 나누기를 위해 요청한 ID는
+// 그 명령의 선형 Undo를 제공한다. 축출·해제·redo의 수명은 같다.
+#[derive(Clone)]
+pub(crate) enum UndoSnapshot {
+    Full(Box<Document>, std::collections::HashSet<RenderPath>),
+    PageBreak(Box<commands::PageBreakUndo>),
+    InsertRow(Box<table_window::InsertRowUndo>), // [hwpx-cowork]
+    RedoRow(Box<table_window::InsertRowRedo>),   // [hwpx-cowork] Undo 직전의 행 상태
 }
 
 /// HWP 문서 핵심 도메인 모델
@@ -334,6 +354,10 @@ pub struct DocumentCore {
     pub(crate) pending_pagination_job: Option<PendingPaginationJob>,
     // [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용 — `renderer::typeset::section::checkpoints`).
     pub(crate) typeset_checkpoints: Vec<Option<TypesetCheckpointStore>>,
+    pub(crate) flow_sections: Vec<Option<flow_window::FlowSection>>,
+    pub(crate) row_tail: Option<table_window::RowTail>, // [hwpx-cowork]
+    row_paint: Option<table_window::RowPaint>, // [hwpx-cowork] 지금 편집한 두 쪽의 측정 원본
+    row_text: Option<(u64, table_window::RowTail)>,     // [hwpx-cowork] 지연 입력의 원본 쪽 진입 컷
     /// 구역마다 '이 번호 앞의 문단은 지난 구역 조판 뒤로 바뀌지 않았다'. `None` = 모름(처음부터 조판),
     /// `Some(usize::MAX)` = 알려진 변경 없음(구역이 다른 길로 dirty 가 됐으면 역시 처음부터).
     pub(crate) typeset_unchanged_before: Vec<Option<usize>>,
@@ -367,6 +391,7 @@ pub struct DocumentCore {
     pub(crate) only_text_edits_pending: std::cell::Cell<bool>,
     pub(crate) progressive_open_page_budget: Option<usize>,
     pub(crate) progressive_open_job: Option<progressive_open::ProgressiveOpenJob>,
+    pub(crate) interactive_layout: interactive_layout::InteractiveLayout,
     /// [hwpx-cowork] 2026-11-10 P2: (구역 번호, 완주한 조판, 측정) — 여러 구역 문서의 점진 열기.
     pub(crate) progressive_open_completed: Option<(usize, PaginationResult, MeasuredSection)>,
     /// 페이지별 렌더 트리 캐시 (지연 구축, 부분 무효화)
@@ -406,8 +431,8 @@ pub struct DocumentCore {
     /// 글상자 오버플로우 연결 캐시 (섹션별, 지연 계산)
     pub(crate) overflow_links_cache:
         RefCell<HashMap<usize, Vec<queries::doc_tree_nav::OverflowLink>>>,
-    /// Undo/Redo용 Document 스냅샷 저장소 (ID → Document 클론)
-    pub(crate) snapshot_store: Vec<(u32, Document, std::collections::HashSet<RenderPath>)>,
+    /// [hwpx-cowork] 전체 스냅샷과 쪽 나누기용 선형 역연산이 같은 메모리 예산을 쓴다.
+    pub(crate) snapshot_store: Vec<(u32, UndoSnapshot)>,
     /// 다음 스냅샷 ID
     pub(crate) next_snapshot_id: u32,
     /// [#5769] Undo/Redo용 삭제 조각 저장소 (ID → DeleteFragment).
@@ -810,6 +835,10 @@ impl DocumentCore {
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
             typeset_checkpoints: Vec::new(),
+            flow_sections: Vec::new(),
+            row_tail: None,
+            row_paint: None,
+            row_text: None,
             typeset_unchanged_before: Vec::new(),
             typeset_resume: Default::default(),
             typeset_tail_deferral: false,
@@ -825,6 +854,7 @@ impl DocumentCore {
             only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,
+            interactive_layout: Default::default(), // [hwpx-cowork]
             progressive_open_completed: None,
             page_tree_cache: RefCell::new(Vec::new()),
             header_footer_preview_tree_cache: RefCell::new(None),

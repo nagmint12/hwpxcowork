@@ -431,6 +431,8 @@ impl TypesetEngine {
             cell_path: Vec::new(),
             note_para_index: usize::MAX,
             tail_leading_consumed_hu: 0,
+            render_offset: 0,
+            compact_spacing: false, // [hwpx-cowork]
         };
         let successor_source = local_indices
             .last()

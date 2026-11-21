@@ -7,6 +7,7 @@ import { ColumnSettingsDialog } from '@/ui/column-settings-dialog';
 import { NewNumberDialog } from '@/ui/new-number-dialog';
 // [hwpx-cowork] 한/글 2022 서식·쪽(2026-11-11): 쪽 번호 매기기·감추기 창, 구역 나누기·다단 설정 나누기, 현재 다단
 import { PageNumberingDialog } from '@/ui/h2022-format-pagenum-dialog';
+import { MasterTextDialog } from '@/ui/master-text-dialog';
 import { PageHideDialog } from '@/ui/h2022-format-hide-dialog';
 import { EndnoteShapeDialog } from '@/ui/endnote-shape-dialog';
 import { hasH2022Format } from '@/ui/h2022-format-api';
@@ -452,6 +453,18 @@ export const pageCommands: CommandDef[] = [
     },
   },
   {
+    id: 'page:edit-master-text',
+    label: '바탕쪽 글 편집',
+    opensDialog: true,
+    canExecute: ctx => ctx.hasDocument,
+    execute(services) {
+      const ih = services.getInputHandler();
+      if (!ih || !services.wasm.supportsPageSourceEdits?.()) return;
+      const page = ih.getCursorPageIndex();
+      new MasterTextDialog(services, services.wasm.getPageMasterText(page)).show();
+    },
+  },
+  {
     id: 'page:hide-current',
     opensDialog: true,
     label: t('command.page.hideCurrent.label'),
@@ -532,6 +545,9 @@ export const pageCommands: CommandDef[] = [
         ih.executeOperation({
           kind: 'snapshot',
           operationType: 'pageBreak',
+          ownsPriorTextPagination: true, // [hwpx-cowork] 기존 키의 타이머가 새 입력의 뒤쪽까지 즉시 계산하지 않게 한다.
+          // [hwpx-cowork] 쪽 삽입에 필요한 원래 문단·줄 좌표만 히스토리에 잡는다.
+          captureBefore: (wasm) => wasm.savePageBreakUndo(pos.sectionIndex, pos.paragraphIndex, pos.charOffset),
           operation: (wasm) => {
             const result = JSON.parse(wasm.insertPageBreak(pos.sectionIndex, pos.paragraphIndex, pos.charOffset));
             if (result.ok) {
@@ -541,7 +557,7 @@ export const pageCommands: CommandDef[] = [
                 charOffset: result.charOffset ?? 0,
               };
             }
-            return pos;
+            return null;
           },
           meta: { actionId: 'page:break', domain: 'page', refresh: 'full', dirtyScope: 'document' },
         });

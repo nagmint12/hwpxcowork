@@ -433,6 +433,81 @@ fn starts_at_stored_page_top(paras: &[Paragraph], i: usize) -> bool {
     }
 }
 
+// [hwpx-cowork] 편집과 실행 취소가 한/글의 처음·끝·중간 나누기 규칙을 공유한다.
+fn existing_break_target(paras: &[Paragraph], index: usize, offset: usize, column: bool) -> Option<usize> {
+    let para = &paras[index];
+    let has = |p: &Paragraph| if column { p.has_column_break() } else { p.has_page_break() };
+    if offset == 0 && !para.defines_section_or_columns() && !has(para) {
+        Some(index)
+    } else if para.split_tail_is_empty(offset) && paras.get(index + 1).is_some_and(|next| !has(next)) {
+        Some(index + 1)
+    } else {
+        None
+    }
+}
+
+// [hwpx-cowork] 독립된 HWPX 본문의 Ctrl+Enter는 대상 문단과 다음 나누기까지의
+// 합성 줄 원점만 바꾼다. 선형 히스토리는 그 역연산을 보관하고 전체 문서 복제를 피한다.
+#[derive(Clone)]
+pub(crate) struct PageBreakUndo {
+    section: usize,
+    index: usize,
+    count: usize,
+    split: bool,
+    paragraph: Paragraph,
+    tail_origins: Vec<(Option<i32>, bool)>,
+    properties: crate::model::document::DocProperties,
+    reflowed_tables: std::collections::HashSet<crate::renderer::render_normalization::RenderPath>,
+}
+
+impl DocumentCore {
+    pub(crate) fn capture_page_break_undo(
+        &self, section_index: usize, index: usize, offset: usize,
+    ) -> Option<PageBreakUndo> {
+        let section = self.document.sections.get(section_index)?;
+        let paragraphs = &section.paragraphs;
+        paragraphs.get(index)?;
+        let target = existing_break_target(paragraphs, index, offset, false);
+        let first = target.unwrap_or(index);
+        self.flow_window_before(section_index, first)?;
+        if section.raw_stream.is_some() || self.flow_sections.iter().any(Option::is_none) { return None; }
+        let end = (first + 1..paragraphs.len()).find(|&i| paragraphs[i].starts_flow_zone())
+            .unwrap_or(paragraphs.len());
+        Some(PageBreakUndo {
+            section: section_index, index: first, count: paragraphs.len(), split: target.is_none(),
+            paragraph: paragraphs[first].clone(),
+            tail_origins: paragraphs[first + 1..end].iter().map(|p|
+                (p.line_segs.first().map(|s| s.vertical_pos), p.layout_source_text_partition)).collect(),
+            properties: self.document.doc_properties.clone(),
+            reflowed_tables: if self.render_normalization.text_reflowed_tables.is_empty() {
+                Default::default()
+            } else {
+                self.text_reflowed_table_paths_for_snapshot()
+            },
+        })
+    }
+
+    pub(crate) fn undo_page_break(&mut self, saved: PageBreakUndo) -> Result<(), HwpError> {
+        let section = self.document.sections.get_mut(saved.section)
+            .ok_or_else(|| HwpError::RenderError("쪽 나누기 구역이 없습니다".into()))?;
+        let paragraphs = &mut section.paragraphs;
+        // 실패 도중 rollback은 문단을 삽입하기 전에도 부를 수 있다.
+        let inserted = saved.split && paragraphs.len() == saved.count + 1;
+        if paragraphs.len() != saved.count + usize::from(inserted) {
+            return Err(HwpError::RenderError("쪽 나누기 실행 취소의 문단 수가 다릅니다".into()));
+        }
+        if inserted { paragraphs.remove(saved.index + 1); }
+        paragraphs[saved.index] = saved.paragraph;
+        for (p, (origin, partition)) in paragraphs[saved.index + 1..].iter_mut().zip(saved.tail_origins) {
+            if let Some(origin) = origin { shift_paragraph_vpos_origin(p, origin); }
+            p.layout_source_text_partition = partition;
+        }
+        self.document.doc_properties = saved.properties;
+        self.restore_text_reflowed_tables_from_snapshot(&saved.reflowed_tables);
+        Ok(())
+    }
+}
+
 /// [Issue #2214] 문단 첫 줄을 원점으로 한 상대 flow advance.
 /// line count가 아니라 후속 문단의 배치 위치를 실제로 바꾸는 높이 신호다.
 fn relative_paragraph_flow_advance(paragraph: &Paragraph) -> Option<i64> {
@@ -794,6 +869,45 @@ fn target_table_first_global_page(
         }
     }
     None
+}
+
+// [hwpx-cowork] 같은 칸의 순수 텍스트 연속 입력은 원본 행·열·문단·개체 수를 바꾸지
+// 않는다. 해당 세대의 첫 입력이 확인한 표 서명과 시작 쪽을 다음 키에서도 쓴다.
+fn deferred_table_identity(
+    core: &DocumentCore,
+    section: usize,
+    para: usize,
+    control: usize,
+    cell: usize,
+    cell_para: usize,
+    certified: bool,
+) -> (Option<u32>, u64) {
+    let Control::Table(table) = &core.document.sections[section].paragraphs[para].controls[control]
+    else {
+        return (None, 0);
+    };
+    if certified && table.cells[cell].paragraphs[cell_para].controls.is_empty() {
+        if let (Some((revision, _)), Some(d)) =
+            (&core.row_text, &core.deferred_pagination_descriptor)
+        {
+            if *revision == d.revision
+                && (section, para, control, cell, cell_para)
+                    == (
+                        d.section_index,
+                        d.para_index,
+                        d.control_index,
+                        d.cell_index,
+                        d.cell_para_index,
+                    )
+            {
+                return (d.target_first_page, d.table_structure_fingerprint);
+            }
+        }
+    }
+    (
+        target_table_first_global_page(core, section, para, control),
+        table_structure_fingerprint(table),
+    )
 }
 
 /// Decide whether a Picture band needs another projection after pagination.
@@ -1418,6 +1532,7 @@ impl DocumentCore {
         delete_count: usize,
         text: &str,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 지연 서식에 이은 입력
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -1496,9 +1611,11 @@ impl DocumentCore {
             // 문단의 새 줄 구성은 위에서 갱신했다. 쪽 소속 확정은 endBatch가 소유한다.
             self.mark_section_dirty(section_idx);
         } else if flow_changed {
-            // [hwpx-cowork] 바뀐 것은 이 문단의 글뿐이다 — 표 칸의 줄 구성 기억은 남긴 채 쪽 나눔한다.
+            // [hwpx-cowork] 한 글자가 줄 수를 바꾸더라도 Enter와 같은 구간을 갱신한다.
+            // 다른 단·머리말 등 지역 조판이 성립하지 않는 문서는 기존 경로에서 확정한다.
             self.text_edit_trust_after(text_edit_trust);
-            self.paginate();
+            let window = self.flow_window_before(section_idx, para_idx);
+            self.paginate_flow_edit(window, 0);
             for _ in 0..2 {
                 let new_col = self
                     .para_column_map
@@ -1531,6 +1648,16 @@ impl DocumentCore {
             self.refresh_render_normalized_body_paragraph_after_edit(section_idx, para_idx);
             // [hwpx-cowork] 쪽 나눔을 미룬 글 편집 — 다음 쪽 나눔(쉼 flush)이 줄 구성 기억을 남길 수 있다.
             self.text_edit_trust_after(text_edit_trust);
+            if self.document.sections[section_idx].paragraphs[para_idx]
+                .controls.iter().any(|control| control.is_treat_as_char_object())
+            {
+                // [hwpx-cowork] 글자처럼 배치한 개체와 같은 줄의 글은 쪽이 소유한
+                // 줄 및 개체 배치도 함께 갱신해야 바로 그린 글자와 원문이 일치한다.
+                self.request_interactive_layout();
+                if self.interactive_layout_pending() {
+                    self.refresh_object_owner_pages(section_idx, para_idx, false);
+                }
+            }
         }
 
         let new_offset = char_offset + new_chars_count;
@@ -1666,6 +1793,7 @@ impl DocumentCore {
         after_inline_control: bool,
         text: &str,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 지연 서식에 이은 입력
         let normalized = normalize_text_newlines(text);
         let text = normalized.as_ref();
         // 인덱스 범위 검증
@@ -1821,6 +1949,7 @@ impl DocumentCore {
         count: usize,
         preserve_memos: bool,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 지연 서식에 이은 입력
         // 인덱스 범위 검증
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
@@ -2252,6 +2381,14 @@ impl DocumentCore {
         paginate_immediately: bool,
         field_control: Option<usize>,
     ) -> Result<String, HwpError> {
+        // [hwpx-cowork] 연속 입력은 이전에 확보한 쪽 시작 상태를 공유한다.
+        let row_window = self.row_text_before(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
         let normalized = normalize_text_newlines(text);
         let text = normalized.as_ref();
         let new_chars_count = text.chars().count();
@@ -2297,11 +2434,15 @@ impl DocumentCore {
             cell_idx,
             cell_para_idx,
         )?;
+        let reusable_row_identity = row_window.is_some() && cell_para.controls.is_empty();
         let old_text_len = cell_para.text.chars().count();
         let source_text_before =
             crate::model::raw_provenance::bytes_digest(cell_para.text.as_bytes());
         let stored_frame_before = StoredVerticalFrame::capture(cell_para);
-        let flow_advance_before = relative_paragraph_flow_advance(cell_para);
+        let flow_advance_before = (
+            relative_paragraph_flow_advance(cell_para),
+            cell_para.line_segs.len(),
+        );
         let local_contribution_before =
             crate::renderer::layout::LayoutEngine::paragraph_contributes_to_table_nested_text_flag(
                 cell_para,
@@ -2360,7 +2501,7 @@ impl DocumentCore {
                     HwpError::RenderError("편집 뒤 셀 문단을 다시 찾을 수 없습니다".to_string())
                 })?;
             (
-                relative_paragraph_flow_advance(cell_para_after),
+                (relative_paragraph_flow_advance(cell_para_after), cell_para_after.line_segs.len()),
                 crate::renderer::layout::LayoutEngine::paragraph_contributes_to_table_nested_text_flag(
                     cell_para_after,
                 ),
@@ -2462,15 +2603,15 @@ impl DocumentCore {
             .as_ref()
             .is_some_and(|pending| pending.cell_flow_changed);
         if !paginate_immediately {
-            let target_first_page =
-                target_table_first_global_page(self, section_idx, parent_para_idx, control_idx);
-            let table_structure_fingerprint = match &self.document.sections[section_idx].paragraphs
-                [parent_para_idx]
-                .controls[control_idx]
-            {
-                Control::Table(table) => table_structure_fingerprint(table),
-                _ => 0,
-            };
+            let (target_first_page, table_structure_fingerprint) = deferred_table_identity(
+                self,
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
+                reusable_row_identity,
+            );
             let pending_flow_changed =
                 self.deferred_pagination_descriptor
                     .as_ref()
@@ -2538,8 +2679,14 @@ impl DocumentCore {
         if focused_page_tree_patched.is_none() {
             self.invalidate_page_tree_cache_from(0);
         }
+        let row_window = row_window
+            .filter(|_| !has_compat_projection && !loaded_frame_restored && !source_cache_restored);
         if paginate_immediately {
-            self.paginate_if_needed();
+            if !row_window.is_some_and(|seed| self.apply_row_window(seed)) {
+                self.paginate_if_needed();
+            }
+        } else {
+            self.defer_row_text(row_window, cell_flow_changed || had_pending_flow_change);
         }
 
         self.event_log.push(DocumentEvent::CellTextChanged {
@@ -2657,6 +2804,14 @@ impl DocumentCore {
         count: usize,
         paginate_immediately: bool,
     ) -> Result<String, HwpError> {
+        // [hwpx-cowork] 연속 입력은 이전에 확보한 쪽 시작 상태를 공유한다.
+        let row_window = self.row_text_before(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
         let focused_target_is_table_cell = !paginate_immediately
             && is_focused_table_cell_target(
                 &self.document,
@@ -2693,11 +2848,15 @@ impl DocumentCore {
             cell_idx,
             cell_para_idx,
         )?;
+        let reusable_row_identity = row_window.is_some() && cell_para.controls.is_empty();
         let old_text_len = cell_para.text.chars().count();
         let source_text_before =
             crate::model::raw_provenance::bytes_digest(cell_para.text.as_bytes());
         let stored_frame_before = StoredVerticalFrame::capture(cell_para);
-        let flow_advance_before = relative_paragraph_flow_advance(cell_para);
+        let flow_advance_before = (
+            relative_paragraph_flow_advance(cell_para),
+            cell_para.line_segs.len(),
+        );
         let local_contribution_before =
             crate::renderer::layout::LayoutEngine::paragraph_contributes_to_table_nested_text_flag(
                 cell_para,
@@ -2750,7 +2909,7 @@ impl DocumentCore {
                     HwpError::RenderError("삭제 뒤 셀 문단을 다시 찾을 수 없습니다".to_string())
                 })?;
             (
-                relative_paragraph_flow_advance(cell_para_after),
+                (relative_paragraph_flow_advance(cell_para_after), cell_para_after.line_segs.len()),
                 crate::renderer::layout::LayoutEngine::paragraph_contributes_to_table_nested_text_flag(
                     cell_para_after,
                 ),
@@ -2849,15 +3008,15 @@ impl DocumentCore {
             .as_ref()
             .is_some_and(|pending| pending.cell_flow_changed);
         if !paginate_immediately {
-            let target_first_page =
-                target_table_first_global_page(self, section_idx, parent_para_idx, control_idx);
-            let table_structure_fingerprint = match &self.document.sections[section_idx].paragraphs
-                [parent_para_idx]
-                .controls[control_idx]
-            {
-                Control::Table(table) => table_structure_fingerprint(table),
-                _ => 0,
-            };
+            let (target_first_page, table_structure_fingerprint) = deferred_table_identity(
+                self,
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
+                reusable_row_identity,
+            );
             let pending_flow_changed =
                 self.deferred_pagination_descriptor
                     .as_ref()
@@ -2927,8 +3086,14 @@ impl DocumentCore {
         if focused_page_tree_patched.is_none() {
             self.invalidate_page_tree_cache_from(0);
         }
+        let row_window = row_window
+            .filter(|_| !has_compat_projection && !loaded_frame_restored && !source_cache_restored);
         if paginate_immediately {
-            self.paginate_if_needed();
+            if !row_window.is_some_and(|seed| self.apply_row_window(seed)) {
+                self.paginate_if_needed();
+            }
+        } else {
+            self.defer_row_text(row_window, cell_flow_changed || had_pending_flow_change);
         }
 
         self.event_log.push(DocumentEvent::CellTextChanged {
@@ -3255,8 +3420,19 @@ impl DocumentCore {
         let metrics = match self.document.sections[section_idx].paragraphs[parent_para_idx]
             .controls
             .get(control_idx)
-            .and_then(|control| Self::cell_metrics_for_control(control, cell_idx))
-        {
+            .and_then(|control| {
+                // [hwpx-cowork] 행과 열이 독립인 표는 측정·배치 모두 이 칸의 물리 폭을 쓴다.
+                if cell_idx != super::super::TABLE_CAPTION_CELL_SENTINEL
+                    && self.certified_row_table(section_idx, parent_para_idx, control_idx)
+                {
+                    if let Control::Table(t) = control {
+                        let c = t.cells.get(cell_idx)?;
+                        let pad = c.paragraph_frame_padding(&t.padding);
+                        return Some((c.width as i32, pad.left, pad.right));
+                    }
+                }
+                Self::cell_metrics_for_control(control, cell_idx)
+            }) {
             Some(metrics) => metrics,
             None => return,
         };
@@ -4300,6 +4476,7 @@ impl DocumentCore {
         char_offset: usize,
         restore_meta: Option<ParaMeta>,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 지연 서식에 이은 입력
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -4469,6 +4646,8 @@ impl DocumentCore {
         // 편집 시 raw 스트림 무효화 (재직렬화 유도)
         self.document.sections[section_idx].raw_stream = None;
 
+        // [hwpx-cowork] 명시적 흐름 경계는 문단 번호가 이동하기 전에 확인한다.
+        let window = self.flow_window_before(section_idx, para_idx);
         // 문단 분리
         let mut new_para =
             self.document.sections[section_idx].paragraphs[para_idx].split_at(char_offset);
@@ -4507,7 +4686,7 @@ impl DocumentCore {
         );
         self.recompose_paragraph(section_idx, para_idx);
         self.insert_composed_paragraph(section_idx, new_para_idx);
-        self.paginate_if_needed();
+        self.paginate_flow_edit(window, 1); // [hwpx-cowork]
 
         for _ in 0..2 {
             let new_col1 = self
@@ -4609,8 +4788,10 @@ impl DocumentCore {
             doc_hwp3_layout,
         );
 
-        // 전체 구역 재구성 + 재페이지네이션
-        self.recompose_section(section_idx);
+        // [hwpx-cowork] Ctrl+Enter도 본문 Enter와 같은 두 문단 분할이다. 기존 구성과
+        // 측정의 문단 인덱스를 이동하고 바뀐 두 문단만 다시 구성한다.
+        self.recompose_paragraph(section_idx, para_idx);
+        self.insert_composed_paragraph(section_idx, new_para_idx);
         self.paginate_if_needed();
         self.invalidate_page_tree_cache();
 
@@ -4826,29 +5007,18 @@ impl DocumentCore {
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!("구역 인덱스 {} 범위 초과", section_idx))
         })?;
-        let para = section
+        section
             .paragraphs
             .get(para_idx)
             .ok_or_else(|| HwpError::RenderError(format!("문단 인덱스 {} 범위 초과", para_idx)))?;
-        let has = |p: &Paragraph| if column { p.has_column_break() } else { p.has_page_break() };
-        let target = if char_offset == 0 && !para.defines_section_or_columns() && !has(para) {
-            Some(para_idx)
-        } else if para.split_tail_is_empty(char_offset)
-            && section
-                .paragraphs
-                .get(para_idx + 1)
-                .is_some_and(|next| !has(next))
-        {
-            Some(para_idx + 1)
-        } else {
-            None
-        };
+        let target = existing_break_target(&section.paragraphs, para_idx, char_offset, column);
         // 나누기가 걸릴 자리가 이미 자연 쪽 경계(저장 vpos 리셋)에서 시작했으면 한/글 조판은 그대로다(그 뒤 쪽 경계도 그대로 유효) —
         // 저장 vpos 를 다시 잇지 않는다. 가르는 경우 문단 처음(0)에서 가를 때만 그 문단의 시작 자리를 본다
         let keep_stored = match target {
             Some(t) => starts_at_stored_page_top(&section.paragraphs, t),
             None => char_offset == 0 && starts_at_stored_page_top(&section.paragraphs, para_idx),
         };
+        let window = (!column).then(|| self.flow_window_before(section_idx, target.unwrap_or(para_idx))).flatten(); // [hwpx-cowork]
 
         self.document.sections[section_idx].raw_stream = None;
         let break_idx = match target {
@@ -4878,11 +5048,27 @@ impl DocumentCore {
             }
         };
         // 가른 경우 나누기 문단은 방금 만든 문단(저장 vpos 가 자리표시) — 그 뒤 간격은 문단 여백으로
-        if !keep_stored {
-            self.rechain_vpos_from_break(section_idx, break_idx, target.is_none());
+        // [hwpx-cowork] 한/글식 기존 문단 나눔/새 문단 나눔을 구분하고, 실제 저장 줄
+        // 좌표를 다시 이은 구간의 구성만 새로 만든다. 다음 흐름 경계 뒤는 그대로다.
+        let end = if !keep_stored {
+            self.rechain_vpos_from_break(section_idx, break_idx, target.is_none())
+        } else {
+            break_idx + 1
+        };
+        if target.is_none() {
+            self.recompose_paragraph(section_idx, para_idx);
+            self.insert_composed_paragraph(section_idx, break_idx);
+        } else {
+            self.recompose_paragraph(section_idx, break_idx);
         }
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        for changed in break_idx + 1..end {
+            // [hwpx-cowork] 독립된 생성 본문의 평문은 모든 줄의 세로 원점만 평행 이동한다.
+            // ComposedLine에는 절대 vpos가 없다. 줄 높이·문자 컷과 수평 shaping은 같다.
+            if window.is_none() || !self.document.sections[section_idx].paragraphs[changed].controls.is_empty() {
+                self.recompose_paragraph(section_idx, changed);
+            }
+        }
+        self.paginate_flow_edit(window, usize::from(target.is_none())); // [hwpx-cowork]
         self.invalidate_page_tree_cache();
 
         self.event_log.push(if target.is_some() {
@@ -4931,13 +5117,13 @@ impl DocumentCore {
     ///  - 그 뒤 범위: 저장 간격이 0 이상이면 그 간격을 그대로 잇고(자리차지 표·그림 호스트 문단처럼 저장 vpos 가 개체 높이를 담은 간격을
     ///    지킨다), 리셋이면 앞 문단 끝 + 문단 여백(spacing_after + spacing_before)으로 잇는다 — 쪽은 조판이 높이로 다시 가른다
     ///  - fresh: k 가 방금 가른 문단(저장 vpos 가 자리표시 0)이면 k 다음 간격도 문단 여백으로
-    fn rechain_vpos_from_break(&mut self, section_idx: usize, k: usize, fresh: bool) {
+    fn rechain_vpos_from_break(&mut self, section_idx: usize, k: usize, fresh: bool) -> usize {
         let hwp3 = self.document.layout_profile().hwp3_layout();
         let styles = &self.styles;
         let dpi = self.dpi;
         let paras = &mut self.document.sections[section_idx].paragraphs;
         if k >= paras.len() {
-            return;
+            return paras.len();
         }
         let end = (k + 1..paras.len())
             .find(|&i| paras[i].starts_flow_zone())
@@ -4982,6 +5168,7 @@ impl DocumentCore {
             prev_stored_end = if pi == k && fresh { None } else { stored_end };
             prev = Some(pi);
         }
+        end
     }
 
     /// 다단 설정 변경
@@ -5078,6 +5265,8 @@ impl DocumentCore {
         section_idx: usize,
         para_idx: usize,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 지연 서식에 이은 입력
+        self.prepare_body_format_at(section_idx, para_idx.saturating_sub(1));
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -5458,6 +5647,18 @@ impl DocumentCore {
         restore_meta: Option<ParaMeta>,
     ) -> Result<String, HwpError> {
         // 셀 문단 검증 및 분할
+        // [hwpx-cowork] 연속 입력은 이전에 확보한 쪽 시작 상태를 공유한다.
+        let row_window = self.row_text_before(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
+        let window = row_window
+            .is_none()
+            .then(|| self.flow_window_before(section_idx, parent_para_idx))
+            .flatten();
         let cell_para = self.get_cell_paragraph_mut(
             section_idx,
             parent_para_idx,
@@ -5544,8 +5745,14 @@ impl DocumentCore {
         // 바꾸므로 최외곽 host 문단의 측정 캐시를 무효화해야 한다.
         self.mark_cell_control_dirty(section_idx, parent_para_idx, control_idx);
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        self.mark_section_dirty_from(section_idx, parent_para_idx); // [hwpx-cowork]
+                                                                    // [hwpx-cowork] 쪽 목록과 함께 paint가 재사용하는 셀 유닛도 새 문단 수로 갱신한다.
+        if row_window.is_some() {
+            self.layout_engine.clear_layout_caches();
+        }
+        if !row_window.is_some_and(|seed| self.apply_row_window(seed)) {
+            self.paginate_flow_edit(window, 0); // [hwpx-cowork]
+        }
 
         self.event_log.push(DocumentEvent::CellTextChanged {
             section: section_idx,
@@ -5576,6 +5783,15 @@ impl DocumentCore {
             ));
         }
 
+        // [hwpx-cowork] Enter 취소·Backspace도 같은 시작 컷과 행 높이를 복원한다.
+        // [hwpx-cowork] 연속 입력은 이전에 확보한 쪽 시작 상태를 공유한다.
+        let row_window = self.row_text_before(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx - 1,
+        );
         // 검증: 셀 문단 인덱스 범위 확인
         {
             let cell_para = self.get_cell_paragraph_mut(
@@ -5685,7 +5901,12 @@ impl DocumentCore {
         self.mark_cell_control_dirty(section_idx, parent_para_idx, control_idx);
         self.document.sections[section_idx].raw_stream = None;
         self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        if row_window.is_some() {
+            self.layout_engine.clear_layout_caches();
+        } // [hwpx-cowork]
+        if !row_window.is_some_and(|seed| self.apply_row_window(seed)) {
+            self.paginate_if_needed();
+        }
 
         self.event_log.push(DocumentEvent::CellTextChanged {
             section: section_idx,
@@ -6527,8 +6748,18 @@ impl DocumentCore {
                 continue;
             }
             let mut result = Vec::new();
-            for (local_i, page) in pr.pages.iter().enumerate() {
-                let global_page = global_offset + local_i as u32;
+            // [hwpx-cowork] 표 조각의 양 끝이 이 행을 완전히 포함하는 경우에도
+            // 줄·셀 컷의 정밀 판정은 바로 아래 원래 술어를 동일하게 사용한다.
+            let range = self
+                .focused_cell_pages(
+                    section_idx,
+                    parent_para_idx,
+                    control_idx,
+                    usize::from(cell.row),
+                )
+                .unwrap_or(0..pr.pages.len());
+            for (i, page) in pr.pages[range.clone()].iter().enumerate() {
+                let global_page = global_offset + (range.start + i) as u32;
                 let mut contains = false;
                 'cols: for col in &page.column_contents {
                     for item in &col.items {
@@ -6980,7 +7211,7 @@ impl DocumentCore {
         let outer_ctrl = path[0].0;
         self.mark_cell_control_dirty(section_idx, parent_para_idx, outer_ctrl);
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
+        self.mark_section_dirty_from(section_idx, parent_para_idx); // [hwpx-cowork]
         self.paginate_if_needed();
 
         self.event_log.push(DocumentEvent::CellTextChanged {

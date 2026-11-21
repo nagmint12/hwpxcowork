@@ -962,7 +962,7 @@ fn reclassify_cell_floating_stacks(para: &mut Paragraph, min_height_hu: i32) -> 
     changed
 }
 
-fn uses_hwp3_origin_page_tolerance(document: &Document) -> bool {
+pub(crate) fn uses_hwp3_origin_page_tolerance(document: &Document) -> bool {
     let total_paragraphs: usize = document.sections.iter().map(|s| s.paragraphs.len()).sum();
     if total_paragraphs <= 50 {
         return false;
@@ -4743,6 +4743,7 @@ impl DocumentCore {
     /// 렌더 정규화의 section revision은 구조/기하 변경을 뜻하므로 여기서는 유지한다.
     /// 해당 path revision은 mutation 진입점에서 별도로 증가시킨다.
     pub(crate) fn mark_section_pagination_dirty(&mut self, section_idx: usize) {
+        self.invalidate_interactive_layout(section_idx); // [hwpx-cowork] 원본이 바뀌면 이전 세대의 미발행 쪽을 버린다.
         // [hwpx-cowork] 무엇이 바뀌었는지 모르는 dirty — 글 편집 경로는 끝에서 다시 켠다(`text_edit_trust_after`).
         self.only_text_edits_pending.set(false);
         if section_idx < self.dirty_sections.len() {
@@ -4763,10 +4764,25 @@ impl DocumentCore {
         }
     }
 
+    // [hwpx-cowork] 칸 문단의 개수가 바뀌어도 최외곽 표 앞의 원본문단은 같다.
+    pub(crate) fn mark_section_dirty_from(&mut self, section_idx: usize, para_idx: usize) {
+        let before = self.typeset_unchanged_before.get(section_idx).copied();
+        self.mark_section_dirty(section_idx);
+        self.note_typeset_change(section_idx, before, para_idx);
+    }
+
     /// [hwpx-cowork] 2026-11-20 구역 조판 체크포인트와 바뀐 자리 기록을 모두 버린다(문서·스타일·환경이 통째로 바뀜).
     pub(crate) fn forget_typeset_checkpoints(&mut self) {
+        self.row_paint = None; // [hwpx-cowork] 문서·서식·측정 환경을 교체한 뒤 그리기 사본도 폐기
+        self.row_text = None; // [hwpx-cowork] 문서·측정 환경이 바뀐 경우 이전 행 컷을 다시 쓰지 않는다.
+        if let Some(tail) = self.row_tail.take() {
+            if let Some(dirty) = self.dirty_sections.get_mut(tail.section) {
+                *dirty = true;
+            }
+        }
         self.typeset_checkpoints.clear();
         self.typeset_unchanged_before.clear();
+        self.flow_sections.clear(); // [hwpx-cowork] 문서 교체·서식 세대 변경
     }
 
     /// [hwpx-cowork] 2026-11-20 알려진 문단 넣기·지우기가 구성 목록을 고치기 직전 주소가 체크포인트의 것과 같으면
@@ -5101,6 +5117,15 @@ impl DocumentCore {
     /// (정규화·측정) → 페이지네이션 → 페이지 트리. 앞 단계를 뒤 단계보다 늦게
     /// 만들면 같은 패스 안에서 옛 값이 섞인다.
     pub(crate) fn rebuild_derived_state(&mut self) {
+        // [hwpx-cowork] 전체 문서나 과거 스냅샷을 교체하면 이전 측정·주소로 재개할 수 없다.
+        self.interactive_layout = Default::default();
+        if self.document.sections.iter().any(|s| s.paragraphs.iter().any(|p| p.interactive_format_dirty)) {
+            self.rebuild_resolved_styles();
+            self.interactive_layout.format_cursor = Some((0, 0));
+            // 이전 조합 벡터의 문단 수가 달라질 수 있어 새 벡터를 먼저 만든다.
+            self.recompose_all_with_horizontal_shaping();
+            self.step_format_rows(0.0, f64::INFINITY);
+        }
         // [hwpx-cowork] 재조판까지 끝내는 경로 — 나뉜 칸 미룬 개체 띠 표의 이 문서 몫을 새로 채운다.
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
         crate::renderer::layout::split_cell_deferred_bands_clear_doc(self.split_cell_doc_id);
@@ -5127,6 +5152,15 @@ impl DocumentCore {
         &mut self,
         fragment_budget: usize,
     ) -> DeferredPaginationStepResult {
+        if self.settle_row_text() {
+            // [hwpx-cowork] 같은 변경을 맨 앞 행부터 다시 재생하지 않는다.
+            return DeferredPaginationStepResult {
+                state: DeferredPaginationJobState::Complete,
+                revision: self.deferred_pagination_revision,
+                fragments_processed: 0,
+                page_count: self.page_count(),
+            };
+        }
         self.pending_pagination_job = None;
         let Some(descriptor) = self.deferred_pagination_descriptor.clone() else {
             return DeferredPaginationStepResult {
@@ -5480,9 +5514,24 @@ impl DocumentCore {
     /// 저장/인쇄/명시 flush용 동기 barrier. resumable job을 끝까지 drain하고,
     /// 시작 불가 또는 stale이면 기존 full pagination으로 복구한다.
     pub fn flush_deferred_pagination(&mut self) -> DeferredPaginationStepResult {
+        self.finish_interactive_layout_for_export(); // [hwpx-cowork] 저장·인쇄 시 지연 서식을 먼저 확정
+        // [hwpx-cowork] UI에 남은 입력 타이머가 이미 닫힌 구조 편집을 다시 조판하지 않게 한다.
+        if !self.settle_row_text() {
+            self.settle_flow_text();
+        } // [hwpx-cowork] 다음 키가 예약한 뒤쪽 조판도 아래 barrier에서 완주한다.
+        if self.typeset_resume.flow_window_edits.get() != 0
+            && self.pending_pagination_job.is_none() && self.deferred_pagination_descriptor.is_none()
+            && !self.typeset_tail_pending() && !self.batch_mode && !self.dirty_sections.contains(&true)
+            && self.progressive_open_job.is_none() && !self.pending_cell_format_vpos
+        {
+            return DeferredPaginationStepResult {
+                state: DeferredPaginationJobState::Fallback, revision: self.deferred_pagination_revision,
+                fragments_processed: 0, page_count: self.page_count(),
+            };
+        }
         // [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판(`typeset_tail`)을 먼저 끝낸다. 표 칸의 미룬 쪽 나눔도, 아직 나누지 않은
         // 구역도 없으면 그것으로 다 정해졌다(결과는 종전의 '이어 갈 작업 없음 → 전체 쪽 나눔'과 같은 Fallback 으로 알린다).
-        if self.typeset_tail_job.is_some() {
+        if self.typeset_tail_pending() {
             self.flush_typeset_tail();
             if self.pending_pagination_job.is_none()
                 && self.deferred_pagination_descriptor.is_none()
@@ -5545,6 +5594,9 @@ impl DocumentCore {
     /// 측정 통일(B). `paginate_pass` 의 `force_break_before` 훅과 `LayoutOverflow` 의
     /// section_index/is_first_in_column 계측은 측정 통일 작업의 진단·후속용으로 유지한다.
     pub(crate) fn paginate(&mut self) {
+        if self.interactive_layout.pending && !self.interactive_layout.advancing {
+            return; // [hwpx-cowork] 다음 키가 진행 중인 앞 세대의 전 구역 조판을 동기로 강제하지 않는다.
+        }
         match self.paginate_with_storage(&crate::storage::Unbounded) {
             Ok(v) => v,
             Err(never) => match never {},
@@ -5566,6 +5618,7 @@ impl DocumentCore {
         };
         self.body_page_field_error = None;
         self.paginate_pass_with_storage(&empty_breaks, storage)?;
+        if self.interactive_layout.section.is_some() || self.interactive_layout.measuring.is_some() || self.interactive_layout.stored_rows.is_some() { return Ok(()); } // [hwpx-cowork] 최종 쪽 번호가 정해진 세대에서만 필드와 각주를 확정한다.
         self.settle_body_page_fields(&empty_breaks);
         // [hwpx-cowork] 쪽마다 새로 각주는 쪽이 정해진 뒤에 번호가 정해진다.
         self.settle_page_footnote_numbers();
@@ -5597,7 +5650,20 @@ impl DocumentCore {
         // 글 편집 표시는 종전처럼 여기서 끈다.
         self.only_text_edits_pending.set(false);
         // [hwpx-cowork] 2026-11-20 멈춰 둔 뒤쪽 조판은 이 쪽 나눔이 대신한다(끝낸 결과는 `typeset_tail_completed` 로 받는다).
-        self.typeset_tail_job = None;
+        if let Some(abandoned) = self.row_tail.take() {
+            if let Some(dirty) = self.dirty_sections.get_mut(abandoned.section) {
+                *dirty = true;
+            }
+        }
+        self.row_paint = None; // [hwpx-cowork] 전체 조판이 기존에 발행한 화면 조각을 대체한다.
+        self.row_text = None;
+        if let Some(abandoned) = self.typeset_tail_job.take() {
+            // [hwpx-cowork] 다른 구역을 고쳐 들어온 pass도 잠정 쪽을 발행한 구역을
+            // 마무리해야 한다. clean으로 건너뛰면 이후 저장까지 옛 뒤쪽 줄이 남는다.
+            if let Some(dirty) = self.dirty_sections.get_mut(abandoned.config.section_index) {
+                *dirty = true;
+            }
+        }
         let keep_cell_compose_memo = true;
         // [#4968 R4C-3] 이번 pass의 모든 fresh-layout 경로가 동일한 exact-source
         // generation을 읽는다. 등록 source가 없으면 None으로 K0 fast path를 고정한다.
@@ -5673,6 +5739,7 @@ impl DocumentCore {
         // [#2308] #2004 revision cache와 #2195 sparse overlay를 source IR에서 갱신한다.
         let issue2424_normalize_started = issue2424_profile_enabled.then(std::time::Instant::now);
         self.compute_render_normalized_with_storage(storage)?;
+        if self.interactive_layout.stored_rows.is_some() { return Ok(()); } // [hwpx-cowork] 같은 구역의 저장 줄이 모두 준비된 뒤에 높이 측정을 시작한다.
         let issue2424_normalize_elapsed = issue2424_normalize_started
             .map(|started| started.elapsed())
             .unwrap_or_default();
@@ -5823,6 +5890,9 @@ impl DocumentCore {
         let mut progressive_suspended = false;
         // [hwpx-cowork] 2026-11-20 뒤쪽 미루기: 본문 쪽 번호 필드는 모든 쪽이 정해져야 값이 정해진다 — 그런 문서는 미루지 않는다.
         let tail_deferral_allowed = self.typeset_tail_deferral && !self.has_body_page_fields();
+        if !tail_deferral_allowed {
+            self.flow_sections.clear(); // [hwpx-cowork] 다른 구역에 추가한 전체 쪽 수 필드도 같은 pass에서 처리한다.
+        }
         for (idx, section) in self.document.sections.iter().enumerate() {
             if progressive_suspended {
                 break;
@@ -5933,6 +6003,8 @@ impl DocumentCore {
                 measured
             } else if completed_tail_result.is_some() {
                 self.measured_sections[idx].clone()
+            } else if let Some((_, result)) = self.interactive_layout.measured.take_if(|(s, _)| *s == idx) {
+                result
             } else if !self.measured_sections[idx].fallback_paragraphs.is_empty() {
                 let dirty_paras = self
                     .dirty_paragraphs
@@ -5951,6 +6023,14 @@ impl DocumentCore {
                     .first()
                     .map(|a| a.width)
                     .unwrap_or(layout_sel.body_area.width);
+                if self.interactive_layout.advancing && !self.interactive_layout.formatted_rows.is_empty() && S::UNBOUNDED {
+                    // [hwpx-cowork] 전체 글자 크기 변경 뒤 측정도 조판과 같은 세대에서 분할한다.
+                    self.interactive_layout.measuring = Some(crate::document_core::interactive_layout::InteractiveMeasurement {
+                        section: idx, width: col_w_sel, measurer,
+                        result: MeasuredSection { fallback_paragraphs: Vec::with_capacity(para_src.len()), tables: Vec::new() },
+                    });
+                    return Ok(());
+                }
                 measurer.measure_section_selective_with_storage(
                     para_src,
                     composed,
@@ -5997,6 +6077,8 @@ impl DocumentCore {
                 .map(|v| v == "1")
                 .unwrap_or(false);
             let mut result = if let Some(result) = completed_open_result {
+                // [hwpx-cowork] 열린 동안 같은 구역의 입력으로 남긴 체크포인트.
+                pending_checkpoints = self.typeset_checkpoints.get_mut(idx).and_then(Option::take);
                 result
             } else if let Some(result) = completed_tail_result {
                 // 체크포인트는 끝낼 때 이미 바꿨다(`complete_typeset_tail`) — 그대로 둔다.
@@ -6097,9 +6179,9 @@ impl DocumentCore {
                 // [hwpx-cowork] 2026-11-10 P2: 여러 구역 문서는 앞 구역 쪽 수를 뺀 남은 예산으로 멈춘다. 앞 구역들이 이미
                 // 예산을 채웠으면(실문서A: 표지·차례 구역) 이 구역은 한 쪽만 짜고 멈춘다(step 의 쪽 예산은 최소 1).
                 // 미주를 앞 구역에서 모아 오는 마지막 구역(RenderAll)은 빌린 목록을 작업에 담을 수 없어 한 번에 짠다.
-                let progressive_page_budget = self.progressive_open_page_budget
+                let progressive_page_budget = self.interactive_layout.advancing.then_some(1).or_else(|| self.progressive_open_page_budget
                     .filter(|_| !matches!(endnote_deferral, EndnoteDeferral::RenderAll(_)))
-                    .map(|budget| budget.saturating_sub(self.pagination[..idx].iter().map(|r| r.pages.len()).sum::<usize>()).max(1));
+                    .map(|budget| budget.saturating_sub(self.pagination[..idx].iter().map(|r| r.pages.len()).sum::<usize>()).max(1)));
                 let suppress_endnotes = matches!(endnote_deferral, EndnoteDeferral::Suppress);
                 if let Some(page_budget) = progressive_page_budget {
                     use crate::document_core::progressive_open::{ProgressiveOpenConfig, ProgressiveOpenJob};
@@ -6117,22 +6199,47 @@ impl DocumentCore {
                         endnote_deferral,
                     };
                     let mut job = typesetter.begin_section(&input);
-                    if typesetter.step_section(&mut job, &input, usize::MAX, page_budget) {
+                    // [hwpx-cowork] 최초 편집에 쓸 재개 표지는 조판 도중 상태가 아닌 시작 상태로 정한다.
+                    let mut checkpoints = (S::UNBOUNDED && !self.typeset_resume.disabled.get()).then(|| {
+                        crate::document_core::TypesetCheckpointStore {
+                            checkpoints: crate::renderer::typeset::SectionCheckpoints::at_open(&typesetter, &input, &job),
+                            paragraphs_ptr: section.paragraphs.as_ptr() as usize,
+                            composed_ptr: self.composed[idx].as_ptr() as usize,
+                            environment: layout_environment,
+                            layout_generation: self.typeset_resume.layout_generation.get(),
+                            respect_vpos_reset: self.respect_vpos_reset,
+                            normalized: norm.is_some(),
+                        }
+                    });
+                    let paragraph_budget = if self.interactive_layout.advancing { 8 } else { usize::MAX };
+                    if typesetter.step_section(&mut job, &input, paragraph_budget, page_budget) {
+                        pending_checkpoints = checkpoints;
                         typesetter.finish_section(job, &input)
                     } else {
-                        let preview = typesetter.preview_section(&job, &input);
-                        self.progressive_open_job = Some(ProgressiveOpenJob {
-                            typesetter, job, section_index: idx,
+                        if let Some(store) = &mut checkpoints {
+                            store.checkpoints.record_open_step(&job);
+                        }
+                        let preview = (!self.interactive_layout.advancing).then(|| typesetter.preview_section(&job, &input));
+                        let pending = ProgressiveOpenJob {
+                            typesetter, job, section_index: idx, checkpoints,
                             config: ProgressiveOpenConfig {
                                 suppress_endnotes,
+                                deferred_endnotes: deferred,
                                 column_def: column_def.clone(),
                                 skip_spacing_before_prededuct: hwp3_origin_flow_spacing_before,
                                 hwp3_origin_page_tolerance,
                                 force_break_before: force_breaks.get(idx).unwrap_or(&empty_breaks).clone(),
                             },
-                        });
+                        };
+                        if self.interactive_layout.advancing {
+                            // [hwpx-cowork] 화면과 적중검사는 마지막 쪽 목록을 계속 사용한다.
+                            // 완주한 세대만 기존 쪽 번호·미주·바탕쪽 후처리에 넘긴다.
+                            self.interactive_layout.section = Some((pending, measured));
+                            return Ok(());
+                        }
+                        self.progressive_open_job = Some(pending);
                         progressive_suspended = true;
-                        preview
+                        preview.expect("progressive open requested a preview")
                     }
                 } else {
                     // [hwpx-cowork] 2026-11-20 지난 조판의 체크포인트에서 이어 갈 수 있으면 편집한 자리 앞의 쪽부터
@@ -6190,7 +6297,9 @@ impl DocumentCore {
                         && idx + 1 == sec_count
                         && endnotes_in_place
                         && force_breaks.get(idx).is_none_or(|breaks| breaks.is_empty())
-                        && !hwp3_origin_page_tolerance
+                        // [hwpx-cowork] 첫 구역에는 표지 맞춤 빈 쪽을 붙이지 않는다.
+                        // 저장 vpos 허용치는 일반 대용량 HWPX에도 켜지며 이어가는 조판이 그대로 쓴다.
+                        && (idx == 0 || !hwp3_origin_page_tolerance)
                         && !self.pagination[idx].pages.is_empty()
                         && self.pagination[idx].endnotes.is_empty())
                     .then(|| crate::renderer::typeset::TailWindow {
@@ -6242,7 +6351,7 @@ impl DocumentCore {
                         control.tail_parked.set(control.tail_parked.get() + 1);
                         self.typeset_tail_job = Some(crate::document_core::typeset_tail::TypesetTailJob {
                             typesetter,
-                            parked,
+                            parked: Some(parked),
                             config: crate::document_core::typeset_tail::TypesetTailConfig {
                                 section_index: idx,
                                 column_def: column_def.clone(),
@@ -6603,6 +6712,13 @@ impl DocumentCore {
             }
             self.pagination[idx] = result;
             self.dirty_sections[idx] = false;
+            // [hwpx-cowork] 편집 시에 문서 전체를 살펴보지 않도록, 정규 조판에서 전역
+            // 의존성이 없는 본문 구역인지 기록한다. 불완전한 열기 미리보기는 제외한다.
+            self.flow_sections.resize_with(sec_count, || None);
+            self.flow_sections[idx] = (S::UNBOUNDED && tail_deferral_allowed && !progressive_suspended
+                && self.typeset_tail_job.as_ref().is_none_or(|job| job.config.section_index != idx))
+                .then(|| self.classify_flow_section(idx, layout_environment))
+                .flatten();
             // [hwpx-cowork] 2026-11-20 체크포인트를 바꾸고 바뀐 자리 기록을 '변경 없음'으로 되돌린다.
             if self.typeset_checkpoints.len() < sec_count {
                 self.typeset_checkpoints.resize_with(sec_count, || None);
@@ -6838,7 +6954,7 @@ impl DocumentCore {
                 storage.push(&mut out, previous[idx].take())?;
                 continue;
             }
-            if completing_progressive_open
+            if (completing_progressive_open || self.interactive_layout.advancing)
                 && previous[idx].is_none()
                 && unprojected[idx] == Some(source_revision)
             {
@@ -6947,7 +7063,9 @@ impl DocumentCore {
             let refresh_markers = (profile.hwp5_stored_pagination_layout()
                 || profile.hwpx_stored_layout())
                 && !profile.legacy_hwp3_stored_geometry();
-            let stored_word_tails = if !profile.session_edited() {
+            let stored_word_tails = if let Some((_, result)) = self.interactive_layout.ready_rows.take_if(|(s, _)| *s == idx) {
+                result
+            } else if !profile.session_edited() {
                 // 구판 자체 변환본은 원 HWP의 줄을 보존했지만 XML 1.2의
                 // 여백 단위는 달라졌다. marker 2 이후와 한컴 원본은 제외한다.
                 let previous_margins = if self
@@ -6964,6 +7082,19 @@ impl DocumentCore {
                 } else {
                     None
                 };
+                if self.interactive_layout.advancing && !self.interactive_layout.formatted_rows.is_empty() && S::UNBOUNDED {
+                    // [hwpx-cowork] 순서가 있는 저장 줄 투영도 현재 구역의 원본·중간 투영을
+                    // 이어서 처리한다. 이미 갱신한 앞 구역과 아직 남은 구역의 캐시는 보존한다.
+                    let columns = Self::find_initial_column_def(source_paragraphs);
+                    let source = text_metrics.or(math_textboxes).or(math_tables).or(cached_frames);
+                    self.interactive_layout.stored_rows = Some(crate::renderer::render_normalization::stored_word_tail::StoredBodyRowsJob::new(
+                        idx, source, section.paragraphs.len(), pd, &columns, self.dpi, refresh_markers, previous_margins,
+                    ));
+                    out.extend(previous.into_iter().skip(idx));
+                    self.render_normalization.sections = out;
+                    self.render_normalization.unprojected_revisions = unprojected;
+                    return Ok(());
+                }
                 crate::renderer::render_normalization::stored_word_tail::normalize_with_storage(
                     text_metrics
                         .as_deref()
@@ -9020,6 +9151,12 @@ impl DocumentCore {
         let page_content = overridden_page_content
             .as_ref()
             .unwrap_or(base_page_content);
+        // [hwpx-cowork] 화면·커서·SVG가 모두 편집 직후의 동일한 두 쪽 조각을 사용한다.
+        let row_paint = if header_footer_override.is_none() {
+            self.row_paint_page(page_content)
+        } else {
+            None
+        };
         // 구역의 각주 모양 정보
         let footnote_shape = if page_content.section_index < self.document.sections.len() {
             &self.document.sections[page_content.section_index]
@@ -9090,7 +9227,7 @@ impl DocumentCore {
             .map(|p| p.pages.len())
             .sum();
         let local_idx = (page_num as usize).saturating_sub(sec_page_offset);
-        {
+        if row_paint.is_none() {
             let mut replayed_partial: std::collections::HashSet<(usize, usize)> =
                 std::collections::HashSet::new();
             // 이전 구역들의 모든 페이지 replay
@@ -9212,12 +9349,15 @@ impl DocumentCore {
             .get(sec_idx)
             .map(|pr| pr.endnote_paragraphs.as_slice())
             .unwrap_or(&[]);
+        // [hwpx-cowork] 본문 쪽에는 가상 미주 인덱스가 없다. 문서 끝 미주 하나 때문에 본문 전체를 쪽마다 복제하지 않는다.
+        let draws_endnote = !en_paras.is_empty() && page_content.column_contents.iter()
+            .any(|col| col.items.iter().any(|item| !matches!(item, PageItem::EndnoteSeparator { .. }) && item.para_index() >= paragraphs.len()));
         let combined_paragraphs: Vec<Paragraph>;
         let combined_composed: Vec<crate::renderer::composer::ComposedParagraph>;
         let (render_paragraphs, render_composed): (
             &[Paragraph],
             &[crate::renderer::composer::ComposedParagraph],
-        ) = if en_paras.is_empty() {
+        ) = if !draws_endnote {
             (paragraphs, composed)
         } else {
             combined_paragraphs = paragraphs.iter().chain(en_paras.iter()).cloned().collect();
@@ -9235,9 +9375,24 @@ impl DocumentCore {
 
         // [hwpx-cowork] 그리기도 이 문서의 나뉜 칸 미룬 개체 띠를 읽는다.
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
+        let original_overlay = row_paint.as_ref().map(|(paint, _)| {
+            let original = self.layout_engine.render_normalization_overlay();
+            self.layout_engine.clear_layout_caches();
+            self.layout_engine
+                .set_render_normalization_overlay(paint.overlay.clone());
+            original
+        });
+        let (paint_page, paint_paragraphs, paint_measured) = match row_paint.as_ref() {
+            Some((paint, page)) => (
+                page,
+                std::slice::from_ref(&paint.host),
+                std::slice::from_ref(&paint.measured),
+            ),
+            None => (page_content, render_paragraphs, sec_measured),
+        };
         let mut tree = self.layout_engine.build_render_tree(
-            page_content,
-            render_paragraphs,
+            paint_page,
+            paint_paragraphs,
             header_paragraphs,
             footer_paragraphs,
             render_composed,
@@ -9245,11 +9400,20 @@ impl DocumentCore {
             footnote_shape,
             &self.document.bin_data_content,
             active_mp,
-            sec_measured,
+            paint_measured,
             page_border_fill,
             outline_num_id,
             wrap_around_paras,
         );
+        if let (Some((paint, _)), Some(original)) = (row_paint, original_overlay) {
+            self.typeset_resume
+                .table_paints
+                .set(self.typeset_resume.table_paints.get() + 1);
+            self.layout_engine
+                .set_render_normalization_overlay(original);
+            self.layout_engine.clear_layout_caches();
+            paint.restore_source_rows(&mut tree.root);
+        }
         // 확장 바탕쪽 추가 렌더링
         for ext_mp in &extra_mps {
             self.layout_engine.build_master_page_into(

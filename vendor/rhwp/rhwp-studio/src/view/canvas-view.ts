@@ -119,7 +119,7 @@ export class CanvasView {
   private scrollContent: HTMLElement;
   private pageArrangement: PageArrangement;
   private pageMovement: PageMovementSettings;
-  private pages: PageInfo[] = [];
+  private pages: (PageInfo | Pick<PageInfo, 'width' | 'height'>)[] = [];
   private currentVisiblePages: number[] = [];
   private currentRetainedPages: number[] = [];
   private editingPageIndex: number | null = null;
@@ -1027,7 +1027,7 @@ export class CanvasView {
 
     const desiredPages = new Set<number>();
     for (const pageIdx of this.canvasPool.activePages) {
-      const page = this.pages[pageIdx];
+      const page = this.detailedPageInfo(pageIdx); // [hwpx-cowork] 보이는 머리말의 실제 홀짝 여백
       if (!page) continue;
       const isPreview = pageIdx === state.previewPage;
       let isAppliedPage = false;
@@ -1433,8 +1433,8 @@ export class CanvasView {
     if (!page || element.tagName !== 'CANVAS') return;
     const canvas = element as HTMLCanvasElement;
     const dpr = globalThis.devicePixelRatio || 1;
-    const paper = page.printSize && this.pageRenderer.getRenderProfile() === 'print'
-      ? page.printSize : page;
+    const paper = this.pageRenderer?.getRenderProfile?.() === 'print'
+      ? this.detailedPageInfo(pageIdx)?.printSize ?? page : page;
     const preserveRasterSamples = this.pageRenderer?.getRenderProfile?.() !== 'print'
       || this.pageRenderer.hasRasterContent(pageIdx) !== false;
     const ownsDeviceAxis = (actual: number, logical: number): boolean => (
@@ -2038,20 +2038,36 @@ export class CanvasView {
     }
   }
 
-  /** 편집 후 보이는 페이지를 재렌더링한다 */
+  /** [hwpx-cowork] 실제 그릴 쪽만 여백·단·인쇄 영역까지 포함한 정보를 읽는다. */
+  private detailedPageInfo(index: number): PageInfo | undefined {
+    const page = this.pages[index];
+    if (!page) return undefined;
+    return 'marginLeft' in page ? page : this.wasm.getPageInfo(index);
+  }
+
+  /** 편집 후 보이는 페이지를 재렌더링한다. */
   refreshPages(): void {
     this.viewportManager.cancelPendingZoomRaster();
     this.zoomRefreshRequired = false;
     if (this.pages.length === 0) return;
 
-    // 페이지 정보 재수집 (페이지 수/크기가 변경될 수 있음)
+    // [hwpx-cowork] 화면 밖 수천 쪽의 상세 JSON을 각각 조회·해석하지 않는다.
+    // 용지 크기만 모아 가상 배치를 정하고, 여백과 제본은 해당 쪽을 그릴 때 조회한다.
     const pageCount = this.wasm.pageCount;
+    const sizeRuns = this.wasm.getPageSizeRuns?.();
     this.pages = [];
-    for (let i = 0; i < pageCount; i++) {
-      try {
-        this.pages.push(this.wasm.getPageInfo(i));
-      } catch (e) {
-        console.error(`[CanvasView] 페이지 ${i} 정보 조회 실패:`, e);
+    if (sizeRuns !== undefined) {
+      for (const [count, width, height] of JSON.parse(sizeRuns) as [number, number, number][]) {
+        const page = { width, height };
+        for (let i = 0; i < count; i++) this.pages.push(page);
+      }
+    } else {
+      for (let i = 0; i < pageCount; i++) {
+        try {
+          this.pages.push(this.wasm.getPageInfo(i));
+        } catch (e) {
+          console.error(`[CanvasView] 페이지 ${i} 정보 조회 실패:`, e);
+        }
       }
     }
 
@@ -2275,7 +2291,7 @@ export class CanvasView {
     const settings = getGridViewSettings();
     if (!settings.visible) return;
 
-    const pageInfo = this.pages[pageIdx];
+    const pageInfo = this.detailedPageInfo(pageIdx);
     if (!pageInfo) return;
 
     const overlay = createGridOverlay(

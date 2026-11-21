@@ -268,9 +268,28 @@ impl DocumentCore {
         if changed.iter().any(|c| *c) {
             for (idx, c) in changed.iter().enumerate() {
                 if *c || idx == last {
-                    self.mark_section_dirty(idx);
-                    self.recompose_section(idx);
+                    self.recompose_note_owners(idx);
                 }
+            }
+        }
+    }
+
+    // [hwpx-cowork] 한/글 순서로 새 번호를 매겨도 실제 조합이 바뀌는 본문은
+    // 각주·미주 표식을 가진 문단(표·글상자 안 표식의 최외곽 소유 문단 포함)이다.
+    pub(crate) fn recompose_note_owners(&mut self, section: usize) {
+        fn owns_note(paragraph: &crate::model::paragraph::Paragraph) -> bool {
+            paragraph.controls.iter().any(|control| match control {
+                Control::Footnote(_) | Control::Endnote(_) => true,
+                Control::Table(table) => table.cells.iter().any(|cell| cell.paragraphs.iter().any(owns_note)),
+                Control::Shape(shape) => shape.drawing().and_then(|d| d.text_box.as_ref())
+                    .is_some_and(|text| text.paragraphs.iter().any(owns_note)),
+                _ => false,
+            })
+        }
+        self.mark_section_dirty(section);
+        for index in 0..self.document.sections[section].paragraphs.len() {
+            if owns_note(&self.document.sections[section].paragraphs[index]) {
+                self.recompose_paragraph(section, index);
             }
         }
     }

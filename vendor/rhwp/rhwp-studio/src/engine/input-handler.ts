@@ -26,6 +26,7 @@ import { chartTargetFromSelection, matchChartRef } from '@/core/chart-data-targe
 import type { SelectedOleRefLike } from '@/core/chart-data-target';
 import { VirtualScroll } from '@/view/virtual-scroll';
 import { ViewportManager } from '@/view/viewport-manager';
+import { BodyRangeFormatCommand } from './command';
 import type {
   DocumentPosition,
   CharProperties,
@@ -335,6 +336,9 @@ export class InputHandler {
   private pendingFocusedPagePatch: DeferredFocusedPagePatch | null = null;
   /** 쪽/단 나누기 뒤 CanvasView의 새 page offset이 준비되면 캐럿을 다시 드러낸다. */
   private readonly caretLayoutReveal = new CaretLayoutReveal();
+  private tailViewportAnchor?: {
+    page: number; x: number; y: number; offset: number; scrollTop: number; zoom: number; generation: number;
+  };
 
   // 표 경계선 리사이즈 드래그 상태
   private isResizeDragging = false;
@@ -652,6 +656,16 @@ export class InputHandler {
     // 다시 투영한다. 선택 삭제 undo도 포함하되, 캐럿 자동 스크롤 예약과는 분리한다.
     eventBus.on('document-layout-refreshed', () => {
       const revealCaret = this.caretLayoutReveal.consume();
+      const anchor = this.tailViewportAnchor;
+      this.tailViewportAnchor = undefined;
+      if (anchor && this.active && !this.isComposing && this.container.scrollTop === anchor.scrollTop
+        && this.viewportManager.getZoom() === anchor.zoom && this.wasm.documentGeneration === anchor.generation) {
+        const rect = this.cursor.getRect();
+        if (rect?.pageIndex === anchor.page && rect.x === anchor.x && rect.y === anchor.y) {
+          // [hwpx-cowork] CanvasView가 비동기로 갱신한 새 종이 높이와 쪽 간격까지 반영한다.
+          this.container.scrollTop = Math.max(0, this.virtualScroll.getPageOffset(anchor.page) + rect.y * anchor.zoom - anchor.offset);
+        }
+      }
       if (!this.active) return;
       if (revealCaret) {
         this.cursor.updateRect();
@@ -667,7 +681,7 @@ export class InputHandler {
     // HF 선택은 같은 정의를 쓰는 visible page마다 투영한다. ViewportManager가 scroll
     // 이벤트를 rAF당 한 번으로 합치므로 여기서는 추가 프레임을 중첩하지 않는다.
     eventBus.on('viewport-scroll', () => {
-      if (this.cursor.getHeaderFooterSelectionOrdered()) this.updateSelection();
+      if (this.cursor.getHeaderFooterSelectionOrdered() || this.cursor.hasSelection()) this.updateSelection();
     });
     eventBus.on('viewport-resize', () => {
       // CanvasView가 같은 이벤트에서 VirtualScroll을 먼저 확정한 다음 그 좌표를 읽는다.
@@ -2099,6 +2113,7 @@ export class InputHandler {
       this.stagePendingCharShape(props);
       return;
     }
+    if (this.applyBodyRangeIfSupported(sel, props, 'applyCharFormat')) return;
     const cmd = new ApplyCharFormatCommand(sel.start, sel.end, props);
     this.executeOperation({ kind: 'command', command: cmd });
   }
@@ -2375,11 +2390,37 @@ export class InputHandler {
   private applyParaFormat(props: Record<string, unknown>): void {
     try {
       if (this.applyParaFormatInNoteOrHeader(props)) return;
+      const selection = this.getNonEmptySelection();
+      if (selection && !this.getSelectedCellBlock() && this.applyBodyRangeIfSupported(selection, props, 'applyParaFormat')) return;
       const targets = this.getParaFormatTargetsAtCursor();
       this.executeParaFormatCommand(targets, props);
     } catch (err) {
       console.warn('[InputHandler] applyParaFormat 실패:', err);
     }
+  }
+
+  getCursorPageIndex(): number { return this.cursor.getRect()?.pageIndex ?? 0; }
+
+  private applyBodyRangeIfSupported(
+    selection: { start: DocumentPosition; end: DocumentPosition },
+    props: Record<string, unknown>, type: 'applyCharFormat' | 'applyParaFormat',
+  ): boolean {
+    const { start, end } = selection;
+    const supported = type === 'applyCharFormat'
+      ? typeof props.fontSize === 'number' || typeof props.strikethrough === 'boolean' || typeof props.underline === 'boolean'
+      : typeof props.alignment === 'string';
+    if (!supported || Object.keys(props).length !== 1 || !this.wasm.supportsBodyRangeFormat?.()
+      || start.parentParaIndex !== undefined || end.parentParaIndex !== undefined || start.isTextBox || end.isTextBox
+      || (start.sectionIndex === end.sectionIndex && start.paragraphIndex === end.paragraphIndex)) return false;
+    const focus = () => {
+      const size = this.viewportManager?.getViewportSize?.();
+      const pages = size && this.virtualScroll?.getVisiblePages?.(
+        this.viewportManager.getScrollY(), size.height, this.viewportManager.getScrollX(), size.width,
+      );
+      return pages?.[0] ?? this.getCursorPageIndex();
+    };
+    this.executeOperation({ kind: 'command', command: new BodyRangeFormatCommand(type, start, end, props, focus) });
+    return true;
   }
 
   /**
@@ -3027,14 +3068,17 @@ export class InputHandler {
       if (newPos) {
         this.prepareTextMutationBeforeCursor(IMMEDIATE_TEXT_MUTATION_EFFECTS);
         this.clearTableResizeRuntimeCache();
-        this.resetDerivedStateAfterHistoryJump();
-        // [Task #2337] 방금 되돌린 커맨드가 HF/FN 편집이면 그 커서 모드로 복원(본문 moveTo 대신).
-        this.restoreEditContextAfterHistory(this.history.peekRedoTop(), newPos);
-        // [Task #3416] 그 위에 "지우기 전 선택" 을 되살린다 — 커서 위치가 정해진 뒤라야
-        // anchor 만 더해 범위가 완성된다. redo 쪽에는 두지 않는다(한컴도 redo 는 해제).
-        this.restoreSelectionAfterUndo(this.history.peekRedoTop());
+        const preservePosition = this.history.peekRedoTop() instanceof BodyRangeFormatCommand;
+        if (preservePosition) {
+          // [hwpx-cowork] 본문 범위 서식은 글자 주소를 바꾸지 않는다. 현재 선택과 화면을 유지한다.
+          this.caretLayoutReveal.clear();
+        } else {
+          this.resetDerivedStateAfterHistoryJump();
+          this.restoreEditContextAfterHistory(this.history.peekRedoTop(), newPos);
+          this.restoreSelectionAfterUndo(this.history.peekRedoTop());
+        }
         this.caretLayoutReveal.requestFor(this.history.peekRedoTop()?.type ?? '');
-        this.afterEdit();
+        this.afterEdit(true, preservePosition);
       }
     });
   }
@@ -3051,14 +3095,16 @@ export class InputHandler {
           this.history.consumeLastExecutionEffects(),
         );
         this.clearTableResizeRuntimeCache();
-        this.resetDerivedStateAfterHistoryJump();
-        // [Task #2337] 방금 다시 실행한 커맨드가 HF/FN 편집이면 그 커서 모드로 복원.
-        this.restoreEditContextAfterHistory(this.history.peekUndoTop(), newPos);
-        // HF 부분 서식은 redo 뒤에도 같은 논리 선택을 유지한다. 삭제·치환은 metadata가 없어
-        // 해제된 상태로 남는다.
-        this.restoreSelectionAfterRedo(this.history.peekUndoTop());
+        const preservePosition = this.history.peekUndoTop() instanceof BodyRangeFormatCommand;
+        if (preservePosition) {
+          this.caretLayoutReveal.clear();
+        } else {
+          this.resetDerivedStateAfterHistoryJump();
+          this.restoreEditContextAfterHistory(this.history.peekUndoTop(), newPos);
+          this.restoreSelectionAfterRedo(this.history.peekUndoTop());
+        }
         this.caretLayoutReveal.requestFor(this.history.peekUndoTop()?.type ?? '');
-        this.afterEdit(!boundaryHandled);
+        this.afterEdit(!boundaryHandled, preservePosition);
       }
     });
   }
@@ -3319,6 +3365,7 @@ export class InputHandler {
           let newPos: DocumentPosition;
           try { newPos = this.history.execute(desc.command, this.wasm); }
           catch (error) { this.handleCharFormatError(error); return; }
+          if (desc.command.type === 'splitParagraph' && desc.command.isNoOp?.()) break;
           const boundaryHandled = this.prepareTextMutationBeforeCursor(
             this.history.consumeLastExecutionEffects(),
           );
@@ -3377,6 +3424,7 @@ export class InputHandler {
                 cursorBefore,
                 desc.operation,
                 desc.selectionBefore ?? null,
+                desc.captureBefore, // [hwpx-cowork] 실제 page:break 명령만 전달한다.
               );
           const newPos = this.history.execute(cmd, this.wasm);
           const markPastedFieldEndOutside = this.pastedFieldEndOutsidePending;
@@ -3385,6 +3433,7 @@ export class InputHandler {
           // [Task #2370] operation 이 무변경(null)을 알리면 기록도 리프레시도 없다.
           // 문서가 그대로이므로 다시 그릴 것이 없고, 커서도 움직이지 않았다.
           if (cmd.isNoOp()) break;
+          if (desc.ownsPriorTextPagination) this.prepareTextMutationBeforeCursor(IMMEDIATE_TEXT_MUTATION_EFFECTS);
           if (cmd instanceof SubmodeSelectionSnapshotCommand) {
             this.restoreEditContextAfterHistory(cmd, newPos);
             this.restoreSelectionAfterRedo(cmd);
@@ -3533,7 +3582,7 @@ export class InputHandler {
   }
 
   /** 편집 후 처리: 재렌더링 + 캐럿 갱신 */
-  private afterEdit(flushDeferredPagination = true): void {
+  private afterEdit(flushDeferredPagination = true, keepSelectionViewport = false): void {
     this.pendingFocusedPagePatch = null;
     if (flushDeferredPagination) {
       this.flushDeferredPaginationIfNeeded('before-full-edit', false);
@@ -3552,7 +3601,7 @@ export class InputHandler {
     this.clearTableResizeRuntimeCache();
     this.eventBus.emit('document-mutated', 'input-handler-edit');
     this.eventBus.emit('document-changed');
-    this.updateCaret();
+    this.updateCaret(keepSelectionViewport);
   }
 
   /** 셀 내부 단일 텍스트 편집 후 처리: 현재 페이지 canvas만 갱신한다. */
@@ -3696,18 +3745,52 @@ export class InputHandler {
 
   /** 뒤쪽 조판이 끝나 쪽 나눔이 바뀌었다 — 표 칸 미룬 쪽 나눔을 마친 때(`completeResumablePagination`)처럼 다시 그린다. */
   private completeTypesetTail(reason: string): void {
+    // [hwpx-cowork] 입력하던 글자가 다른 쪽으로 넘어가도 화면 안에서 같은
+    // 높이에 남긴다. 사용자가 다른 쪽으로 스크롤한 동안에는 그 시점을 유지한다.
+    const viewport = this.container;
+    const caretY = (rect: CursorRect | null | undefined) => rect && this.virtualScroll
+      ? this.virtualScroll.getPageOffset(rect.pageIndex) + rect.y * this.viewportManager.getZoom()
+      : undefined;
+    const previous = viewport?.clientHeight ? caretY(this.cursor.getRect()) : undefined;
+    const offset = previous === undefined ? undefined : previous - viewport.scrollTop;
+    const visible = offset !== undefined && offset >= 0 && offset < viewport.clientHeight;
+    this.tailViewportAnchor = undefined;
     this.lastCellKey = null;
     this.protectedCellHitCache = null;
     this.eventBus.emit('document-changed', reason);
     // 한글 조합 중에는 캐럿·조합 상자를 옮기지 않는다 — 편집한 쪽은 멈추기 전에 이미 끝까지 조판했다.
     if (this.isComposing) return;
-    const position = this.cursor.getPosition();
     this.cursor.invalidateFocusedCellCursorGeometry();
-    this.cursor.moveTo(position);
-    this.updateCaret();
+    // [hwpx-cowork] 쪽이 옮겨져도 선택 범위·주석·셀·조합의 원본 주소를 보존한다.
+    this.cursor.updateRect();
+    if (visible) {
+      const rect = this.cursor.getRect();
+      const current = caretY(rect);
+      if (rect && current !== undefined && Number.isFinite(current)) {
+        viewport.scrollTop = Math.max(0, current - offset);
+        this.tailViewportAnchor = { page: rect.pageIndex, x: rect.x, y: rect.y, offset,
+          scrollTop: viewport.scrollTop, zoom: this.viewportManager.getZoom(), generation: this.wasm.documentGeneration };
+      }
+    }
+    this.updateCaret(true);
   }
 
-  /** [hwpx-cowork] 2026-11-20 저장·인쇄·내보내기 전에 남은 뒤쪽 조판을 지금 끝낸다. 끝낼 것이 있었으면 true. */
+  async prepareAsyncExport(pause = () => new Promise<void>(resolve => setTimeout(resolve, 0))): Promise<void> {
+    // [hwpx-cowork] 저장을 요청한 문서에서만 다음 쪽을 진행한다. 이벤트 사이의 새 입력은
+    // 엔진이 보존한 최신 컷에서 이어지며, 쪽 변경 알림도 일반 idle runner와 같다.
+    const generation = this.wasm.documentGeneration;
+    while (this.wasm.typesetTailPending()) {
+      await pause();
+      if (generation !== this.wasm.documentGeneration) throw new Error('저장 준비 중 문서가 바뀌었습니다.');
+      if (!this.wasm.typesetTailPending()) break;
+      this.typesetTailRunner.cancel();
+      const result = this.wasm.stepTypesetTail(TYPESET_TAIL_STEP_BUDGET_MS);
+      if (result.status === 'complete' || result.status === 'stale') this.completeTypesetTail('async-export');
+      if (result.status === 'fallback' || result.status === 'none') break;
+    }
+  }
+
+  /** [hwpx-cowork] 동기 인쇄·내보내기에서 남은 쪽을 끝낸다. */
   flushTypesetTailIfPending(reason = 'manual'): boolean {
     this.typesetTailRunner.cancel();
     if (!this.wasm.typesetTailPending()) return false;
@@ -3741,6 +3824,23 @@ export class InputHandler {
       || this.deferredPaginationRunner.hasPendingWork();
     this.cancelDeferredPaginationFlush();
     if (!shouldFlush) return false;
+    if (this.wasm.interactiveLayoutPending?.() && (
+      reason === 'before-undo' || reason === 'before-redo' || reason === 'before-full-edit'
+      || reason === 'input-blur' || reason === 'after-input-blur' || reason === 'idle-auto'
+      || reason === 'before-deactivate' || reason === 'before-dispose'
+    )) {
+      // [hwpx-cowork] 이 명령들은 원본에 바로 적용된다. 저장의 prepareAsyncExport가 마지막 세대를 마무리한다.
+      this.startTypesetTailIfPending();
+      return false;
+    }
+    if (reason === 'input-blur') {
+      // [hwpx-cowork] 목록 버튼을 누르면 click보다 textarea blur가 먼저 온다.
+      // 모델은 이미 편집됐다. 목록을 그릴 기회를 주고 다음 입력이 오면 이 예약은 합친다.
+      this.deferredPaginationFlushTimer = setTimeout(() => {
+        this.flushDeferredPaginationIfNeeded('after-input-blur', emitChange);
+      }, DOCUMENT_PAGINATION_IDLE_FLUSH_DELAY_MS);
+      return false;
+    }
 
     try {
       this.deferredPaginationRunner.cancel();
@@ -3798,8 +3898,13 @@ export class InputHandler {
     pageLocalOptions: PageLocalTextEditOptions = {},
     boundaryHandled = false,
   ): void {
+    // [hwpx-cowork] Ctrl+A의 논리 선택 끝은 수천 쪽 뒤에 있을 수 있다.
+    // 서식을 적용해도 사용자가 그 명령을 내린 화면과 선택 범위를 함께 유지한다.
+    const keepSelectionViewport = (commandType === 'applyCharFormat' || commandType === 'applyParaFormat')
+      && this.cursor.hasSelection();
+    if (keepSelectionViewport) this.caretLayoutReveal.clear();
     if (boundaryHandled) {
-      this.afterEdit(false);
+      this.afterEdit(false, keepSelectionViewport);
       return;
     }
     const policy = requested ?? fallback;
@@ -3807,20 +3912,20 @@ export class InputHandler {
       case 'none':
         return;
       case 'selectionOnly':
-        this.updateCaret();
+        this.updateCaret(keepSelectionViewport);
         return;
       case 'pageLocal':
         this.afterPageLocalEdit();
         return;
       case 'full':
-        this.afterEdit();
+        this.afterEdit(true, keepSelectionViewport);
         return;
       case 'auto':
       default:
         if (this.shouldUsePageLocalRefresh(commandType, beforePos, afterPos, pageLocalOptions)) {
           this.afterPageLocalEdit();
         } else {
-          this.afterEdit();
+          this.afterEdit(true, keepSelectionViewport);
         }
     }
   }
@@ -4257,6 +4362,18 @@ export class InputHandler {
           );
         }
       } else if (!startInCell && !endInCell) {
+        // [hwpx-cowork] 선택의 시작·끝은 그대로 두고 화면에 새로 들어온 쪽만 그린다.
+        if (this.wasm.getVisibleBodySelection && this.viewportManager.getViewportSize && this.virtualScroll?.getVisiblePages) {
+          const { width, height } = this.viewportManager.getViewportSize();
+          const pages = this.virtualScroll.getVisiblePages(
+            this.viewportManager.getScrollY(), height, this.viewportManager.getScrollX(), width,
+          );
+          const local = this.wasm.getVisibleBodySelection(pages, start, end);
+          if (local) {
+            this.selectionRenderer.render(local, zoom);
+            return;
+          }
+        }
         // 본문 선택
         // [hwpx-cowork] getSelectionRects 는 한 구역 안만 받는다. 구역을 넘는 선택(구역이 여럿인 문서의
         // Ctrl+A·끌어 고르기)은 구역마다 나눠 모은다 — 종전에는 끝 구역의 문단 번호를 시작 구역에 넘겨

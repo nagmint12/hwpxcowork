@@ -23,6 +23,17 @@ pub(in crate::renderer::typeset) mod row_projection;
 pub(in crate::renderer::typeset) mod types;
 
 impl TypesetEngine {
+    /// [hwpx-cowork] 쪽 배치는 뒤에서 이어 가되 미주 본문과 번호는 입력 즉시 원본에서 그린다.
+    pub(crate) fn edited_endnote_paragraph(
+        note: &crate::model::footnote::Endnote,
+        source: &crate::renderer::pagination::EndnoteParaSource,
+    ) -> Option<Paragraph> {
+        let original = note.paragraphs.get(source.note_para_index)?;
+        let mut rendered = row_projection::render_paragraph(original, source.render_offset, source.compact_spacing);
+        if source.note_para_index == 0 { content::prepend_endnote_marker_text(&mut rendered, note); }
+        Some(rendered)
+    }
+
     /// [Task #1904] 미주(endnote) 가상 삽입·배치 — `typeset_section_with_variant` 에서
     /// 동작 불변 추출 (1차 리팩토링 라운드 1). 미주 deferral 을 정리한 뒤 `st.endnotes` 를
     /// 본문 흐름 뒤에 배치한다 (#836 한컴 정합: 미주는 섹션 끝 2단 플로우).

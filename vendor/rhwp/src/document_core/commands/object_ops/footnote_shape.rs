@@ -423,6 +423,12 @@ impl DocumentCore {
         apply_props(&mut section.section_def.footnote_shape, props)?;
         section.raw_stream = None;
         self.sync_section_def_controls_from_section(section_idx);
+        if self.source_format == crate::parser::FileFormat::Hwpx {
+            self.recompose_note_owners(section_idx); // [hwpx-cowork] 구분선·표식이 있는 본문만 갱신한다.
+            self.request_interactive_layout();
+            self.refresh_footnote_numbers(section_idx);
+            return Ok(json_ok());
+        }
         self.recompose_section(section_idx);
         self.refresh_footnote_numbers(section_idx);
         Ok(json_ok())

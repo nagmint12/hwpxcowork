@@ -280,16 +280,142 @@ fn normalize_flow(
         Err(never) => match never {},
     }
 }
+// [hwpx-cowork] 본문 상자 탐침과 실제 투영은 같은 원본 순서를 갖는다. 양쪽 모두
+// 다음 입력에 양보하면서 단 폭·이전 세로 원점·누적 이동량을 그대로 이어 간다.
+struct StoredFlowProgress {
+    probe: usize,
+    probe_width: Option<f64>,
+    rebuild: bool,
+    cursor: usize,
+    width: Option<f64>,
+    shift: i32,
+    previous_vpos: Option<i32>,
+    result: Vec<Paragraph>,
+    changed: bool,
+    pending: bool,
+}
+
+impl StoredFlowProgress {
+    fn new(width: Option<f64>, result: Vec<Paragraph>) -> Self {
+        Self {
+            probe: 0,
+            probe_width: width,
+            rebuild: false,
+            cursor: 0,
+            width,
+            shift: 0,
+            previous_vpos: None,
+            result,
+            changed: false,
+            pending: false,
+        }
+    }
+}
+
+// [hwpx-cowork] 원본에 앞 단계 투영이 필요했던 경우에만 그 사본을 조각 사이에 소유한다.
+pub(crate) struct StoredBodyRowsJob {
+    pub(crate) section: usize,
+    input: Option<Vec<Paragraph>>,
+    flow: StoredFlowProgress,
+    refresh_markers: bool,
+    previous_margins: Option<ResolvedStyleSet>,
+    scratch: crate::renderer::composer::SourceProgramScratch,
+}
+
+impl StoredBodyRowsJob {
+    pub(crate) fn new(
+        section: usize,
+        input: Option<Vec<Paragraph>>,
+        count: usize,
+        page: &PageDef,
+        columns: &ColumnDef,
+        dpi: f64,
+        refresh_markers: bool,
+        previous_margins: Option<ResolvedStyleSet>,
+    ) -> Self {
+        Self {
+            section,
+            input,
+            flow: StoredFlowProgress::new(
+                uniform_column_width(page, columns, dpi),
+                Vec::with_capacity(count),
+            ),
+            refresh_markers,
+            previous_margins,
+            scratch: crate::renderer::composer::SourceProgramScratch::new(None),
+        }
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        source: &[Paragraph],
+        styles: &ResolvedStyleSet,
+        page: &PageDef,
+        dpi: f64,
+        memo: &StoredRowsMemo,
+    ) -> std::task::Poll<Option<Vec<Paragraph>>> {
+        let policy = NormalizationPolicy {
+            refresh_markers: self.refresh_markers,
+            previous_margin_styles: self.previous_margins.as_ref(),
+            source_program_scratch: &self.scratch,
+            rows_memo: (self.previous_margins.is_none() && memo.enabled()).then_some(memo),
+        };
+        let result = normalize_flow_step(
+            self.input.as_deref().unwrap_or(source),
+            styles,
+            Some(page),
+            true,
+            policy,
+            dpi,
+            &crate::storage::Unbounded,
+            &mut self.flow,
+            4,
+        )
+        .unwrap_or_else(|never| match never {});
+        if self.flow.pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(result)
+        }
+    }
+}
+
 fn normalize_flow_with_storage<S: crate::storage::Storage>(
     original: &[Paragraph],
     styles: &ResolvedStyleSet,
-    mut width: Option<f64>,
+    width: Option<f64>,
     body_page: Option<&PageDef>,
     refresh_text: bool,
     policy: NormalizationPolicy<'_>,
     dpi: f64,
     storage: &S,
 ) -> Result<Option<Vec<Paragraph>>, S::Error> {
+    let mut state = StoredFlowProgress::new(width, storage.vec(original.len())?);
+    normalize_flow_step(
+        original,
+        styles,
+        body_page,
+        refresh_text,
+        policy,
+        dpi,
+        storage,
+        &mut state,
+        usize::MAX,
+    )
+}
+
+fn normalize_flow_step<S: crate::storage::Storage>(
+    original: &[Paragraph],
+    styles: &ResolvedStyleSet,
+    body_page: Option<&PageDef>,
+    refresh_text: bool,
+    policy: NormalizationPolicy<'_>,
+    dpi: f64,
+    storage: &S,
+    state: &mut StoredFlowProgress,
+    count: usize,
+) -> Result<Option<Vec<Paragraph>>, S::Error> {
+    state.pending = false;
     crate::storage::with_optional(|failure| {
         let NormalizationPolicy {
             refresh_markers,
@@ -299,10 +425,11 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
         } = policy;
         // 본문 상자의 모순과 실제 문자 경계 이동이 함께 확인된 흐름만 현재
         // 문단 간격 축을 발행한다. 유효한 저장 상자는 더 적게 채워져도 유지한다.
-        let mut probe_width = width;
-        let mut rebuild_body_spacing = false;
-        if body_page.is_some() {
-            for paragraph in original {
+        let mut probe_width = state.probe_width;
+        let mut rebuild_body_spacing = state.rebuild;
+        if body_page.is_some() && !rebuild_body_spacing && state.probe < original.len() {
+            let end = state.probe.saturating_add(count).min(original.len());
+            for paragraph in &original[state.probe..end] {
                 for control in &paragraph.controls {
                     if let (Some(page), Control::ColumnDef(columns)) = (body_page, control) {
                         probe_width = uniform_column_width(page, columns, dpi);
@@ -352,12 +479,22 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
                     }
                 }
             }
+            state.probe = end;
+            state.probe_width = probe_width;
+            state.rebuild = rebuild_body_spacing;
+            if !rebuild_body_spacing && end < original.len() {
+                state.pending = true;
+                return None;
+            }
         }
-        let mut shift = 0_i32;
-        let mut previous_source_vpos = None;
-        let mut result = crate::storage::optional(storage.vec(original.len()), failure)?;
-        let mut changed = false;
-        for (source_index, source) in original.iter().enumerate() {
+        let mut width = state.width;
+        let mut shift = state.shift;
+        let mut previous_source_vpos = state.previous_vpos;
+        let mut result = std::mem::take(&mut state.result);
+        let mut changed = state.changed;
+        let end = state.cursor.saturating_add(count).min(original.len());
+        for source_index in state.cursor..end {
+            let source = &original[source_index];
             if source.column_type != ColumnBreakType::None
                 || styles
                     .para_styles
@@ -629,6 +766,16 @@ fn normalize_flow_with_storage<S: crate::storage::Storage>(
                 }
             }
             crate::storage::optional(storage.push(&mut result, paragraph), failure)?;
+        }
+        if end < original.len() {
+            state.cursor = end;
+            state.width = width;
+            state.shift = shift;
+            state.previous_vpos = previous_source_vpos;
+            state.result = result;
+            state.changed = changed;
+            state.pending = true;
+            return None;
         }
         changed.then_some(result)
     })

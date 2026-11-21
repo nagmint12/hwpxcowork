@@ -169,6 +169,19 @@ function isCommittedCellEnterSplit(this: any, e: KeyboardEvent): boolean {
     && this.cursor.isInCell();
 }
 
+// [hwpx-cowork] 본문 Enter와 쪽 나누기는 직전 글자까지 포함해 현재 쪽을 발행한다.
+// 성공 전에는 기존 글 입력 타이머를 보존한다. 모드·선택·다른 단축키는 원래 경계를 쓴다.
+function isBodyStructuralEnter(this: any, e: KeyboardEvent): boolean {
+  if (e.key !== 'Enter' || e.shiftKey || e.altKey || this.isComposing || this.isFormMode?.()) return false;
+  const cursor = this.cursor;
+  if (cursor.isInCell() || cursor.isInHeaderFooter() || cursor.isInFootnote()
+      || cursor.isInPictureObjectSelection() || cursor.isInTableObjectSelection()
+      || cursor.isInBlockSelectionMode() || cursor.isInCellSelectionMode() || cursor.hasSelection()
+      || cursor.getPosition().parentParaIndex !== undefined) return false;
+  return !(e.ctrlKey || e.metaKey)
+    || (Boolean(this.dispatcher) && matchShortcut(e, defaultShortcuts) === 'page:break');
+}
+
 function dispatchSubmodeGlobalShortcut(this: any, e: KeyboardEvent): boolean {
   if (!this.dispatcher) return false;
   const commandId = matchShortcut(e, defaultShortcuts);
@@ -1113,7 +1126,7 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
   if (PAGINATION_BOUNDARY_KEYS.has(e.key)) {
     if (committedCellEnterSplit) {
       this.cancelDeferredPaginationForOwnedMutation();
-    } else {
+    } else if (!isBodyStructuralEnter.call(this, e)) {
       this.flushDeferredPaginationIfNeeded('before-navigation', false);
     }
   }

@@ -9,6 +9,7 @@
 // 한글로 저장은 단추 하나(설정대로 — /file?kind=export), ⚙ 문서 설정 창(web/settings.js — 설정할 수 있는 사람만), 패널 탭은 보기 규칙(web/view.js),
 // 실시간 문서에 내게 남은 승인 방식 때 수정본(진행 중 변경 요청)이 있으면 편집기 위 띠 '남은 내 수정본 · 변경 요청 #n · n문단' [반영] [닫기].
 import { createApp, ref, computed, provide, inject, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from '/vendor/vue.esm-browser.prod.js';
+import { createDepartureSaves } from './departure-saves.js';
 import { state, api, toast, toasts, toastError, fmt, isTyping, clip, kindLabel, roleLabel, josa, versionTip, milestoneAt, workEnv, docWorkEnv, agentEnvName, personalEnvName, presets, NO_AI_TIP, CONNECT_HELP, copyText } from './util.js';
 import { quickPrompt } from './menumodel.js';
 import { createDocStore } from './store.js';
@@ -53,13 +54,24 @@ const DOCLIST_POLL_MS = 30000;   // 문서 목록: 창이 보이는 동안 이 �
 
 // 화면을 옮기기 전에 할 일(문서 화면이 단다: 저장 안 된 편집 저장 → 저장하지 못했으면 나갈지 묻기). 브라우저 '뒤로'·주소 바꾸기·'← 목록'도
 // 여기를 지난다. guard() → false 면 머문다(주소를 되돌린다 — 편집기와 그 안 글이 그대로). 같은 문서 안의 주소 바꾸기(?legacy=1 등)는 화면을 옮기지 않는다
-let leaveGuard = null;
+const retainedDocIds = ref([]);
+const leaveGuards = new Map();
+const retainedSaves = createDepartureSaves({
+  changed: ids => { retainedDocIds.value = ids; },
+  failed: (id, error) => toast(`저장을 완료하지 못했습니다. 문서를 다시 열면 작성한 글을 확인할 수 있습니다. ${error.message}`, { kind: 'warn', ms: 9000 }),
+  afterPaint: callback => {
+    let fired = false;
+    const start = () => { if (!fired) { fired = true; clearTimeout(timer); setTimeout(callback, 0); } };
+    const timer = setTimeout(start, 80);
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(start));
+  },
+});
 let routeGen = 0; let leaving = null;
 const docOf = (route) => (/^#\/doc\/([\w-]+)/.exec(route || '') || [])[1] || null;
 window.addEventListener('hashchange', async () => {
   const gen = ++routeGen;
   const next = location.hash || '#/';
-  const guard = leaveGuard;
+  const guard = leaveGuards.get(docOf(state.route));
   if (guard && next !== state.route && docOf(next) !== docOf(state.route)) {
     // 잇달아 옮기면(두 번 누름) 확인은 한 번만
     if (!leaving) leaving = Promise.resolve().then(guard).catch(e => { toastError(e, '문서를 나가기 전에 상태를 확인하지 못했습니다: '); return false; }).finally(() => { leaving = null; });
@@ -413,7 +425,10 @@ const DocList = {
       await load();
     }
     function open(d) { location.hash = `#/doc/${d.id}`; }
-    function logout() { try { localStorage.removeItem('hwpx.token'); } catch { /* ignore */ } state.token = ''; state.me = null; location.hash = '#/'; }
+    function logout() {
+      if (retainedSaves.hasAny()) { toast('저장 중인 문서가 있습니다. 해당 문서에서 저장 상태를 확인한 뒤 로그아웃하세요.', { kind:'warn' }); return; }
+      try { localStorage.removeItem('hwpx.token'); } catch { /* ignore */ } state.token = ''; state.me = null; location.hash = '#/';
+    }
     // 다른 사람이 올리거나 고친 문서가 보이게: 창으로 돌아올 때(focus·다시 보임)와 창이 보이는 동안 30초마다 다시 읽는다
     const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
     const onFocus = () => load({ quiet: true });
@@ -544,6 +559,8 @@ const DocView = {
       <span v-else class="title" data-testid="doc-title" :title="s.info?.fileName">{{ s.info?.title }}</span>
       <button class="pill ver" v-if="verLabel" data-testid="version-pill" :title="verTitle" @click="s.tab = 'history'">{{ verLabel }}</button>
       <span class="pill pcpill" v-if="s.info?.local" :class="'st-' + s.info.local.state" :title="localTip(s.info.local)" data-testid="pc-pill">{{ localLabel(s.info.local) }}</span>
+      <button v-for="copy in recoveryFiles" :key="copy.key" type="button" class="pill" :title="copy.message"
+        @click="d.download(d.base+'/departure-saves/'+copy.key+'/file', (s.info?.title || '문서')+'_접수본.hwpx')">저장 접수본 복구 · {{ new Date(copy.time).toLocaleTimeString('ko-KR') }}</button>
       <span class="draftchip" :class="chip.cls" :title="chip.tip" data-testid="draft-chip"><span class="dot" aria-hidden="true"></span><span class="chip-text">{{ chip.text }}</span>
         <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="chip.reopen || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ chip.reopen || (s.draft.stale && !liveMode) ? '다시 열기' : '다시' }}</button>
         <button v-if="chip.keep" class="linkbtn" data-testid="chip-keep" title="서버의 내 수정본을 이 창의 글로 덮어씁니다" @click="keepMine">이 글로 저장</button>
@@ -706,8 +723,28 @@ const DocView = {
         return !s.draft.dirty && !s.draft.saving;
       } });
     }
-    window.__doc = d;   // 시험·문제 찾기용(같은 출처 페이지 안)
+    watch(() => docOf(state.route) === props.id, active => {
+      if (active) window.__doc = d;
+      else if (window.__doc === d) delete window.__doc;
+    }, { immediate: true });
     const editorEl = ref(null);
+    const recoveryFiles = ref([]);
+    const observingSaves = new Set();
+    async function refreshRecoveryFiles() {
+      try {
+        const result = await api(d.base + '/departure-saves');
+        recoveryFiles.value = result.files || [];
+        for (const key of result.pending || []) {
+          if (observingSaves.has(key)) continue;
+          observingSaves.add(key);
+          api(d.base + '/departure-saves/' + key).then(refreshRecoveryFiles, error => {
+            if (error.data?.receipt) void refreshRecoveryFiles();
+          }).finally(() => observingSaves.delete(key));
+        }
+      }
+      catch { /* 이전 서버에서는 기존 편집·저장 경로를 사용한다. */ }
+    }
+    watch(() => s.draft.error, error => { if (error) void refreshRecoveryFiles(); });
     const serverNotice = ref('');
     const rebasing = ref(false); const carrying = ref(false); const saving = ref(false);
     const ed = computed(() => s.editor);
@@ -886,23 +923,31 @@ const DocView = {
     let handle = null;
     function mount() { handle = mountEditor(editorEl.value, d); }
     function remount() { try { handle?.destroy(); } catch { /* 이미 없음 */ } if (editorEl.value) editorEl.value.innerHTML = ''; mount(); }
-    // 목록으로: 저장 안 된 편집은 화면을 옮기기 전에 저장한다(leaveGuard — 브라우저 '뒤로'도 같다)
     function goBack() { location.hash = '#/'; }
-    /**
-     * 화면을 옮겨도 되나(leaveGuard): 저장 안 된 편집을 먼저 저장한다(최대 8초). 저장하지 못했으면(저장을 멈춤 — 다른 곳에서 바뀜·옛 기준,
-     * 저장 실패·아직 저장 중) 나가면 편집기 안 글이 사라지므로 묻는다 → false 면 머문다
-     */
+    // 뒤로 가기는 편집기를 보유한 채 화면을 먼저 전환한다. 이미 알려진 충돌은 나가기 전에 확인한다.
     async function guard() {
       if (tour && tourOn.value && !await tour.requestLeave()) return false;
       if (tourOn.value) await flushTour(props.id).catch(() => {});
+      // [hwpx-cowork] 라우트가 바뀌어도 기존 iframe·문서·저장 세대가 살아 있다.
+      // 저장 오류/충돌은 같은 문서를 다시 열어 해결할 수 있다.
+      if (handle?.ready && !s.draft.stale && !s.draft.error && (s.draft.dirty || s.draft.saving)) {
+        retainedSaves.leave(props.id, () => d.saveDraftNow({ departure: true }), () => !s.draft.dirty && !s.draft.saving,
+          () => handle?.editRevision?.() ?? 0, s.info?.title || props.id);
+        return true;
+      }
       if (s.draft.dirty || s.draft.saving) {
         try { await Promise.race([d.saveDraftNow(), new Promise((r) => setTimeout(r, 8000))]); } catch { /* 아래에서 묻는다 */ }
       }
-      if (!s.draft.dirty && !s.draft.saving) return true;
+      if (!s.draft.dirty && !s.draft.saving) { retainedSaves.discard(props.id); return true; }
       const p = s.live.progress;
       const why = s.draft.stale ? `저장을 멈춤${s.draft.elsewhere ? ` — ${s.draft.elsewhere}` : ''}` : s.draft.saving ? `아직 저장 중${p?.total ? ` — 문서에 넣는 중 ${p.done}/${p.total}` : ''}` : '저장 실패';
-      return confirm(`저장하지 못한 글이 있습니다(${why}).\n나가면 그 글이 사라집니다. 그래도 나갈까요?\n([취소]: 남아서 상단 칩의 단추로 저장)`);
+      const discard = confirm(`저장하지 못한 글이 있습니다(${why}).\n나가면 그 글이 사라집니다. 그래도 나갈까요?\n([취소]: 남아서 상단 칩의 단추로 저장)`);
+      if (discard) retainedSaves.discard(props.id);
+      return discard;
     }
+    watch(() => [s.draft.dirty, s.draft.saving], ([dirty, saving]) => {
+      if (!dirty && !saving && retainedSaves.status(props.id)?.running === false) retainedSaves.discard(props.id);
+    });
 
     // ── 플러그인 menu-action → 요청 창·메모 창·제안 반영·레일 ──
     /** 호스트 페이지 사각형 → FloatWin 기준점(대상 바로 아래, 대상을 가리지 않게) */
@@ -1015,6 +1060,7 @@ const DocView = {
       else if (k.key === 'M' && (k.ctrl || k.meta) && k.alt) memoOnSelection();
     }
     function onKey(e) {
+      if (docOf(state.route) !== props.id) return;
       if (e.key === 'Escape' && moreOpen.value) moreOpen.value = false;
       else if (e.key === 'Escape' && !isTyping()) { if (!closeFloating() && peek.value) closePeek(); }
       else if ((e.ctrlKey || e.metaKey) && e.altKey && !isTyping() && (e.code === 'KeyM' || e.key.toLowerCase() === 'm')) { e.preventDefault(); memoOnSelection(); }
@@ -1077,6 +1123,7 @@ const DocView = {
       edgeTimer = setTimeout(() => { edgeTimer = 0; openPeek('hover'); }, 200);
     }
     function onHostMove(e) {
+      if (docOf(state.route) !== props.id) return;
       if (e.pointerType !== 'mouse' || stacked.value) return;
       if (e.target.closest?.('.floatwin, .toasts, dialog')) { clearTimeout(edgeTimer); edgeTimer = 0; return; }
       edgeSense(e, e.clientX, e.clientY);
@@ -1268,16 +1315,22 @@ const DocView = {
     // 다룰 곳(편집기·요청 창·첨부 칸) 밖에 파일을 놓아도 브라우저가 파일을 열어 화면을 떠나지 않게. 패널에 놓으면 첨부만
     const isFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
     function onWinDragOver(e) {
+      if (docOf(state.route) !== props.id) return;
       if (!isFiles(e)) return; const handled = e.defaultPrevented; e.preventDefault();
       if (!handled) e.dataTransfer.dropEffect = e.target.closest?.('.panel') ? 'copy' : 'none';
     }
     function onWinDrop(e) {
+      if (docOf(state.route) !== props.id) return;
       if (!isFiles(e) || e.defaultPrevented) { if (isFiles(e)) e.preventDefault(); return; }
       e.preventDefault();
       if (e.target.closest?.('.panel')) d.uploadFiles([...e.dataTransfer.files]);
     }
     let reloadingTutorialRestore = false;
-    function onBeforeUnload(e) { if (!reloadingTutorialRestore && (s.draft.dirty || s.draft.saving)) { e.preventDefault(); e.returnValue = ''; } }
+    function onBeforeUnload(e) {
+      if (!reloadingTutorialRestore && (s.draft.dirty || s.draft.saving) && !handle?.departureReceived?.()) {
+        e.preventDefault(); e.returnValue = '';
+      }
+    }
 
     async function serverRestarting(msg) {
       if (msg.type !== 'server' || msg.action !== 'restarting') return;
@@ -1295,8 +1348,9 @@ const DocView = {
     s.railOpen = railVisible(panel.value.rmode, { stacked: stacked.value });
     onMounted(async () => {
       addEventListener('keydown', onKey); addEventListener('resize', onResize); addEventListener('dragover', onWinDragOver); addEventListener('drop', onWinDrop);
+      void refreshRecoveryFiles();
       addEventListener('beforeunload', onBeforeUnload);
-      leaveGuard = guard;
+      leaveGuards.set(props.id, guard);
       loadAutomation(); addEventListener('focus', refreshAutomation); document.addEventListener('visibilitychange', refreshAutomation);
       automationPoll = setInterval(refreshAutomation, 15000);
       stackQuery.addEventListener('change', onStack); phoneQuery.addEventListener('change', onPhone); document.addEventListener('pointerdown', onDocDown, true); addEventListener('blur', closeMore);
@@ -1408,7 +1462,7 @@ const DocView = {
       stackQuery.removeEventListener('change', onStack); phoneQuery.removeEventListener('change', onPhone); document.removeEventListener('pointerdown', onDocDown, true); removeEventListener('blur', closeMore);
       removeEventListener('keydown', onKey); removeEventListener('resize', onResize); removeEventListener('dragover', onWinDragOver); removeEventListener('drop', onWinDrop);
       removeEventListener('beforeunload', onBeforeUnload);
-      if (leaveGuard === guard) leaveGuard = null;
+      if (leaveGuards.get(props.id) === guard) leaveGuards.delete(props.id);
       try { tour?.stop(); } catch { /* 없음 */ }
       for (const off of offs) off();
       try { handle?.destroy(); } catch { /* 이미 없음 */ }
@@ -1416,7 +1470,7 @@ const DocView = {
       if (window.__doc === d) delete window.__doc;
     });
     return {
-      d, s, ed, editorEl, canRename, titleEdit, titleInp, editTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipHead, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
+      d, s, ed, editorEl, recoveryFiles, canRename, titleEdit, titleInp, editTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipHead, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
       env, agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, onMoreClick, tools, toggleTools, mobileEnvironment, openMobileOptions,
       folded, peek, panelEl, openPeek, togglePin, edgeTip, aiGlance, onTabEnter, onTabLeave, onPanelEnter, onPanelLeave, onPanelFocusOut,
       memosOn, toggleMemos, movedMemos, resetMemoPos, railOver, over, overStyle,
@@ -1432,11 +1486,14 @@ const App = {
   components: { Login, DocList, DocView, HelpDialog, AdminServerPanel, TutorialMenu, AdminTokenNotice },
   template: `<div class="app">
     <Login v-if="!state.me && ready"/>
-    <DocView v-else-if="state.me && docId" :id="docId" :key="docId"/>
-    <TutorialMenu v-else-if="state.me && tutorialRoute"/>
-    <main v-else-if="state.me && adminRoute" class="admin-page"><AdminServerPanel v-if="state.me.role==='admin'"/>
+    <DocView v-for="id in editorIds" :key="id" :id="id" v-show="id===docId" :inert="id!==docId"/>
+    <TutorialMenu v-if="state.me && !docId && tutorialRoute"/>
+    <main v-else-if="state.me && !docId && adminRoute" class="admin-page"><AdminServerPanel v-if="state.me.role==='admin'"/>
       <section v-else class="admin-denied" data-testid="admin-denied"><h1>관리자만 사용할 수 있습니다</h1><p>서버 설정은 관리자에게 요청하세요.</p><a href="#/">문서 목록으로</a></section></main>
-    <DocList v-else-if="state.me"/>
+    <DocList v-else-if="state.me && !docId"/>
+    <aside v-if="backgroundDocs.length" class="departure-status" aria-live="polite">
+      <a v-for="doc in backgroundDocs" :key="doc.id" :href="'#/doc/'+doc.id">{{ doc.title }} · {{ doc.running ? '저장 중' : '저장 상태 확인' }}</a>
+    </aside>
     <AdminServerPanel v-if="adminOpen && state.me?.role==='admin'" modal :prepare-restart="adminContext?.prepareRestart" @close="adminOpen = false"/>
     <HelpDialog/>
     <AdminTokenNotice v-if="tokenNotice && state.me" @close="tokenNotice = false"/>
@@ -1456,7 +1513,10 @@ const App = {
       tokenNotice.value = shouldShowTokenNotice({ me: state.me, viaLink: viaTokenLink, storage: localStorage });
       ready.value = true;
     });
-    return { state, docId, toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice };
+    const editorIds = computed(() => state.me ? [...new Set([...retainedDocIds.value, ...(docId.value ? [docId.value] : [])])] : []);
+    const backgroundDocs = computed(() => state.me ? retainedDocIds.value.filter(id => id !== docId.value)
+      .map(id => ({ id, ...retainedSaves.status(id) })) : []);
+    return { state, docId, editorIds, backgroundDocs, toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice };
   },
 };
 createApp(App).mount('#app');

@@ -467,14 +467,6 @@ pub(super) fn tables_with_ladder_reserved_nested_overflow(
 ) -> std::collections::HashSet<(u32, usize, usize)> {
     let mut reserved = std::collections::HashSet::new();
     for (index, cell) in table.cells.iter().enumerate() {
-        // 폭 변경 전 호스트 사다리는 새 부모 셀의 과폭 paint를 인증하지 않는다.
-        // 자식의 원본 폭은 보존하되 clip은 현재 물리 셀 경계를 소유한다.
-        if crate::renderer::typeset::is_reparsed_single_column_cell_split_row(
-            table,
-            usize::from(cell.row),
-        ) {
-            continue;
-        }
         let Ok(index) = u32::try_from(index) else {
             continue;
         };
@@ -483,6 +475,14 @@ pub(super) fn tables_with_ladder_reserved_nested_overflow(
                 let Control::Table(nested) = control else {
                     continue;
                 };
+                // [hwpx-cowork] 과폭 중첩 표가 있는 칸만 행의 호스트 사다리를 확인한다.
+                // 일반 텍스트 칸마다 표 전체를 다시 훑으면 현재 한 쪽 그리기도 제곱 시간이 든다.
+                if crate::renderer::typeset::is_reparsed_single_column_cell_split_row(
+                    table,
+                    usize::from(cell.row),
+                ) {
+                    continue;
+                }
                 // 같은 셀의 다른 문단이나 같은 문단의 다른 줄이 예약한 폭을
                 // 빌리지 않는다. 실제 컨트롤 슬롯의 저장 줄만 근거로 사용한다.
                 let stored_width = super::control_line_seg_index(para, control_index)
@@ -4556,7 +4556,10 @@ impl LayoutEngine {
         // 셀 내용 우측에 정확히 flush 된다.
         let fit_om_left = hwpunit_to_px(table.outer_margin_left as i32, self.dpi);
         let fit_avail_w = (col_area.width - fit_om_left).max(0.0);
-        let original_column_grid = (self.profile.get().hwp5_stored_pagination_layout()
+        // [hwpx-cowork] 이 인증값의 유일한 소비자는 다열 중첩 표의 축소 분기다.
+        // 본문 표의 쪽마다 모든 행의 원본 열 지도를 다시 만들 필요가 없다.
+        let original_column_grid = depth > 0 && table.col_count > 1 && !table.common.treat_as_char
+            && table_width > fit_avail_w + 0.5 && (self.profile.get().hwp5_stored_pagination_layout()
             || self.profile.get().hwpx_stored_layout())
             && !self
                 .render_normalization

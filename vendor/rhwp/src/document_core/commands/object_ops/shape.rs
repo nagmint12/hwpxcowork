@@ -379,6 +379,7 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         use crate::document_core::helpers::{json_bool, json_i32, json_str};
 
+        let window = self.flow_window_before(section_idx, parent_para_idx); // [hwpx-cowork] 인라인 차트의 본문 흐름
         let shape = self.resolve_shape_control_mut(section_idx, parent_para_idx, control_idx)?;
 
         // [#8399] 어울림 배제 밴드 지문 — 그림 속성 편집(#6204)과 같은 재투영 판정.
@@ -628,8 +629,14 @@ impl DocumentCore {
         // 리플로우 + 렌더 트리 캐시 무효화
         let section = &mut self.document.sections[section_idx];
         section.raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        if window.is_some() && !caption_changed && super::json_numbering_type(props_json).is_none()
+        {
+            self.recompose_paragraph(section_idx, parent_para_idx);
+            self.paginate_flow_edit(window, 0);
+        } else {
+            self.recompose_section(section_idx);
+            self.paginate_if_needed();
+        }
         self.invalidate_page_tree_cache();
         // [#8399] 어울림 도형의 밴드 기하가 바뀌면 그 밴드에 되감긴 문단의 저장 줄을 새로
         // 새긴다. 밴드를 만들 수 없는 형상이면 종전 경로가 그대로 남는다.
@@ -2665,6 +2672,15 @@ impl DocumentCore {
             section.raw_stream = None;
         }
         self.sync_section_def_controls_from_section(section_idx);
+        if self.source_format == crate::parser::FileFormat::Hwpx {
+            // [hwpx-cowork] 미주 표시의 원본만 동기 갱신하고 문서 끝 쪽 배정은 나누어 실행한다.
+            self.recompose_note_owners(section_idx);
+            self.request_interactive_layout();
+            self.refresh_endnote_numbers(section_idx);
+            self.paginate_if_needed();
+            self.invalidate_page_tree_cache();
+            return Ok(crate::document_core::helpers::json_ok());
+        }
         self.refresh_endnote_numbers(section_idx);
 
         self.recompose_section(section_idx);

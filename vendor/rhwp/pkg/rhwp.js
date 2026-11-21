@@ -1,5 +1,32 @@
 /* @ts-self-types="./rhwp.d.ts" */
 
+export class BodyRangeFormatHistory {
+    static __wrap(ptr) {
+        const obj = Object.create(BodyRangeFormatHistory.prototype);
+        obj.__wbg_ptr = ptr;
+        BodyRangeFormatHistoryFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        BodyRangeFormatHistoryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_bodyrangeformathistory_free(ptr, 0);
+    }
+    /**
+     * @returns {boolean}
+     */
+    isEmpty() {
+        const ret = wasm.bodyrangeformathistory_isEmpty(this.__wbg_ptr);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) BodyRangeFormatHistory.prototype[Symbol.dispose] = BodyRangeFormatHistory.prototype.free;
+
 /**
  * 한 번의 문서 내보내기 결과.
  *
@@ -143,6 +170,26 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
         }
+    }
+    /**
+     * @param {number} s
+     * @param {number} p
+     * @param {number} o
+     * @param {number} end_s
+     * @param {number} end_p
+     * @param {number} end_o
+     * @param {string} props
+     * @param {number} page
+     * @returns {BodyRangeFormatHistory}
+     */
+    applyBodyRangeFormat(s, p, o, end_s, end_p, end_o, props, page) {
+        const ptr0 = passStringToWasm0(props, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.hwpdocument_applyBodyRangeFormat(this.__wbg_ptr, s, p, o, end_s, end_p, end_o, ptr0, len0, page);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return BodyRangeFormatHistory.__wrap(ret[0]);
     }
     /**
      * [#5959] 셀/zone border_fill_id 직접 대입 (undo·redo 전용).
@@ -998,6 +1045,16 @@ export class HwpDocument {
         }
     }
     /**
+     * @returns {HwpxSaveSession | undefined}
+     */
+    beginHwpxSave() {
+        const ret = wasm.hwpdocument_beginHwpxSave(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] === 0 ? undefined : HwpxSaveSession.__wrap(ret[0]);
+    }
+    /**
      * 나누기 — 웹한글컨트롤 `Run("BreakPage"·"BreakColumn"·"BreakColDef"·"BreakSection")`.
      *
      * `kind` 는 `page`·`column`·`colDef`·`section`.
@@ -1100,6 +1157,31 @@ export class HwpDocument {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] >>> 0;
+    }
+    /**
+     * @param {number} section
+     * @param {boolean} endnote
+     * @returns {NoteShapeHistory}
+     */
+    captureNoteShape(section, endnote) {
+        const ret = wasm.hwpdocument_captureNoteShape(this.__wbg_ptr, section, endnote);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return NoteShapeHistory.__wrap(ret[0]);
+    }
+    /**
+     * [hwpx-cowork] 쪽 감추기 Undo는 컨트롤 원래 순서와 원시 레코드를 포함한 소유 문단 하나만 기억한다.
+     * @param {number} section
+     * @param {number} paragraph
+     * @returns {PageHideHistory}
+     */
+    capturePageHide(section, paragraph) {
+        const ret = wasm.hwpdocument_capturePageHide(this.__wbg_ptr, section, paragraph);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return PageHideHistory.__wrap(ret[0]);
     }
     /**
      * 그림 리사이즈 전에 원본 변환만 보관한다.
@@ -3780,6 +3862,37 @@ export class HwpDocument {
     getAnnotateMetricFont() {
         const ret = wasm.hwpdocument_getAnnotateMetricFont(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * 본문 선택 영역의 줄별 사각형을 반환한다.
+     *
+     * 반환: JSON 배열 `[{"pageIndex":N,"x":F,"y":F,"width":F,"height":F}, ...]`
+     * @param {number} page
+     * @param {number} section
+     * @param {number} paragraph
+     * @param {number} offset
+     * @param {number} end_section
+     * @param {number} end_paragraph
+     * @param {number} end_offset
+     * @returns {string}
+     */
+    getBodySelectionOnPage(page, section, paragraph, offset, end_section, end_paragraph, end_offset) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_getBodySelectionOnPage(this.__wbg_ptr, page, section, paragraph, offset, end_section, end_paragraph, end_offset);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
     }
     /**
      * 문서 내 모든 책갈피 목록 반환
@@ -7156,6 +7269,30 @@ export class HwpDocument {
         }
     }
     /**
+     * 감추기 설정
+     * [hwpx-cowork] 홀·짝, 마지막 쪽, 이전 구역에서 상속한 바탕쪽도 실제 렌더 소유자를 사용한다.
+     * @param {number} page_num
+     * @returns {string}
+     */
+    getPageMasterText(page_num) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_getPageMasterText(this.__wbg_ptr, page_num);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * 구역의 쪽 번호 매기기를 읽는다: `{ok, exists, position?, format?, dash?}` (#7635).
      * @param {number} section_idx
      * @returns {string}
@@ -7291,6 +7428,23 @@ export class HwpDocument {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * [hwpx-cowork] 가상 스크롤에 필요한 실제 조판 용지 크기를 연속 구간별로 전달한다.
+     * 표시 정밀도는 getPageInfo와 같고, 여백·제본·쪽 번호는 보이는 쪽에서 직접 조회한다.
+     * @returns {string}
+     */
+    getPageSizeRuns() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_getPageSizeRuns(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
     }
     /**
@@ -7761,9 +7915,6 @@ export class HwpDocument {
         }
     }
     /**
-     * 본문 선택 영역의 줄별 사각형을 반환한다.
-     *
-     * 반환: JSON 배열 `[{"pageIndex":N,"x":F,"y":F,"width":F,"height":F}, ...]`
      * @param {number} section_idx
      * @param {number} start_para_idx
      * @param {number} start_char_offset
@@ -8375,6 +8526,19 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * [hwpx-cowork] 줄 삽입 뒤 새 캐럿의 모델 위치를 표 전체의 쪽 그림 없이 구한다.
+     * @param {number} section
+     * @param {number} para
+     * @param {number} control
+     * @param {number} row
+     * @param {number} col
+     * @returns {number | undefined}
+     */
+    getTableCellIndexAt(section, para, control, row, col) {
+        const ret = wasm.hwpdocument_getTableCellIndexAt(this.__wbg_ptr, section, para, control, row, col);
+        return ret === Number.MAX_SAFE_INTEGER ? undefined : ret;
     }
     /**
      * 표의 행/열/셀 수를 반환한다.
@@ -10463,6 +10627,14 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
+    }
+    /**
+     * [hwpx-cowork] 편집 중에 화면 조판을 동기 저장 장벽으로 바꾸지 않도록 구분한다.
+     * @returns {boolean}
+     */
+    interactiveLayoutPending() {
+        const ret = wasm.hwpdocument_interactiveLayoutPending(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * 아무 내용도 없는 빈 문서인가 — 웹한글컨트롤 `IsEmpty`(§8.2.7).
@@ -12555,6 +12727,25 @@ export class HwpDocument {
         return ret[0] !== 0;
     }
     /**
+     * @param {number} section
+     * @param {number} master
+     * @param {number} paragraph
+     * @param {string} expected
+     * @param {string} next
+     * @returns {MasterTextHistory}
+     */
+    replaceMasterText(section, master, paragraph, expected, next) {
+        const ptr0 = passStringToWasm0(expected, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(next, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.hwpdocument_replaceMasterText(this.__wbg_ptr, section, master, paragraph, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return MasterTextHistory.__wrap(ret[0]);
+    }
+    /**
      * 단일 치환 (검색어 기반) — 첫 번째 매치만 교체
      * @param {string} query
      * @param {string} new_text
@@ -12837,6 +13028,35 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * @param {number} section
+     * @param {number} para
+     * @param {number} control
+     * @param {number} after
+     * @returns {number}
+     */
+    saveInsertRowUndo(section, para, control, after) {
+        const ret = wasm.hwpdocument_saveInsertRowUndo(this.__wbg_ptr, section, para, control, after);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} section
+     * @param {number} para
+     * @param {number} offset
+     * @returns {number}
+     */
+    savePageBreakUndo(section, para, offset) {
+        const ret = wasm.hwpdocument_savePageBreakUndo(this.__wbg_ptr, section, para, offset);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} before
+     * @returns {number}
+     */
+    saveRedoSnapshot(before) {
+        const ret = wasm.hwpdocument_saveRedoSnapshot(this.__wbg_ptr, before);
+        return ret >>> 0;
     }
     /**
      * Document 스냅샷을 저장하고 ID를 반환한다.
@@ -14327,7 +14547,6 @@ export class HwpDocument {
         }
     }
     /**
-     * 감추기 설정
      * @param {number} sec
      * @param {number} para
      * @param {boolean} hide_header
@@ -15281,6 +15500,47 @@ export class HwpDocument {
         return ret !== 0;
     }
     /**
+     * @param {BodyRangeFormatHistory} saved
+     * @param {number} page
+     */
+    swapBodyRangeFormat(saved, page) {
+        _assertClass(saved, BodyRangeFormatHistory);
+        const ret = wasm.hwpdocument_swapBodyRangeFormat(this.__wbg_ptr, saved.__wbg_ptr, page);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {MasterTextHistory} history
+     */
+    swapMasterText(history) {
+        _assertClass(history, MasterTextHistory);
+        const ret = wasm.hwpdocument_swapMasterText(this.__wbg_ptr, history.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {NoteShapeHistory} history
+     */
+    swapNoteShape(history) {
+        _assertClass(history, NoteShapeHistory);
+        const ret = wasm.hwpdocument_swapNoteShape(this.__wbg_ptr, history.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {PageHideHistory} history
+     */
+    swapPageHide(history) {
+        _assertClass(history, PageHideHistory);
+        const ret = wasm.hwpdocument_swapPageHide(this.__wbg_ptr, history.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * 저장 상태와 현재 상태를 교환한다. 같은 ID로 Undo/Redo를 수행한다.
      * @param {number} id
      */
@@ -15790,6 +16050,115 @@ export class HwpViewer {
     }
 }
 if (Symbol.dispose) HwpViewer.prototype[Symbol.dispose] = HwpViewer.prototype.free;
+
+/**
+ * [hwpx-cowork] 저장용 사본만 소유한다. 이벤트 사이에 원래 편집기를 계속 수정할 수 있다.
+ */
+export class HwpxSaveSession {
+    static __wrap(ptr) {
+        const obj = Object.create(HwpxSaveSession.prototype);
+        obj.__wbg_ptr = ptr;
+        HwpxSaveSessionFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        HwpxSaveSessionFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_hwpxsavesession_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    finish() {
+        const ret = wasm.hwpxsavesession_finish(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @param {number} units
+     * @returns {boolean}
+     */
+    step(units) {
+        const ret = wasm.hwpxsavesession_step(this.__wbg_ptr, units);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+}
+if (Symbol.dispose) HwpxSaveSession.prototype[Symbol.dispose] = HwpxSaveSession.prototype.free;
+
+/**
+ * [hwpx-cowork] 반복해서 그려지는 바탕쪽에도 원본 문단 하나와 그 역연산만 있다.
+ */
+export class MasterTextHistory {
+    static __wrap(ptr) {
+        const obj = Object.create(MasterTextHistory.prototype);
+        obj.__wbg_ptr = ptr;
+        MasterTextHistoryFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MasterTextHistoryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_mastertexthistory_free(ptr, 0);
+    }
+}
+if (Symbol.dispose) MasterTextHistory.prototype[Symbol.dispose] = MasterTextHistory.prototype.free;
+
+export class NoteShapeHistory {
+    static __wrap(ptr) {
+        const obj = Object.create(NoteShapeHistory.prototype);
+        obj.__wbg_ptr = ptr;
+        NoteShapeHistoryFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        NoteShapeHistoryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_noteshapehistory_free(ptr, 0);
+    }
+}
+if (Symbol.dispose) NoteShapeHistory.prototype[Symbol.dispose] = NoteShapeHistory.prototype.free;
+
+export class PageHideHistory {
+    static __wrap(ptr) {
+        const obj = Object.create(PageHideHistory.prototype);
+        obj.__wbg_ptr = ptr;
+        PageHideHistoryFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PageHideHistoryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_pagehidehistory_free(ptr, 0);
+    }
+}
+if (Symbol.dispose) PageHideHistory.prototype[Symbol.dispose] = PageHideHistory.prototype.free;
 
 /**
  * HWP 파일에서 썸네일 이미지만 경량 추출 (전체 파싱 없이)
@@ -16647,6 +17016,9 @@ function __wbg_get_imports() {
 }
 
 const __wbindgen_enum_CanvasWindingRule = ["nonzero", "evenodd"];
+const BodyRangeFormatHistoryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_bodyrangeformathistory_free(ptr, 1));
 const DocumentExportFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_documentexport_free(ptr, 1));
@@ -16656,6 +17028,18 @@ const HwpDocumentFinalization = (typeof FinalizationRegistry === 'undefined')
 const HwpViewerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_hwpviewer_free(ptr, 1));
+const HwpxSaveSessionFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_hwpxsavesession_free(ptr, 1));
+const MasterTextHistoryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_mastertexthistory_free(ptr, 1));
+const NoteShapeHistoryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_noteshapehistory_free(ptr, 1));
+const PageHideHistoryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_pagehidehistory_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

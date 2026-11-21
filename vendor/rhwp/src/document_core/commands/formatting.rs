@@ -2825,11 +2825,25 @@ impl DocumentCore {
             }
         }
 
-        self.document.sections[section_idx].raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
-
+        self.refresh_page_hide(section_idx, para_idx);
         Ok(crate::document_core::helpers::json_ok())
+    }
+
+    /// [hwpx-cowork] 감추기 소유 문단과 해당 쪽의 표시를 먼저 고친다. 같은 쪽의 다른 감추기도 정상 조판과 같은 순서로 처리한다.
+    pub(crate) fn refresh_page_hide(&mut self, section_idx: usize, para_idx: usize) {
+        self.document.sections[section_idx].raw_stream = None;
+        self.recompose_paragraph(section_idx, para_idx);
+        if self.typeset_tail_deferral {
+            if let Some(result) = self.pagination.get_mut(section_idx) {
+                let controls = crate::renderer::page_number::PageControlEvents::collect(
+                    &result.pages, &self.document.sections[section_idx].paragraphs);
+                for page in &mut result.pages { page.page_hide = None; }
+                for (index, hide) in controls.hides {
+                    if let Some(page) = result.pages.get_mut(index) { page.page_hide = Some(hide); }
+                }
+            }
+        }
+        self.request_interactive_layout();
     }
 
     /// 현재 문단의 PageHide 상태를 조회한다.

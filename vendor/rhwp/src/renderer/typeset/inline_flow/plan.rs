@@ -32,6 +32,77 @@ pub(in crate::renderer::typeset) fn build_plan_with_storage<S: crate::storage::S
     dpi: f64,
     storage: &S,
 ) -> Result<Option<InlineFlowPlan>, S::Error> {
+    let mut exclusions: Vec<_> = if let Some(exclusions) = input.exclusions {
+        storage.collect(exclusions.values().cloned())?
+    } else {
+        Vec::new()
+    };
+    if let Some(zones) = input.visible_float_exclusions {
+        storage.extend(
+            &mut exclusions,
+            zones
+                .iter()
+                .filter(|zone| zone.para_index != para_index)
+                .map(|zone| FrameExclusion {
+                    horizontal: crate::renderer::px_to_hwpunit(input.column.x, dpi)
+                        ..crate::renderer::px_to_hwpunit(input.column.x + input.column.width, dpi),
+                    vertical: crate::renderer::px_to_hwpunit(input.column.y + zone.top, dpi)
+                        ..crate::renderer::px_to_hwpunit(input.column.y + zone.bottom, dpi),
+                    policy: FrameExclusionPolicy::BothSides,
+                }),
+        )?;
+    }
+
+    build_in_frame_with_storage(
+        inline_flow::InlineFlowFrame {
+            column: input.column,
+            body: *input.body,
+            page_width: input.page_width,
+            page_height: input.page_height,
+            start: input.start,
+            reflow_stored_text: input.reflow_stored_text,
+            exclusions,
+        },
+        para,
+        para_index,
+        styles,
+        tables,
+        dpi,
+        storage,
+    )
+}
+
+// [hwpx-cowork] 이전 쪽부터 전부 재분할하지 않고 이전 조판이 실제로 사용한 프레임을 재사용한다.
+pub(crate) fn replay_inline_owner(
+    plan: &InlineFlowPlan,
+    para: &Paragraph,
+    index: usize,
+    styles: &ResolvedStyleSet,
+    tables: &[MeasuredTable],
+    dpi: f64,
+) -> Option<InlineFlowPlan> {
+    let input = plan.source_frame.as_ref()?.as_ref().clone();
+    build_in_frame_with_storage(
+        input,
+        para,
+        index,
+        styles,
+        tables,
+        dpi,
+        &crate::storage::Unbounded,
+    )
+    .unwrap_or_else(|never| match never {})
+}
+
+fn build_in_frame_with_storage<S: crate::storage::Storage>(
+    input: inline_flow::InlineFlowFrame,
+    para: &Paragraph,
+    para_index: usize,
+    styles: &ResolvedStyleSet,
+    tables: &[MeasuredTable],
+    dpi: f64,
+    storage: &S,
+) -> Result<Option<InlineFlowPlan>, S::Error> {
     let column = input.column;
     let Some(style) = styles.para_styles.get(para.para_shape_id as usize) else {
         return Ok(None);
@@ -69,30 +140,18 @@ pub(in crate::renderer::typeset) fn build_plan_with_storage<S: crate::storage::S
         width: input.page_width,
         height: input.page_height,
     };
-    let mut exclusions: Vec<_> = if let Some(exclusions) = input.exclusions {
-        storage.collect(exclusions.values().cloned())?
+    let source_frame = if para.controls.iter().any(|c| c.is_treat_as_char_object()) {
+        Some(std::sync::Arc::new(crate::storage::try_clone(
+            &input, storage,
+        )?))
     } else {
-        Vec::new()
+        None
     };
-    if let Some(zones) = input.visible_float_exclusions {
-        storage.extend(
-            &mut exclusions,
-            zones
-                .iter()
-                .filter(|zone| zone.para_index != para_index)
-                .map(|zone| FrameExclusion {
-                    horizontal: crate::renderer::px_to_hwpunit(column.x, dpi)
-                        ..crate::renderer::px_to_hwpunit(column.x + column.width, dpi),
-                    vertical: crate::renderer::px_to_hwpunit(column.y + zone.top, dpi)
-                        ..crate::renderer::px_to_hwpunit(column.y + zone.bottom, dpi),
-                    policy: FrameExclusionPolicy::BothSides,
-                }),
-        )?;
-    }
+    let mut exclusions = input.exclusions;
     let frame = ObjectPlacementFrame {
         container: &container,
         column: &column,
-        body: input.body,
+        body: &input.body,
         paper: &paper,
         paragraph_y: column.y + input.start,
         alignment: style.alignment,
@@ -173,6 +232,7 @@ pub(in crate::renderer::typeset) fn build_plan_with_storage<S: crate::storage::S
             ));
         }
     }
+    plan.source_frame = source_frame;
     plan.relative_to(column.x, column.y);
     Ok(Some(plan))
 }

@@ -1755,8 +1755,7 @@ impl DocumentCore {
         self.shift_active_field_for_control_insert(section_idx, para_idx, insert_idx);
 
         self.reflow_paragraph(section_idx, para_idx);
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        self.recompose_edited_object_owner(section_idx, para_idx); // [hwpx-cowork] 새 차트의 소유 문단
         self.bump_bin_data_epoch();
         self.invalidate_page_tree_cache();
         self.event_log

@@ -679,4 +679,6 @@ button.cmp-run-toggle { padding: 0 7px; gap: 6px; color: var(--muted); }
 /* 문서 목록 제목 = 한 번 눌러 열기(휴대전화 터치 한 번) */
 .libtable .doc-link { color: inherit; text-decoration: none; }
 .libtable .doc-link:hover b, .libtable .doc-link:focus-visible b { text-decoration: underline; }
+.departure-status { position: fixed; inset-inline-end: 1rem; bottom: 1rem; z-index: 30; display: grid; gap: .35rem; max-width: min(26rem,90vw); }
+.departure-status a { padding: .5rem .8rem; background: #fff; color: #16496a; border: 1px solid #bdcdd8; border-radius: .4rem; overflow-wrap: anywhere; }
 /* AI 송수신 상태 움직임(§6)은 사용자의 요청에 따라 '동작 줄이기' 설정에서도 재생한다. */

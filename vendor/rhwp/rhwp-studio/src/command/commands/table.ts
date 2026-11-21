@@ -325,16 +325,18 @@ function cellStartAt(
   row: number,
   col: number,
 ): DocPos | null {
-  const hit = wasm.getTableCellBboxes(table.sec, table.ppi, table.ci).find((b) =>
-    row >= b.row && row < b.row + b.rowSpan && col >= b.col && col < b.col + b.colSpan);
-  if (!hit) return null;
+  // [hwpx-cowork] 병합 칸도 덮는 모델 격자가 실행 직후 이미 최신이다.
+  const indexed = wasm.getTableCellIndexAt?.(table.sec, table.ppi, table.ci, row, col);
+  const cellIndex = indexed === undefined ? wasm.getTableCellBboxes(table.sec, table.ppi, table.ci).find((b) =>
+    row >= b.row && row < b.row + b.rowSpan && col >= b.col && col < b.col + b.colSpan)?.cellIdx : indexed;
+  if (cellIndex == null) return null;
   return {
     sectionIndex: table.sec,
     paragraphIndex: 0,
     charOffset: 0,
     parentParaIndex: table.ppi,
     controlIndex: table.ci,
-    cellIndex: hit.cellIdx,
+    cellIndex,
     cellParaIndex: 0,
   };
 }
@@ -362,9 +364,11 @@ function appendTableRow(services: CommandServices): void {
   safeTableOp(() => ih.executeOperation({
     kind: 'snapshot',
     operationType: 'insertTableRow',
+    captureBefore: wasm => wasm.saveInsertRowUndo?.(table.sec, table.ppi, table.ci, afterRow) ?? wasm.saveSnapshot(),
+    ownsPriorTextPagination: true, // [hwpx-cowork] 삽입 API가 직전 글자의 표 조각까지 발행한다.
     operation: (wasm) => {
       const res = wasm.insertTableRow(table.sec, table.ppi, table.ci, afterRow, true);
-      if (res && res.ok === false) return pos;
+      if (res && res.ok === false) return null;
       return cellStartAt(wasm, table, afterRow + 1, caretCol) ?? pos;
     },
   }), '줄 추가');

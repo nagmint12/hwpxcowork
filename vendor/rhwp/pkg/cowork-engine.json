@@ -1,25 +1,16 @@
 {
-  "builtAt": "2026-11-20T16:06:41.198Z",
+  "builtAt": "2026-11-21T23:19:12.352Z",
   "profile": "release",
   "source": "vendor\\rhwp",
   "base": {
     "tag": "v0.9.0",
-    "commit": "0fed994531"
+    "commit": "651e02c410"
   },
   "modified": [],
   "wasmBindgen": "0.2.127",
   "features": "console_error_panic_hook,wasm-api",
   "nameSection": false,
   "targetDir": "artifacts\\public-build-20261113\\target",
-  "cacheLastSource": null,
-  "workspaceRefreshed": [
-    "rhwp-contracts",
-    "rhwp-ooxml-chart",
-    "rhwp-password-crypto",
-    "rhwp",
-    "rhwp-native-ffi",
-    "llm-verifier-verdict-protocol",
-    "llm-verifier-claim-bind",
-    "llm-verifier-criteria-decomp"
-  ]
+  "cacheLastSource": "vendor\\rhwp",
+  "workspaceRefreshed": []
 }

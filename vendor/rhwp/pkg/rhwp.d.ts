@@ -1,6 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export class BodyRangeFormatHistory {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    isEmpty(): boolean;
+}
+
 /**
  * 한 번의 문서 내보내기 결과.
  *
@@ -44,6 +51,7 @@ export class HwpDocument {
      * mode: left|center|right|top|middle|bottom|hspace|vspace|width|height|size. {moved, skipped}
      */
     alignObjectsH2022(targets_json: string, mode: string): string;
+    applyBodyRangeFormat(s: number, p: number, o: number, end_s: number, end_p: number, end_o: number, props: string, page: number): BodyRangeFormatHistory;
     /**
      * [#5959] 셀/zone border_fill_id 직접 대입 (undo·redo 전용).
      *
@@ -175,6 +183,7 @@ export class HwpDocument {
      * 대형 표 continuation shadow job을 시작한다. 공개 페이지는 완료 전까지 유지된다.
      */
     beginDeferredPagination(fragment_budget: number): string;
+    beginHwpxSave(): HwpxSaveSession | undefined;
     /**
      * 나누기 — 웹한글컨트롤 `Run("BreakPage"·"BreakColumn"·"BreakColDef"·"BreakSection")`.
      *
@@ -199,6 +208,11 @@ export class HwpDocument {
      * `restoreDeleteFragment`/`discardDeleteFragment` 에 쓴다.
      */
     captureDeleteRange(section_idx: number, start_para: number, end_para: number): number;
+    captureNoteShape(section: number, endnote: boolean): NoteShapeHistory;
+    /**
+     * [hwpx-cowork] 쪽 감추기 Undo는 컨트롤 원래 순서와 원시 레코드를 포함한 소유 문단 하나만 기억한다.
+     */
+    capturePageHide(section: number, paragraph: number): PageHideHistory;
     /**
      * 그림 리사이즈 전에 원본 변환만 보관한다.
      */
@@ -824,6 +838,12 @@ export class HwpDocument {
      * [#4709] SVG 메트릭 face 주석 부착 여부를 반환한다.
      */
     getAnnotateMetricFont(): boolean;
+    /**
+     * 본문 선택 영역의 줄별 사각형을 반환한다.
+     *
+     * 반환: JSON 배열 `[{"pageIndex":N,"x":F,"y":F,"width":F,"height":F}, ...]`
+     */
+    getBodySelectionOnPage(page: number, section: number, paragraph: number, offset: number, end_section: number, end_paragraph: number, end_offset: number): string;
     /**
      * 문서 내 모든 책갈피 목록 반환
      */
@@ -1481,6 +1501,11 @@ export class HwpDocument {
      */
     getPageLayerTreeWithProfile(page_num: number, profile: string, omit_image_bytes?: boolean | null, omit_font_bytes?: boolean | null): string;
     /**
+     * 감추기 설정
+     * [hwpx-cowork] 홀·짝, 마지막 쪽, 이전 구역에서 상속한 바탕쪽도 실제 렌더 소유자를 사용한다.
+     */
+    getPageMasterText(page_num: number): string;
+    /**
      * 구역의 쪽 번호 매기기를 읽는다: `{ok, exists, position?, format?, dash?}` (#7635).
      */
     getPageNumberPosition(section_idx: number): string;
@@ -1501,6 +1526,11 @@ export class HwpDocument {
      * 페이지 렌더 트리를 JSON 문자열로 반환한다.
      */
     getPageRenderTree(page_num: number): string;
+    /**
+     * [hwpx-cowork] 가상 스크롤에 필요한 실제 조판 용지 크기를 연속 구간별로 전달한다.
+     * 표시 정밀도는 getPageInfo와 같고, 여백·제본·쪽 번호는 보이는 쪽에서 직접 조회한다.
+     */
+    getPageSizeRuns(): string;
     /**
      * 페이지가 그리는 그림들의 신원 키만 작은 JSON 으로 반환한다 (Task #3315).
      */
@@ -1604,11 +1634,6 @@ export class HwpDocument {
      * 구역마다 첫 본문 문단 번호 — `MoveSectionUp`·`MoveSectionDown` 이 딛는다.
      */
     getSectionStarts(): string;
-    /**
-     * 본문 선택 영역의 줄별 사각형을 반환한다.
-     *
-     * 반환: JSON 배열 `[{"pageIndex":N,"x":F,"y":F,"width":F,"height":F}, ...]`
-     */
     getSelectionRects(section_idx: number, start_para_idx: number, start_char_offset: number, end_para_idx: number, end_char_offset: number): string;
     /**
      * 셀 내 선택 영역의 줄별 사각형을 반환한다.
@@ -1758,6 +1783,10 @@ export class HwpDocument {
      * 셀의 첫 계산식 필드 `{"formula","resultFormat","lastResult"}` — 없으면 `{}`.
      */
     getTableCellFormula(section_idx: number, parent_para_idx: number, control_idx: number, cell_idx: number): string;
+    /**
+     * [hwpx-cowork] 줄 삽입 뒤 새 캐럿의 모델 위치를 표 전체의 쪽 그림 없이 구한다.
+     */
+    getTableCellIndexAt(section: number, para: number, control: number, row: number, col: number): number | undefined;
     /**
      * 표의 행/열/셀 수를 반환한다.
      *
@@ -2186,6 +2215,10 @@ export class HwpDocument {
      */
     insertTextLogical(section_idx: number, para_idx: number, logical_offset: number, text: string): string;
     /**
+     * [hwpx-cowork] 편집 중에 화면 조판을 동기 저장 장벽으로 바꾸지 않도록 구분한다.
+     */
+    interactiveLayoutPending(): boolean;
+    /**
      * 아무 내용도 없는 빈 문서인가 — 웹한글컨트롤 `IsEmpty`(§8.2.7).
      */
     isEmptyDocument(): boolean;
@@ -2611,6 +2644,7 @@ export class HwpDocument {
     replaceAllEx(query: string, new_text: string, options_json: string): string;
     replaceBodyTextLocal(section_idx: number, para_idx: number, char_offset: number, delete_count: number, text: string): string;
     replaceHyperlinkTextEx(options_json: string): boolean;
+    replaceMasterText(section: number, master: number, paragraph: number, expected: string, next: string): MasterTextHistory;
     /**
      * 단일 치환 (검색어 기반) — 첫 번째 매치만 교체
      */
@@ -2660,6 +2694,9 @@ export class HwpDocument {
      * 지정 ID의 스냅샷으로 Document를 복원한다.
      */
     restoreSnapshot(id: number): string;
+    saveInsertRowUndo(section: number, para: number, control: number, after: number): number;
+    savePageBreakUndo(section: number, para: number, offset: number): number;
+    saveRedoSnapshot(before: number): number;
     /**
      * Document 스냅샷을 저장하고 ID를 반환한다.
      */
@@ -2959,9 +2996,6 @@ export class HwpDocument {
      * 구역의 용지 설정(PageDef)을 변경하고 재페이지네이션한다.
      */
     setPageDef(section_idx: number, json: string): string;
-    /**
-     * 감추기 설정
-     */
     setPageHide(sec: number, para: number, hide_header: boolean, hide_footer: boolean, hide_master: boolean, hide_border: boolean, hide_fill: boolean, hide_page_num: boolean): string;
     /**
      * `setPageHide` 의 options object 변형 (#1413).
@@ -3167,6 +3201,10 @@ export class HwpDocument {
      * 현재 WASM 빌드에서 PDF 입력을 사용할 수 있는지 문서 생성 전에 조회한다.
      */
     static supportsPdfImport(): boolean;
+    swapBodyRangeFormat(saved: BodyRangeFormatHistory, page: number): void;
+    swapMasterText(history: MasterTextHistory): void;
+    swapNoteShape(history: NoteShapeHistory): void;
+    swapPageHide(history: PageHideHistory): void;
     /**
      * 저장 상태와 현재 상태를 교환한다. 같은 ID로 Undo/Redo를 수행한다.
      */
@@ -3302,6 +3340,38 @@ export class HwpViewer {
 }
 
 /**
+ * [hwpx-cowork] 저장용 사본만 소유한다. 이벤트 사이에 원래 편집기를 계속 수정할 수 있다.
+ */
+export class HwpxSaveSession {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    finish(): Uint8Array;
+    step(units: number): boolean;
+}
+
+/**
+ * [hwpx-cowork] 반복해서 그려지는 바탕쪽에도 원본 문단 하나와 그 역연산만 있다.
+ */
+export class MasterTextHistory {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+}
+
+export class NoteShapeHistory {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+}
+
+export class PageHideHistory {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+}
+
+/**
  * HWP 파일에서 썸네일 이미지만 경량 추출 (전체 파싱 없이)
  *
  * 반환: JSON `{ "format": "png"|"gif", "base64": "...", "width": N, "height": N }`
@@ -3369,9 +3439,15 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_bodyrangeformathistory_free: (a: number, b: number) => void;
     readonly __wbg_documentexport_free: (a: number, b: number) => void;
     readonly __wbg_hwpdocument_free: (a: number, b: number) => void;
     readonly __wbg_hwpviewer_free: (a: number, b: number) => void;
+    readonly __wbg_hwpxsavesession_free: (a: number, b: number) => void;
+    readonly __wbg_mastertexthistory_free: (a: number, b: number) => void;
+    readonly __wbg_noteshapehistory_free: (a: number, b: number) => void;
+    readonly __wbg_pagehidehistory_free: (a: number, b: number) => void;
+    readonly bodyrangeformathistory_isEmpty: (a: number) => number;
     readonly documentexport_contentLoss: (a: number) => [number, number];
     readonly documentexport_hasBytes: (a: number) => number;
     readonly documentexport_takeBytes: (a: number) => [number, number, number, number];
@@ -3379,6 +3455,7 @@ export interface InitOutput {
     readonly fontSymbolUnicodeRange: (a: number, b: number, c: number) => [number, number];
     readonly hwpdocument_addBookmark: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_alignObjectsH2022: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly hwpdocument_applyBodyRangeFormat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
     readonly hwpdocument_applyCellBorderFillIds: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_applyCellStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_applyCharFormat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
@@ -3409,12 +3486,15 @@ export interface InitOutput {
     readonly hwpdocument_attachCaptionAt: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_beginBatch: (a: number) => [number, number, number, number];
     readonly hwpdocument_beginDeferredPagination: (a: number, b: number) => [number, number, number, number];
+    readonly hwpdocument_beginHwpxSave: (a: number) => [number, number, number];
     readonly hwpdocument_breakAtCursor: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_buildFontEnvironmentFromAvailablePrograms: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_canAdoptDocumentFragment: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly hwpdocument_cancelDeferredPagination: (a: number) => number;
     readonly hwpdocument_canvasMetricsActive: (a: number) => number;
     readonly hwpdocument_captureDeleteRange: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly hwpdocument_captureNoteShape: (a: number, b: number, c: number) => [number, number, number];
+    readonly hwpdocument_capturePageHide: (a: number, b: number, c: number) => [number, number, number];
     readonly hwpdocument_capturePictureTransform: (a: number, b: number, c: number) => [number, number, number];
     readonly hwpdocument_captureSectionRaw: (a: number, b: number) => [number, number, number];
     readonly hwpdocument_cellComposeMemoStats: (a: number) => [number, number];
@@ -3535,6 +3615,7 @@ export interface InitOutput {
     readonly hwpdocument_fontMissingTextWithSpaces: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly hwpdocument_fontSupportsText: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly hwpdocument_getAnnotateMetricFont: (a: number) => number;
+    readonly hwpdocument_getBodySelectionOnPage: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_getBookmarks: (a: number) => [number, number, number, number];
     readonly hwpdocument_getBulletList: (a: number) => [number, number];
     readonly hwpdocument_getCanvasKitDocumentPreflight: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -3683,12 +3764,14 @@ export interface InitOutput {
     readonly hwpdocument_getPageLayerTreeValueWithProfile: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly hwpdocument_getPageLayerTreeValueWithProfileAndResourceKeys: (a: number, b: number, c: number, d: number, e: any, f: any, g: number, h: number) => [number, number, number];
     readonly hwpdocument_getPageLayerTreeWithProfile: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly hwpdocument_getPageMasterText: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageNumberPosition: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageNumbering: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageOfPosition: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_getPageOverlayImages: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPagePaintFontRequests: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageRenderTree: (a: number, b: number) => [number, number, number, number];
+    readonly hwpdocument_getPageSizeRuns: (a: number) => [number, number];
     readonly hwpdocument_getPageSourceImageKeys: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageText: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_getPageTextLayout: (a: number, b: number) => [number, number, number, number];
@@ -3738,6 +3821,7 @@ export interface InitOutput {
     readonly hwpdocument_getTableCellBboxesAtPage: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_getTableCellBboxesByPath: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_getTableCellFormula: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly hwpdocument_getTableCellIndexAt: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly hwpdocument_getTableDimensions: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_getTableDimensionsByPath: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_getTableOfContentsAt: (a: number, b: number, c: number) => [number, number, number, number];
@@ -3813,6 +3897,7 @@ export interface InitOutput {
     readonly hwpdocument_insertTextInFootnote: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_insertTextInHeaderFooter: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_insertTextLogical: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly hwpdocument_interactiveLayoutPending: (a: number) => number;
     readonly hwpdocument_isEmptyDocument: (a: number) => number;
     readonly hwpdocument_isObjectLockedH2022: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly hwpdocument_layoutMemoStats: (a: number) => [number, number];
@@ -3902,6 +3987,7 @@ export interface InitOutput {
     readonly hwpdocument_replaceAllEx: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly hwpdocument_replaceBodyTextLocal: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly hwpdocument_replaceHyperlinkTextEx: (a: number, b: number, c: number) => [number, number, number];
+    readonly hwpdocument_replaceMasterText: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly hwpdocument_replaceOne: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_replaceRangeInHeaderFooter: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly hwpdocument_replaceText: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
@@ -3912,6 +3998,9 @@ export interface InitOutput {
     readonly hwpdocument_restoreDeleteFragment: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_restoreSectionRaw: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_restoreSnapshot: (a: number, b: number) => [number, number, number, number];
+    readonly hwpdocument_saveInsertRowUndo: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly hwpdocument_savePageBreakUndo: (a: number, b: number, c: number, d: number) => number;
+    readonly hwpdocument_saveRedoSnapshot: (a: number, b: number) => number;
     readonly hwpdocument_saveSnapshot: (a: number) => number;
     readonly hwpdocument_searchAllText: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_searchAllTextEx: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
@@ -4014,6 +4103,10 @@ export interface InitOutput {
     readonly hwpdocument_stepProgressiveOpen: (a: number, b: number) => [number, number];
     readonly hwpdocument_stepTypesetTail: (a: number, b: number) => [number, number];
     readonly hwpdocument_supportsPdfImport: () => number;
+    readonly hwpdocument_swapBodyRangeFormat: (a: number, b: number, c: number) => [number, number];
+    readonly hwpdocument_swapMasterText: (a: number, b: number) => [number, number];
+    readonly hwpdocument_swapNoteShape: (a: number, b: number) => [number, number];
+    readonly hwpdocument_swapPageHide: (a: number, b: number) => [number, number];
     readonly hwpdocument_swapPictureTransform: (a: number, b: number) => [number, number];
     readonly hwpdocument_swapTable: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_tableEditAtCursor: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -4041,6 +4134,8 @@ export interface InitOutput {
     readonly hwpviewer_updateViewport: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly hwpviewer_visiblePages: (a: number) => [number, number];
     readonly hwpxToHwpJson: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly hwpxsavesession_finish: (a: number) => [number, number, number, number];
+    readonly hwpxsavesession_step: (a: number, b: number) => [number, number, number];
     readonly isPrintMetafile: (a: number, b: number) => number;
     readonly mapPrintBitmapClip: (a: number, b: number, c: number, d: number) => any;
     readonly mapPrintBitmapImage: (a: number, b: number, c: number, d: number) => any;

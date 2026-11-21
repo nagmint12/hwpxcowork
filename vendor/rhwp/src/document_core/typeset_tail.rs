@@ -19,7 +19,7 @@ use std::collections::HashSet;
 
 pub(crate) struct TypesetTailJob {
     pub(crate) typesetter: TypesetEngine,
-    pub(crate) parked: ParkedSection,
+    pub(crate) parked: Option<ParkedSection>, // [hwpx-cowork] 자연 경계에서 예약한 새 작업은 첫 유휴 조각에서 시작한다.
     pub(crate) config: TypesetTailConfig,
 }
 
@@ -61,7 +61,7 @@ impl TypesetTailState {
     }
 }
 
-fn now_ms() -> f64 {
+pub(super) fn now_ms() -> f64 {
     #[cfg(target_arch = "wasm32")]
     {
         js_sys::Date::now()
@@ -77,6 +77,15 @@ fn now_ms() -> f64 {
 impl DocumentCore {
     /// 편집기가 켠다. 끄면 남은 작업을 끝낸다.
     pub fn set_typeset_tail_deferral(&mut self, enabled: bool) {
+        // [hwpx-cowork] 일반 열기는 조판 뒤에 편집기가 연결된다. 편집 모드 진입 때
+        // 한 번만 독립 구역을 찾는다. 점진 열기의 미완료 구역은 완주 pass에서 등록한다.
+        if enabled && !self.typeset_tail_deferral && !self.has_body_page_fields() {
+            let env = self.layout_environment_stamp();
+            self.flow_sections = (0..self.pagination.len().min(self.document.sections.len()))
+                .map(|i| (self.progressive_open_job.as_ref().is_none_or(|job| i < job.section_index)
+                    && self.dirty_sections.get(i) == Some(&false)).then(|| self.classify_flow_section(i, env)).flatten())
+                .collect();
+        }
         self.typeset_tail_deferral = enabled;
         if !enabled {
             self.flush_typeset_tail();
@@ -84,7 +93,7 @@ impl DocumentCore {
     }
 
     pub fn typeset_tail_pending(&self) -> bool {
-        self.typeset_tail_job.is_some()
+        self.interactive_layout.pending || self.typeset_tail_job.is_some() || self.row_tail.is_some() || self.row_text.is_some() // [hwpx-cowork]
     }
 
     fn typeset_tail_current(&self, config: &TypesetTailConfig) -> bool {
@@ -110,7 +119,7 @@ impl DocumentCore {
             && self.measured_sections.get(idx).is_some()
     }
 
-    fn typeset_tail_input<'a>(
+    pub(crate) fn typeset_tail_input<'a>(
         &'a self,
         config: &'a TypesetTailConfig,
         no_breaks: &'a HashSet<usize>,
@@ -138,10 +147,25 @@ impl DocumentCore {
 
     /// 남은 작업을 `budget_ms` 동안(최소 한 걸음) 잇는다. 끝나면 쪽 나눔을 바꾼다.
     pub fn step_typeset_tail(&mut self, budget_ms: f64) -> TypesetTailState {
+        if self.interactive_layout.pending { return self.step_interactive_layout(budget_ms); } // [hwpx-cowork]
+        // [hwpx-cowork] 한 칸에서 이어 친 글자는 마지막 리비전의 근접 창을 한 번만
+        // 발행한다. 다음 스케줄러 차례에서 그 뒤쪽을 재개한다.
+        if self.settle_row_text() {
+            return if self.typeset_tail_pending() { TypesetTailState::Pending } else { TypesetTailState::Complete };
+        }
+        if self.row_tail.is_some() {
+            return self.advance_row_tail();
+        }
         let Some(mut tail) = self.typeset_tail_job.take() else {
             return TypesetTailState::None;
         };
         if !self.typeset_tail_current(&tail.config) {
+            // [hwpx-cowork] 자연 흐름의 앞쪽에서 친 다음 글자가 기존 작업을 무효화했다.
+            // 잠정 쪽의 경계는 구역에 남아 있다. 이번 글자를 포함한 새 작업으로 이어 간다.
+            if self.dirty_sections.get(tail.config.section_index) == Some(&true)
+                && self.only_text_edits_pending.get() && self.settle_flow_text() {
+                return if self.typeset_tail_pending() { TypesetTailState::Pending } else { TypesetTailState::Complete };
+            }
             // 바뀐 문서는 그 변경의 쪽 나눔이 새로 한다. dirty 가 아닌데 입력이 달라졌으면(다른 길로 바뀜)
             // 잠정 쪽이 남지 않도록 지금 처음부터 다시 나눈다.
             let idx = tail.config.section_index;
@@ -155,12 +179,15 @@ impl DocumentCore {
             return TypesetTailState::Stale;
         }
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
+        let spacing = self.document.sections[tail.config.section_index].section_def.default_tab_spacing;
+        let _tabs = self.styles.section_tab_scope(spacing, self.dpi); // [hwpx-cowork] 예약한 구역의 탭 간격
         let started = now_ms();
         let no_breaks = HashSet::new();
         let done = loop {
             let input = self.typeset_tail_input(&tail.config, &no_breaks);
+            let parked = tail.parked.get_or_insert_with(|| tail.typesetter.start_flow_tail(&input));
             let done = match tail.typesetter.continue_parked_with_storage(
-                &mut tail.parked,
+                parked,
                 &input,
                 &crate::storage::Unbounded,
             ) {
@@ -181,18 +208,21 @@ impl DocumentCore {
 
     /// 남은 작업을 지금 끝낸다(저장·인쇄·명시 마무리).
     pub fn flush_typeset_tail(&mut self) -> TypesetTailState {
-        self.step_typeset_tail(f64::INFINITY)
+        loop {
+            let state = self.step_typeset_tail(f64::INFINITY);
+            if state != TypesetTailState::Pending && !self.typeset_tail_pending() { return state; } // [hwpx-cowork] 합쳐진 작업까지 모두 마무리
+        }
     }
 
     fn complete_typeset_tail(&mut self, tail: TypesetTailJob) {
-        let TypesetTailJob { typesetter, parked, config } = tail;
+        let TypesetTailJob { typesetter, parked, config, .. } = tail;
         let idx = config.section_index;
         let verify = self.typeset_resume.verify.get();
         let outcome = {
             let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
             let no_breaks = HashSet::new();
             let input = self.typeset_tail_input(&config, &no_breaks);
-            match typesetter.finish_parked_with_storage(parked, &input, verify, &crate::storage::Unbounded) {
+            match typesetter.finish_parked_with_storage(parked.expect("completed tail has started"), &input, verify, &crate::storage::Unbounded) {
                 Ok(outcome) => outcome,
                 Err(never) => match never {},
             }

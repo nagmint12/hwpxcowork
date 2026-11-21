@@ -13,6 +13,7 @@ pub mod char_shape_tables;
 pub mod char_shapes;
 pub mod content;
 pub mod context;
+pub(crate) mod cooperative; // [hwpx-cowork] 편집기에 양보하는 저장
 pub mod field;
 pub mod fixtures;
 pub mod form;
@@ -90,22 +91,43 @@ pub fn serialize_hwpx(doc: &Document) -> Result<Vec<u8>, SerializeError> {
 
 /// HWPX 직렬화 바이트와 바로 그 산출물의 내용 손실을 함께 반환한다 (#4430).
 pub fn serialize_hwpx_with_report(doc: &Document) -> Result<SerializedDocument, SerializeError> {
-    let (writer, report) =
-        serialize_hwpx_into(doc, HwpxZipWriter::new(), &crate::storage::Unbounded, None, false)?;
+    let (writer, report) = serialize_hwpx_into(
+        doc,
+        HwpxZipWriter::new(),
+        &crate::storage::Unbounded,
+        None,
+        false,
+        None,
+    )?;
     Ok(SerializedDocument::new(writer.into_inner(), report))
 }
 
 /// [hwpx-cowork] HWPX input for the Hancom COM conversion to Hwp Native.
-pub(crate) fn serialize_hwpx_for_hancom_clipboard(doc: &Document) -> Result<Vec<u8>, SerializeError> {
-    let (writer, report) =
-        serialize_hwpx_into(doc, HwpxZipWriter::new(), &crate::storage::Unbounded, None, true)?;
+pub(crate) fn serialize_hwpx_for_hancom_clipboard(
+    doc: &Document,
+) -> Result<Vec<u8>, SerializeError> {
+    let (writer, report) = serialize_hwpx_into(
+        doc,
+        HwpxZipWriter::new(),
+        &crate::storage::Unbounded,
+        None,
+        true,
+        None,
+    )?;
     report.write_warnings_to_stderr();
     Ok(writer.into_inner())
 }
 
 /// [hwpx-cowork] Worker에서 압축할 동일 XML 패키지.
 pub fn serialize_hwpx_uncompressed(doc: &Document) -> Result<Vec<u8>, SerializeError> {
-    let (writer, report) = serialize_hwpx_into(doc, HwpxZipWriter::uncompressed(), &crate::storage::Unbounded, None, false)?;
+    let (writer, report) = serialize_hwpx_into(
+        doc,
+        HwpxZipWriter::uncompressed(),
+        &crate::storage::Unbounded,
+        None,
+        false,
+        None,
+    )?;
     report.write_warnings_to_stderr();
     Ok(writer.into_inner())
 }
@@ -127,6 +149,7 @@ where
         storage,
         Some(reservation),
         false,
+        None,
     )?;
     report.write_warnings_to_stderr();
     Ok(writer.into_inner())
@@ -138,6 +161,7 @@ fn serialize_hwpx_into<W: std::io::Write + std::io::Seek, S: crate::storage::Sto
     storage: &S,
     reservation: Option<std::sync::Arc<dyn crate::storage::Reservation>>,
     for_hancom_clipboard: bool,
+    chunk: Option<cooperative::ChunkHook>,
 ) -> Result<(W, crate::serializer::ContentLossReport), SerializeError>
 where
     S::Error: std::fmt::Display,
@@ -146,6 +170,7 @@ where
 
     // 1-pass: ID 풀 구성
     let mut ctx = SerializeContext::try_collect_from_document(doc, storage, reservation)?;
+    ctx.chunk = chunk; // [hwpx-cowork] 완성된 구간의 XML과 그 시점의 표식·ID 상태
     // 1. mimetype (반드시 최초 엔트리, STORED, extra field 없음)
     z.write_stored("mimetype", b"application/hwp+zip")?;
 

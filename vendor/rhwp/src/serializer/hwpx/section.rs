@@ -893,37 +893,16 @@ where
     // 추가 문단: `</hp:p></hs:sec>` 직전에 `<hp:p>` 요소를 삽입.
     if section.paragraphs.len() > 1 {
         let mut extra = String::new();
-        for p in section.paragraphs.iter().skip(1) {
-            let (runs, linesegs, advance) =
-                render_paragraph_parts_with_storage(p, vert_cursor, ctx, storage)?;
-            ctx.check_storage()?;
-            vert_cursor = advance;
-            let pid = ctx.body_para_id(p); // [hwpx-cowork] 읽어 온 고유 id 보존(차례 하이퍼링크 대상)
-            let sid = ctx.effective_style_id(p.style_id);
-            storage
-                .push_str(
-                    &mut extra,
-                    &render_hp_p_open_with_storage(p, pid, sid, storage)?,
-                )
-                .map_err(xml_error)?;
-            // [#4056] 후속 문단이 구역나누기(SectionDef)면 그 구역을 secPr 로 방출한다.
-            // `render_runs` 는 SectionDef 슬롯을 hidden 처리해 XML 을 내지 않으므로
-            // 여기서 내지 않으면 뒤 구역이 통째로 사라져 쪽나눔이 소실된다.
-            if let Some(Control::SectionDef(sd)) = p
-                .controls
-                .iter()
-                .find(|c| matches!(c, Control::SectionDef(_)))
-            {
-                storage
-                    .push_str(
-                        &mut extra,
-                        &build_secpr_run_with_storage(sd, first_run_char_shape_id(p), storage)?,
-                    )
-                    .map_err(xml_error)?;
+        if let Some(bytes) = super::cooperative::exchange(
+            ctx,
+            super::cooperative::Target::Body(section as *const _ as usize),
+            vert_cursor,
+        )? {
+            extra = String::from_utf8(bytes).map_err(xml_error)?;
+        } else {
+            for p in section.paragraphs.iter().skip(1) {
+                write_body_paragraph(&mut extra, p, &mut vert_cursor, ctx, storage)?;
             }
-            storage.push_str(&mut extra, &runs).map_err(xml_error)?;
-            storage.push_str(&mut extra, &linesegs).map_err(xml_error)?;
-            storage.push_str(&mut extra, "</hp:p>").map_err(xml_error)?;
         }
         out = xml_replacen(
             out,
@@ -935,6 +914,48 @@ where
     }
 
     Ok(out.into_bytes())
+}
+
+// [hwpx-cowork] 쪽 나누기·글자 ID·세로 시작값은 저장 방식과 상관없이 같은 순서로 진행한다.
+pub(super) fn write_body_paragraph<S: crate::storage::Storage>(
+    extra: &mut String,
+    p: &Paragraph,
+    vert_cursor: &mut u32,
+    ctx: &mut SerializeContext,
+    storage: &S,
+) -> Result<(), SerializeError>
+where
+    S::Error: std::fmt::Display,
+{
+    let (runs, linesegs, advance) =
+        render_paragraph_parts_with_storage(p, *vert_cursor, ctx, storage)?;
+    ctx.check_storage()?;
+    *vert_cursor = advance;
+    let pid = ctx.body_para_id(p); // [hwpx-cowork] 읽어 온 고유 id 보존(차례 하이퍼링크 대상)
+    let sid = ctx.effective_style_id(p.style_id);
+    storage
+        .push_str(extra, &render_hp_p_open_with_storage(p, pid, sid, storage)?)
+        .map_err(xml_error)?;
+    // [#4056] 후속 문단이 구역나누기(SectionDef)면 그 구역을 secPr 로 방출한다.
+    // `render_runs` 는 SectionDef 슬롯을 hidden 처리해 XML 을 내지 않으므로
+    // 여기서 내지 않으면 뒤 구역이 통째로 사라져 쪽나눔이 소실된다.
+    if let Some(Control::SectionDef(sd)) = p
+        .controls
+        .iter()
+        .find(|c| matches!(c, Control::SectionDef(_)))
+    {
+        storage
+            .push_str(
+                extra,
+                &build_secpr_run_with_storage(sd, first_run_char_shape_id(p), storage)?,
+            )
+            .map_err(xml_error)?;
+    }
+    storage.push_str(extra, &runs).map_err(xml_error)?;
+    storage.push_str(extra, &linesegs).map_err(xml_error)?;
+    storage.push_str(extra, "</hp:p>").map_err(xml_error)?;
+
+    Ok(())
 }
 
 /// IR의 Paragraph를 기반으로 `<hp:p>` 시작 태그를 생성.

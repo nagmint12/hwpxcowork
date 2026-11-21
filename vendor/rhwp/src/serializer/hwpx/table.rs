@@ -149,31 +149,66 @@ where
     write_cellzone_list_with_storage(w, table, storage)?;
 
     // tr[]: 행 단위 반복. 각 행에 속한 셀 (cell.row == r) 을 col 오름차순으로 출력.
+    // [hwpx-cowork] 보통 writer와 같은 행·셀 XML을 이전 이벤트들에서 작성한 경우다.
+    if let Some(rows) = super::cooperative::exchange(
+        ctx,
+        super::cooperative::Target::Table(table as *const Table as usize),
+        0,
+    )? {
+        w.get_mut().write_all(&rows).map_err(xml_error)?;
+        return end_tag_with_storage(w, "hp:tbl", storage);
+    }
     let compacted = row_plan.iter().enumerate().any(|(i, &r)| r as usize != i);
-    for &row_idx in &row_plan {
-        start_tag_with_storage(w, "hp:tr", storage)?;
-        let mut row_cells: Vec<&Cell> = storage
-            .collect(table.cells.iter().filter(|c| c.row == row_idx))
-            .map_err(xml_error)?;
+    // [hwpx-cowork] 표 저장을 시작하면 행마다 모든 칸을 다시 순회하던 비용이 입력 스레드에
+    // 남았다. 원래의 (행, 열, 같은 좌표의 입력 순서)를 한 번 정해 같은 XML을 선형으로 쓴다.
+    let mut cells = storage.collect(table.cells.iter()).map_err(xml_error)?;
+    if !cells.is_sorted_by_key(|c| (c.row, c.col)) {
         storage
-            .bytes(std::mem::size_of_val(row_cells.as_slice()))
+            .bytes(std::mem::size_of_val(cells.as_slice()))
             .map_err(xml_error)?;
-        row_cells.sort_by_key(|c| c.col);
-        for cell in row_cells {
-            if compacted {
-                let mut c2 = cell.clone();
-                let end = cell.row.saturating_add(cell.row_span.max(1));
-                c2.row = row_plan.iter().position(|&r| r == cell.row).unwrap_or(0) as u16;
-                c2.row_span = (row_plan.iter().filter(|&&r| r >= cell.row && r < end).count() as u16).max(1);
-                write_cell_with_storage(w, &c2, ctx, storage)?;
-            } else {
-                write_cell_with_storage(w, cell, ctx, storage)?;
-            }
-        }
-        end_tag_with_storage(w, "hp:tr", storage)?;
+        cells.sort_by_key(|c| (c.row, c.col));
+    }
+    let mut cells = cells.into_iter().peekable();
+    for (row, &row_idx) in row_plan.iter().enumerate() {
+        let row_cells = std::iter::from_fn(|| cells.next_if(|c| c.row == row_idx));
+        write_row(
+            w,
+            row_cells,
+            compacted.then_some((row, row_plan.as_slice())),
+            ctx,
+            storage,
+        )?;
     }
 
     end_tag_with_storage(w, "hp:tbl", storage)?;
+    Ok(())
+}
+
+// [hwpx-cowork] 동기 저장과 재개형 저장이 행 태그·병합 보정·칸 속성을 같은 코드로 쓴다.
+pub(super) fn write_row<'a, W: Write, S: crate::storage::Storage>(
+    w: &mut Writer<W>,
+    cells: impl Iterator<Item = &'a Cell>,
+    compacted: Option<(usize, &[u16])>,
+    ctx: &mut SerializeContext,
+    storage: &S,
+) -> Result<(), SerializeError>
+where
+    S::Error: std::fmt::Display,
+{
+    start_tag_with_storage(w, "hp:tr", storage)?;
+    for cell in cells {
+        if let Some((row, row_plan)) = compacted {
+            let mut c2 = cell.clone();
+            let end = cell.row.saturating_add(cell.row_span.max(1));
+            c2.row = row as u16;
+            c2.row_span =
+                (row_plan.partition_point(|&r| r < end).saturating_sub(row) as u16).max(1);
+            write_cell_with_storage(w, &c2, ctx, storage)?;
+        } else {
+            write_cell_with_storage(w, cell, ctx, storage)?;
+        }
+    }
+    end_tag_with_storage(w, "hp:tr", storage)?;
     Ok(())
 }
 

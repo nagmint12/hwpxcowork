@@ -49,6 +49,7 @@
 import { reactive, watch, toRaw } from '/vendor/vue.esm-browser.prod.js';
 import { createStudio } from '/vendor/rhwp-editor/index.js';
 import { state, api, toast, cpLen, cpSlice, josa, docWorkEnv, autoSendLabel } from './util.js';
+import { submitDeparture } from './departure-transport.js';
 import { buildAnnotations } from './annotations.js';
 import { alignOffsets, lcsPairs } from './refmap.js';
 import { emptyDraft, adoptionInEffect } from './store.js';
@@ -395,7 +396,10 @@ export function mountEditor(el, d) {
   let warnedUnsupported = false;
 
   // 셸·store 와는 지금 기준 ref 로, 플러그인과는 편집기 기준 ref 로(머리 주석 8 — 기준이 같으면 그대로 넘긴다)
+  let acceptedSave = null;
   const h = reactive({
+    editRevision: () => lastSeq,
+    departureReceived: () => acceptedSave?.gen === loadGen && acceptedSave.seq === lastSeq && !s.draft.error && !s.draft.stale,
     ready: false, loading: true, previewReady: false, previewPages: 0, previewPageCount: null,
     error: '', notice: '', source: '', baseVersion: 0, dirty: false,
     mode: 'review',  // v0.4: 'review' | 'live' | 'follow'(머리 주석 v0.4)
@@ -1101,7 +1105,7 @@ export function mountEditor(el, d) {
       clearTimeout(pushTimer); pushTimer = null;
       if (pushing) { try { await pushing; } catch { /* 칩 */ } }
       if (!h.ready || destroyed) return null;
-      return lastSeq > savedSeq ? pushOnce() : null;
+      return lastSeq > savedSeq ? pushOnce(!!o.departure) : null;
     }
     if (mode === 'follow') return null;
     clearTimeout(saveTimer); saveTimer = null;
@@ -1110,7 +1114,7 @@ export function mountEditor(el, d) {
     if (saving) { try { await saving; } catch { /* 아래에서 다시 */ } }
     if (!h.ready || destroyed) return null;
     // 덮어쓰기는 저장 안 된 편집이 없어도 이 창 글을 보낸다(서버 것이 이 창 것과 다르다)
-    if (force || lastSeq > savedSeq || h.dirty) return doSave({ force });
+    if (force || lastSeq > savedSeq || h.dirty) return doSave({ force, departure: !!o.departure });
     return null;
   }
   const staleError = () => Object.assign(new Error(s.draft.error || '내 수정본을 다시 열어야 저장할 수 있습니다'), { code: s.draft.elsewhere ? 'CHANGED_ELSEWHERE' : 'STALE_BASE' });
@@ -1147,9 +1151,12 @@ export function mountEditor(el, d) {
    * 수정본 PUT. 409 DRAFT_STALE(이 창이 아는 판 뒤에 서버 수정본이 다른 곳에서 저장됨)이면 서버 것을 읽어 보고, 이 창이 아는 것과
    * 같은 내용이면(서명 같음 — 판만 바뀜: 같은 글을 다시 저장·검토 요청 등) 새 판으로 한 번 더 보낸다. 다르면 그대로 던진다(→ 저장을 멈추고 묻는다)
    */
-  async function put(bytes, force) {
+  const departureRequest = (seq, gen) => (path, options) => submitDeparture(api, d.base, path, options, () => {
+    if (!destroyed && gen === loadGen) acceptedSave = { seq, gen };
+  });
+  async function put(bytes, force, send = api) {
     saveGen++;
-    try { return await api(putPath(force), { method: 'PUT', body: bytes, raw: true }); } catch (e) {
+    try { return await send(putPath(force), { method: 'PUT', body: bytes, raw: true }); } catch (e) {
       if (e?.code !== 'DRAFT_STALE' || force) throw e;
       const mine = await api(`${d.base}/drafts/mine`).catch(() => null);
       // 서버 수정본이 이 창보다 새 기준이면(다른 창의 [최신 반영]) 이 창 글로는 덮어쓸 수도 없다(STALE_BASE) — [내 글 옮겨 넣기]로
@@ -1158,7 +1165,7 @@ export function mountEditor(el, d) {
       const fresh = revOf(mine);
       if (!mine || fresh == null || String(fresh) === String(rev) || draftSig(mine.cr) !== known) throw e;
       rev = fresh; saveGen++;
-      return api(putPath(false), { method: 'PUT', body: bytes, raw: true });
+      return send(putPath(false), { method: 'PUT', body: bytes, raw: true });
     }
   }
   /** 서버 내 수정본(GET /drafts/mine)의 기준 버전이 이 창 편집기 기준보다 새것이면 그 버전, 아니면 0 */
@@ -1198,7 +1205,7 @@ export function mountEditor(el, d) {
         const shape = shapeOf(st);   // 이 저장에 실리는 내 수정 모습(저장되면 savedShape)
         const bytes = await studio.exportHwpx();
         if (gen !== loadGen || destroyed) return null;
-        const res = await put(bytes, !!o.force);
+        const res = await put(bytes, !!o.force, o.departure ? departureRequest(seq, gen) : undefined);
         known = draftSig(res?.cr);   // 서버 내 수정본 = 방금 보낸 것
         rev = revOf(res);
         savedShape = shape;
@@ -1268,7 +1275,7 @@ export function mountEditor(el, d) {
    * 실패: STALE_BASE·BAD_BASE → 저절로 [내 글 옮겨 넣기] 뒤 다시, NOT_REALTIME·FORBIDDEN(문서 설정이 바뀜) → 새 방식으로, 그 밖 → 칩
    * '보내지 못함'(5·10·15초 뒤 저절로). 던지지 않는다 → 응답 | null
    */
-  async function pushOnce() {
+  async function pushOnce(departure = false) {
     if (mode !== 'live' || !cw || !studio || destroyed || !h.ready || s.readOnly || reopenRequired()) return null;
     if (pushing) { pushAgain = true; return pushing; }
     if (lastSeq <= savedSeq) return null;
@@ -1282,7 +1289,8 @@ export function mountEditor(el, d) {
       const k = seqBase + (++pushNo);
       mySeqs.add(k);
       if (mySeqs.size > 400) mySeqs.delete(mySeqs.values().next().value);
-      const res = await api(`${d.base}/live?base=${baseV}&seq=${k}${loadedVersion ? `&loaded=${loadedVersion}` : ''}`, { method: 'PUT', body: bytes, raw: true });
+      const send = departure ? departureRequest(seq, gen) : api;
+      const res = await send(`${d.base}/live?base=${baseV}&seq=${k}${loadedVersion ? `&loaded=${loadedVersion}` : ''}`, { method: 'PUT', body: bytes, raw: true });
       if (gen !== loadGen || destroyed) return null;
       try { await studio.notifySaved(); } catch { /* notify-saved 를 모르는 studio */ }
       await cw.markClean({ changeSeq: seq });

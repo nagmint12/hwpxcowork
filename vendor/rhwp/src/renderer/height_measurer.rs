@@ -847,15 +847,32 @@ crate::storage::clone_fields!(MeasuredTable, {para_index, control_index, unwrapp
 ///
 /// 일치하면 개체 높이와의 차이는 화해시킬 측정 오차가 아니다. 행 선언이 없는 행이
 /// 하나라도 있으면 일치를 증명할 수 없으므로 거짓을 돌려 종전 경로를 유지한다 (#7147).
-fn measured_rows_match_declared(measured: &MeasuredTable, table: &Table, dpi: f64) -> bool {
-    let row_count = measured.row_heights.len();
-    if row_count == 0 {
-        return false;
+fn measured_rows_match_declared(measured: &MeasuredTable, declared: &[f64]) -> bool {
+    !declared.is_empty()
+        && measured
+            .row_heights
+            .iter()
+            .zip(declared)
+            .all(|(height, &minimum)| minimum > 0.0 && (height - minimum).abs() <= 0.5)
+}
+
+// [hwpx-cowork] 한 쪽을 그릴 때 N행 각각에서 전체 칸을 다시 훑지 않는다.
+// 정렬되지 않은 셀·중복 원점도 종전과 같은 단일행 칸의 최대 선언 높이를 쓴다.
+fn declared_row_heights<S: crate::storage::Storage>(
+    table: &Table,
+    rows: usize,
+    dpi: f64,
+    storage: &S,
+) -> Result<Vec<f64>, S::Error> {
+    let mut result = storage.filled(rows, 0.0f64)?;
+    for cell in &table.cells {
+        if cell.row_span == 1 {
+            if let Some(height) = result.get_mut(cell.row as usize) {
+                *height = height.max(hwpunit_to_px(cell.height as i32, dpi));
+            }
+        }
     }
-    (0..row_count).all(|row| {
-        let declared = declared_row_height_px(table, row, dpi);
-        declared > 0.0 && (measured.row_heights[row] - declared).abs() <= 0.5
-    })
+    Ok(result)
 }
 
 /// 행 `row` 의 선언 높이(px) — 그 행에서 세로 병합 없는 칸의 최댓값.
@@ -1269,16 +1286,15 @@ pub(crate) fn trim_stored_hwpx_inline_row_trailing_spacing_with_storage<
 /// 있고, 행 중간에서 끊기면 조각 경계일 수 없다 (#7147).
 fn declared_height_lands_on_a_row_boundary(
     measured: &MeasuredTable,
-    table: &Table,
+    declared: &[f64],
     target_body_height: f64,
-    dpi: f64,
 ) -> bool {
     let mut cumulative = 0.0f64;
-    for row in 0..measured.row_heights.len() {
+    for (row, &height) in declared.iter().enumerate() {
         if row > 0 {
             cumulative += measured.cell_spacing;
         }
-        cumulative += declared_row_height_px(table, row, dpi);
+        cumulative += height;
         if (cumulative - target_body_height).abs() <= 0.5 {
             return true;
         }
@@ -1291,16 +1307,14 @@ fn declared_height_lands_on_a_row_boundary(
 /// 나누는 첫 조각 높이다 (#7147 의 행 경계 판정을, 끝 행이 자란 경우로 넓힌다).
 fn declared_fragment_closes_on_a_grown_row(
     measured: &MeasuredTable,
-    table: &Table,
+    heights: &[f64],
     target_body_height: f64,
-    dpi: f64,
 ) -> bool {
     let mut cumulative = 0.0f64;
-    for row in 0..measured.row_heights.len() {
+    for (row, &declared) in heights.iter().enumerate() {
         if row > 0 {
             cumulative += measured.cell_spacing;
         }
-        let declared = declared_row_height_px(table, row, dpi);
         if declared <= 0.0 {
             return false;
         }
@@ -1386,8 +1400,9 @@ pub(crate) fn fit_measured_table_to_declared_height_with_outcome_with_storage<
     // (정본 1행 6.005mm ↔ 선언 6.004mm). 뒤는 나누지 않고 개체 높이 그대로 그린다
     // (정본 괘선 899 / 946 / 998 / 1029px → 표 높이 130px = 개체 130.2px).
     // 곧 행 중간에서 끊기는 개체 높이는 조각 경계일 수 없으므로 종전대로 화해한다.
-    if measured_rows_match_declared(&fitted, table, dpi)
-        && declared_height_lands_on_a_row_boundary(&fitted, table, target_body_height, dpi)
+    let declared = declared_row_heights(table, row_count, dpi, storage)?;
+    if measured_rows_match_declared(&fitted, &declared)
+        && declared_height_lands_on_a_row_boundary(&fitted, &declared, target_body_height)
     {
         return Ok((fitted, false));
     }
@@ -1395,7 +1410,7 @@ pub(crate) fn fit_measured_table_to_declared_height_with_outcome_with_storage<
     // 나머지 줄은 다음 쪽으로 이어진다(1613000 185쪽 29×3 표: 개체 58227HU = 행 0–26 선언 합,
     // 행 26 은 두 줄로 38.4px 까지 자라지만 한/글 2020 정본은 첫 줄만 185쪽에 두고 둘째 줄을
     // 186쪽 첫머리에 둔다. 앞 행들은 모두 선언 28.4·45.4·27.3px 그대로다).
-    if declared_fragment_closes_on_a_grown_row(&fitted, table, target_body_height, dpi) {
+    if declared_fragment_closes_on_a_grown_row(&fitted, &declared, target_body_height) {
         return Ok((fitted, false));
     }
 
@@ -1426,14 +1441,14 @@ pub(crate) fn fit_measured_table_to_declared_height_with_outcome_with_storage<
     if target_row_sum > 0.0 && current_row_sum > 0.0 {
         let scale = target_row_sum / current_row_sum;
         if scale < 1.0 {
-            let cuts_content = (0..row_count).any(|row| {
-                let floor = fitted
-                    .cells
-                    .iter()
-                    .filter(|cell| cell.row == row && cell.row_span == 1)
-                    .map(|cell| cell.total_content_height)
-                    .fold(0.0f64, f64::max);
-                floor > 0.0 && fitted.row_heights[row] * scale < floor - 0.5
+            // [hwpx-cowork] 한 행의 최대 내용 높이를 자르는지와 그 행의 어느 칸을 자르는지는 같은 판정이다.
+            let cuts_content = fitted.cells.iter().any(|cell| {
+                cell.row_span == 1
+                    && cell.total_content_height > 0.0
+                    && fitted
+                        .row_heights
+                        .get(cell.row)
+                        .is_some_and(|h| h * scale < cell.total_content_height - 0.5)
             });
             if cuts_content {
                 return Ok((fitted, true));
@@ -6850,32 +6865,29 @@ let mut tables=p.controls.iter().filter_map(|c| match c{Control::Table(t)=>Some(
         column_width_px: Option<f64>,
         storage: &S,
     ) -> Result<MeasuredSection, S::Error> {
-        let dirty_bits = match dirty_paras {
-            Some(bits) => bits,
-            None => {
-                // 전체 dirty: 모든 문단과 표를 다시 측정한다.
-                return self.measure_section_incremental_with_storage(
-                    paragraphs,
-                    composed,
-                    styles,
-                    prev_measured,
-                    column_width_px,
-                    storage,
-                );
-            }
-        };
+        if dirty_paras.is_none() {
+            return self.measure_section_incremental_with_storage(paragraphs, composed, styles, prev_measured, column_width_px, storage);
+        }
+        let mut out = MeasuredSection { fallback_paragraphs: storage.vec(paragraphs.len())?, tables: Vec::new() };
+        self.measure_section_range(paragraphs, composed, styles, prev_measured, dirty_paras,
+            column_width_px, 0..paragraphs.len(), &mut out, storage)?;
+        Ok(out)
+    }
 
-        let mut measured_paras = storage.vec(paragraphs.len())?;
-        let mut measured_tables = Vec::new();
-
-        for (para_idx, para) in paragraphs.iter().enumerate() {
-            let is_dirty = dirty_bits.get(para_idx).copied().unwrap_or(true);
-
+    // [hwpx-cowork] 조판·표 행 높이 하한·캐시의 의미는 그대로 두고 중단 가능한 문단 범위를 받는다.
+    pub(crate) fn measure_section_range<S: crate::storage::Storage>(
+        &self, paragraphs: &[Paragraph], composed: &[ComposedParagraph], styles: &ResolvedStyleSet,
+        prev_measured: &MeasuredSection, dirty_paras: Option<&[bool]>, column_width_px: Option<f64>,
+        range: std::ops::Range<usize>, out: &mut MeasuredSection, storage: &S,
+    ) -> Result<(), S::Error> {
+        for para_idx in range {
+            let para = &paragraphs[para_idx];
+            let is_dirty = dirty_paras.and_then(|bits| bits.get(para_idx)).copied().unwrap_or(true);
             if !is_dirty {
                 // 문단 측정 캐시 재사용
                 if let Some(prev_para) = prev_measured.fallback_paragraphs.get(para_idx) {
                     storage.push(
-                        &mut measured_paras,
+                        &mut out.fallback_paragraphs,
                         crate::storage::try_clone(prev_para, storage)?,
                     )?;
                     // A clean paragraph owns the validity of its table
@@ -6886,7 +6898,7 @@ let mut tables=p.controls.iter().filter_map(|c| match c{Control::Table(t)=>Some(
                                 prev_measured.get_measured_table(para_idx, ctrl_idx)
                             {
                                 storage.push(
-                                    &mut measured_tables,
+                                    &mut out.tables,
                                     crate::storage::try_clone(prev_t, storage)?,
                                 )?;
                                 continue;
@@ -6894,7 +6906,7 @@ let mut tables=p.controls.iter().filter_map(|c| match c{Control::Table(t)=>Some(
                             let mt = self.measure_table_with_storage(
                                 table, para_idx, ctrl_idx, styles, storage,
                             )?;
-                            storage.push(&mut measured_tables, mt)?;
+                            storage.push(&mut out.tables, mt)?;
                         }
                     }
                     continue;
@@ -6918,7 +6930,7 @@ let mut tables=p.controls.iter().filter_map(|c| match c{Control::Table(t)=>Some(
                 column_width_px,
                 storage,
             )?;
-            storage.push(&mut measured_paras, measured)?;
+            storage.push(&mut out.fallback_paragraphs, measured)?;
 
             for (ctrl_idx, ctrl) in para.controls.iter().enumerate() {
                 if let Control::Table(table) = ctrl {
@@ -6931,14 +6943,11 @@ let mut tables=p.controls.iter().filter_map(|c| match c{Control::Table(t)=>Some(
                             Self::floor_rows_to_prev_with_storage(&mut mt, prev, cs, storage)?;
                         }
                     }
-                    storage.push(&mut measured_tables, mt)?;
+                    storage.push(&mut out.tables, mt)?;
                 }
             }
         }
-        Ok(MeasuredSection {
-            fallback_paragraphs: measured_paras,
-            tables: measured_tables,
-        })
+        Ok(())
     }
 
     /// 캡션의 높이를 측정한다.

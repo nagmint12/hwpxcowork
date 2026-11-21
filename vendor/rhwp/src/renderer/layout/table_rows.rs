@@ -15,8 +15,11 @@ struct RowMembers {
     single_by_column: Vec<usize>,
 }
 
+#[derive(Default)]
 struct RowIndex {
     rows: HashMap<usize, RowMembers>,
+    // [hwpx-cowork] 행 우선 격자의 열 순서와 원본 순서는 같다. 행마다 두 Vec을 만들지 않는다.
+    ordered: Vec<usize>,
     spanning: Vec<usize>,
     // [hwpx-cowork] 쪽을 넘긴 걸침 칸의 높이를 계산할 때만 끝 행별 원본 칸 순서를 만든다.
     spanning_by_end_row: OnceLock<HashMap<usize, Vec<usize>>>,
@@ -29,6 +32,12 @@ struct RowIndex {
 
 impl RowIndex {
     fn new(table: &Table) -> Self {
+        if table.row_major_unmerged() {
+            return Self {
+                ordered: (0..table.cells.len()).collect(),
+                ..Self::default()
+            };
+        }
         let mut rows = HashMap::<usize, RowMembers>::new();
         let mut spanning = Vec::new();
         for (index, cell) in table.cells.iter().enumerate() {
@@ -48,6 +57,7 @@ impl RowIndex {
         Self {
             rows,
             spanning,
+            ordered: Vec::new(),
             spanning_by_end_row: OnceLock::new(),
             raw_heights: OnceLock::new(),
             declared_shrink: OnceLock::new(),
@@ -71,7 +81,22 @@ impl Drop for TableRows<'_> {
 }
 
 impl TableRows<'_> {
+    fn ordered_row(&self, row: usize) -> Option<&[usize]> {
+        if self.index.ordered.is_empty() {
+            return None;
+        }
+        let cols = usize::from(self.table.col_count);
+        Some(if row < usize::from(self.table.row_count) {
+            &self.index.ordered[row * cols..(row + 1) * cols]
+        } else {
+            &[]
+        })
+    }
+
     pub(super) fn starting(&self, row: usize) -> &[usize] {
+        if let Some(indices) = self.ordered_row(row) {
+            return indices;
+        }
         self.index
             .rows
             .get(&row)
@@ -79,6 +104,9 @@ impl TableRows<'_> {
     }
 
     pub(super) fn single_by_column(&self, row: usize) -> &[usize] {
+        if let Some(indices) = self.ordered_row(row) {
+            return indices;
+        }
         self.index
             .rows
             .get(&row)

@@ -116,8 +116,23 @@ pub(crate) struct InlineFlowRow {
 crate::storage::clone_fields!(InlineFlowRow, {boxes, x, y, width, frame_x, frame_width, height, baseline});
 
 /// 좌표와 높이는 같은 계산의 결과다. 확정 후 단 상대 좌표로 보관한다.
+// [hwpx-cowork] 자연 쪽 나눔에서 앞 개체가 정한 단과 배제 영역을 그대로 보존한다.
+// 같은 문단의 글자나 개체가 바뀌면 기존 조판기로 그 줄의 새 문자 범위를 계산한다.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InlineFlowFrame {
+    pub(crate) column: super::page_layout::LayoutRect,
+    pub(crate) body: super::page_layout::LayoutRect,
+    pub(crate) page_width: f64,
+    pub(crate) page_height: f64,
+    pub(crate) start: f64,
+    pub(crate) reflow_stored_text: bool,
+    pub(crate) exclusions: Vec<FrameExclusion>,
+}
+crate::storage::clone_fields!(InlineFlowFrame, {column, body, page_width, page_height, start, reflow_stored_text, exclusions});
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineFlowPlan {
+    pub(crate) source_frame: Option<std::sync::Arc<InlineFlowFrame>>,
     /// 정상 저장 증언으로 확정한 빈 부동 개체 호스트의 실제 줄 예약.
     pub(crate) stored_empty_host: bool,
     /// 절대 전폭 개체의 예약 뒤에서 시작하는 첫 저장 부분 문단.
@@ -140,7 +155,7 @@ pub struct InlineFlowPlan {
     next_row_top: f64,
     fallback_font_size: f64,
 }
-crate::storage::clone_fields!(InlineFlowPlan, {stored_empty_host, stored_float_host, text_rows, square_host_control, text_spacing_before, square_host_placement, square_host_exclusion, floating_shapes, start, end, boxes, rows, carved, next_row_top, fallback_font_size});
+crate::storage::clone_fields!(InlineFlowPlan, {source_frame, stored_empty_host, stored_float_host, text_rows, square_host_control, text_spacing_before, square_host_placement, square_host_exclusion, floating_shapes, start, end, boxes, rows, carved, next_row_top, fallback_font_size});
 
 impl InlineFlowPlan {
     /// 확정한 행의 물리 하단. 다음 줄 전진과 문단 뒤 여백을 구분한다.
@@ -558,6 +573,7 @@ pub(crate) fn plan_with_storage<S: crate::storage::Storage>(
     let mut exclusions = storage.collect(preceding.iter().cloned())?;
     let horizontal = frame.container.x..frame.container.x + frame.container.width;
     let mut result = InlineFlowPlan {
+        source_frame: None,
         stored_empty_host: false,
         stored_float_host: false,
         text_rows: None,
@@ -1163,6 +1179,7 @@ fn plan_text_rows_with_storage<S: crate::storage::Storage>(
         });
     let end = text_top + hwpunit_to_px(frame.top, placement.dpi) + style.spacing_after;
     Ok(Some(InlineFlowPlan {
+        source_frame: None,
         stored_empty_host: false,
         stored_float_host: false,
         start: placement.paragraph_y,
@@ -1388,6 +1405,7 @@ pub(crate) fn plan_square_table_host(
     }
     let end = spacing_before + hwpunit_to_px(flow_end, dpi) + style.spacing_after;
     Some(InlineFlowPlan {
+        source_frame: None,
         stored_empty_host: false,
         stored_float_host: false,
         text_rows: Some(rows),

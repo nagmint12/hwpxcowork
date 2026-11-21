@@ -11,6 +11,8 @@ use std::collections::HashSet;
 pub(crate) struct ProgressiveOpenJob {
     pub typesetter: TypesetEngine,
     pub job: SectionTypesetJob,
+    // [hwpx-cowork] 미리보기와 같은 조판 작업에서 수집한다. 완료할 때만 공개한다.
+    pub checkpoints: Option<super::TypesetCheckpointStore>,
     /// 멈춘 구역.
     pub section_index: usize,
     pub config: ProgressiveOpenConfig,
@@ -19,6 +21,7 @@ pub(crate) struct ProgressiveOpenJob {
 pub(crate) struct ProgressiveOpenConfig {
     /// 문서 끝 미주 구역(마지막 아님): 미주 본문을 이 구역에서 그리지 않는다(`EndnoteDeferral::Suppress`).
     pub suppress_endnotes: bool,
+    pub deferred_endnotes: Vec<crate::renderer::pagination::DeferredEndnote>, // [hwpx-cowork] 구역 사이 미주의 원본 번호와 내용 유지
     pub column_def: ColumnDef,
     pub skip_spacing_before_prededuct: bool,
     pub hwp3_origin_page_tolerance: bool,
@@ -33,7 +36,7 @@ impl DocumentCore {
         }
         Ok(())
     }
-    fn progressive_open_input<'a>(&'a self, section_index: usize, config: &'a ProgressiveOpenConfig) -> SectionTypesetInput<'a> {
+    pub(super) fn progressive_open_input<'a>(&'a self, section_index: usize, config: &'a ProgressiveOpenConfig) -> SectionTypesetInput<'a> {
         let section = &self.document.sections[section_index];
         let source_revision = self.render_normalization.section_revisions[section_index];
         let normalized = self.render_normalization.sections[section_index].as_ref()
@@ -53,7 +56,7 @@ impl DocumentCore {
             footnote_shape: Some(&section.section_def.footnote_shape),
             endnote_shape: Some(&section.section_def.endnote_shape),
             force_break_before: &config.force_break_before,
-            endnote_deferral: if config.suppress_endnotes { EndnoteDeferral::Suppress } else { EndnoteDeferral::None },
+            endnote_deferral: if !config.deferred_endnotes.is_empty() { EndnoteDeferral::RenderAll(&config.deferred_endnotes) } else if config.suppress_endnotes { EndnoteDeferral::Suppress } else { EndnoteDeferral::None },
         }
     }
 
@@ -77,12 +80,23 @@ impl DocumentCore {
         let input = self.progressive_open_input(section_index, &pending.config);
         // [hwpx-cowork] 나뉜 칸 미룬 개체 띠 표는 이 문서 키로 채운다.
         let _split_cell_doc = crate::renderer::layout::split_cell_doc_scope(self.split_cell_doc_id);
-        let complete = pending.typesetter.step_section(
-            &mut pending.job, &input, paragraph_budget.max(1), usize::MAX,
-        );
+        // [hwpx-cowork] flush(usize::MAX)도 정상적인 점진 열기와 같은 재개 지점을 남긴다.
+        let start = pending.job.processed_paragraphs();
+        let complete = loop {
+            let remaining = paragraph_budget.max(1).saturating_sub(pending.job.processed_paragraphs() - start);
+            if remaining == 0 { break false; }
+            let page_budget = if pending.checkpoints.is_some() { 2 } else { usize::MAX };
+            if pending.typesetter.step_section(&mut pending.job, &input, remaining, page_budget) {
+                break true;
+            }
+            if let Some(store) = pending.checkpoints.as_mut() {
+                store.checkpoints.record_open_step(&pending.job);
+            }
+        };
         if complete {
             let input = self.progressive_open_input(section_index, &pending.config);
             let result = pending.typesetter.finish_section(pending.job, &input);
+            self.typeset_checkpoints[section_index] = pending.checkpoints;
             self.progressive_open_completed = Some((section_index, result, self.measured_sections[section_index].clone()));
             // 앞 구역은 끝난 조판을 그대로 쓰고(dirty 아님), 뒤 구역은 처음부터 dirty 다.
             self.dirty_sections[section_index] = true;

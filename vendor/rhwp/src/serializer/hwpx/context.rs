@@ -108,6 +108,7 @@ pub struct ChartPartEntry {
 /// 1-pass 스캔으로 구축되는 직렬화 컨텍스트.
 #[derive(Debug)]
 pub struct SerializeContext {
+    pub(super) chunk: Option<super::cooperative::ChunkHook>, // [hwpx-cowork] 독립 저장 사본에서만 설정
     pub char_shape_ids: IdPool<u32>,
     pub para_shape_ids: IdPool<u16>,
     pub border_fill_ids: IdPool<u16>,
@@ -202,6 +203,7 @@ pub struct SerializeContext {
 impl Default for SerializeContext {
     fn default() -> Self {
         Self {
+            chunk: None,
             char_shape_ids: IdPool::default(),
             line_segs_on_hwpx_axis: false,
             line_segs_on_paragraph_axis: false,

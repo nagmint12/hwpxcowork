@@ -4,7 +4,8 @@ import type { EndnoteShapeSettings } from '@/core/types';
 import { HWPUNIT_PER_MM } from '@/core/hwp-constants';
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { CommandServices } from '@/command/types';
-import { applyThroughRouter } from './dialog-apply';
+import { applyCommandThroughRouter, applyThroughRouter } from './dialog-apply';
+import { PageSourceCommand } from '@/engine/command';
 
 import { t } from '../i18n/index.ts';
 type LineTypeChoice = {
@@ -253,17 +254,36 @@ export class EndnoteShapeDialog extends ModalDialog {
     const unchanged = (Object.keys(next) as (keyof NoteShapeSettings)[])
       .every((k) => next[k] === this.settings[k]);
 
-    // [미주 모양 이관] snapshot 으로 라우팅(#2077 동형). services 미주입 시 직접 적용 fallback.
+    if (unchanged) return true;
     const apply = () => (footnote
       ? this.wasm.applyFootnoteShape(this.sectionIdx, next as unknown as Record<string, unknown>)
       : this.wasm.applyEndnoteShape(this.sectionIdx, next));
+    if (this.wasm.supportsNoteShapeHistory?.()) {
+      return applyCommandThroughRouter({
+        services: this.services,
+        label: footnote ? 'FootnoteShapeDialog' : 'EndnoteShapeDialog',
+        command: ih => ({
+          kind: 'command',
+          command: new PageSourceCommand(footnote ? 'footnoteShape' : 'endnoteShape', ih.getCursorPosition(), wasm => {
+            const saved = wasm.captureNoteShape(this.sectionIdx, !footnote);
+            try {
+              apply();
+              return saved;
+            } catch (error) {
+              saved.free();
+              throw error;
+            }
+          }),
+        }),
+        fallback: () => { apply(); this.eventBus.emit('document-changed'); },
+      });
+    }
     return applyThroughRouter({
       services: this.services,
       label: footnote ? 'FootnoteShapeDialog' : 'EndnoteShapeDialog',
       operationType: footnote ? 'footnoteShape' : 'endnoteShape',
       // 무변경이면 뮤테이션도 기록도 생략(null) — phantom 엔트리·스냅샷 2슬롯 방지.
       operation: (ih) => {
-        if (unchanged) return null;
         apply();
         return ih.getCursorPosition();
       },

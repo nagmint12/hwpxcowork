@@ -204,7 +204,7 @@ impl DocumentCore {
         self.refresh_endnote_numbers(section_idx);
         self.mark_section_dirty(section_idx);
         self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        self.request_interactive_layout(); // [hwpx-cowork] 주석의 원본 변경 뒤 쪽 계산을 별도로 진행한다.
         // 각주 번호는 구역의 각주 모양(시작 번호·이어 세기·쪽마다 새로 시작)을 따른다.
         self.refresh_footnote_numbers(section_idx);
         self.invalidate_page_tree_cache();
@@ -356,6 +356,29 @@ impl DocumentCore {
             }
             _ => {}
         }
+        self.refresh_edited_endnote(section_idx, para_idx, control_idx, fn_para_idx);
+    }
+
+    // [hwpx-cowork] 미주는 본문 끝의 가상 문단을 통해 그린다. 제자리의 편집도 같은 세대의 내용을 보여준다.
+    fn refresh_edited_endnote(&mut self, section_idx: usize, para_idx: usize, control_idx: usize, inner: usize) {
+        if !self.typeset_tail_deferral { return; }
+        let Some(Control::Endnote(note)) = self.document.sections.get(section_idx)
+            .and_then(|s| s.paragraphs.get(para_idx)).and_then(|p| p.controls.get(control_idx)) else { return; };
+        let mut render_sections = Vec::new();
+        for (render_section, result) in self.pagination.iter_mut().enumerate() {
+            for (source, rendered) in result.endnote_para_sources.iter().zip(&mut result.endnote_paragraphs) {
+                if source.section_index == section_idx && source.para_index == para_idx && source.control_index == control_idx
+                    && source.cell_path.is_empty() && source.note_para_index == inner {
+                    if let Some(updated) = crate::renderer::typeset::TypesetEngine::edited_endnote_paragraph(note, source) {
+                        *rendered = updated;
+                        if render_section != section_idx && render_sections.last() != Some(&render_section) {
+                            render_sections.push(render_section);
+                        }
+                    }
+                }
+            }
+        }
+        for idx in render_sections { self.mark_section_dirty(idx); } // [hwpx-cowork] 문서 끝 미주는 그리는 구역도 갱신한다.
     }
 
     /// 각주/미주 내부 문단 속성 조회.
@@ -436,7 +459,10 @@ impl DocumentCore {
         }
 
         self.document.sections[section_idx].raw_stream = None;
-        self.rebuild_section(section_idx);
+        self.rebuild_resolved_styles();
+        self.refresh_edited_endnote(section_idx, para_idx, control_idx, fn_para_idx);
+        self.mark_section_dirty_from(section_idx, para_idx);
+        self.request_interactive_layout(); // [hwpx-cowork] 주석 서식은 본문 전체를 다시 조합하지 않는다.
         self.event_log.push(DocumentEvent::ParaFormatChanged {
             section: section_idx,
             para: para_idx,
@@ -520,8 +546,8 @@ impl DocumentCore {
         self.reflow_footnote_paragraph(section_idx, para_idx, control_idx, fn_para_idx);
 
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        self.mark_section_dirty_from(section_idx, para_idx);
+        self.request_interactive_layout(); // [hwpx-cowork] 주석의 원본 변경 뒤 쪽 계산을 별도로 진행한다.
 
         let new_offset = char_offset + new_chars_count;
         self.event_log.push(DocumentEvent::TextInserted {
@@ -556,8 +582,8 @@ impl DocumentCore {
         self.reflow_footnote_paragraph(section_idx, para_idx, control_idx, fn_para_idx);
 
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        self.mark_section_dirty_from(section_idx, para_idx);
+        self.request_interactive_layout(); // [hwpx-cowork] 주석의 원본 변경 뒤 쪽 계산을 별도로 진행한다.
 
         self.event_log.push(DocumentEvent::TextDeleted {
             section: section_idx,
@@ -640,8 +666,8 @@ impl DocumentCore {
         self.reflow_footnote_paragraph(section_idx, para_idx, control_idx, new_para_idx);
 
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        self.mark_section_dirty_from(section_idx, para_idx);
+        self.request_interactive_layout(); // [hwpx-cowork] 주석의 원본 변경 뒤 쪽 계산을 별도로 진행한다.
 
         self.event_log.push(DocumentEvent::ParagraphSplit {
             section: section_idx,
@@ -719,8 +745,8 @@ impl DocumentCore {
         self.reflow_footnote_paragraph(section_idx, para_idx, control_idx, prev_idx);
 
         self.document.sections[section_idx].raw_stream = None;
-        self.mark_section_dirty(section_idx);
-        self.paginate_if_needed();
+        self.mark_section_dirty_from(section_idx, para_idx);
+        self.request_interactive_layout(); // [hwpx-cowork] 주석의 원본 변경 뒤 쪽 계산을 별도로 진행한다.
 
         self.event_log.push(DocumentEvent::ParagraphMerged {
             section: section_idx,

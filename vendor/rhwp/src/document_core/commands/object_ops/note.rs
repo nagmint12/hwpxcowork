@@ -122,8 +122,8 @@ impl DocumentCore {
 
         let section = &mut self.document.sections[section_idx];
         section.raw_stream = None;
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        self.recompose_paragraph(section_idx, parent_para_idx); // [hwpx-cowork] 원본 수식 소유 문단
+        self.request_interactive_layout(); // [hwpx-cowork] 원본 표식을 먼저 확정한다.
 
         Ok(crate::document_core::helpers::json_ok())
     }
@@ -601,8 +601,8 @@ impl DocumentCore {
         // 프레임 수용은 같은 저장 줄의 점유를 소비하는 pagination이 계산한다.
 
         // 리플로우 + 페이지네이션
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        self.recompose_paragraph(section_idx, para_idx); // [hwpx-cowork] 각주·미주 표식 소유 문단
+        self.request_interactive_layout(); // [hwpx-cowork] 원본 표식을 먼저 확정한다.
         // 새 각주와 뒤 각주의 번호·모양을 구역의 각주 모양대로 맞춘다(한/글처럼 모양을 따른다).
         self.refresh_footnote_numbers(section_idx);
         self.invalidate_page_tree_cache();
@@ -737,8 +737,8 @@ impl DocumentCore {
         // 대화형 편집의 관문과 같은 한 곳을 쓴다.
         self.reflow_paragraph(section_idx, para_idx);
 
-        self.recompose_section(section_idx);
-        self.paginate_if_needed();
+        self.recompose_paragraph(section_idx, para_idx); // [hwpx-cowork] 각주·미주 표식 소유 문단
+        self.request_interactive_layout(); // [hwpx-cowork] 원본 표식을 먼저 확정한다.
         self.invalidate_page_tree_cache();
 
         self.event_log.push(DocumentEvent::PictureInserted {

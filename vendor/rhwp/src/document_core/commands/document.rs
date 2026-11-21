@@ -500,6 +500,10 @@ fn from_bytes_inner(
             deferred_pagination_descriptor: None,
             pending_pagination_job: None,
             typeset_checkpoints: Vec::new(),
+            flow_sections: Vec::new(), // [hwpx-cowork]
+            row_tail: None,
+            row_paint: None, // [hwpx-cowork]
+            row_text: None, // [hwpx-cowork]
             typeset_unchanged_before: Vec::new(),
             typeset_resume: Default::default(),
             typeset_tail_deferral: false,
@@ -515,6 +519,7 @@ fn from_bytes_inner(
             only_text_edits_pending: std::cell::Cell::new(false),
             progressive_open_page_budget: None,
             progressive_open_job: None,
+            interactive_layout: Default::default(), // [hwpx-cowork]
             progressive_open_completed: None,
             page_tree_cache: RefCell::new(Vec::new()),
             header_footer_preview_tree_cache: RefCell::new(None),
@@ -4183,19 +4188,69 @@ fn from_bytes_inner(
 
     pub fn save_snapshot_native(&mut self) -> u32 {
         self.flush_cell_format_vpos();
+        let snapshot = crate::document_core::UndoSnapshot::Full(
+            Box::new(self.document.clone()), self.text_reflowed_table_paths_for_snapshot(),
+        );
+        self.store_undo_snapshot(snapshot)
+    }
+
+    // [hwpx-cowork] 일반 스냅샷의 절대 복원 계약은 보존한다. 웹의 단일 Ctrl+Enter만
+    // 캡처 범위를 지정하고, 저장 좌표·정규화 등 다른 의존성이 있으면 전체 상태를 잡는다.
+    pub fn save_page_break_undo(&mut self, section: usize, para: usize, offset: usize) -> u32 {
+        self.flush_cell_format_vpos();
+        if let Some(local) = self.capture_page_break_undo(section, para, offset) {
+            self.store_undo_snapshot(crate::document_core::UndoSnapshot::PageBreak(Box::new(local)))
+        } else {
+            self.save_snapshot_native()
+        }
+    }
+
+    // [hwpx-cowork] Studio가 한 행 추가를 확정한 경우에만 범위를 한정한 Undo를 요청한다.
+    pub fn save_insert_row_undo(
+        &mut self,
+        section: usize,
+        para: usize,
+        control: usize,
+        after: u16,
+    ) -> u32 {
+        self.flush_cell_format_vpos();
+        if let Some(local) = self.capture_insert_row_undo(section, para, control, after) {
+            self.store_undo_snapshot(crate::document_core::UndoSnapshot::InsertRow(Box::new(
+                local,
+            )))
+        } else {
+            self.save_snapshot_native()
+        }
+    }
+
+    fn store_undo_snapshot(&mut self, snapshot: crate::document_core::UndoSnapshot) -> u32 {
         let id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
-        self.snapshot_store.push((
-            id,
-            self.document.clone(),
-            self.text_reflowed_table_paths_for_snapshot(),
-        ));
+        self.snapshot_store.push((id, snapshot));
         // 초과 시 가장 오래된 스냅샷 제거. 상한은 `Self::MAX_SNAPSHOTS` 하나뿐이고
         // studio 는 `snapshotCapacity()` 로 그 값을 받아 예산을 계산한다(#7002 후속).
         while self.snapshot_store.len() > Self::MAX_SNAPSHOTS {
             self.snapshot_store.remove(0);
         }
         id
+    }
+
+    // [hwpx-cowork] 이전 스냅샷이 보장하는 복원 범위를 양방향으로 사용한다.
+    pub fn save_redo_snapshot(&mut self, before: u32) -> u32 {
+        self.flush_cell_format_vpos();
+        let redo = self
+            .snapshot_store
+            .iter()
+            .find(|(id, _)| *id == before)
+            .and_then(|(_, s)| match s {
+                crate::document_core::UndoSnapshot::InsertRow(row) => self.capture_row_redo(row),
+                _ => None,
+            });
+        if let Some(row) = redo {
+            self.store_undo_snapshot(crate::document_core::UndoSnapshot::RedoRow(Box::new(row)))
+        } else {
+            self.save_snapshot_native()
+        }
     }
 
     /// 그림 신원 키의 세대를 올린다 (Task #3315).
@@ -4223,11 +4278,23 @@ fn from_bytes_inner(
         let idx = self
             .snapshot_store
             .iter()
-            .position(|(sid, _, _)| *sid == id)
+            .position(|(sid, _)| *sid == id)
             .ok_or_else(|| HwpError::RenderError(format!("스냅샷 {} 없음", id)))?;
-        let (_, doc, text_reflowed_table_paths) = self.snapshot_store[idx].clone();
-        self.document = doc;
-        self.restore_text_reflowed_tables_from_snapshot(&text_reflowed_table_paths);
+        match self.snapshot_store[idx].1.clone() {
+            crate::document_core::UndoSnapshot::Full(doc, paths) => {
+                self.document = *doc;
+                self.restore_text_reflowed_tables_from_snapshot(&paths);
+            }
+            crate::document_core::UndoSnapshot::PageBreak(saved) => self.undo_page_break(*saved)?,
+            crate::document_core::UndoSnapshot::InsertRow(saved) => {
+                self.undo_insert_row(*saved)?;
+                return Ok(super::super::helpers::json_ok());
+            }
+            crate::document_core::UndoSnapshot::RedoRow(saved) => {
+                self.redo_insert_row(*saved)?;
+                return Ok(super::super::helpers::json_ok());
+            }
+        }
         self.bump_bin_data_epoch();
         // 문서를 통째로 갈아끼웠으므로 파생 상태는 전부 새 원본에서 다시 만든다.
         self.rebuild_derived_state();
@@ -4236,7 +4303,7 @@ fn from_bytes_inner(
 
     /// 지정 ID의 스냅샷을 저장소에서 제거하여 메모리를 해제한다.
     pub fn discard_snapshot_native(&mut self, id: u32) {
-        self.snapshot_store.retain(|(sid, _, _)| *sid != id);
+        self.snapshot_store.retain(|(sid, _)| *sid != id);
     }
 
     pub fn measure_width_diagnostic_native(

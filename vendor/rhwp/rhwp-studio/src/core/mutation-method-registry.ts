@@ -19,6 +19,7 @@
 
 /** 문서 IR(직렬화 결과)을 바꾸는 WasmBridge 공개 메서드 전수. */
 export const MUTATING_METHODS: readonly string[] = [
+  'applyBodyRangeFormat', 'swapBodyRangeFormat', // [hwpx-cowork] 선택 전체를 원본 좌표의 한 이력으로 기록한다.
   // 쪽/구역/다단
   'setPageDef', 'setPageMargin', 'setSectionDef', 'setSectionDefAll', 'setPageBorderFill', 'setColumnDef',
   // 본문 텍스트/문단
@@ -28,7 +29,7 @@ export const MUTATING_METHODS: readonly string[] = [
   'clearParagraphBreak', // [hwpx-cowork] 쪽·단 나누기 지우기(Backspace·Delete)
   'deleteRangeAcross', // [hwpx-cowork] 구역을 넘는 범위 지우기 — 구역 합치기(docs/SECTIONS.md)
   // [hwpx-cowork] 한/글 2022 서식·쪽(h2022-format): 현재 다단·다단 설정 나누기·쪽 번호 매기기·감추기·구역 나누기·번호 수준·각주 모양
-  'setColumnDefAt', 'insertColumnDefBreak', 'setPageNumbering', 'setPageHide', 'splitSection', 'changeParaNumberLevel', 'applyFootnoteShape',
+  'setColumnDefAt', 'insertColumnDefBreak', 'setPageNumbering', 'setPageHide', 'swapPageHide', 'replaceMasterText', 'swapMasterText', 'splitSection', 'changeParaNumberLevel', 'applyFootnoteShape',
   'applyMarkpen', 'applyMarkpenInCell', 'createNumberingEx', // [hwpx-cowork] 형광펜(markpen)·문단 번호 사용자 정의(h2022-format)
   'applyMarkpenTarget', // [hwpx-cowork] 형광펜 — 머리말·꼬리말·각주·미주·표 칸 경로(중첩 표·글상자) 문단(h2022-format 3차)
   'makeTableOfContents', 'updateTableOfContents', 'updateAllTablesOfContents', 'setTitleMark', // [hwpx-cowork] 차례 만들기·새로 고침·제목 차례 표시
@@ -65,7 +66,7 @@ export const MUTATING_METHODS: readonly string[] = [
   'setChartFormatByIndex', // [hwpx-cowork] 2026-11-12 한/글 2022 차트 종류·구성·색·레이아웃(h2022-chart) — 대화상자가 executeOperation snapshot 안에서 부른다
   'insertChart', // [hwpx-cowork] 차트 넣기 — 컨트롤 + Chart/chartN.xml 슬롯
   // 각주/미주
-  'insertFootnote', 'insertEndnote', 'deleteFootnote', 'applyEndnoteShape',
+  'insertFootnote', 'insertEndnote', 'deleteFootnote', 'applyEndnoteShape', 'swapNoteShape',
   'insertTextInFootnote', 'deleteTextInFootnote', 'splitParagraphInFootnote',
   'mergeParagraphInFootnote', 'applyParaFormatInFootnote',
   // 붙여넣기

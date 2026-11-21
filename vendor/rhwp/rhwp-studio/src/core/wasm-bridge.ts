@@ -354,8 +354,76 @@ interface DocumentFontEnvironmentApi {
   setFontEnvironment(environment?: string): boolean;
 }
 
+// [hwpx-cowork] 실행 취소용 WASM 객체를 문서 이력 수명에 맞춰 해제한다.
+export interface ParagraphHistory { free(): void }
+export type MasterTextEntry = { section: number; master: number; paragraph: number; text: string };
+interface PageSourceApi {
+  getSourceFormat(): string;
+  captureNoteShape(section: number, endnote: boolean): ParagraphHistory;
+  swapNoteShape(history: ParagraphHistory): void;
+  capturePageHide(section: number, paragraph: number): ParagraphHistory;
+  swapPageHide(history: ParagraphHistory): void;
+  getPageMasterText(page: number): string;
+  replaceMasterText(section: number, master: number, paragraph: number, old: string, next: string): ParagraphHistory;
+  swapMasterText(history: ParagraphHistory): void;
+}
+
+export interface BodyRangeHistory {
+  isEmpty(): boolean;
+  free(): void;
+}
+interface BodyRangeApi {
+  applyBodyRangeFormat(section: number, paragraph: number, offset: number,
+    endSection: number, endParagraph: number, endOffset: number, properties: string, page: number): BodyRangeHistory;
+  swapBodyRangeFormat(history: BodyRangeHistory, page: number): void;
+}
 export class WasmBridge {
   private doc: HwpDocument | null = null;
+  supportsBodyRangeFormat(): boolean {
+    return typeof (this.doc as unknown as Partial<BodyRangeApi> | null)?.applyBodyRangeFormat === 'function';
+  }
+  applyBodyRangeFormat(
+    start: DocumentPosition, end: DocumentPosition, props: Record<string, unknown>, page: number,
+  ): BodyRangeHistory {
+    return (this.doc as unknown as BodyRangeApi).applyBodyRangeFormat(
+      start.sectionIndex, start.paragraphIndex, start.charOffset,
+      end.sectionIndex, end.paragraphIndex, end.charOffset, JSON.stringify(props), page,
+    );
+  }
+  swapBodyRangeFormat(history: BodyRangeHistory, page: number): void {
+    (this.doc as unknown as BodyRangeApi).swapBodyRangeFormat(history, page);
+  }
+  supportsPageSourceEdits(): boolean {
+    return typeof (this.doc as unknown as Partial<PageSourceApi> | null)?.capturePageHide === 'function';
+  }
+  supportsNoteShapeHistory(): boolean {
+    const api = this.doc as unknown as Partial<PageSourceApi> | null;
+    return typeof api?.captureNoteShape === 'function' && api.getSourceFormat?.() === 'hwpx';
+  }
+  captureNoteShape(section: number, endnote: boolean): ParagraphHistory {
+    return (this.doc as unknown as PageSourceApi).captureNoteShape(section, endnote);
+  }
+  swapNoteShape(history: ParagraphHistory): void {
+    (this.doc as unknown as PageSourceApi).swapNoteShape(history);
+  }
+  capturePageHide(section: number, paragraph: number): ParagraphHistory {
+    return (this.doc as unknown as PageSourceApi).capturePageHide(section, paragraph);
+  }
+  swapPageHide(history: ParagraphHistory): void {
+    (this.doc as unknown as PageSourceApi).swapPageHide(history);
+  }
+  getPageMasterText(page: number): MasterTextEntry[] {
+    return JSON.parse((this.doc as unknown as PageSourceApi).getPageMasterText(page));
+  }
+  replaceMasterText(entry: MasterTextEntry, next: string): ParagraphHistory {
+    return (this.doc as unknown as PageSourceApi).replaceMasterText(
+      entry.section, entry.master, entry.paragraph, entry.text, next,
+    );
+  }
+  swapMasterText(history: ParagraphHistory): void {
+    (this.doc as unknown as PageSourceApi).swapMasterText(history);
+  }
+
   private canvasMetrics = new CanvasMetricSession();
   private readonly hostCanvasFonts = new HostCanvasFontSession(inspectFontSymbols);
   private readonly nativePuaFonts = new NativePuaFontSession();
@@ -808,6 +876,17 @@ export class WasmBridge {
    * 지나므로 여기가 단일 지점이다.
    */
   onBeforeExport: (() => void) | null = null;
+  // [hwpx-cowork] 호스트 비동기 저장에서 현재 쪽 밖의 조판을 이벤트 루프에 양보한다.
+  prepareAsyncExport?: (pause?: () => Promise<void>) => Promise<void>;
+
+  // [hwpx-cowork] 구버전 엔진과 짧은 문서는 동기 XML writer를 사용할 수 있다.
+  beginHwpxSave() {
+    type Save = { step(units: number): boolean; finish(): Uint8Array; free(): void };
+    const doc = this.doc as unknown as { beginHwpxSave?: () => Save | undefined } | null;
+    if (!doc?.beginHwpxSave) return null;
+    this.onBeforeExport?.();
+    return doc.beginHwpxSave() ?? null;
+  }
 
   exportHwp(): Uint8Array {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
@@ -1025,6 +1104,11 @@ export class WasmBridge {
     if (d && typeof d.setTypesetTailDeferral === 'function') d.setTypesetTailDeferral(this._typesetTailDeferral);
   }
 
+  interactiveLayoutPending(): boolean {
+    const doc = this.doc as unknown as { interactiveLayoutPending?: () => boolean } | null;
+    return doc?.interactiveLayoutPending?.() ?? false;
+  }
+
   typesetTailPending(): boolean {
     const d = this.doc as unknown as { typesetTailPending?: () => boolean } | null;
     return !!d && typeof d.typesetTailPending === 'function' && d.typesetTailPending();
@@ -1095,6 +1179,11 @@ export class WasmBridge {
   getPageInfo(pageNum: number): PageInfo {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return JSON.parse(this.doc.getPageInfo(pageNum));
+  }
+
+  /** [hwpx-cowork] 편집 뒤 가상 스크롤에 필요한 연속 용지 크기. 이전 WASM은 개별 조회한다. */
+  getPageSizeRuns(): string | undefined {
+    return (this.doc as { getPageSizeRuns?: () => string } | null)?.getPageSizeRuns?.();
   }
 
   refreshLayout(): void {
@@ -2280,6 +2369,12 @@ export class WasmBridge {
     return JSON.parse(this.doc.getControls());
   }
 
+  // [hwpx-cowork] 구형 엔진은 undefined, 현재 격자에 칸이 없는 자리는 null.
+  getTableCellIndexAt(sec: number, para: number, ctrl: number, row: number, col: number): number | null | undefined {
+    const doc = this.doc as { getTableCellIndexAt?: (s: number, p: number, c: number, r: number, k: number) => number | undefined } | null;
+    return doc?.getTableCellIndexAt ? doc.getTableCellIndexAt(sec, para, ctrl, row, col) ?? null : undefined;
+  }
+
   getTableDimensions(sec: number, parentPara: number, controlIdx: number): TableDimensions {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return JSON.parse(this.doc.getTableDimensions(sec, parentPara, controlIdx));
@@ -3422,6 +3517,38 @@ export class WasmBridge {
 
   // ─── Selection API ──────────────────────────────────────
 
+  /** [hwpx-cowork] 논리 선택 범위 안에서 화면에 보이는 본문 줄과 표 조각만 칠한다. */
+  getVisibleBodySelection(
+    pages: number[], start: DocumentPosition, end: DocumentPosition,
+  ): SelectionRect[] | null {
+    const doc = this.doc as unknown as {
+      getBodySelectionOnPage?: (page: number, section: number, para: number, offset: number,
+        endSection: number, endPara: number, endOffset: number) => string;
+    } | null;
+    if (!doc?.getBodySelectionOnPage) return null;
+    const result: SelectionRect[] = [];
+    for (const page of pages) {
+      const projection: { rects: SelectionRect[]; tables: [number, number, number][] } = JSON.parse(
+        doc.getBodySelectionOnPage(page, start.sectionIndex, start.paragraphIndex, start.charOffset,
+          end.sectionIndex, end.paragraphIndex, end.charOffset),
+      );
+      result.push(...projection.rects);
+      for (const [section, paragraph, control] of projection.tables) {
+        const cells = this.getTableCellBboxesAtPage(section, paragraph, control, page);
+        if (!cells.length) continue;
+        let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+        for (const cell of cells) {
+          left = Math.min(left, cell.x);
+          top = Math.min(top, cell.y);
+          right = Math.max(right, cell.x + cell.w);
+          bottom = Math.max(bottom, cell.y + cell.h);
+        }
+        result.push({ pageIndex: page, x: left, y: top, width: right - left, height: bottom - top });
+      }
+    }
+    return result;
+  }
+
   getSelectionRects(sec: number, startPara: number, startOffset: number, endPara: number, endOffset: number): SelectionRect[] {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return JSON.parse(this.doc.getSelectionRects(sec, startPara, startOffset, endPara, endOffset));
@@ -3974,6 +4101,23 @@ export class WasmBridge {
   saveSnapshot(): number {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return this.doc.saveSnapshot();
+  }
+
+  // [hwpx-cowork] 구형 엔진도 동일한 명령 히스토리에서 복원한다.
+  // [hwpx-cowork] 행 추가 때 엔진이 기존 문서의 행 의존성에 맞춰 Undo 범위를 정한다.
+  saveInsertRowUndo(section: number, para: number, control: number, after: number): number {
+    const doc = this.doc as { saveInsertRowUndo?: (s: number, p: number, c: number, r: number) => number } | null;
+    return doc?.saveInsertRowUndo?.(section, para, control, after) ?? this.saveSnapshot();
+  }
+
+  saveRedoSnapshot(before: number): number {
+    const doc = this.doc as { saveRedoSnapshot?: (id: number) => number } | null;
+    return doc?.saveRedoSnapshot?.(before) ?? this.saveSnapshot();
+  }
+
+  savePageBreakUndo(section: number, para: number, offset: number): number {
+    const doc = this.doc as { savePageBreakUndo?: (s: number, p: number, o: number) => number } | null;
+    return doc?.savePageBreakUndo?.(section, para, offset) ?? this.saveSnapshot();
   }
 
   restoreSnapshot(id: number): void {

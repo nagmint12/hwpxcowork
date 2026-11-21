@@ -29,6 +29,7 @@
 // insertTrackedParagraphsAfter)로 구역을 한 번만 다시 읽는다 — 하나씩 한 것과 같은 XML(tests/live_track_batch.test.mjs). 흉내 낼 수 없는
 // 문단(부호가 든 문단·표·그림 문단 넣기)은 예전처럼 하나씩, 차례는 그대로. 큰 밀어 넣기는 보낸 창에 진행(WS live progress)을 알린다.
 import crypto from 'node:crypto';
+import { masterTextChanges } from '../engine/master-text.js';
 import { HwpxDoc } from '../engine/doc.js';
 import { charOps, merge3, planBody, joinPlan, splitPoints } from '../engine/diff.js';
 import { ServiceError } from './service.js';
@@ -80,6 +81,8 @@ export function mergePreferMine(base, mine, theirs) {
 export function liveDrift(a, b) {
   b = b.inFormattingUnitsOf(a);
   const out = { paras: 0, text: 0, format: 0, object: 0, picMore: 0, secDef: 0, tableHead: 0 };
+  const masterChanges = masterTextChanges(a, b).length;
+  if (masterChanges) out.masterText = masterChanges;
   const A = a.bodyEntries(); const B = b.bodyEntries();
   for (const s of Object.keys(A)) {
     const x = A[s]; const y = B[s];
@@ -114,6 +117,7 @@ function cleanOrLog(id, doc, head, committed) {
 /** 두 문서의 본문·칸 글(최종본, 메모 본문 제외 — bodyEntries)·서식·그림 속성/조판 부호가 똑같은가(§2.2-5 clean) */
 export function sameBodyTexts(a, b) {
   b = b.inFormattingUnitsOf(a);
+  if (masterTextChanges(a, b).length) return false;
   const A = a.bodyEntries(); const B = b.bodyEntries();
   const ka = Object.keys(A); if (ka.length !== Object.keys(B).length) return false;
   for (const s of ka) {
@@ -677,6 +681,19 @@ export class LiveEditor {
       hunks.forEach((h, order) => {
         if (bp?.used.has(order)) return;
         const p = crs._place(h, map, doc, null);
+        if (h.type === 'masterText') {
+          if (p.state === 'gone') { skipped.push({ hid: h.hid, reason: 'GONE' }); return; }
+          if (p.kind === 'skip') return;
+          const disputed = p.kind === 'conflict';
+          const target = disputed ? mergePreferMine(h.baseText, MT.xmlSafe(h.newText), p.currentText) : p.target;
+          if (doc.writeMasterText(p.address, target, src, h.master)) {
+            ctx.dirty = true;
+            ctx.formatting = true;
+            ctx.changed.add(p.curRef);
+            ownSeen.push({ ref: p.curRef, kind: 'changed', clashed: disputed, prev: touch[p.curRef] || null });
+          }
+          return;
+        }
         if (h.type === 'object') {
           // 그새 남이 같은 그림·부호를 바꿨어도(conflict) 보낸 쪽이 이긴다(글 겹침과 같은 규칙). 문단이 없으면 건너뛴다
           if (p.curRef == null || p.kind === 'skip' || ownInserted(p.curRef)) return;

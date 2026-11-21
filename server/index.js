@@ -272,7 +272,7 @@ app.get('/api/users', auth, (req, res) => res.json(service.listUsers()));
 // ── v0.3 라우터(웨이브 1 이 채운다): 개인 에이전트(§2) · 수정본·변경 요청·메모 스레드(§3) ──
 // 기존 문서 경로보다 먼저 끼운다 — 새 경로를 더하고, 필요하면 같은 경로(예: /file?reviews=1)를 먼저 받아 처리하거나 next() 로 넘긴다.
 // installAgentRoutes 가 돌려주는 값(예: 에이전트 등록부)은 ctx.agents 로 collab 에 넘어간다.
-const routeCtx = { app, service, hub, config: cfg, store, wrap, auth, raw, bodyBytes, safeDecode, pkg, root, restartControl, instanceId: NONCE };
+const routeCtx = { app, service, hub, config: cfg, store, wrap, auth, raw, bodyBytes, safeDecode, pkg, root, restartControl, trackOperation, instanceId: NONCE };
 installOrchestrationRoutes(routeCtx);
 // 문서함 접근 문(docs/LIBRARY_SPEC.md): /api/docs/:id 아래 모든 경로(collab·agents 라우터 것도)보다 먼저 — 볼 수 없는 문서는 없는 것처럼 404.
 // 그 뒤 쓰기 권한(편집·삭제·관리)은 서비스가 문서마다 본다(canEdit·docPerms)
