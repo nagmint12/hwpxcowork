@@ -1,5 +1,5 @@
 // AI 실행기 관리(2026-11-17 사용자 결정 — 저장소의 실행기 bat(start-codex-agent·start-claude-worker·start-gemini-agent …)을 앱이 대신한다).
-//   실행기 하나 = { AI(codex·claude-code·gemini-cli·antigravity) · 서버(이 앱의 서버 'local' 또는 '다른 서버') · 자동 시작 · 연결 방식(v2 기본, v3 TSV, v1) }.
+//   실행기 하나 = { AI(codex·claude-code·gemini-cli·antigravity) · 서버(이 앱의 서버 'local' 또는 '다른 서버') · 자동 시작 · 연결 방식(v3 TSV 기본, v2, v1) }.
 //   띄우는 것은 scripts/setup-worker.mjs → scripts/ai-worker.mjs(--provider · --url <서버>/mcp · --mcp 1|2|3) — 예전 bat 이 띄우던 실행기와 같은 코드다.
 //   '다른 서버' 토큰은 Electron safeStorage(vault)로 암호화해 설정 폴더(runner-secrets.json)에 두고, 실행기에는 환경 변수 HWPX_COWORK_TOKEN 으로만
 //   넘긴다 — 명령줄 인자·기록·화면·runners.json 에는 쓰지 않는다(기록 줄은 토큰 글자를 *** 로 가린다).
@@ -107,7 +107,7 @@ export function killTree(child, { platform = process.platform, run = spawnSync }
   } catch { /* 이미 끝남 */ }
 }
 
-// 예전 저장 목록의 누락값은 v2였으며, 명시한 v3도 다시 열 때 보존한다.
+// 저장된 목록에서 버전이 빠진 옛 실행기는 저장 당시의 v2로 다시 연다.
 function runnerMcp(value) {
   const version = Number(value);
   return [1, 3].includes(version) ? version : 2;
@@ -166,7 +166,7 @@ export class RunnerManager extends EventEmitter {
     if (missing && migrate && this.#localSupported) {
       let old = null; try { old = JSON.parse(fs.readFileSync(path.join(this.#dir, 'desktop.json'), 'utf8')); } catch { /* 없음 */ }
       if (['codex', 'claude-code'].includes(old?.ai)) {
-        list.runners.push({ id: this.#newId('r', list), ai: old.ai, server: LOCAL_SERVER, autoStart: true, mcp: 2 });
+        list.runners.push({ id: this.#newId('r', list), ai: old.ai, server: LOCAL_SERVER, autoStart: true, mcp: 3 });
         this.#list = list; this.#save();
       }
     }
@@ -327,7 +327,7 @@ export class RunnerManager extends EventEmitter {
   serverUrl(id) { return this.#server(id).url; }
 
   // ── 실행기 목록 ──
-  addRunner({ ai, server, autoStart = true, mcp = 2 } = {}) {
+  addRunner({ ai, server, autoStart = true, mcp = 3 } = {}) {
     if (!RUNNER_AIS[ai]) throw new Error('AI를 골라 주세요.');
     if (server === LOCAL_SERVER) { if (!this.#localSupported) throw new Error('이 운영 방식에는 앱의 서버가 없습니다. 다른 서버를 골라 주세요.'); }
     else this.#server(server);
@@ -341,7 +341,7 @@ export class RunnerManager extends EventEmitter {
   #checkMcp(ai, server, version) {
     if (!RUNNER_AIS[ai].mcp || version === 1 || server === LOCAL_SERVER) return;
     const remote = this.#server(server);
-    if (version === 3 && !remote.mcp3) throw new Error('이 서버에서 MCP v3(TSV) 지원을 확인할 수 없습니다. 시험 서버 주소와 토큰으로 서버를 다시 확인해 주세요.');
+    if (version === 3 && !remote.mcp3) throw new Error('이 서버에서 MCP v3(TSV) 지원을 확인할 수 없습니다. 서버 연결을 다시 확인하거나 고급에서 서버가 지원하는 v2 또는 v1을 선택하세요.');
     if (version === 2 && !remote.mcp2) throw new Error('이 서버는 새 연결(v2)을 지원하지 않습니다. 고급에서 예전 연결(v1)을 고르거나 서버를 업데이트해 주세요.');
   }
   /** 자동 시작·연결 방식만 바꾼다(연결 방식은 다음에 켤 때부터) */

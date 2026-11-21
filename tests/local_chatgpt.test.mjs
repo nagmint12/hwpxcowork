@@ -69,9 +69,9 @@ test('로컬 ChatGPT: 읽기 전용 check→백그라운드 시작→중복 차�
   } finally { if (localStatus(s.settings, s.dependencies).running) await stopLocal(s.settings, s.dependencies); await s.close(); }
 });
 
-test('로컬 ChatGPT: 백그라운드 --run은 선택한 MCP v3와 기본 v2를 받고 환경의 토큰은 받지 않는다', async (t) => {
+test('로컬 ChatGPT: 백그라운드 --run은 기본 MCP v3와 명시한 버전를 받고 환경의 토큰은 받지 않는다', async (t) => {
   t.mock.method(CodexProposer.prototype, 'check', async () => ({ ready: true, authMode: 'chatgpt', version: 'test' }));
-  for (const [requested, expected] of [[undefined, '2'], ['3', '3']]) {
+  for (const [requested, expected] of [[undefined, '3'], ['2', '2'], ['3', '3']]) {
     const s = await setup();
     try {
       s.dependencies.env = { HWPX_COWORK_TOKEN: 'other-private-token', OPENAI_API_KEY: 'other-key' };

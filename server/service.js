@@ -5721,13 +5721,13 @@ export class Service {
   }
 
   /**
-   * 서버 AI·서버에 등록한 개인 키가 새 MCP 연결(v2)로 도는가: 그 AI 에 밝힌 ai.mcp > config.ai.mcp > 기본 'v2'(2026-11-17 — 예전 연결은 'v1' 로 고른다).
+   * 서버 AI·서버에 등록한 개인 키가 새 MCP 연결(v2)로 도는가: 그 AI 에 밝힌 ai.mcp > config.ai.mcp > 기본 'v3'(TSV).
    * 도구를 쓰지 않는 모의 AI·runV2 가 없는 실행기(튜토리얼 예시 답변 등)는 예전 길
    */
   _serverAiTaskSurface(ai) {
     if (!ai?.supportsTools || ai.mock || typeof ai.runV2 !== 'function') return null;
-    let fallback = 'v2';
-    try { fallback = normalizeMcp(this.cfg?.ai?.mcp) || 'v2'; } catch { /* 틀린 값이면 AiProposer 가 이미 AI 를 꺼 두었다 */ }
+    let fallback = 'v3';
+    try { fallback = normalizeMcp(this.cfg?.ai?.mcp) || 'v3'; } catch { /* 틀린 값이면 AiProposer 가 이미 AI 를 꺼 두었다 */ }
     const surface = ai.mcp || fallback;
     return isTaskSurface(surface) ? surface : null;
   }

@@ -4,14 +4,16 @@
 
 2026-11-05 검증 추가: native 흐름과 현재 읽기 규칙을 유지하면서, 모델 입력의 정확한 문단 중복만 제거하고 표·그림 자동번호를 원문과 분리한 메타데이터로 전달했다. 총 모델 토큰 절감은 실측에서 입증되지 않았다. 변경 범위·실측·제외 기록·운영 미반영 상태는 [검증 보고서](NATIVE_CONTEXT_DEDUP_2026-11-05.md)를 따른다. 아래 날짜별 측정/설계는 당시 기록이다.
 
-## 2026-11-17 — 새 MCP 연결(v2)이 기본(모든 제공자)
+## MCP v3 기본 연결(모든 제공자, 2026-11-21)
+
+v3는 요청 내용과 문서 읽기에서 표의 행과 열을 TSV로 전달한다.
 
 사용자 결정(서버 기본 주소까지 새 연결)에 따라 API 실행기와 서버 AI 도 새 연결로 옮겼다. 규칙·측정·남은 문제의 근거는 [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md) §13. **실제 유료 API 로는 아직 확인하지 않았다**(가짜 fetch 시험 `tests/api_mcp_v2.test.mjs` 14개).
 
 - **대상**: OpenAI(Responses)·Anthropic(Messages)·Gemini(generateContent)·호환 게이트웨이(`--gateway baze`·`--base-url`) — 개인 API 실행기(`scripts/ai-worker.mjs` → `server/worker.js` apiV2)와 서버 AI·서버에 등록한 개인 키(내 AI 키)·체험 공유 키(`server/service.js _serverAiV2`·`_runAiV2`).
-- **고르기**: 개인 API 실행기는 `--mcp 2`(기본) | `--mcp 1`(예전 — 아래 '기본 MCP 모드'의 길). 환경 변수 `HWPX_COWORK_MCP` 로도 정하며 명령줄이 먼저다. 서버 쪽은 `config.ai.mcp`(`"v2"` 기본 | `"v1"` — 바꾸면 서버 재시작, 모르는 값이면 서버 AI 를 켜지 않고 까닭을 알림, `server/ai.js normalizeMcp`). 모의 AI·튜토리얼 예시 답변은 이 값과 관계없이 예전 길이다.
+- **고르기**: 개인 API 실행기는 `--mcp 3`(기본) | `--mcp 2`(문단 보기) | `--mcp 1`(예전 — 아래 '기본 MCP 모드'의 길). 환경 변수 `HWPX_COWORK_MCP` 로도 정하며 명령줄이 먼저다. 서버 쪽은 `config.ai.mcp`(`"v3"` 기본 | `"v2"` | `"v1"` — 바꾸면 서버 재시작, 모르는 값이면 서버 AI 를 켜지 않고 까닭을 알림, `server/ai.js normalizeMcp`). 모의 AI·튜토리얼 예시 답변은 이 값과 관계없이 예전 길이다.
 - **첫 입력**: 실행기가 요청을 맡고, `task` 응답과 같은 요청 내용(brief — 지시·대상·문서 얼개·주변 글·할 일)을 모델의 첫 사용자 글로 싣는다. 서버가 읽은 PDF·그림 첨부는 원본으로 함께 싣고(Gemini 는 GIF 를 받지 않음) 다시 읽지 않게 알린다. 시스템 지침은 `EDITOR_INSTRUCTIONS_API_V2`(OpenAI `--workspace hosted` 면 코드 실행 결과를 `edit` 의 figure op 로 넣으라는 한 줄을 더함).
-- **도구**: `TOOL_PROFILES.apiV2` 7개 — `read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`. `task` 는 실행기가 맡으므로 주지 않는다. 서버 AI 는 같은 MCP 서버를 메모리로 연다(`server/api-service-tools.js` — surface 'v2', 도구 범위 core).
+- **도구**: `TOOL_PROFILES.apiV2` 7개 — `read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`. `task` 는 실행기가 맡으므로 주지 않는다. 서버 AI 는 같은 MCP 서버를 메모리로 연다(`server/api-service-tools.js` — surface 'v3' 또는 'v2', 도구 범위 core).
 - **끝 판정**: 최종 JSON 이 없다. 결과는 `edit` 가 곧바로 저장하고, 모델이 `edit` 의 `done` 이나 `finish` 를 부르면 요청 상태(완료·실패)를 보고 고리를 멈춘다(끝낸 뒤 모델을 한 번 더 부르지 않음). 도구 없이 글로만 답하면 두 번까지 재촉하고(`server/api-tool-loop.js V2_NUDGES`), 그래도 끝내지 않으면 `API_MCP_INCOMPLETE` 로 실패로 닫는다 — 그때까지 저장한 제안·메모는 남는다. 응답 길이 한도로 끊기면 이어 하라고 다시 부른다(`V2_CONTINUE`). 취소·다시 요청이면 멈춘다.
 - **사용량**: 토큰·모델은 예전처럼 요청 기록(`r.usage`)에 남는다. 서버 AI 는 완료를 다시 하지 않고 사용량·모델만 적고, 개인 API 실행기는 완료를 다시 등록하지 않고 사용량만 덧붙인다.
 - **측정(모델 없음, o200k 토큰 추정)**: 도구 정의 36개 13,616 → 7개 3,279토큰, 지침 3,468 → 1,096토큰, 호출마다 다시 보내는 고정 글 약 1만 7천 → 4천 4백 토큰(캐시 할인 전).
@@ -124,7 +126,7 @@ MCP 기능 경계(코드 연결 기준):
 
 ## 기본 MCP 모드
 
-> 2026-11-17 부터 이 절은 **예전 길**(`--mcp 1`·`config.ai.mcp:'v1'`)이다. 기본은 맨 위 '2026-11-17 — 새 MCP 연결(v2)이 기본'.
+> 2026-11-17 부터 이 절은 **예전 길**(`--mcp 1`·`config.ai.mcp:'v1'`)이다. 기본은 맨 위 'MCP v3 기본 연결'.
 
 `대기 요청 → 모델 도구 요청 → MCP 실행 → 결과를 모델에 전달 → 최종 결과 → 완료`
 

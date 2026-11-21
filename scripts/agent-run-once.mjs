@@ -28,10 +28,10 @@ const USAGE = '사용: node scripts/agent-run-once.mjs --doc <hwpx> --instructio
 
 const docPath = opt('doc'); const instruction = opt('instruction');
 if (!docPath || !instruction || !flag('yes-real-ai')) { process.stderr.write(USAGE); process.exit(2); }
-const provider = opt('provider', 'codex'); const mcp = opt('mcp', '2'); const model = opt('model'); const effort = opt('effort');
+const provider = opt('provider', 'codex'); const mcp = opt('mcp', '3'); const model = opt('model'); const effort = opt('effort');
 // 새 연결(--mcp 2)은 Codex·Claude Code 실행기에만 있다 — 다른 제공자를 주면 조용히 예전 흐름으로 돌아 결과가 헷갈린다
 if (!['codex', 'claude-code'].includes(provider)) { process.stderr.write(`--provider 는 codex 또는 claude-code 입니다(받은 값: ${provider}).\n`); process.exit(2); }
-if (!['1', '2', '3'].includes(mcp)) { process.stderr.write('--mcp 는 1(예전 연결), 2(기본), 3(TSV) 중 하나입니다.\n'); process.exit(2); }
+if (!['1', '2', '3'].includes(mcp)) { process.stderr.write('--mcp 는 1(예전 연결), 2, 3(TSV, 기본) 중 하나입니다.\n'); process.exit(2); }
 // 실행 파일 옵션이 제공자와 어긋나면 멈춘다 — 가짜 CLI 로 예행연습하려다 진짜 CLI(구독 사용량)를 부르지 않게
 if (provider === 'codex' && flag('cli-command')) { process.stderr.write('--cli-command 는 --provider claude-code 용입니다(Codex 는 --codex-command).\n'); process.exit(2); }
 if (provider === 'claude-code' && flag('codex-command')) { process.stderr.write('--codex-command 는 --provider codex 용입니다(Claude Code 는 --cli-command).\n'); process.exit(2); }

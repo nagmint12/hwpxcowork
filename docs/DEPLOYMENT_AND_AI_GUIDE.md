@@ -196,7 +196,7 @@ npm.cmd run worker -- --provider codex --check
 npm.cmd run worker -- --provider codex
 ```
 
-`codex login`으로 ChatGPT 계정에 로그인한 상태여야 한다. Windows 앱(0.6.0부터)이면 [AI → 실행기 관리…]에서 Codex 실행기를 더해 켠다(다른 PC의 서버면 '다른 서버' — 주소 + 내 토큰. 이 PC에 서버가 필요 없으면 앱 처음 실행에서 'AI 실행기만'). 예전 `start-codex-agent.bat`은 2026-11-17에 지웠다. 실행기는 새 MCP 연결(v2)이 기본이고 `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다 — 옛 중앙 서버(새 연결을 모름)면 시작 점검에서 멈추고 `--mcp 1`을 알린다. 자세한 동작·모델 선택·복구는 [자동 처리 안내](/manual-resources/AUTOMATIC_AI_GUIDE.md).
+`codex login`으로 ChatGPT 계정에 로그인한 상태여야 한다. Windows 앱(0.6.0부터)이면 [AI → 실행기 관리…]에서 Codex 실행기를 더해 켠다(다른 PC의 서버면 '다른 서버' — 주소 + 내 토큰. 이 PC에 서버가 필요 없으면 앱 처음 실행에서 'AI 실행기만'). 예전 `start-codex-agent.bat`은 2026-11-17에 지웠다. 실행기는 MCP v3가 기본이고, `--mcp 2`이면 v2, `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다 — 옛 중앙 서버(새 연결을 모름)면 시작 점검에서 멈추고 `--mcp 1`을 알린다. 자세한 동작·모델 선택·복구는 [자동 처리 안내](/manual-resources/AUTOMATIC_AI_GUIDE.md).
 
 ### Claude Code 실행기 — 바로 처리(기본)
 
@@ -231,7 +231,7 @@ npm.cmd run worker -- --provider gemini --model '계정에서-사용할-Gemini-�
 
 OpenAI는 Responses API, Gemini는 `generateContent` REST를 쓴다. 구조화 JSON 출력과 필요한 첨부 입력을 지원하는 모델을 고른다. [OpenAI 구조화 출력](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [Gemini 생성 API](https://ai.google.dev/api/generate-content).
 
-**MCP 연결(2026-11-17부터 새 연결이 기본).** API 실행기는 `--mcp 2`(기본)이면 요청을 맡아 요청 내용(brief)을 첫 입력에 싣고, 모델에게 도구 7개(`read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`)만 준다. 모델이 `edit`로 결과를 저장하고 `edit`의 `done`이나 `finish`로 끝내면 그 자리에서 멈춘다. 도구 없이 글로만 답하면 두 번 재촉하고, 그래도 끝내지 않으면 `API_MCP_INCOMPLETE`로 실패로 알린다(그때까지 저장한 제안·메모는 남는다). 토큰 사용량은 요청 기록에 남는다. 예전 길(도구 26개 + 최종 JSON — 위의 구조화 출력이 필요한 쪽)은 `--mcp 1`(또는 `HWPX_COWORK_MCP=1`). 서버 AI·서버에 등록한 개인 키·체험 공유 키는 `config.ai.mcp`(기본 `"v2"`, `"v1"`이면 예전 길 — 서버 재시작 필요)를 따른다. 새 연결에는 선택 서식 자동 보충·`instructionSummary`·`ai.documentContext`·표준서식 지침을 시스템 글에 싣기(필요하면 모델이 `read view='guide'`)·`maxProposals`가 없다. **실제 유료 API로는 아직 확인하지 않았다**(가짜 fetch 시험 `tests/api_mcp_v2.test.mjs`). 새 연결은 도구 정의(36개 13,616 → 7개 3,279토큰, o200k 추정)와 지침(3,468 → 1,096)이 작아, 호출마다 다시 보내는 고정 글이 약 1만 7천 → 4천 4백 토큰이 된다(모델 없이 잰 값).
+**MCP 연결(2026-11-17부터 새 연결이 기본).** API 실행기는 기본 v3 또는 `--mcp 2`로 실행하면 요청을 맡아 요청 내용(brief)을 첫 입력에 싣고, 모델에게 도구 7개(`read`·`edit`·`finish` + `preview_figure`·`export_figure`·`read_skill_resource`·`export_skill_resource`)만 준다. 모델이 `edit`로 결과를 저장하고 `edit`의 `done`이나 `finish`로 끝내면 그 자리에서 멈춘다. 도구 없이 글로만 답하면 두 번 재촉하고, 그래도 끝내지 않으면 `API_MCP_INCOMPLETE`로 실패로 알린다(그때까지 저장한 제안·메모는 남는다). 토큰 사용량은 요청 기록에 남는다. 예전 길(도구 26개 + 최종 JSON — 위의 구조화 출력이 필요한 쪽)은 `--mcp 1`(또는 `HWPX_COWORK_MCP=1`). 서버 AI·서버에 등록한 개인 키·체험 공유 키는 `config.ai.mcp`(기본 `"v3"`, `"v2"`는 문단 보기, `"v1"`이면 예전 길 — 서버 재시작 필요)를 따른다. 새 연결에는 선택 서식 자동 보충·`instructionSummary`·`ai.documentContext`·표준서식 지침을 시스템 글에 싣기(필요하면 모델이 `read view='guide'`)·`maxProposals`가 없다. **실제 유료 API로는 아직 확인하지 않았다**(가짜 fetch 시험 `tests/api_mcp_v2.test.mjs`). 새 연결은 도구 정의(36개 13,616 → 7개 3,279토큰, o200k 추정)와 지침(3,468 → 1,096)이 작아, 호출마다 다시 보내는 고정 글이 약 1만 7천 → 4천 4백 토큰이 된다(모델 없이 잰 값).
 
 ### API 게이트웨이 경유(`--gateway baze`)
 

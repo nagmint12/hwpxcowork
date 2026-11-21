@@ -21,8 +21,8 @@ const USAGE = `hwpx-cowork MCP stdio 브리지
     --agent     에이전트 이름(기본: MCP 클라이언트 이름, claude-code → Claude Code)
     --channel   Claude Code 채널 알림 켜기(웹 편집기에서 맡긴 AI 작업이 생기면 세션에 알림)
     (기본)      새 연결: 작업 도구 넷(task 맡기·read 읽기·edit 고치기·finish 끝내기). 요청 내용·읽기는 글과 주소만, 쓰기는 ops 를 한 번에
-    --v3        본문 표를 TSV로 읽는 시험 연결. --mcp 3 과 같다
-    --v1        예전 연결(start_request·propose_* 등 예전 도구). --mcp 1 과 같다. --v2·--mcp 2 는 새 연결(기본과 같다)
+    --v3        본문 표를 TSV로 읽는 기본 연결. --mcp 3 과 같다
+    --v1        예전 연결(start_request·propose_* 등 예전 도구). --mcp 1 과 같다. --v2·--mcp 2 는 v2 문단 보기
     --lean      예전 연결의 얇은 흐름: 요청 내용·도구 응답을 모델용으로 짧게 받는다(start_request 가 내용을 줌, 쓰기의 complete 로 완료) — --v2 가 없으면 예전 연결
     --tools     새 연결의 도구 범위: all(기본 — 사람이 정할 일·변경 요청·멀티에이전트 도구 포함) | core(작업 도구와 그림·스킬 파일만)
     --no-tools  도구는 중계하지 않고 알림만(--channel 과 함께)

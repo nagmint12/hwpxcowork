@@ -18,7 +18,7 @@ import { editStageInstructions } from './edit-workflow-runner.js';
 /**
  * MCP 연결 고르기(ai.mcp — 2026-11-17): 'v2'·'2' = 새 연결(작업 도구 read·edit·finish — runV2), 'v1'·'1'·false = 예전 연결(run — 도구 + 최종 JSON),
  * 비우면(undefined·null·'') null = 정하지 않음. 정하지 않은 값의 기본은 쓰는 곳이 정한다: 서버 AI·서버에 등록한 개인 키는 새 연결
- * (server/service.js serverAiSurface — config.ai.mcp 기본 'v2'), 개인 API 실행기는 실행 인자(--mcp, scripts/ai-worker.mjs)가 늘 'v2'·null 로 밝힌다.
+ * (server/service.js serverAiSurface — config.ai.mcp 기본 'v3'), 개인 API 실행기는 실행 인자(--mcp, scripts/ai-worker.mjs)가 늘 'v2'·null 로 밝힌다.
  * 모르는 값이면 Error(설정 오류를 기본값으로 덮지 않는다)
  */
 export function normalizeMcp(value) {
@@ -27,7 +27,7 @@ export function normalizeMcp(value) {
   if (['v3', '3'].includes(v)) return 'v3';
   if (['v2', '2'].includes(v)) return 'v2';
   if (['v1', '1', 'false'].includes(v)) return 'v1';
-  throw new Error("MCP 연결(ai.mcp)은 'v2'(새 연결 — 기본) · 'v3'(TSV) · 'v1'(예전 연결) 중 하나입니다");
+  throw new Error("MCP 연결(ai.mcp)은 'v2'(새 연결) · 'v3'(TSV, 기본) · 'v1'(예전 연결) 중 하나입니다");
 }
 
 const TABLE_OP_HINT = 'delete_rows{rows} · delete_cols{cols,keep_width?} · insert_rows{row,count?,position:below|above} · insert_cols{col,count?,position:right|left,keep_width?} · merge{range} · unmerge{row,col} · '
@@ -222,7 +222,7 @@ export class AiProposer {
   get supportsTools() { return this.enabled && !this.mock; }
   /**
    * 개인 API 실행기(server/worker.js)가 보는 연결: 'v2'(새 연결로 runV2) | null(예전 연결로 run). 생성 인자 ai.mcp 를 'v2' 로 밝혔을 때만 새 연결이다
-   * (scripts/ai-worker.mjs 가 --mcp 2(기본)면 'v2', 1 이면 null 을 넘긴다). 모의 AI 는 도구를 쓰지 않으므로 늘 null.
+   * (scripts/ai-worker.mjs 가 --mcp 2면 'v2', 1 이면 null 을 넘긴다). 모의 AI 는 도구를 쓰지 않으므로 늘 null.
    * 서버 AI 의 기본(정하지 않으면 새 연결)은 server/service.js 가 config.ai.mcp 로 정한다
    */
   get mcpSurface() { return this.supportsTools && isTaskSurface(this.mcp) ? this.mcp : null; }

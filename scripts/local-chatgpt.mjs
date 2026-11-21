@@ -84,7 +84,7 @@ export function localStatus(settings, { alive = pidAlive } = {}) {
 
 function localMcp(env) {
   const version = String(env.HWPX_COWORK_MCP ?? '').trim();
-  return ['1', '3'].includes(version) ? version : '2';
+  return ['1', '2'].includes(version) ? version : '3';
 }
 
 async function makeReady(settings, dependencies = {}) {

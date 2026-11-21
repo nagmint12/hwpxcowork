@@ -1,10 +1,10 @@
-// MCP 기본 연결 = 새 연결(v2) 시험(2026-11-17 사용자 결정 — server/mcp2.js mcpSurface). 모델·실제 AI 를 부르지 않는다.
+// MCP 기본 연결 = v3 시험(2026-11-21 사용자 결정 — server/mcp2.js mcpSurface). 모델·실제 AI 를 부르지 않는다.
 //  · 순수 함수: 연결 종류 고르기(mcpSurface — 머리글·주소·lean·설정·옛 클라이언트 호환·세션 없는 호출), 브리지 인자(bridgeSurface·parseBridgeArgs),
-//    실행기 인자(ai-worker --mcp — 모든 제공자, 기본 2)
-//  · 임시 서버(설정 없음 = 운영 기본): 밝히지 않은 연결은 v2('all'), 예전 연결은 X-Hwpx-Mcp: 1·?v=1·lean 일 때만, 'hwpx-…' 옛 실행기·브리지와
+//    실행기 인자(ai-worker --mcp — 모든 제공자, 기본 3)
+//  · 임시 서버(설정 없음 = 운영 기본): 밝히지 않은 연결은 v3('all'), 예전 연결은 X-Hwpx-Mcp: 1·?v=1·lean 일 때만, 'hwpx-…' 옛 실행기·브리지와
 //    세션 없는 한 번짜리 호출은 예전 연결, 2026-07-28(무상태)도 같은 규칙 — 도구 목록·서버 안내·이벤트 설명이 연결에 맞게 나간다
 //  · 임시 서버(설정 mcp.defaultSurface 'v1' — 시험 받침 기본): 밝히지 않으면 예전 연결, 밝힌 새 연결은 그대로
-//  · 브리지 기본(인자 없음) = 새 연결(X-Hwpx-Mcp: 2), surface v1 = 예전 연결, 실행기의 모델 도구 연결(codex-mcp)은 요청 종류대로 밝힌다
+//  · 브리지 기본(인자 없음) = 새 연결(X-Hwpx-Mcp: 3), surface v1 = 예전 연결, 실행기의 모델 도구 연결(codex-mcp)은 요청 종류대로 밝힌다
 //  · 에이전트 본보기(agent/CLAUDE.md = 새 연결, agent/v1/CLAUDE.md = 예전 연결)와 setup-agent 기본·묶음 목록
 //   node --test tests/mcp_default_v2.test.mjs
 import test from 'node:test';
@@ -41,7 +41,7 @@ test('순수 함수: 연결 종류 고르기 — 기본 새 연결, 예전 연�
   assert.equal(isV2Request(req('/mcp?v=2')), true); assert.equal(isV2Request(req()), false, 'isV2Request 는 밝혔는지만 본다(기본은 mcpSurface)');
   // 2) 표: [요청, 설정, clientName, legacyCall] → 연결
   const rows = [
-    [req(), null, null, false, 'v2', '설정 없음·밝히지 않음 = 새 연결(웹 AI 커넥터 포함)'],
+    [req(), null, null, false, 'v3', '설정 없음·밝히지 않음 = 새 연결(웹 AI 커넥터 포함)'],
     [req(), cfg2, 'chatgpt', false, 'v2', 'ChatGPT'],
     [req(), cfg2, 'claude-code', false, 'v2', 'Claude Code(사용자 HTTP 연결)'],
     [req('/mcp', { 'x-hwpx-mcp': '1' }), cfg2, 'chatgpt', false, 'v1', '머리글 X-Hwpx-Mcp: 1'],
@@ -65,8 +65,8 @@ test('순수 함수: 연결 종류 고르기 — 기본 새 연결, 예전 연�
   assert.ok(!/list_documents/.test(v2Instructions('홍길동', { toolset: 'core' })));
 });
 
-test('순수 함수: 브리지 기본 새 연결(bridgeSurface·명령줄)과 실행기 --mcp(모든 제공자, 기본 2)', () => {
-  assert.deepEqual(bridgeSurface({}), { surface: 'v2', lean: false });
+test('순수 함수: 브리지 기본 새 연결(bridgeSurface·명령줄)과 실행기 --mcp(모든 제공자, 기본 3)', () => {
+  assert.deepEqual(bridgeSurface({}), { surface: 'v3', lean: false });
   assert.deepEqual(bridgeSurface({ lean: true }), { surface: 'v1', lean: true }, '--lean = 예전 연결의 얇은 흐름');
   assert.deepEqual(bridgeSurface({ surface: 'v1' }), { surface: 'v1', lean: false });
   assert.deepEqual(bridgeSurface({ v2: true, lean: true }), { surface: 'v2', lean: false }, '예전 인자 --v2 그대로');
@@ -75,23 +75,23 @@ test('순수 함수: 브리지 기본 새 연결(bridgeSurface·명령줄)과 �
   assert.equal(parseBridgeArgs(['--v1'], {}).surface, 'v1'); assert.equal(parseBridgeArgs(['--mcp', '1'], {}).surface, 'v1');
   assert.equal(parseBridgeArgs(['--v2'], {}).surface, 'v2', '옛 플래그 --v2 도 받는다'); assert.equal(parseBridgeArgs(['--mcp=2'], {}).surface, 'v2');
   assert.equal(parseBridgeArgs(['--mcp', 'x'], {}).bad.length, 1);
-  // 실행기: 모든 제공자가 --mcp 1|2 를 받고 기본은 2. 그 밖의 값은 오류
+  // 실행기: 모든 제공자가 --mcp 1|2 를 받고 기본은 3. 그 밖의 값은 오류
   const env = { HWPX_COWORK_TOKEN: 't', OPENAI_API_KEY: 'k', ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'k' };
   const providers = [['codex'], ['claude-code'], ['gemini-cli'], ['antigravity'], ['openai', '--model', 'm'], ['anthropic', '--model', 'm'], ['gemini', '--model', 'm']];
   for (const [provider, ...rest] of providers) {
     const argv = ['--provider', provider, ...rest];
-    assert.equal(parseWorkerArgs(argv, env).mcp, '2', `${provider}: 기본 2`);
+    assert.equal(parseWorkerArgs(argv, env).mcp, '3', `${provider}: 기본 3`);
     assert.equal(parseWorkerArgs([...argv, '--mcp', '1'], env).mcp, '1', `${provider}: --mcp 1`);
     assert.equal(parseWorkerArgs(argv, { ...env, HWPX_COWORK_MCP: '1' }).mcp, '1', `${provider}: HWPX_COWORK_MCP=1`);
     assert.throws(() => parseWorkerArgs([...argv, '--mcp', '4'], env), /--mcp.*1.*2.*3/, `${provider}: 잘못된 값`);
   }
   // 모델에게 넘기는 값: 구독 CLI 는 mcpSurface, API 는 ai.mcp('v2'|'v1' — server/ai.js normalizeMcp), Google CLI 는 MCP 를 쓰지 않아 받기만 한다
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v3');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '1'], env), env).mcpSurface, null);
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code'], env), env).mcpSurface, 'v2');
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'openai', '--model', 'm'], env), env).cfg.mcp, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code'], env), env).mcpSurface, 'v3');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'openai', '--model', 'm'], env), env).cfg.mcp, 'v3');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'anthropic', '--model', 'm', '--mcp', '1'], env), env).cfg.mcp, 'v1');
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'gemini', '--model', 'm'], env), env).cfg.mcp, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'gemini', '--model', 'm'], env), env).cfg.mcp, 'v3');
   for (const provider of ['gemini-cli', 'antigravity']) {
     const ai = createWorkerAi(parseWorkerArgs(['--provider', provider, '--mcp', '1'], env), env);
     assert.equal(typeof ai.runMcp, 'undefined', `${provider}: 모델 MCP 연결이 없다(--mcp 는 영향 없음)`);
@@ -127,7 +127,7 @@ test('임시 서버(설정 없음 = 운영 기본): 밝히지 않은 연결은 �
   const open = [];
   t.after(async () => { for (const c of open) await c.close(); await srv.stop(); });
   const conn = async (o) => { const c = await connect(srv, o); open.push(c); return c; };
-  assert.equal(srv.config.features.mcpDefault, 'v2', '/api/config features.mcpDefault');
+  assert.equal(srv.config.features.mcpDefault, 'v3', '/api/config features.mcpDefault');
 
   // 밝히지 않은 표준 연결(ChatGPT·Claude.ai·Claude Code 의 사용자 HTTP 연결) = 새 연결 'all', 서버 안내도 새 연결용
   for (const name of ['chatgpt', 'claude-ai', 'claude-code']) {
@@ -179,7 +179,7 @@ test('임시 서버(설정 없음 = 운영 기본): 밝히지 않은 연결은 �
   const called = await modern(srv, 'tools/call', { name: 'task', arguments: {} });
   assert.deepEqual(JSON.parse(textOf(called.result)), { none: true });
 
-  // 브리지 기본(인자 없음) = 새 연결(X-Hwpx-Mcp: 2 — 이 브리지의 client 이름 hwpx-cowork-bridge 라도 밝혀서 새 연결), surface v1 = 예전 연결
+  // 브리지 기본(인자 없음) = 새 연결(X-Hwpx-Mcp: 3 — 이 브리지의 client 이름 hwpx-cowork-bridge 라도 밝혀서 새 연결), surface v1 = 예전 연결
   const seen = [];
   const fetchImpl = async (url, init) => { const h = new Headers(init?.headers); if (String(url).includes('/mcp')) seen.push(h.get('x-hwpx-mcp')); return fetch(url, init); };
   for (const [opts, check] of [[{}, isV2], [{ surface: 'v1' }, isV1], [{ lean: true }, isV1]]) {
@@ -190,8 +190,8 @@ test('임시 서버(설정 없음 = 운영 기본): 밝히지 않은 연결은 �
       const [a, b] = InMemoryTransport.createLinkedPair(); await bridge.server.connect(b); await client.connect(a);
       const names = (await client.listTools()).tools.map((x) => x.name);
       assert.ok(check(names), `${JSON.stringify(opts)}: ${names.join(',')}`);
-      assert.ok(seen.length && seen.every((v) => v === (bridge.surface === 'v2' ? '2' : '1')), `${JSON.stringify(opts)}: 머리글 ${seen.join(',')}`);
-      assert.equal(bridge.surface, opts.surface || (opts.lean ? 'v1' : 'v2'));
+      assert.ok(seen.length && seen.every((v) => v === bridge.surface.slice(1)), `${JSON.stringify(opts)}: 머리글 ${seen.join(',')}`);
+      assert.equal(bridge.surface, opts.surface || (opts.lean ? 'v1' : 'v3'));
       if (!opts.surface && !opts.lean) assert.match(bridge.instructions, /task\(맡기/);
     } finally { await client.close().catch(() => {}); await bridge.stop(); }
   }
@@ -240,12 +240,17 @@ test('에이전트 본보기·setup-agent 기본·묶음 목록: agent/CLAUDE.md
   assert.equal(guideSurface(v2Guide), 'v2'); assert.equal(guideSurface(v1Guide), 'v1');
   assert.ok(!fs.existsSync(path.join(root, 'agent', 'v2', 'CLAUDE.md')), '예전 자리(agent/v2/CLAUDE.md)는 없앴다 — 본보기는 하나씩');
   const example = JSON.parse(fs.readFileSync(path.join(root, 'agent', '.mcp.json.example'), 'utf8')).mcpServers.hwpx.args;
-  assert.equal(entrySurface({ args: example }), 'v2'); assert.ok(!example.includes('--lean'));
-  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp']);
+  assert.equal(entrySurface({ args: example }), 'v3'); assert.ok(!example.includes('--lean'));
+  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v3', '--url', 'http://x/mcp']);
   // 배포 묶음·공개 저장소 목록이 새 자리를 싣는다(agent/v1/CLAUDE.md 가 없으면 --v1 로 준비할 때 지침을 쓰지 못한다)
-  for (const file of ['scripts/package-portable.mjs', 'scripts/export-public-repo.mjs']) {
-    const text = fs.readFileSync(path.join(root, file), 'utf8');
-    assert.ok(text.includes("'agent/v1/CLAUDE.md'") && !text.includes("'agent/v2/CLAUDE.md'"), file);
+  const portable = fs.readFileSync(path.join(root, 'scripts/package-portable.mjs'), 'utf8');
+  assert.ok(portable.includes("'agent/v1/CLAUDE.md'") && !portable.includes("'agent/v2/CLAUDE.md'"));
+  const exporter = path.join(root, 'scripts/export-public-repo.mjs');
+  if (fs.existsSync(exporter)) {
+    assert.ok(fs.readFileSync(exporter, 'utf8').includes("'agent/v1/CLAUDE.md'"));
+  } else {
+    const published = JSON.parse(fs.readFileSync(path.join(root, 'agent/.mcp.json'), 'utf8'));
+    assert.equal(entrySurface(published.mcpServers.hwpx), 'v3');
   }
   // setup-agent 기본(인자 없음) = 새 연결
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-default-v2-agent-'));
@@ -254,6 +259,6 @@ test('에이전트 본보기·setup-agent 기본·묶음 목록: agent/CLAUDE.md
   try { assert.equal(await setupAgent(['--dir', dir, '--url', 'http://127.0.0.1:9/mcp', '--no-claude', '--no-server', '--no-registry'], { ...process.env, HWPX_COWORK_TOKEN: '' }), 0); }
   finally { console.log = log; }
   const args = JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.hwpx.args;
-  assert.equal(entrySurface({ args }), 'v2');
+  assert.equal(entrySurface({ args }), 'v3');
   assert.equal(fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8'), v2Guide);
 });

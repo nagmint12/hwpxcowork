@@ -119,7 +119,7 @@ async function startStub({ token = TOKEN, user = USER, instructions = STUB_INSTR
     if (u.pathname === '/api/agent/events' && req.method === 'GET') return sse(req, res, u);
     if (u.pathname === '/mcp') return mcp(req, res, u);
     req.resume();
-    if (u.pathname === '/api/config' && req.method === 'GET') return json(res, 200, { name: 'hwpx-cowork', version: '0.3.0-stub' });
+    if (u.pathname === '/api/config' && req.method === 'GET') return json(res, 200, { name: 'hwpx-cowork', version: '0.3.0-stub', features: { mcp2: true, mcp3: true } });
     if (u.pathname === '/api/me' && req.method === 'GET') return authed(req) ? json(res, 200, { name: st.user, role: 'member' }) : json(res, 401, { error: 'unauthorized' });
     if (u.pathname === '/api/agent/status' && req.method === 'GET') return authed(req) ? json(res, 200, { me: { online: st.conns.some((c) => !c.closed), sessions: [] }, users: [] }) : json(res, 401, { error: 'unauthorized' });
     return json(res, 404, { error: 'not_found' });
@@ -349,7 +349,7 @@ try {
     ok(tools.tools.map((t) => t.name).sort().join(',') === 'list_documents,whoami', 'tools/list 를 원격 MCP 로 중계');
     const who = JSON.parse((await A.client.callTool({ name: 'whoami', arguments: { echo: '안녕' } })).content[0].text);
     ok(who.session === sessionA && who.auth === `Bearer ${TOKEN}` && who.agent === 'Claude Code' && who.echo === '안녕', 'tools/call 중계: X-Hwpx-Agent-Session·Authorization 머리글, ?agent=Claude Code(clientInfo claude-code)');
-    ok(A.bridge.surface === 'v2' && who.mcp === '2' && who.lean === null, '기본 연결 = 새 연결: 서버에 X-Hwpx-Mcp: 2 를 밝힌다(2026-11-17 — 밝히지 않으면 새 서버가 옛 브리지로 보고 예전 연결로 연다)');
+    ok(A.bridge.surface === 'v3' && who.mcp === '3' && who.lean === null, '기본 연결 = 새 연결: 서버에 X-Hwpx-Mcp: 3 를 밝힌다(2026-11-17 — 밝히지 않으면 새 서버가 옛 브리지로 보고 예전 연결로 연다)');
     ok(stub.st.mcpReqs.length >= 4 && stub.st.mcpReqs.every((r) => r.session === sessionA && r.auth === `Bearer ${TOKEN}`), `원격 MCP 요청 ${stub.st.mcpReqs.length}건(안내 받기 포함) 모두 같은 세션 머리글`);
     let unknownOk = false;
     try { const r = await A.client.callTool({ name: 'no_such_tool', arguments: {} }); unknownOk = r.isError === true; } catch (e) { unknownOk = e.code === -32602; }
@@ -401,7 +401,7 @@ try {
     await L.close();
     // 연결 종류 고르기(bridgeSurface): 명시(surface) > 예전 인자 v2 true|false > --lean > 주소 ?v=·?lean= > 기본 새 연결
     const pick = (o) => { const p = B.bridgeSurface(o); return `${p.surface}${p.lean ? '+lean' : ''}`; };
-    ok(pick({}) === 'v2' && pick({ v2: true }) === 'v2' && pick({ v2: false }) === 'v1' && pick({ lean: true }) === 'v1+lean' && pick({ surface: 'v2', lean: true }) === 'v2'
+    ok(pick({}) === 'v3' && pick({ v2: true }) === 'v2' && pick({ v2: false }) === 'v1' && pick({ lean: true }) === 'v1+lean' && pick({ surface: 'v2', lean: true }) === 'v2'
       && pick({ surface: 'v1', lean: true }) === 'v1+lean' && pick({ url: 'http://h/mcp?v=1' }) === 'v1' && pick({ url: 'http://h/mcp?v=2' }) === 'v2' && pick({ url: 'http://h/mcp?lean=1' }) === 'v1+lean'
       && pick({ surface: 'v1', url: 'http://h/mcp?v=2' }) === 'v1' && pick({ surface: 'v2', url: 'http://h/mcp?lean=1' }) === 'v2'
       && pick({ surface: 'v3', url: 'http://h/mcp?v=2' }) === 'v3' && pick({ url: 'http://h/mcp?v=3' }) === 'v3',
@@ -732,7 +732,7 @@ ${B.FALLBACK_INSTRUCTIONS_V2}` && ins.includes('브리지에 내장된 안내') 
       ok(pc.query.agent === 'Claude Code' && pc.query.channel === '1' && pc.headers.authorization === `Bearer ${TOKEN}`, '프로세스: url 은 인자로, 토큰은 env(HWPX_COWORK_TOKEN)로 — SSE 헤더 인증');
       ok((await P.client.listTools()).tools.length === 2, '프로세스: tools/list 중계');
       const who = JSON.parse((await P.client.callTool({ name: 'whoami', arguments: {} })).content[0].text);
-      ok(who.session === pc.query.session && who.agent === 'Claude Code' && who.mcp === '2', '프로세스: MCP 머리글 세션 = SSE 세션(선점에 같은 id), 연결 종류 머리글 X-Hwpx-Mcp: 2(기본)');
+      ok(who.session === pc.query.session && who.agent === 'Claude Code' && who.mcp === '3', '프로세스: MCP 머리글 세션 = SSE 세션(선점에 같은 id), 연결 종류 머리글 X-Hwpx-Mcp: 3(기본)');
       await until(() => /알림 연결됨/.test(P.out.stderr), 'hello 처리(stderr 로그)', 5000);
       // (d) 에서 남긴 snapshot(대기 5건) — 새 프로세스에는 처음 보는 요청이라 요약 1번으로 알린다.
       // 기본 startupHoldMs(5초): Claude Code 가 채널 처리기를 달 때까지 모았다가 보낸다
@@ -828,11 +828,11 @@ ${B.FALLBACK_INSTRUCTIONS_V2}` && ins.includes('브리지에 내장된 안내') 
       && ['claim_orchestration_task', 'heartbeat_orchestration_task', 'submit_orchestration_task', 'plan_orchestration_run', 'publish_orchestration_result', 'LEASE_LOST'].every((s) => guide('orchestration.md').includes(s))
       && ['list_change_requests', 'get_change_request', 'comment_change_request', 'review_change_request', 'approve'].every((s) => guide('change-requests.md').includes(s)),
     'agent/guides: 그림 파일·멀티에이전트·변경 요청 절차(CLAUDE.md 가 그 일을 할 때만 읽게 가리킴)');
-    ok(md1.includes('complete="요약"') && md1.includes('`context` 가 없으면') && e0.args.includes('--v2') && !e0.args.includes('--lean'),
-      'agent/v1/CLAUDE.md: 얇은 흐름(start_request 가 내용을 줌, 쓰기의 complete 로 완료 — 예전 서버면 get_request·complete_request), .mcp.json.example 은 새 연결(--v2)');
-    ok(same(SA.mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp']) && same(SA.mcpEntry('/b.js', 'http://x/mcp', null, { v2: false }).args, ['/b.js', '--channel', '--v1', '--lean', '--url', 'http://x/mcp'])
+    ok(md1.includes('complete="요약"') && md1.includes('`context` 가 없으면') && e0.args.includes('--v3') && !e0.args.includes('--lean'),
+      'agent/v1/CLAUDE.md: 얇은 흐름(start_request 가 내용을 줌, 쓰기의 complete 로 완료 — 예전 서버면 get_request·complete_request), .mcp.json.example 은 새 연결(--v3)');
+    ok(same(SA.mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v3', '--url', 'http://x/mcp']) && same(SA.mcpEntry('/b.js', 'http://x/mcp', null, { v2: false }).args, ['/b.js', '--channel', '--v1', '--lean', '--url', 'http://x/mcp'])
       && SA.entrySurface({ args: ['b', '--channel', '--lean'] }) === null && SA.entrySurface({ args: ['b', '--v1', '--lean'] }) === 'v1' && SA.entrySurface({ args: ['b', '--v2'] }) === 'v2' && SA.entrySurface({ args: ['b', '--mcp', '1'] }) === 'v1' && SA.entrySurface(undefined) === null,
-    'mcpEntry 기본 = 새 연결(--v2), 예전 연결 = --v1 --lean · entrySurface: --v1·--v2·--mcp 만 고른 것으로 본다(예전 기본 --lean 은 고르지 않은 것)');
+    'mcpEntry 기본 = 새 연결(--v3), 예전 연결 = --v1 --lean · entrySurface: --v1·--v2·--mcp 만 고른 것으로 본다(예전 기본 --lean 은 고르지 않은 것)');
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-agent-')); tmpDirs.push(tmp);
     const ws = path.join(tmp, 'ws');

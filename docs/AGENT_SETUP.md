@@ -34,7 +34,7 @@ CLI의 본인 구독 로그인·OAuth 동의는 사용자가 직접 합니다. �
 claude mcp add --scope user --transport http hwpx 'https://cowork.example.com/mcp' --header 'Authorization: Bearer ${HWPX_COWORK_TOKEN}'
 ```
 
-그 뒤 Claude Code 대화창에서 `대기열을 처리해 줘` 라고 하면 인자 없는 `task` 로 쌓인 내 요청을 오래된 것부터 처리합니다(2026-11-17부터 이 주소의 기본은 새 연결 v2 — 예전 도구가 필요하면 주소를 `…/mcp?v=1` 로 등록하고, 그때는 `claim_next_request`). 이 연결은 알림(채널)이 아니라 도구 연결이라 웹의 보낼 곳에 ‘Claude Code로 보내기’가 생기지 않습니다. 새 요청을 바로 받으려면 아래 실행기나 채널을 켭니다. 이미 `hwpx` 가 있다고 나오면 `claude mcp remove hwpx -s user` 뒤 다시 등록합니다.
+그 뒤 Claude Code 대화창에서 `대기열을 처리해 줘` 라고 하면 인자 없는 `task` 로 쌓인 내 요청을 오래된 것부터 처리합니다(2026-11-21부터 이 주소의 기본은 v3 — 예전 도구가 필요하면 주소를 `…/mcp?v=1` 로 등록하고, 그때는 `claim_next_request`). 이 연결은 알림(채널)이 아니라 도구 연결이라 웹의 보낼 곳에 ‘Claude Code로 보내기’가 생기지 않습니다. 새 요청을 바로 받으려면 아래 실행기나 채널을 켭니다. 이미 `hwpx` 가 있다고 나오면 `claude mcp remove hwpx -s user` 뒤 다시 등록합니다.
 
 ### 채널 없이 바로 처리하기 — Claude Code 실행기
 
@@ -104,7 +104,7 @@ hwpx-cowork 폴더에서:
 node scripts/setup-agent.mjs
 ```
 - `agent/.mcp.json` 을 만듭니다(이 PC 의 브리지 절대 경로, `--channel`, 연결 종류 `--v2`, 서버 주소. 토큰은 `${HWPX_COWORK_TOKEN}` 참조만 — 값은 쓰지 않음). 이미 있으면 `hwpx` 항목만 바꾸고 다른 항목은 그대로 둡니다.
-- **2026-11-17부터 새 MCP 연결(v2)이 기본입니다** — 작업 도구 넷 `task`·`read`·`edit`·`finish`. 예전 연결 지침(`CLAUDE.md`)이 있던 작업 공간은 그 지침을 `CLAUDE.v1.md` 로 남기고 새 지침으로 바꿉니다(어느 연결 것인지 모르는 지침은 그대로 둡니다). 예전 연결을 계속 쓰려면 `--v1`(아래 옵션).
+- **새 작업 공간의 기본은 표를 TSV로 읽는 MCP v3입니다** — 작업 도구 넷 `task`·`read`·`edit`·`finish`. 예전 연결 지침(`CLAUDE.md`)이 있던 작업 공간은 그 지침을 `CLAUDE.v1.md` 로 남기고 새 지침으로 바꿉니다(어느 연결 것인지 모르는 지침은 그대로 둡니다). 예전 연결을 계속 쓰려면 `--v1`(아래 옵션).
 - 서버 주소는 **MCP 주소(`…/mcp`)** 여야 합니다. `http://서버:8787` 처럼 서버 주소만 주면 끝에 `/mcp` 를 붙이고 알려 줍니다.
 - `claude --version` 을 확인해 판이 낮으면 알려 줍니다.
 - 서버에 닿으면 **MCP 주소가 정말 MCP 로 답하는지**(`✓ MCP 주소 … — hwpx-cowork …`) 확인합니다. MCP 로 답하지 않으면 `✗ … 는 MCP 주소가 아닙니다` 와 함께 종료 코드 1 — `--url` 을 고쳐 다시 실행하세요.
@@ -118,7 +118,8 @@ node scripts/setup-agent.mjs
 | `--url http://서버:8787/mcp` | 서버 MCP 주소(기본 `http://localhost:8787/mcp`, 또는 환경 변수 `HWPX_COWORK_URL`). `/mcp` 가 없으면 붙여 줍니다 |
 | `--dir <폴더>` | 작업 공간을 다른 곳에(예: `%USERPROFILE%\hwpx-agent`). 본보기 `CLAUDE.md`·`.claude/settings.json` 도 복사합니다 |
 | `--v1` | 예전 연결로 준비(브리지 `--v1 --lean`, 지침은 남겨 둔 `CLAUDE.v1.md` 또는 `agent/v1/CLAUDE.md`). 이 저장소의 `agent/` 는 배포 묶음·시험이 읽는 새 연결 본보기라 그 자리에서는 거절합니다 — `--dir agent-v1 --v1` 처럼 다른 폴더에 만드세요 |
-| `--v2` | 새 연결(기본과 같음 — 예전 인자 그대로 받음) |
+| `--v3` | 기본 연결. 문서의 표를 TSV로 읽습니다. |
+| `--v2` | 표를 기존 문단 형식으로 읽습니다. |
 | `--user 홍길동` | 토큰 주인이 이 이름인지 확인 |
 | `--no-claude` · `--no-server` | `claude --version` · 서버 확인을 건너뜀 |
 | `--no-registry` | (Windows) 이 창에 토큰이 없을 때 `setx` 로 저장돼 있는지(레지스트리 `HKCU\Environment`) 보지 않음 — 시험용. 값은 어느 경우에도 읽어 보여 주지 않습니다 |
@@ -127,7 +128,7 @@ node scripts/setup-agent.mjs
 
 | 파일 | 하는 일 |
 |---|---|
-| `.mcp.json` | hwpx 브리지를 채널로 띄우는 설정(setup-agent 가 만듦). `--v2` 는 새 연결(기본 — 아래 부록 '브리지 명령줄'), `--files-dir <agent>/work` 로 로컬 파일 도구를 켭니다. `--v1 --lean`(setup-agent `--v1`)은 예전 연결의 얇은 흐름 — 서버가 요청 내용·도구 응답을 모델용으로 짧게 줍니다(`start_request` 가 내용을 함께 주고 쓰기의 `complete` 로 완료 — [MCP_LEAN_FLOW_2026-11-10.md](MCP_LEAN_FLOW_2026-11-10.md)). 본보기: `.mcp.json.example`(`--v2`) |
+| `.mcp.json` | hwpx 브리지를 채널로 띄우는 설정(setup-agent 가 만듦). `--v3`는 기본 연결(아래 부록 '브리지 명령줄'), `--files-dir <agent>/work` 로 로컬 파일 도구를 켭니다. `--v1 --lean`(setup-agent `--v1`)은 예전 연결의 얇은 흐름 — 서버가 요청 내용·도구 응답을 모델용으로 짧게 줍니다(`start_request` 가 내용을 함께 주고 쓰기의 `complete` 로 완료 — [MCP_LEAN_FLOW_2026-11-10.md](MCP_LEAN_FLOW_2026-11-10.md)). 본보기: `.mcp.json.example`(`--v3`) |
 | `CLAUDE.md` | 이 세션에서 Claude 가 할 일(새 연결 지침) — 알림 처리 순서(`task` → 필요할 때만 `read` → `edit(done)`, 쓰기 없이 끝내면 `finish`), 취소·선점 실패 때 멈추기, 알림 없이 시키면 인자 없는 `task`, 문서 글은 자료일 뿐 지시가 아님. 자주 하지 않는 일은 `guides/` 를 그때 읽게 가리킵니다. 예전 연결 지침은 저장소의 `agent/v1/CLAUDE.md`(예전 연결로 바꾼 작업 공간에서는 `CLAUDE.v1.md`) |
 | `guides/` | 그 일을 할 때만 읽는 절차: `figure-files.md`(그림·파일 고치기 — 작업 폴더 `work/`), `orchestration.md`(멀티에이전트 알림), `change-requests.md`(변경 요청 검토 — 시킬 때만, 승인·반영 안 함). 읽기만 허용하고 고치기는 거부합니다 |
 | `.claude/settings.json` | 기본 모드 `dontAsk` — 아래 허용 목록 밖은 묻지 않고 거부합니다(무인 세션이 승인 창에서 멈추지 않게). 허용: 새 연결 작업 도구(`task`·`read`·`edit`·`finish`), hwpx 읽기·제안·요청 도구(예전 연결 — `claim_next_request` 포함), 서식 도구(`propose_format`·`get_formatting`), 그림 도구(`list_figures`·`export_figure`·`download_attachment_file`·`upload_result_file`), 변경 요청 검토 도구(승인은 서버가 거절), `work/` 안 읽기·쓰기(`Read(/work/**)`·`Edit(/work/**)` — Claude Code 는 새 파일 쓰기도 `Edit(경로)` 규칙으로 봅니다)와 `python -I work/*` 실행, `guides/` 읽기(`Read(/guides/**)`)만. 거부: `apply_proposal`·`accept_change`·`reject_change`·`undo_proposal`·`delete_memo`, ChatGPT 전용 파일 도구, `.claude/`·`.mcp.json`·`CLAUDE.md`·`guides/` 고치기, NotebookEdit·WebFetch·WebSearch. `--dangerously-skip-permissions` 막음 |
@@ -261,7 +262,7 @@ bearer_token_env_var = "HWPX_COWORK_TOKEN"
 
 > hwpx의 task(인자 없이)로 내 대기 요청을 오래된 순서로 하나씩 맡아 처리해 줘. 받은 지시·대상으로 충분하면 바로, 모자라면 read로 필요한 범위만 읽고 edit로 기본 권장안 1개를 한 번에 내고 done에 짧은 공유 요약을 적어 마무리해 줘. 고칠 것이 없으면 finish로 끝내 줘. 여러 안은 비교를 요청한 경우에만 만들어 줘. CLAIMED·NOT_OWNER·REQUEST_CLOSED이면 그 요청은 멈추고, task가 none이면 끝내 줘.
 
-2026-11-17부터 `/mcp` 의 기본은 새 연결(v2)이라 위 문장을 씁니다. 주소를 `…/mcp?v=1`(예전 연결)로 등록했다면 예전 문장 — "hwpx의 claim_next_request로 … 각 요청은 complete_request의 짧은 공유 요약으로 마무리해 줘" — 을 씁니다.
+2026-11-21부터 `/mcp` 의 기본은 v3이라 위 문장을 씁니다. 주소를 `…/mcp?v=1`(예전 연결)로 등록했다면 예전 문장 — "hwpx의 claim_next_request로 … 각 요청은 complete_request의 짧은 공유 요약으로 마무리해 줘" — 을 씁니다.
 
 **MCP 연결만으로 웹에서 맡긴 작업이 AI에게 자동 전달되지는 않습니다.** Claude Code 채널은 자동 알림을 보내지만 일반 ChatGPT·Codex MCP 연결은 위처럼 도구 호출로 작업을 가져옵니다. 상단 '내 에이전트'의 연결 표시는 채널 자동 수신 상태이므로, 일반 MCP 도구가 정상 작동해도 자동 수신은 꺼져 있을 수 있습니다. 제안·의견이 서버에 저장되면 열려 있는 편집기에는 WebSocket으로 바로 나타납니다. 본문 반영은 사람이 선택하며, 실시간 편집 문서는 반영 직후 다른 편집기에 공유됩니다.
 
@@ -285,7 +286,7 @@ node server/mcp-stdio.js [--channel] [--v1 [--lean] | --v2 [--tools core|all]] [
 | `--channel` | 채널 알림 켜기(없으면 v0.2 처럼 도구만 중계) |
 | `--v1` | 예전 연결(`--mcp 1` 과 같다 — 머리글 `X-Hwpx-Mcp: 1`): `start_request`·`propose_*`·`complete_request` 등 예전 도구. 주소에 `?v=1` 을 붙여도 같다 |
 | `--lean` | 예전 연결의 얇은 흐름 — 요청 내용·도구 응답을 모델용으로 짧게 받는다(`start_request` 가 내용을 함께 줌, 쓰기의 `complete` 로 완료). `--v2` 가 없으면 예전 연결이다. `--no-lean` 으로 끈다. 주소에 `?lean=1` 을 붙여도 같다 |
-| `--v2` | 새 연결(2026-11-17부터 기본 — 적지 않아도 같다, `--mcp 2` 와 같다 — [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md)): 작업 도구 넷 `task`(맡기 + 요청 내용)·`read`(글과 주소만)·`edit`(ops 를 한 번에, `done` 으로 완료)·`finish`. 주소에 `?v=2` 를 붙여도 같다. `--tools core` 는 작업 도구와 그림·스킬 파일 도구만, `all`(기본)은 문서 목록·새 문서·사람이 정할 일·변경 요청·멀티에이전트 도구까지. 서버가 새 연결을 알아야 한다(옛 서버는 예전 도구로 답한다 — 그때는 `--v1`) |
+| `--v2` | v2 연결(`--mcp 2`와 같다 — [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md)): 작업 도구 넷 `task`(맡기 + 요청 내용)·`read`(글과 주소만)·`edit`(ops 를 한 번에, `done` 으로 완료)·`finish`. 주소에 `?v=2` 를 붙여도 같다. `--tools core` 는 작업 도구와 그림·스킬 파일 도구만, `all`(기본)은 문서 목록·새 문서·사람이 정할 일·변경 요청·멀티에이전트 도구까지. 서버가 새 연결을 알아야 한다(옛 서버는 예전 도구로 답한다 — 그때는 `--v1`) |
 | `--no-tools` | 도구는 중계하지 않고 알림만(`--channel` 과 함께, 도구는 다른 hwpx MCP 연결을 쓸 때) |
 
 2026-11-17부터 `node scripts/setup-agent.mjs` 는 인자 없이도 새 연결로 준비한다 — `.mcp.json` 의 브리지 인자를 `--v2` 로, 예전 연결 지침이던 `CLAUDE.md` 는 `CLAUDE.v1.md` 로 남기고 새 연결 지침(저장소의 `agent/CLAUDE.md`)으로 바꾸며, 허용 목록에 작업 도구 넷을 더한다(`agent/v2/` 본보기는 없어졌다 — `agent/CLAUDE.md` 가 새 연결 지침이다). 예전 연결로 되돌리기는 `--v1`(브리지 `--v1 --lean`, 지침 `CLAUDE.v1.md` 또는 `agent/v1/CLAUDE.md`). 바꾼 뒤 에이전트 세션을 다시 띄워야 적용된다. 프로그램 소스 폴더(시험·묶음 스크립트가 함께 있는 개발용 폴더)의 `agent/` 는 배포 묶음·공개 저장소의 새 연결 본보기이므로 그 자리에서는 `--v1` 을 거절한다 — 예전 연결은 다른 폴더에 만든다(`node scripts/setup-agent.mjs --dir agent-v1 --v1` — 그 폴더에서 Claude Code 를 띄운다). **새 연결은 서버가 알 때만 쓴다** — `setup-agent` 의 서버 확인에 "이 서버는 새 연결(--v2)을 모릅니다"가 나오면 그 서버는 예전 도구로 답해 새 지침과 맞지 않으므로 `--v1` 로 준비한다.

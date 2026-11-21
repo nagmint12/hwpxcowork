@@ -271,11 +271,11 @@ test('웹 요청 → Claude Code 실행기(채널 없이) → MCP 결과 저장,
 const V2_TOOLS = ['download_attachment_file', 'edit', 'export_figure', 'export_skill_resource', 'finish', 'preview_figure', 'read', 'read_skill_resource', 'task', 'upload_result_file'];
 const OLD_TOOL_NAMES = /\bpropose_[a-z_]+|get_request|complete_request|fail_request|read_document|claim_next_request|start_request|add_memo/;
 
-test('새 연결(--mcp 2): 실행기 인자는 codex 와 같은 규칙, 기본은 새 연결(2026-11-17)·예전 연결은 --mcp 1', () => {
+test('새 연결(--mcp 2): 실행기 인자는 codex 와 같은 규칙, 기본은 TSV 연결(v3)·예전 연결은 --mcp 1', () => {
   const env = { HWPX_COWORK_TOKEN: 'personal-token' };
   const parsed = parseWorkerArgs(['--provider', 'claude-code'], env);
-  assert.equal(parsed.mcp, '2', '기본 = 새 연결');
-  assert.equal(createWorkerAi(parsed, env).mcpSurface, 'v2');
+  assert.equal(parsed.mcp, '3', '기본 = TSV 연결');
+  assert.equal(createWorkerAi(parsed, env).mcpSurface, 'v3');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '2'], env), env).mcpSurface, 'v2');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-code', '--mcp', '1'], env), env).mcpSurface, null, '--mcp 1 = 예전 연결');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'claude-cli', '--mcp', '1'], { ...env, HWPX_COWORK_MCP: '2' }), env).mcpSurface, null, '명령줄이 환경 변수보다 먼저');

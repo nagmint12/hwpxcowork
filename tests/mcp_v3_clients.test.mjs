@@ -99,7 +99,7 @@ async function queue(api, route, instruction = INSTRUCTION) {
   return (await api(`${route}/requests`, { method: 'POST', body: { kind: 'instruct', target: TARGET, instruction, route: 'queue' } })).request;
 }
 
-test('HTTP ?v=3 및 stdio --mcp 3의 실제 TSV 읽기, v2 기본·v1 호환', { timeout: 30000 }, async (t) => {
+test('HTTP ?v=3 및 stdio --mcp 3의 실제 TSV 읽기, v3 기본·v2/v1 호환', { timeout: 30000 }, async (t) => {
   const { srv, docId, api, route } = await sample(t);
   const read = async (client) => {
     const result = await client.callTool({ name: 'read', arguments: { doc_id: docId, view: 'text' } });
@@ -107,14 +107,17 @@ test('HTTP ?v=3 및 stdio --mcp 3의 실제 TSV 읽기, v2 기본·v1 호환', {
     return bodyText(result);
   };
   assert.equal(srv.config.features.mcp3, true);
-  assert.equal(srv.config.features.mcpDefault, 'v2');
-  const v2Text = await withHttp(srv, {}, async (client) => {
+  assert.equal(srv.config.features.mcpDefault, 'v3');
+  const v2Text = await withHttp(srv, { query: '?v=2' }, async (client) => {
     const text = await read(client);
     assert.match(text, /회의일시/);
     assert.doesNotMatch(text, /TSV r0/);
     return text;
   });
-  assert.equal(await withHttp(srv, { query: '?v=2' }, read), v2Text);
+  const defaultText = await withHttp(srv, {}, read);
+  assertDocumentContext(defaultText);
+  assert.notEqual(defaultText, v2Text);
+  assert.equal(await withHttp(srv, { query: '?v=3' }, read), defaultText);
   await withHttp(srv, { query: '?v=1' }, async (client) => {
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     assert.ok(names.includes('read_document') && !names.includes('read'));
@@ -191,7 +194,7 @@ test('실행기 명시 선택과 구서버 사전 점검: 지원하는 서버에
   const clients = ['codex', 'claude-code', ...PROVIDERS];
   for (const client of clients) {
     const base = ['--provider', client, '--model', 'fake-model'];
-    assert.equal(parseWorkerArgs(base, env).mcp, '2', `${client}: 기존 기본값`);
+    assert.equal(parseWorkerArgs(base, env).mcp, '3', `${client}: TSV 기본값`);
     assert.equal(parseWorkerArgs(base, { ...env, HWPX_COWORK_MCP: '3' }).mcp, '3');
     const options = parseWorkerArgs([...base, '--mcp', '3'], { ...env, HWPX_COWORK_MCP: '1' });
     const ai = createWorkerAi(options, env);

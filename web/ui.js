@@ -193,11 +193,11 @@ const KIND_HELP = {
 /** [프롬프트 복사] 설명(요청 창·결과 창·AI 작업 탭 카드) */
 export const COPY_TIP = 'ChatGPT Work 등 MCP로 연결한 AI 대화창에 붙여 넣을 문장을 복사합니다';
 
-/** 연결한 AI 대화창(MCP)에 붙여 넣을 문장(글은 menumodel.js) — 도구 이름은 이 서버의 MCP 기본 연결(features.mcpDefault, 2026-11-17 기본 'v2')을 따른다.
+/** 연결한 AI 대화창(MCP)에 붙여 넣을 문장(글은 menumodel.js) — 도구 이름은 이 서버의 MCP 기본 연결(features.mcpDefault, 기본 'v3')을 따른다.
  *  features 에 mcpDefault 가 없으면 기본이 예전 연결이던 판의 서버다(web/ 은 서버 재시작 없이 바로 보인다) */
 export function agentPrompt(d, r) {
   const f = state.config?.features;
-  return agentPromptText(d, r, kinds(), { surface: f && f.mcpDefault !== 'v2' ? 'v1' : 'v2' });
+  return agentPromptText(d, r, kinds(), { surface: f ? (f.mcpDefault || 'v1') : 'v3' });
 }
 
 export const FormatPreview = {

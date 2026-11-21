@@ -29,7 +29,7 @@ setx HWPX_COWORK_TOKEN "내-토큰"
 codex mcp add hwpx --url "https://cowork.example.com/mcp?agent=Codex" --bearer-token-env-var HWPX_COWORK_TOKEN
 ```
 
-주소는 웹 설명서에 이 서버의 실제 주소로 채워져 나온다. 등록한 뒤 Codex 대화창에서 “대기열을 처리해 줘”라고 하면 인자 없는 `task`로 쌓인 요청을 오래된 순서로 처리한다(연결만으로 자동 실행되지는 않는다). 2026-11-17부터 `/mcp`의 기본은 새 연결(v2 — `task`·`read`·`edit`·`finish`)이다. 예전 도구(`claim_next_request` 등)가 필요하면 주소에 `&v=1`을 붙인다(`…/mcp?agent=Codex&v=1`).
+주소는 웹 설명서에 이 서버의 실제 주소로 채워져 나온다. 등록한 뒤 Codex 대화창에서 “대기열을 처리해 줘”라고 하면 인자 없는 `task`로 쌓인 요청을 오래된 순서로 처리한다(연결만으로 자동 실행되지는 않는다). 2026-11-21부터 `/mcp`의 기본은 새 연결(v3 — `task`·`read`·`edit`·`finish`)이다. 예전 도구(`claim_next_request` 등)가 필요하면 주소에 `&v=1`을 붙인다(`…/mcp?agent=Codex&v=1`).
 
 ## 실행기 켜기 — 실시간 처리
 
@@ -43,7 +43,7 @@ npm.cmd run worker -- --provider codex --check
 npm.cmd run worker -- --provider codex
 ```
 
-예전 `start-codex-agent.bat`은 2026-11-17에 지웠다(앱의 실행기 관리 또는 위 명령이 대신한다). 프로그램 폴더에서는 `npm.cmd run agent:codex`(= `scripts/codex-agent.mjs`)도 같은 Codex 실행기를 띄운다 — AI 협업(멀티에이전트) 큐까지 처리하려면 `HWPX_COWORK_ORCHESTRATION=1`(기본 꺼짐). 실행기는 새 MCP 연결(v2)이 기본이고, `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다. 아직 새 연결을 모르는 옛 중앙 서버에 붙으면 시작 점검에서 멈추고 `--mcp 1`을 알린다.
+예전 `start-codex-agent.bat`은 2026-11-17에 지웠다(앱의 실행기 관리 또는 위 명령이 대신한다). 프로그램 폴더에서는 `npm.cmd run agent:codex`(= `scripts/codex-agent.mjs`)도 같은 Codex 실행기를 띄운다 — AI 협업(멀티에이전트) 큐까지 처리하려면 `HWPX_COWORK_ORCHESTRATION=1`(기본 꺼짐). 실행기는 MCP v3가 기본이고, `--mcp 2`이면 v2,, `--mcp 1`(또는 `HWPX_COWORK_MCP=1`)이면 예전 연결이다. 아직 새 연결을 모르는 옛 중앙 서버에 붙으면 시작 점검에서 멈추고 `--mcp 1`을 알린다.
 
 - `--check`는 로그인·서버 계정·필수 도구·재시도 보호만 점검한다. 모델을 부르거나 문서를 읽거나 요청을 선점하지 않는다. `ready: true`, `connected: true`, `toolsReady: true`를 확인한다.
 - 켜 두면 문서 화면의 보낼 곳에 **Codex로 보내기**가 보인다. 시작할 때 기존 대기 요청과 선점이 만료된 작업도 확인하고, 새 요청은 알림으로 바로 받는다(연결이 빠지면 30초 점검·재연결로 복구). 한 번에 한 요청씩, 본인 요청만 맡는다.
@@ -78,7 +78,7 @@ node scripts/local-chatgpt.mjs status --user "내 이름"
 node scripts/local-chatgpt.mjs stop --user "내 이름"
 ```
 
-`start`는 숨은 실행기를 시작하고(이미 있으면 다시 띄우지 않음), `stop`은 그 실행기만 멈춘다. 상태와 진단 로그는 `artifacts/local-chatgpt-worker/`에 남고 토큰은 저장하지 않는다. CLI 경로가 필요하면 `check`·`start`에 `--codex-command`를 더한다. 이 실행기도 2026-11-17부터 새 MCP 연결(v2)이 기본이며, 예전 연결은 `HWPX_COWORK_MCP=1`을 정한 창에서 `start`한다.
+`start`는 숨은 실행기를 시작하고(이미 있으면 다시 띄우지 않음), `stop`은 그 실행기만 멈춘다. 상태와 진단 로그는 `artifacts/local-chatgpt-worker/`에 남고 토큰은 저장하지 않는다. CLI 경로가 필요하면 `check`·`start`에 `--codex-command`를 더한다. 이 실행기도 MCP v3가 기본이며, 예전 연결은 `HWPX_COWORK_MCP=1`을 정한 창에서 `start`한다.
 
 ## 대화로 처리하기(설치 없이)
 

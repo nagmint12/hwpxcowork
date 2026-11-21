@@ -124,10 +124,11 @@ export function loadConfig(root) {
   cfg.experiments = { contentFormat: false, ...obj(cfg.experiments) };
   cfg.experiments.contentFormat = cfg.experiments.contentFormat === true || process.env.HWPX_COWORK_CONTENT_FORMAT === '1';
   // MCP 기본 연결(2026-11-17 사용자 결정 — server/mcp2.js mcpSurface): 머리글 X-Hwpx-Mcp·주소 ?v= 로 밝히지 않은 HTTP MCP 연결(웹 AI 커넥터 포함)을
-  // 무엇으로 여는가. 'v2'(기본 — 새 연결, 작업 도구 넷) | 'v1'(예전 연결로 서버 전체를 되돌릴 때). 그 밖의 값·없음은 'v2'.
-  // 밝힌 연결(X-Hwpx-Mcp: 1|2·?v=1|2)은 이 값과 상관없이 밝힌 대로다
+  // 무엇으로 여는가. v1·v2를 명시하면 그 버전, 기본은 v3(TSV).
+  // 밝힌 연결(X-Hwpx-Mcp: 1|2|3·?v=1|2|3)은 이 값과 상관없이 밝힌 대로다
   cfg.mcp = { ...obj(cfg.mcp) };
-  cfg.mcp.defaultSurface = ['v1', '1'].includes(String(cfg.mcp.defaultSurface ?? '').trim().toLowerCase()) ? 'v1' : 'v2';
+  const version = String(cfg.mcp.defaultSurface ?? '').trim().toLowerCase().replace(/^v/, '');
+  cfg.mcp.defaultSurface = ['1', '2', '3'].includes(version) ? `v${version}` : 'v3';
   // PC 폴더 연결(server/local-folders.js — 개인용 앱): 서버 PC 의 폴더를 관리자의 개인 문서함에 비춘다. 기본 끔(중앙 서버에서는 켜지 않는다).
   // HWPX_COWORK_LOCAL=1 로도 켠다. writeDelayMs = 고친 뒤 PC 파일에 쓰기까지 모으는 시간, trash = 'recycle'(Windows 휴지통, 기본)|'folder'(<dataDir>/local-trash)
   cfg.local = { enabled: false, ...obj(cfg.local) };

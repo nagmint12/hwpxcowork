@@ -2,9 +2,9 @@
 // 개인 에이전트 작업 공간 준비(docs/V3_SPEC.md §2.4, 사용자 안내: docs/AGENT_SETUP.md)
 //   node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v3|--v2|--v1] [--no-claude] [--no-server] [--no-registry]
 //   · 연결 종류(2026-11-17 사용자 결정 — 기본 새 연결): 새 MCP 연결(작업 도구 넷 task·read·edit·finish — docs/MCP_REDESIGN_2026-11-16.md)로 준비한다 —
-//     브리지 인자 --v2, CLAUDE.md 는 agent/CLAUDE.md(예전 연결 지침이면 CLAUDE.v1.md 로 남기고 바꾼다 — 어느 연결 것인지 모르는 지침은 그대로).
+//     브리지 인자 --v3, CLAUDE.md 는 agent/CLAUDE.md(예전 연결 지침이면 CLAUDE.v1.md 로 남기고 바꾼다 — 어느 연결 것인지 모르는 지침은 그대로).
 //     --v1 은 예전 연결(브리지 --v1 --lean, CLAUDE.md 는 남겨 둔 CLAUDE.v1.md 또는 agent/v1/CLAUDE.md)로 준비한다.
-//     --v3은 TSV 시험 연결이다. 선택 인자가 없으면 기존 작업 공간의 명시적 연결을 유지하고 처음에는 v2를 쓴다
+//     --v3은 TSV 연결이다. 인자를 생략하면 저장된 연결을 유지하고 새 작업 공간은 v3을 쓴다
 //   · <dir>/.mcp.json 에 hwpx 항목을 쓴다(이 PC 의 절대 경로로 브리지 실행, --channel, 토큰은 ${HWPX_COWORK_TOKEN} 참조) — 다른 항목은 그대로 둔다
 //   · <dir> 가 이 프로젝트의 agent/ 가 아니면 CLAUDE.md·.claude/settings.json 본보기를 복사한다(이미 있으면 그대로)
 //   · 위 폴더들의 CLAUDE.md(개발 메모)를 에이전트 세션이 읽지 않게 <dir>/.claude/settings.local.json 의 claudeMdExcludes 에 넣는다
@@ -55,10 +55,10 @@ export function claudeAdvice(versionText, platform = process.platform) {
 }
 /**
  * .mcp.json 의 hwpx 항목(토큰은 환경 변수 참조). filesDir 를 주면 로컬 파일 도구(--files-dir — 첨부 원본 내려받기·결과 파일 올리기)를 켠다.
- * v2(기본) = 새 연결(--v2). 예전 연결은 --v1 --lean — --v1 은 사람이 고른 예전 연결이라는 표시(다시 준비할 때 그대로 둔다),
+ * v3(기본) = TSV 연결(--v3), v2 = 새 연결(--v2). 예전 연결은 --v1 --lean — --v1 은 사람이 고른 예전 연결이라는 표시(다시 준비할 때 그대로 둔다),
  * --lean = 얇은 흐름(요청 내용·도구 응답을 모델용으로 짧게 — docs/MCP_LEAN_FLOW_2026-11-10.md, agent/v1/CLAUDE.md 가 이 흐름을 쓴다)
  */
-export function mcpEntry(bridgePath, url, filesDir = null, { v2 = true, surface = v2 ? 'v2' : 'v1' } = {}) {
+export function mcpEntry(bridgePath, url, filesDir = null, { v2, surface = v2 === undefined ? 'v3' : v2 ? 'v2' : 'v1' } = {}) {
   return { command: 'node', args: [bridgePath, '--channel', ...(surface === 'v1' ? ['--v1', '--lean'] : [`--${surface}`]), '--url', url, ...(filesDir ? ['--files-dir', filesDir] : [])], env: { HWPX_COWORK_TOKEN: TOKEN_REF } };
 }
 /**
@@ -217,8 +217,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const out = (s = '') => console.log(s);
   if (o.help) {
     out('node scripts/setup-agent.mjs [--dir agent] [--url http://localhost:8787/mcp] [--user 이름] [--v3|--v2|--v1] [--no-claude] [--no-server] [--no-registry]');
-    out('  연결 종류: 기본은 새 MCP 연결(작업 도구 넷 — task·read·edit·finish, --v2 와 같다). --v1 = 예전 연결(start_request·propose_* 등), --v3 = 본문 표를 TSV로 읽는 시험 연결.');
-    out('  생략하면 작업 공간에 저장한 버전을 유지합니다. 새 작업 공간의 기본은 v2입니다');
+    out('  연결 종류: 기본은 본문 표를 TSV로 읽는 --v3입니다. --v2는 문단 보기, --v1은 예전 연결(start_request·propose_* 등)입니다.');
+    out('  생략하면 작업 공간에 저장한 버전을 유지합니다. 새 작업 공간의 기본은 v3입니다');
     out('  개인 에이전트(Claude Code 채널) 작업 공간을 준비합니다. 자세한 안내: docs/AGENT_SETUP.md');
     return 0;
   }
@@ -241,14 +241,14 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const dir = path.resolve(o.dir || templateDir);
   const bridgePath = path.join(root, 'server', 'mcp-stdio.js').split(path.sep).join('/');
   const mcpFile = path.join(dir, '.mcp.json');
-  // 명시적 버전 인자, 새 주소의 ?v=, 작업 공간에 저장된 선택, 기본 v2 순이다.
+  // 명시적 버전 인자, 새 주소의 ?v=, 작업 공간에 저장된 선택, 기본 v3 순이다.
   // 예전 기본(--lean)·인자 없는 옛 항목은 사람이 고른 것이 아니라 새 기본으로 바꾼다(예전 연결은 밝힐 때만 쓴다 — 사용자 결정)
   const before = fs.existsSync(mcpFile) ? readJson(mcpFile) : undefined;
   const oldEntry = before && typeof before === 'object' && !Array.isArray(before) ? before.mcpServers?.[SERVER_NAME] : undefined;
   const kept = entrySurface(oldEntry);
   const urlVersion = new URL(url).searchParams.get('v');
   const urlSurface = ['1', '2', '3'].includes(urlVersion) ? `v${urlVersion}` : null;
-  const surface = o.surface || (o.url && urlSurface) || kept || urlSurface || 'v2';
+  const surface = o.surface || (o.url && urlSurface) || kept || urlSurface || 'v3';
   const v2 = surface !== 'v1';
   // 소스 폴더(시험과 묶음 스크립트가 함께 있는 곳)의 agent/ 는 배포 묶음·공개 저장소·시험이 읽는 본보기(새 연결)다. 그 자리에서 예전 연결로 바꾸면
   // 본보기 CLAUDE.md 가 예전 연결용 글로 바뀌어 묶음과 시험이 어긋난다 — 예전 연결 작업 공간은 다른 폴더에 만든다(설치본의 agent/ 는 그 자리에서 바꿔도 된다)
@@ -403,7 +403,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
         }
         out(`  ✓ ${parts.join(' · ')}`);
         // 새 연결(기본)은 서버가 그 연결을 알아야 한다(/api/config features.mcp2). 옛 서버는 예전 도구로 답해 새 연결용 지침(CLAUDE.md)과 맞지 않는다
-        if (surface === 'v3' && !c.body.features?.mcp3) { mcpBad = true; out('  ✗ 이 서버는 MCP v3(TSV)를 지원하지 않습니다. v3 시험 서버 주소를 지정하세요.'); }
+        if (surface === 'v3' && !c.body.features?.mcp3) { mcpBad = true; out('  ✗ 이 서버는 MCP v3(TSV)를 지원하지 않습니다. 이 서버가 지원하는 --v2 또는 --v1을 선택하세요.'); }
         if (surface === 'v2' && !c.body.features?.mcp2) out('  ✗ 이 서버는 새 연결(--v2)을 모릅니다 — 서버를 최신 버전으로 올린 뒤 쓰세요. 지금 띄우면 예전 도구로 답해 지침과 맞지 않습니다(예전 연결로 준비: node scripts/setup-agent.mjs --v1)');
       }
     } catch (e) {

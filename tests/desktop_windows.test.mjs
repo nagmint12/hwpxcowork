@@ -145,7 +145,7 @@ const TOKEN = 'remote-token-NEVER-IN-LOGS-0123456789';
 const LOCAL_TOKEN = 'local-admin-token-NEVER-IN-LOGS-9876';
 // safeStorage 대역: 되돌릴 수 있지만 평문이 보이지 않는 암호문
 const vault = { available: () => true, encrypt: (text) => `sealed:${Buffer.from(text).reverse().toString('base64')}`, decrypt: (sealed) => Buffer.from(String(sealed).slice(7), 'base64').reverse().toString() };
-function fakeFetch({ me = { name: '홍길동', role: 'editor' }, meStatus = 200, config = { features: { mcp2: true } }, meText = null } = {}) {
+function fakeFetch({ me = { name: '홍길동', role: 'editor' }, meStatus = 200, config = { features: { mcp2: true, mcp3: true } }, meText = null } = {}) {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     calls.push({ url: String(url), auth: init.headers?.Authorization || null, redirect: init.redirect });
@@ -254,10 +254,10 @@ test('다른 서버 추가: /api/me·/api/config 확인 → 토큰은 safeStorag
     assert.deepEqual([server.url, server.host, server.user, server.roleLabel, server.mcp2], ['https://cowork.example.com/', 'cowork.example.com', '홍길동', '편집자', true]);
     assert.deepEqual(calls.map((c) => [new URL(c.url).pathname, c.auth, c.redirect]), [['/api/me', `Bearer ${TOKEN}`, 'error'], ['/api/config', null, 'error']], '토큰은 /api/me 머리글로만');
     const runner = m.addRunner({ ai: 'codex', server: server.id });
-    assert.deepEqual([runner.mcp, runner.autoStart, runner.state, runner.stateLabel], [2, true, 'off', '꺼짐'], '기본: 새 연결(v2)·자동 시작');
+    assert.deepEqual([runner.mcp, runner.autoStart, runner.state, runner.stateLabel], [3, true, 'off', '꺼짐'], '기본: TSV 연결(v3)·자동 시작');
     await m.start(runner.id);
     const child = runners.children[0];
-    assert.deepEqual(child.args, ['--provider', 'codex', '--url', 'https://cowork.example.com/mcp', '--mcp', '2']);
+    assert.deepEqual(child.args, ['--provider', 'codex', '--url', 'https://cowork.example.com/mcp', '--mcp', '3']);
     assert.equal(child.env.HWPX_COWORK_TOKEN, TOKEN, '토큰은 환경 변수로만');
     child.say(`홍길동의 요청을 처리합니다.`); child.stdout.write(`잘못 찍힌 토큰 ${TOKEN}\n`);
     await settle();
@@ -301,7 +301,7 @@ test('연결 방식: 새 연결을 모르는 서버에는 v2 를 막고 v1 은 �
     const { m, runners } = manager(dir, { fetch: { config: { features: {} } } });
     const old = await m.addServer({ url: 'https://old.example', token: TOKEN });
     assert.equal(old.mcp2, false);
-    assert.throws(() => m.addRunner({ ai: 'claude-code', server: old.id }), /새 연결\(v2\)을 지원하지 않습니다/);
+    assert.throws(() => m.addRunner({ ai: 'claude-code', server: old.id }), /MCP v3\(TSV\) 지원을 확인할 수 없습니다/);
     const v1 = m.addRunner({ ai: 'claude-code', server: old.id, mcp: 1, autoStart: false });
     assert.deepEqual([v1.mcp, v1.autoStart], [1, false]);
     assert.throws(() => m.updateRunner(v1.id, { mcp: 2 }), /지원하지 않습니다/);
@@ -326,11 +326,11 @@ test('실행기 MCP v3 선택을 저장·다시 불러와 시작하고 v2 전용
     const server = await initial.addServer({ url: 'https://tsv.example', token: TOKEN });
     assert.equal(server.mcp3, true);
     const remote = initial.addRunner({ ai: 'codex', server: server.id, autoStart: false });
-    assert.equal(remote.mcp, 2, '연결 방식의 기본은 v2');
+    assert.equal(remote.mcp, 3, '연결 방식의 기본은 v3');
     assert.equal(initial.updateRunner(remote.id, { mcp: 3 }).mcp, 3);
     const local = initial.addRunner({ ai: 'claude-code', server: LOCAL_SERVER, autoStart: false, mcp: 3 });
 
-    loaded = manager(dir);
+    loaded = manager(dir, { fetch: { config: { features: { mcp2: true } } } });
     assert.equal(loaded.m.snapshot().servers[0].mcp3, true);
     for (const r of [remote, local]) {
       assert.equal(view(loaded.m, r.id).mcp, 3);
@@ -343,7 +343,7 @@ test('실행기 MCP v3 선택을 저장·다시 불러와 시작하고 v2 전용
     const older = await loaded.m.addServer({ url: 'https://old.example', token: TOKEN });
     assert.deepEqual([older.mcp2, older.mcp3], [true, false]);
     assert.throws(() => loaded.m.addRunner({ ai: 'codex', server: older.id, mcp: 3 }), /MCP v3\(TSV\) 지원을 확인할 수 없습니다/);
-    const v2 = loaded.m.addRunner({ ai: 'codex', server: older.id });
+    const v2 = loaded.m.addRunner({ ai: 'codex', server: older.id, mcp: 2 });
     assert.throws(() => loaded.m.updateRunner(v2.id, { mcp: 3 }), /MCP v3\(TSV\) 지원을 확인할 수 없습니다/);
     assert.equal(view(loaded.m, v2.id).mcp, 2);
     assert.equal(loaded.runners.children.length, 2, '거절한 선택으로 실행기를 시작하지 않는다');
@@ -353,11 +353,11 @@ test('실행기 MCP v3 선택을 저장·다시 불러와 시작하고 v2 전용
   }
 });
 
-test('실행기 추가와 설정 화면의 연결 선택에 v3 TSV가 있으며 추가의 기본 선택은 v2다', () => {
+test('실행기 추가와 설정 화면의 연결 선택에 v3 TSV가 있으며 추가의 기본 선택은 v3다', () => {
   const html = fs.readFileSync(path.join(root, 'deploy', 'desktop', 'runners.html'), 'utf8');
   const panel = /<select\b[^>]*\bid="mcp"[^>]*>([\s\S]*?)<\/select>/.exec(html);
   assert.ok(panel, '추가 화면의 연결 선택');
-  assert.deepEqual([...panel[1].matchAll(/<option\b[^>]*\bvalue="([123])"/g)].map((match) => match[1]), ['2', '3', '1']);
+  assert.deepEqual([...panel[1].matchAll(/<option\b[^>]*\bvalue="([123])"/g)].map((match) => match[1]), ['3', '2', '1']);
   assert.match(panel[1], /<option\b[^>]*\bvalue="3"[^>]*>[^<]*TSV/);
   const js = fs.readFileSync(path.join(root, 'deploy', 'desktop', 'runners.js'), 'utf8');
   const edit = js.slice(js.indexOf('function settingsPanel('), js.indexOf('function runnerRow('));
@@ -382,7 +382,7 @@ test('상태: 준비 → 연결됨(사용자) → 처리 중 → 연결됨, 연�
     await m.start(runner.id);
     assert.deepEqual(prepared, [{ ai: 'claude-code', interactive: true }], '직접 켜면 설치·로그인 창을 띄울 수 있다');
     const child = runners.children[0];
-    assert.deepEqual(child.args, ['--provider', 'claude-code', '--url', 'http://127.0.0.1:47123/mcp', '--mcp', '2']);
+    assert.deepEqual(child.args, ['--provider', 'claude-code', '--url', 'http://127.0.0.1:47123/mcp', '--mcp', '3']);
     assert.equal(child.env.HWPX_COWORK_TOKEN, LOCAL_TOKEN);
     assert.equal(view(m, runner.id).state, 'preparing'); assert.equal(view(m, runner.id).active, true);
     child.say('관리자의 요청을 처리합니다.'); child.say('자동 처리를 시작했습니다. 종료하려면 Ctrl+C를 누르세요.'); await settle();
@@ -400,7 +400,7 @@ test('상태: 준비 → 연결됨(사용자) → 처리 중 → 연결됨, 연�
     child.say('개인 AI 처리에 실패했습니다. 개인 PC의 AI 로그인(Codex·Claude Code) 또는 API 키·모델·연결 상태를 확인한 뒤 다시 요청해 주세요.'); await settle();
     assert.equal(view(m, runner.id).state, 'connected', '요청 실패 뒤에도 실행기는 계속 연결됨');
     const lines = m.lines(runner.id).map((l) => l.text);
-    assert.ok(lines.some((t) => t.startsWith('[앱] 켭니다 — Claude Code · 이 앱의 서버 · 연결 v2')));
+    assert.ok(lines.some((t) => t.startsWith('[앱] 켭니다 — Claude Code · 이 앱의 서버 · 연결 v3')));
     assert.ok(lines.includes('[hwpx 개인 AI] 관리자의 요청을 처리합니다.'));
     await m.stop(runner.id);
     assert.deepEqual([view(m, runner.id).state, view(m, runner.id).active], ['off', false]);
@@ -515,7 +515,7 @@ test('예전 "내 AI 연결"(desktop.json { ai }) → 이 앱 서버의 자동 �
   try {
     fs.writeFileSync(path.join(dir, 'desktop.json'), JSON.stringify({ ai: 'claude-code' }));
     const { m } = manager(dir);
-    assert.deepEqual(m.snapshot().runners.map((r) => [r.ai, r.server, r.autoStart, r.mcp]), [['claude-code', LOCAL_SERVER, true, 2]]);
+    assert.deepEqual(m.snapshot().runners.map((r) => [r.ai, r.server, r.autoStart, r.mcp]), [['claude-code', LOCAL_SERVER, true, 3]]);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'desktop.json'), 'utf8')).ai, 'claude-code', '예전 파일은 그대로 둔다');
     assert.equal(manager(dir).m.snapshot().runners.length, 1, '한 번만 옮긴다');
     fs.writeFileSync(path.join(other, 'desktop.json'), JSON.stringify({ ai: 'codex' }));
@@ -551,7 +551,7 @@ test('DesktopHost: AI 실행기만 방식은 서버를 띄우지 않고, 실행�
     const { file, args, options } = spawned[0];
     assert.equal(file, process.execPath);
     assert.equal(args[0], path.join(root, 'scripts/setup-worker.mjs'));
-    assert.deepEqual(args.slice(1), ['--provider', 'codex', '--url', 'https://cowork.example.com/mcp', '--mcp', '2']);
+    assert.deepEqual(args.slice(1), ['--provider', 'codex', '--url', 'https://cowork.example.com/mcp', '--mcp', '3']);
     assert.ok(options.stdio.includes('ipc')); assert.equal(options.shell, false); assert.equal(options.windowsHide, true);
     assert.equal(options.env.HWPX_COWORK_TOKEN, TOKEN); assert.equal(options.env.HWPX_COWORK_DESKTOP_MANAGED, '1');
     for (const key of ['HWPX_COWORK_CONFIG', 'HWPX_COWORK_USERDATA', 'HWPX_COWORK_LOCAL', 'HWPX_COWORK_AI']) assert.equal(options.env[key], undefined, key);
@@ -646,7 +646,7 @@ test('진짜 프로세스: setup-worker(그대로) + 가짜 ai-worker — 상태
     await until(() => view(host.runners, runner.id).state === 'connected');
     await until(() => host.runners.lines(runner.id).some((l) => l.text.startsWith('args ')));
     const echoed = host.runners.lines(runner.id).find((l) => l.text.startsWith('args ')).text;
-    assert.equal(echoed, 'args ["--provider","codex","--url","https://cowork.example.com/mcp","--mcp","2"] token ***');
+    assert.equal(echoed, 'args ["--provider","codex","--url","https://cowork.example.com/mcp","--mcp","3"] token ***');
     await host.runners.stop(runner.id);
     assert.equal(view(host.runners, runner.id).state, 'off');
     const log = fs.readFileSync(host.runners.logFile(runner.id), 'utf8');

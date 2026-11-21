@@ -473,7 +473,7 @@ test('개인 실행기(Codex): --mcp 2 는 짧은 요청 내용을 첫 입력에
   // 명령줄: 기본(2026-11-17 사용자 결정)·--mcp 2 → 새 연결, --mcp 1(또는 HWPX_COWORK_MCP=1) → 예전 연결
   const env = { HWPX_COWORK_TOKEN: srv.tokens.a };
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '2'], env), env).mcpSurface, 'v2');
-  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v2');
+  assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], env), env).mcpSurface, 'v3');
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex', '--mcp', '1'], env), env).mcpSurface, null);
   assert.equal(createWorkerAi(parseWorkerArgs(['--provider', 'codex'], { ...env, HWPX_COWORK_MCP: '1' }), env).mcpSurface, null);
   assert.throws(() => parseWorkerArgs(['--provider', 'codex', '--mcp', '4'], env));
@@ -544,7 +544,7 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   // 에이전트 준비(2026-11-17 — 기본 새 연결): .mcp.json 에 --v2, CLAUDE.md 는 새 연결 본보기(agent/CLAUDE.md), 허용 목록에 작업 도구 넷.
   // --v1 은 예전 연결(--v1 --lean, CLAUDE.md 는 agent/v1/CLAUDE.md) — 고른 것이 남아 다시 준비해도 그대로, --v2 로 돌아올 수 있다
   assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp', '/w', { v2: true }).args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp', '--files-dir', '/w']);
-  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v2', '--url', 'http://x/mcp']);
+  assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp').args, ['/b.js', '--channel', '--v3', '--url', 'http://x/mcp']);
   assert.deepEqual(mcpEntry('/b.js', 'http://x/mcp', null, { v2: false }).args, ['/b.js', '--channel', '--v1', '--lean', '--url', 'http://x/mcp']);
   const dir = path.join(tmp, 'agent');
   const quiet = async (argv) => { const log = console.log; const lines = []; console.log = (s = '') => lines.push(String(s)); try { return { code: await setupAgent(argv, { ...process.env, HWPX_COWORK_TOKEN: '' }), lines }; } finally { console.log = log; } };
@@ -553,7 +553,7 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   await quiet(args);   // 처음: 새 연결(기본)
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
   const hwpxArgs = () => JSON.parse(read('.mcp.json')).mcpServers.hwpx.args;
-  assert.ok(hwpxArgs().includes('--v2') && !hwpxArgs().includes('--lean'));
+  assert.ok(hwpxArgs().includes('--v3') && !hwpxArgs().includes('--lean'));
   assert.equal(read('CLAUDE.md'), v2Guide); assert.ok(!fs.existsSync(path.join(dir, 'CLAUDE.v1.md')));
   const allow = JSON.parse(read(path.join('.claude', 'settings.json'))).permissions.allow;
   for (const p of V2_PERMISSIONS) assert.ok(allow.includes(p), p);
@@ -575,7 +575,7 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   fs.writeFileSync(path.join(oldDir, 'CLAUDE.md'), `${v1Guide}\n- 내가 더한 규칙 한 줄\n`);
   const switched = await quiet(['--dir', oldDir, '--url', `${srv.base}/mcp`, '--no-claude', '--no-server', '--no-registry']);
   const oldCfg = JSON.parse(fs.readFileSync(path.join(oldDir, '.mcp.json'), 'utf8'));
-  assert.ok(oldCfg.mcpServers.hwpx.args.includes('--v2') && oldCfg.mcpServers.other.command === 'x');
+  assert.ok(oldCfg.mcpServers.hwpx.args.includes('--v3') && oldCfg.mcpServers.other.command === 'x');
   assert.ok(switched.lines.some((l) => /예전 기본\(예전 연결\)으로 준비된 작업 공간을 새 기본/.test(l)), switched.lines.join('\n'));
   assert.equal(fs.readFileSync(path.join(oldDir, 'CLAUDE.md'), 'utf8'), v2Guide);
   assert.match(fs.readFileSync(path.join(oldDir, 'CLAUDE.v1.md'), 'utf8'), /내가 더한 규칙 한 줄/, '고쳐 쓴 예전 지침도 CLAUDE.v1.md 로 남긴다');
@@ -603,7 +603,7 @@ test('브리지(--v2)와 에이전트 준비(setup-agent --v2): 새 연결 머�
   const onOldV1 = await quiet(['--dir', path.join(tmp, 'agent-old1'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry', '--v1']);
   assert.ok(!onOldV1.lines.some((l) => unknown.test(l)), '예전 연결(--v1)로 준비할 때는 알리지 않는다');
   const onOldDefault = await quiet(['--dir', path.join(tmp, 'agent-old2'), '--url', `http://127.0.0.1:${stub.address().port}/mcp`, '--no-claude', '--no-registry']);
-  assert.ok(onOldDefault.lines.some((l) => unknown.test(l) && /--v1/.test(l)), `기본(새 연결)으로 옛 서버에 준비하면 알리고 --v1 을 안내한다: ${onOldDefault.lines.join('\n')}`);
+  assert.ok(onOldDefault.lines.some((l) => /MCP v3\(TSV\)를 지원하지 않습니다/.test(l) && /--v2 또는 --v1/.test(l)), `기본(새 연결)으로 옛 서버에 준비하면 알리고 --v1 을 안내한다: ${onOldDefault.lines.join('\n')}`);
   const onNew = await quiet(['--dir', path.join(tmp, 'agent-new'), '--url', `${srv.base}/mcp`, '--no-claude', '--no-registry', '--v2']);
   assert.ok(!onNew.lines.some((l) => unknown.test(l)), onNew.lines.join('\n'));
 });

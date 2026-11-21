@@ -110,7 +110,7 @@ test('순수: 도구 범위·지침·첫 입력·연결 값 고르기', async ()
 
 for (const provider of PROVIDERS) {
   test(`서버 AI(개인 키) ${provider}: 요청 내용을 첫 입력으로, 새 연결 도구로 읽고 edit(done) 한 번에 끝낸다 — 모델은 다시 부르지 않고 사용량은 요청에`, { timeout: 30000 }, async (t) => {
-    const env = tempService(t);
+    const env = tempService(t, { mcp: 'v2' });
     const { service, docId, user } = env;
     const ops = [{ op: 'replace', at: 's0/p1', find: '둘째 문단입니다.', with: '두 번째 문단입니다.', reason: '표현' }, { op: 'memo', at: 's0/p2', text: '근거 수치를 확인해 주세요.' }];
     const seen = personalKey(env, provider, (body, n) => {

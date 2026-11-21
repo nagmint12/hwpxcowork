@@ -36,7 +36,7 @@ export const isLegacyClientName = (name) => typeof name === 'string' && /^hwpx-/
  *  3) 서버 설정 config.mcp.defaultSurface 'v1' — 모든 연결을 예전 연결로(되돌리기)
  *  4) 옛 클라이언트 호환 — clientInfo 이름이 'hwpx-' 로 시작(밝히지 않는 옛 실행기·브리지), 세션 없는 한 번짜리 tools/call(legacyCall —
  *     initialize 없이 예전 도구를 이름으로 부르는 스크립트용 옛 길. 지금 저장소의 실행기·브리지·웹은 이 길을 쓰지 않는다)
- *  5) 그 밖 — 새 연결
+ *  5) 그 밖 — 설정에 v2를 지정했으면 v2, 기본은 TSV 표를 제공하는 v3
  * clientName: initialize 의 params.clientInfo.name(또는 2026-07-28 요청의 _meta clientInfo.name)
  */
 export function mcpSurface(req, { config = null, clientName = null, legacyCall = false } = {}) {
@@ -45,7 +45,7 @@ export function mcpSurface(req, { config = null, clientName = null, legacyCall =
   if (isLeanRequest(req)) return 'v1';
   if (config?.mcp?.defaultSurface === 'v1') return 'v1';
   if (legacyCall || isLegacyClientName(clientName)) return 'v1';
-  return 'v2';
+  return config?.mcp?.defaultSurface === 'v2' ? 'v2' : 'v3';
 }
 /** 새 연결의 도구 범위: 'core'(작업 도구 + 그림·스킬 파일) | 'all'(+ 사람이 정할 일·변경 요청·멀티에이전트·새 문서) — 머리글 X-Hwpx-Tools 또는 ?tools= */
 export function v2Toolset(req) {

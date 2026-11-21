@@ -1,6 +1,6 @@
 // MCP stdio 브리지(docs/V3_SPEC.md §2.3) — Claude Code 같은 로컬 MCP 클라이언트 ↔ hwpx-cowork 서버.
 //  · 도구: 원격 HTTP MCP(…/mcp)로 그대로 넘긴다(StreamableHTTPClientTransport, 머리글 Authorization·X-Hwpx-Agent-Session·X-Hwpx-Mcp).
-//    연결 종류는 2026-11-17 부터 기본이 새 연결(v2 — 작업 도구 넷)이고 예전 연결은 --v1(얇은 흐름은 --lean)로 고른다(bridgeSurface).
+//    연결 종류는 2026-11-21부터 기본이 v3(표 TSV, 작업 도구 넷)이고 예전 연결은 --v1(얇은 흐름은 --lean)로 고른다(bridgeSurface).
 //    원격이 안 될 때 tools/list 는 마지막 목록(없으면 빈 목록)으로 답하고, 다시 닿으면 notifications/tools/list_changed.
 //  · 채널(channel): initialized 뒤 서버 SSE(…/api/agent/events, 헤더 인증만)를 듣다가 '내가 맡긴 AI 작업'이 오면
 //    notifications/claude/channel 로 '초인종'을 울린다. 알림 글은 고정 문구 + 번호뿐 — 문서 글·지시 원문을 넣지 않는다.
@@ -364,7 +364,7 @@ export function parseBridgeArgs(argv, env = {}) {
       case '--mcp': {
         const v = String(val() ?? '').trim();
         if (['1', '2', '3'].includes(v)) o.surface = `v${v}`;
-        else o.bad.push(`--mcp 는 1(예전 연결), 2(기본), 3(TSV) 중 하나입니다: ${cleanText(v, 20) || '(값 없음)'}`);
+        else o.bad.push(`--mcp 는 1(예전 연결), 2, 3(TSV, 기본) 중 하나입니다: ${cleanText(v, 20) || '(값 없음)'}`);
         break;
       }
       case '--tools': o.toolset = val(); break;
@@ -381,7 +381,7 @@ export function parseBridgeArgs(argv, env = {}) {
 }
 
 /**
- * 이 브리지가 쓸 연결 종류 → { surface: 'v1'|'v2'|'v3', lean }. 2026-11-17 부터 기본은 새 연결(v2)이다(서버 기본과 같다 — server/mcp2.js mcpSurface).
+ * 이 브리지가 쓸 연결 종류 → { surface: 'v1'|'v2'|'v3', lean }. 기본은 TSV 연결(v3)이다(서버 기본과 같다 — server/mcp2.js mcpSurface).
  * 앞이 이긴다: surface 'v1'|'v2'|'v3'(--mcp 1|2|3) > v2 true|false(예전 인자) > lean(--lean = 예전 연결의 얇은 흐름) > 주소 ?v=1|2|3·?lean=1 > 새 연결.
  * lean 은 예전 연결일 때만 뜻이 있다(새 연결은 응답이 이미 짧다)
  */
@@ -391,13 +391,13 @@ export function bridgeSurface({ surface = null, v2 = null, lean = false, url = n
   try { q = url ? new URL(url).searchParams : null; } catch { q = null; }
   const urlLean = /^(1|true|yes|on)$/i.test(q?.get('lean') || '');
   const urlV = String(q?.get('v') ?? '').trim();
-  const chosen = surface || (v2 === true ? 'v2' : v2 === false ? 'v1' : lean ? 'v1' : ['1', '2', '3'].includes(urlV) ? `v${urlV}` : urlLean ? 'v1' : 'v2');
+  const chosen = surface || (v2 === true ? 'v2' : v2 === false ? 'v1' : lean ? 'v1' : ['1', '2', '3'].includes(urlV) ? `v${urlV}` : urlLean ? 'v1' : 'v3');
   return { surface: chosen, lean: chosen === 'v1' && (!!lean || urlLean) };
 }
 
 /**
  * 브리지를 만든다(시작 전에 서버 instructions 를 2초 안에 받아 온다).
- * surface: 'v2'(기본 — 새 연결) | 'v1'(예전 연결). 서버에는 언제나 머리글 X-Hwpx-Mcp(2|1)로 밝힌다 — 이 브리지의 client 이름(hwpx-cowork-bridge)은
+ * surface: 'v3'(기본, 표 TSV) | 'v2' | 'v1'(예전 연결). 서버에는 언제나 머리글 X-Hwpx-Mcp(3|2|1)로 밝힌다 — 이 브리지의 client 이름(hwpx-cowork-bridge)은
  *   밝히지 않으면 새 서버가 옛 브리지로 보고 예전 연결로 연다(server/mcp2.js). 옛 서버는 모르는 머리글이라 예전 도구로 답한다
  * @returns {{ server, session, instructions, surface, start(transport), stop(), stats() }}
  */
@@ -430,7 +430,7 @@ export async function createBridge({ url = DEFAULT_URL, token = null, agent = nu
   const v2 = picked.surface !== 'v1';
   if (picked.surface === 'v3') {
     const res = await fetchImpl(`${apiBaseFrom(base)}/api/config`, { redirect: 'error', signal: AbortSignal.timeout(timing.connectTimeoutMs) });
-    if (!res.ok || !(await res.json()).features?.mcp3) throw new Error('이 서버는 MCP v3(TSV 표 읽기)를 지원하지 않습니다. v3를 지원하는 시험 서버로 연결하세요.');
+    if (!res.ok || !(await res.json()).features?.mcp3) throw new Error('이 서버는 MCP v3(TSV 표 읽기)를 지원하지 않습니다. 서버를 업데이트하거나 --mcp 2 또는 --mcp 1로 연결하세요.');
   }
   const lean = picked.lean;
   const tools2 = ['core', 'all'].includes(toolset) ? toolset : (['core', 'all'].includes(base.searchParams.get('tools')) ? base.searchParams.get('tools') : null);
