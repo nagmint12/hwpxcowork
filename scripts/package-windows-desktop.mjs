@@ -136,10 +136,11 @@ await builder.build({
   targets: builder.Platform.WINDOWS.createTarget(['nsis'], builder.Arch.x64),
   config: {
     appId: 'kr.hwpx.cowork.desktop', productName: 'Hwpx Cowork', copyright: 'Copyright (c) 2026 hwpx-cowork contributors',
-    electronVersion: ELECTRON, npmRebuild: false, directories: { output: installerDir },
+    electronVersion: ELECTRON, npmRebuild: false, directories: { output: installerDir, buildResources: path.join(root, 'deploy/installer') },
     // 서명 인증서가 없고, 실행 파일 정보(아이콘·이름)는 위 packager 가 이미 넣었다 — rcedit·서명 도구를 받지 않는다
     win: { icon, target: 'nsis', signAndEditExecutable: false },
     nsis: {
+      include: path.join(root, 'deploy/installer/update.nsh'),
       oneClick: false, perMachine: false, allowElevation: false, allowToChangeInstallationDirectory: true,
       createDesktopShortcut: 'always', createStartMenuShortcut: true, shortcutName: 'Hwpx Cowork', menuCategory: false,
       runAfterFinish: true, deleteAppDataOnUninstall: false, installerIcon: icon, uninstallerIcon: icon,
@@ -168,12 +169,14 @@ put(path.join(installerDir, '설치 안내.txt'), '﻿' + [
   '2. "Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행]을 누릅니다.',
   '   (이 설치 파일은 아직 코드 서명 인증서가 없어 Windows가 처음 보는 프로그램으로 알립니다.)',
   '3. 설치 마법사에서 [다음] → [설치] → [마침]을 누릅니다. 관리자 권한은 필요 없습니다.',
+  '   기존 버전이 있으면 같은 설치 파일로 업데이트할 수 있습니다. 앱이 켜져 있으면 저장하고 종료한 뒤 설치를 계속합니다.',
   '4. 처음 실행하면 "혼자 쓰기", "여러 사람과 함께 쓰기", "AI 실행기만"(이미 있는 서버에 내 AI만 연결) 가운데 하나를 고릅니다.',
   '5. AI를 쓰려면 메뉴 [AI → 실행기 관리]에서 실행기(Codex·Claude Code·Gemini CLI·Antigravity)를 추가하고 켭니다.',
   '   Codex·Claude Code는 처음 켤 때 연결 프로그램을 준비하고 브라우저에서 본인 구독 계정으로 로그인합니다(인터넷 필요, API 키 아님).',
   '   다른 서버(운영·공동 작업 서버)에 붙일 때는 그 서버 주소와 내 토큰을 적습니다. 토큰은 이 PC에 암호화해 보관합니다.',
   '',
-  '바탕화면·시작 메뉴의 "Hwpx Cowork" 아이콘으로 다시 엽니다. 창을 닫으면 저장을 마친 뒤 함께 꺼집니다.',
+  '작업 표시줄 오른쪽 알림 영역(숨겨진 아이콘 ∧ 포함)의 Hwpx Cowork 아이콘에 서버 상태가 표시됩니다.',
+  '창을 닫거나 아이콘을 오른쪽 클릭해 [앱과 서버 종료]를 고르면 저장 확인 후 서버도 꺼집니다. 바탕화면·시작 메뉴에서 다시 켭니다.',
   '지우기: 설정 → 앱 → Hwpx Cowork → 제거. 문서 기록·설정(%APPDATA%\\Hwpx Cowork)은 남습니다.',
   '',
 ].join('\r\n'));

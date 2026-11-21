@@ -1,0 +1,92 @@
+name: Windows same-version update
+on:
+  workflow_dispatch:
+    inputs:
+      previous:
+        description: Installed release tag
+        required: true
+      candidate:
+        description: Replacement release tag
+        required: true
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch and verify both Windows installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous }}
+          CANDIDATE_TAG: ${{ inputs.candidate }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($pair in @(@('previous', $env:PREVIOUS_TAG), @('candidate', $env:CANDIDATE_TAG))) {
+            $tag = $pair[1]
+            if ($tag -notmatch '^windows-app-[0-9]+\.[0-9]+\.[0-9]+-[0-9]{8}(-r[0-9]+)?$') { throw 'Invalid Windows release tag' }
+            $assets = (gh release view $tag -R $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
+            $setup = @($assets | Where-Object name -match '^HwpxCowork-Setup-[\d.]+-\d{8}\.exe$')
+            if ($LASTEXITCODE -or $setup.Count -ne 1) { throw 'Expected one Windows installer' }
+            $dir = Join-Path $env:RUNNER_TEMP $pair[0]
+            gh release download $tag -R $env:GITHUB_REPOSITORY --pattern $setup[0].name --dir $dir
+            if ($LASTEXITCODE) { throw 'Download failed' }
+            $file = Join-Path $dir $setup[0].name
+            $digest = (Get-FileHash -LiteralPath $file).Hash
+            if ("sha256:$digest" -ne $setup[0].digest) { throw 'Installer digest mismatch' }
+          }
+      - name: Update while the previous personal server is running
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $old = (Get-ChildItem "$env:RUNNER_TEMP/previous/*.exe").FullName
+          $new = (Get-ChildItem "$env:RUNNER_TEMP/candidate/*.exe").FullName
+          $homeDir = Join-Path $env:LOCALAPPDATA 'Programs/Hwpx Cowork'
+          $app = Join-Path $homeDir 'Hwpx Cowork.exe'
+          $asar = Join-Path $homeDir 'resources/app.asar'
+          $config = Join-Path $env:APPDATA 'Hwpx Cowork/personal/config.json'
+          function Install([string]$file) {
+            $p = Start-Process -FilePath $file -ArgumentList '/S' -PassThru -WindowStyle Hidden
+            if (!$p.WaitForExit(150000) -or $p.ExitCode -ne 0) { throw "Setup failed: $($p.ExitCode)" }
+          }
+          function Launch {
+            Start-Process -FilePath $app -ArgumentList '--mode','personal','--disable-gpu' -PassThru -WindowStyle Normal
+          }
+          function Server {
+            $cfg = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
+            Invoke-RestMethod "http://127.0.0.1:$($cfg.port)/api/config" -TimeoutSec 2
+          }
+          function Ready {
+            foreach ($i in 1..120) {
+              try { $state = Server; if ($state.nonce) { return $state } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            throw 'Personal server did not start'
+          }
+          function Version {
+            $installed = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object DisplayName -eq 'Hwpx Cowork')
+            if ($installed.Count -ne 1) { throw 'Expected one registered installation' }
+            return $installed[0].DisplayVersion
+          }
+          if ((Test-Path $app) -or (Test-Path $config)) { throw 'Expected a clean runner' }
+          Install $old
+          $version = Version
+          $oldAsar = (Get-FileHash $asar).Hash
+          $previous = Launch
+          $first = Ready
+          $savedConfig = (Get-FileHash $config).Hash
+          Install $new
+          if (!$previous.WaitForExit(10000) -or $previous.ExitCode -ne 0) { throw 'Previous app failed to exit cleanly' }
+          $online = try { (Server).nonce } catch { $null }
+          if ($online) { throw 'Previous server still running after update' }
+          if ((Version) -ne $version -or (Get-FileHash $asar).Hash -eq $oldAsar) { throw 'Same-version replacement failed' }
+          if ((Get-FileHash $config).Hash -ne $savedConfig) { throw 'Existing configuration changed during installation' }
+          $updated = Launch
+          $next = Ready
+          if ($next.nonce -eq $first.nonce) { throw 'Expected a new server instance' }
+          $updated.Refresh()
+          if (!$updated.CloseMainWindow() -or !$updated.WaitForExit(60000) -or $updated.ExitCode -ne 0) { throw 'Updated app failed to close cleanly' }
+          $online = try { (Server).nonce } catch { $null }
+          if ($online) { throw 'Updated server did not stop with the app' }
+          "Verified update over running $version, saved configuration, relaunch and server shutdown."

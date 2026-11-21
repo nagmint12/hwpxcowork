@@ -1,10 +1,11 @@
-import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DesktopHost } from './host.mjs';
 import { desktopPermission } from './permissions.mjs';
 import { createBlockedCloseHandler } from './close-policy.mjs';
+import { createServerTray } from './server-tray.mjs';
 import { findCloudflared, installCloudflared } from './share.mjs';
 import { savedMode, saveMode, modeFromArgs, relaunchArgs, MODE_CHOICE, MODES, MODE_LABELS } from './mode.mjs';
 import { RUNNER_AIS } from './runners.mjs';
@@ -23,6 +24,13 @@ if (verificationAt >= 0) {
   app.commandLine.appendSwitch('remote-debugging-port', '0');
 }
 let editor; let runnerWin; let host; let quitting = false; let quittingNow = false; let mode = 'personal'; let shareBusy = false;
+let serverTray;
+function showEditor() {
+  if (!editor || editor.isDestroyed()) return;
+  if (editor.isMinimized()) editor.restore();
+  editor.show();
+  editor.focus();
+}
 const mac = process.platform === 'darwin';
 const TITLES = { personal: 'Hwpx Cowork · 내 문서', shared: 'Hwpx Cowork · 공동 작업', runner: 'Hwpx Cowork · AI 실행기' };
 const SWITCH_QUESTION = { personal: '혼자 쓰기(개인용)로 바꿀까요?', shared: '여러 사람과 함께 쓰기(공동 작업용)로 바꿀까요?', runner: 'AI 실행기만 쓰는 방식으로 바꿀까요?' };
@@ -187,6 +195,9 @@ async function bootstrap() {
   host = new DesktopHost({ payload, node, userdata, mode, vault, otherUserdata: MODES.filter(m => m !== mode).map(m => path.join(appData, m)) });
   host.runners.on('change', pushRunnerState);
   const runnerOnly = mode === 'runner';
+  if (process.platform === 'win32' && !runnerOnly) {
+    serverTray = createServerTray({ Tray, Menu, icon: appIcon().resize({ width: 24, height: 24 }), mode, showWindow: showEditor, quit: () => app.quit() });
+  }
   editor = new BrowserWindow({ title: TITLES[mode], width: runnerOnly ? 880 : 1440, height: runnerOnly ? 780 : 940, minWidth: runnerOnly ? 560 : 900, minHeight: runnerOnly ? 520 : 650, backgroundColor: windowBackground(),
     webPreferences: { preload: path.join(here, runnerOnly ? 'preload.cjs' : 'editor-preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
   guardWindow(editor); refreshMenus();
@@ -200,6 +211,7 @@ async function bootstrap() {
   }));
   editor.on('closed', () => { editor = null; app.quit(); });
   host.on('state', state => {
+    if (!quitting) serverTray?.update(state.phase);
     refreshMenus(); pushRunnerState();
     if (state.phase === 'error') showError(new Error(state.message));
   });
@@ -223,7 +235,7 @@ async function bootstrap() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { if (editor) { if (editor.isMinimized()) editor.restore(); editor.show(); editor.focus(); } });
+  app.on('second-instance', showEditor);
   app.whenReady().then(bootstrap);
 }
 // 실행기 창이 부르는 일 — 보낸 곳이 우리 runners.html 일 때만. 토큰은 'add-server' 로 한 번 들어와 암호화해 저장하고, 화면에는 다시 보내지 않는다
@@ -262,8 +274,10 @@ app.on('before-quit', event => {
   event.preventDefault(); if (quitting) return;
   if (editor && !editor.isDestroyed()) { editor.close(); return; }
   quitting = true;
+  serverTray?.update('stopping');
   void (async () => {
     try { await host?.stop(); quittingNow = true; app.quit(); }
-    catch (error) { quitting = false; await dialog.showMessageBox(editor, { type: 'warning', message: '저장을 마칠 때까지 기다려 주세요.', detail: error.message }); }
+    catch (error) { quitting = false; serverTray?.update('error'); await dialog.showMessageBox({ type: 'warning', message: '저장을 마칠 때까지 기다려 주세요.', detail: error.message }); }
   })();
 });
+app.on('will-quit', () => serverTray?.destroy());

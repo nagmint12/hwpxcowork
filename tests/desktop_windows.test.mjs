@@ -3,6 +3,7 @@
 // 실제 터널·인터넷·Electron·AI CLI 없이 모의 자식 프로세스(또는 가짜 ai-worker 를 단 진짜 setup-worker 프로세스)로 본다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServerTray } from '../deploy/desktop/server-tray.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,31 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-desktop-win-'));
 const cleanup = (dir) => { assert.ok(path.resolve(dir).startsWith(path.resolve(os.tmpdir()) + path.sep)); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); };
 const settle = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('알림 영역은 실제 서버 상태를 표시하고 창 복원과 정상 종료를 요청한다', () => {
+  let tray;
+  const actions = [];
+  class FakeTray {
+    constructor() { tray = this; }
+    setToolTip(text) { this.tooltip = text; }
+    setContextMenu(items) { this.items = items; }
+    on(event, handler) { this[event] = handler; }
+    destroy() { this.destroyed = true; }
+  }
+  for (const [mode, name] of [['personal', '개인 서버'], ['shared', '공동 작업 서버']]) {
+    const control = createServerTray({ Tray: FakeTray, Menu: { buildFromTemplate: items => items }, icon: {}, mode,
+      showWindow: () => actions.push('open'), quit: () => actions.push('quit') });
+    assert.equal(tray.tooltip, `Hwpx Cowork · ${name} · 시작 중`);
+    control.update('ready');
+    assert.equal(tray.items[0].label, `${name} · 실행 중`);
+    tray.click(); tray.items.find(item => item.label === '앱과 서버 종료').click();
+    assert.deepEqual(actions.splice(0), ['open', 'quit']);
+    assert.equal(tray.destroyed, undefined, '종료가 취소되면 아이콘을 유지한다');
+    control.update('stopping'); assert.equal(tray.items.at(-1).enabled, false);
+    control.update('error'); assert.equal(tray.items.at(-1).enabled, true);
+    control.destroy(); assert.equal(tray.destroyed, true);
+  }
+});
 
 test('운영 방식: 명령줄 → 저장값 → 예전 개인용 설치는 개인용 → 처음이면 null(묻기). 세 방식(혼자·함께·AI 실행기만)', () => {
   const dir = temporary();
