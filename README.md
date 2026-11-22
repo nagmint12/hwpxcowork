@@ -4,7 +4,7 @@
 
 ![개인 구독 AI로 검토하고 반영하는 흐름, 한/글과 HWPX Cowork 사이의 양방향 복사, 줄·쪽 나눔과 편집 성능 개선](docs/assets/readme-overview.webp)
 
-**[다운로드](https://github.com/nagmint12/hwpxcowork/releases)** · **[설치 안내](#설치--두-가지-길)**
+**[소개 영상 보러가기](https://nagmint12.github.io/hwpxcowork/teaser/)** · **[다운로드](https://github.com/nagmint12/hwpxcowork/releases)** · **[설치 안내](#설치--두-가지-길)**
 
 [rhwp](https://github.com/edwardkim/rhwp)를 바탕으로 다음 기능을 더했습니다.
 

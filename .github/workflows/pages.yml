@@ -9,6 +9,7 @@ on:
       - 'studio/dist/**'
       - 'deploy/github-pages/**'
       - 'web/icons/**'
+      - 'web/teaser/**'
       - 'web/teaser3/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -36,6 +37,7 @@ jobs:
             deploy/github-pages
             web/icons
             web/favicon.ico
+            web/teaser
             web/teaser3
             tutorial/결과보고서.hwpx
           sparse-checkout-cone-mode: false

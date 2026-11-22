@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GitHub Pages 사이트 만들기(2026-11-18 사용자 요청): 서버 없이 도는 공개 체험 페이지 — 운영 서버와 연결하지 않는다.
-//   index.html(체험 고르기: 튜토리얼·자유 편집기·AI 연결 안내 — 첫 방문은 intro/ 소개 영상부터) · intro/(web/teaser3 재생기·장면)
+//   index.html(체험 고르기) · teaser/와 teaser3/(기존 재생기·장면) · tutorial/(예시 검토)
 //   · studio/(브라우저 편집기, studio/dist) · samples/report-sample.hwpx(견본 보고서 = tutorial/결과보고서.hwpx)
 //   node deploy/github-pages/build-site.mjs <출력 폴더>      (저장소 맨 위에서 — .github/workflows/pages.yml 이 부른다)
 // Node 기본 모듈만 쓴다(Actions 에서 npm 설치 없이).
@@ -42,12 +42,22 @@ if (serverUrl) {
   fs.mkdirSync(path.join(out, 'app'));
   fs.writeFileSync(path.join(out, 'app', 'index.html'), shell.replace('__HWPX_SERVER__', () => JSON.stringify(u.origin + '/')).replaceAll('href="favicon.ico"', 'href="../favicon.ico"').replaceAll('href="icon.png"', 'href="../icon.png"'));
 }
-// 소개 영상: web/teaser3 의 재생기·장면·그림을 복사하고 첫 쪽만 이 사이트용(intro.html — 끝나면 ../?intro=0)
-const teaser = path.join(root, 'web/teaser3');
-const intro = path.join(out, 'intro');
-fs.mkdirSync(intro);
-for (const name of ['player.js', 'film', 'assets']) fs.cpSync(path.join(teaser, name), path.join(intro, name), { recursive: true });
-fs.copyFileSync(path.join(here, 'intro.html'), path.join(intro, 'index.html'));
+// 두 영상은 각 재생기의 상대 경로를 유지하고 같은 Pages용 화면을 사용한다.
+const intro = fs.readFileSync(path.join(here, 'intro.html'), 'utf8');
+for (const [film, title] of [['teaser', '기능 소개'], ['teaser3', '여백의 손글씨']]) {
+  const destination = path.join(out, film);
+  fs.mkdirSync(destination);
+  for (const name of ['player.js', 'film', 'assets']) {
+    fs.cpSync(path.join(root, 'web', film, name), path.join(destination, name), { recursive: true });
+  }
+  fs.writeFileSync(path.join(destination, 'index.html'), intro.replaceAll('__FILM__', film).replaceAll('__TITLE__', title));
+}
+fs.mkdirSync(path.join(out, 'intro'));
+fs.writeFileSync(path.join(out, 'intro', 'index.html'), '<!doctype html><html lang="ko"><meta charset="utf-8"><title>Hwpx Cowork 소개 영상</title><meta http-equiv="refresh" content="0;url=../teaser/"><a href="../teaser/">소개 영상 보러가기</a></html>');
+fs.mkdirSync(path.join(out, 'tutorial'));
+for (const name of ['tutorial.html', 'tutorial.js']) {
+  fs.copyFileSync(path.join(here, name), path.join(out, 'tutorial', name === 'tutorial.html' ? 'index.html' : name));
+}
 // 견본 보고서(가상 자료로 만든 튜토리얼 문서)
 fs.mkdirSync(path.join(out, 'samples'));
 fs.copyFileSync(path.join(root, 'tutorial', '결과보고서.hwpx'), path.join(out, 'samples', 'report-sample.hwpx'));
@@ -87,4 +97,4 @@ if (!/<head>/i.test(html)) fail('편집기 index.html 에 <head> 가 없습니�
 fs.writeFileSync(index, html.replace(/<head>/i, '<head>\n  <meta name="hwpx-ai-key-storage" content="off">\n  <meta name="hwpx-ai-assistant" content="off">'));
 if (!fs.readdirSync(path.join(studio, 'assets')).some((f) => f.endsWith('.js') && fs.readFileSync(path.join(studio, 'assets', f), 'utf8').includes('hwpx-ai-assistant'))) fail('AI 도우미 숨김 패치가 든 편집기 빌드가 아닙니다');
 for (const name of excludedStudioEntries) if (fs.existsSync(path.join(studio, name))) fail(`공개 체험에 포함하지 않는 편집기 항목이 남았습니다: ${name}`);
-console.log(`[pages] ${out} — 편집기 경로 ${replaced}곳을 ${base} 로, AI 키 저장 막음·AI 도우미 숨김 확인, 소개 영상·견본 보고서${serverUrl ? ', app/ 입구' : ''}`);
+console.log(`[pages] ${out} — 편집기 경로 ${replaced}곳을 ${base} 로, AI 키 저장 막음·AI 도우미 숨김 확인, 소개 영상 2편·튜토리얼·견본 보고서${serverUrl ? ', app/ 입구' : ''}`);

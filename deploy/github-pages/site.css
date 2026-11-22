@@ -60,6 +60,37 @@ h2 { margin: 0 0 16px; font-size: 21px; letter-spacing: -.03em; }
 .foot { padding: 32px 0 48px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 32px; }
 .foot p { margin: 0; }
 
+.tutorial { max-width: 760px; padding-bottom: 40px; }
+.demo h2:focus { outline-offset: 4px; }
+.demo blockquote { margin: 16px 0; padding: 14px 18px; border-inline-start: 3px solid var(--accent); background: var(--bg); overflow-wrap: anywhere; }
+.demo button { font: inherit; font-weight: 700; cursor: pointer; }
+
+.film-page {
+  --bg: #0d1424; --text: #edf2ff; --accent: #bbcaff; --line: #28364e; --tint: #53698d;
+  display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; height: 100dvh;
+}
+.film-page .top-inner { padding-block: 8px; flex-wrap: wrap; }
+.film-page .top-nav { flex-wrap: wrap; gap: 6px 16px; }
+.film-page .top-nav [aria-current="page"] { color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
+.film-status { margin: 0; padding: 24px; text-align: center; }
+.tz { position: relative; min-height: 0; overflow: hidden; }
+.tz-viewport { position: absolute; inset: 0; overflow: hidden; cursor: pointer; }
+.tz-stage {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden;
+  --sans: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+.tz-framed .tz-stage { border-radius: 20px; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+.tz-bar {
+  position: absolute; left: max(12px, var(--tz-x, 0px)); right: max(12px, var(--tz-x, 0px));
+  bottom: max(8px, calc(var(--tz-y, 0px) - 48px)); display: flex; align-items: center; gap: 10px;
+  padding: 4px 12px 4px 6px; border-radius: 9px; background: rgb(13 20 36 / 85%); color: #fff; font-size: 13px;
+}
+.tz-bar[hidden] { display: none; }
+.tz-play { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.tz-play:hover { background: rgb(255 255 255 / 14%); }
+.tz-seek { flex: 1; min-width: 0; accent-color: #f5a800; cursor: pointer; }
+.tz-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 @media (max-width: 560px) {
   .hero { padding: 40px 0 28px; }
   .lead { font-size: 16px; }
