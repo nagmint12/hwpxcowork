@@ -14,7 +14,7 @@
     try {
       if (new URLSearchParams(location.search).get('intro') !== '0' && !localStorage.getItem('hwpx-pages.introSeen')) {
         localStorage.setItem('hwpx-pages.introSeen', '1');
-        location.replace('teaser/');
+        location.replace('intro/');
       }
     } catch (e) { /* 저장소를 못 쓰면 이 쪽을 그대로 보인다 */ }
   </script>
@@ -23,7 +23,7 @@
   <header class="top">
     <div class="shell top-inner">
       <a class="brand" href="./?intro=0"><img src="brand.png" width="32" height="32" alt=""><span>hwpx<span class="dot">.</span>cowork</span></a>
-      <nav class="top-nav" aria-label="바로 가기"><a href="teaser/">소개 영상 보러가기</a><a href="https://github.com/nagmint12/hwpxcowork#readme">GitHub</a></nav>
+      <nav class="top-nav" aria-label="바로 가기"><a href="intro/">소개 영상</a><a href="https://github.com/nagmint12/hwpxcowork#readme">GitHub</a></nav>
     </div>
   </header>
 
@@ -35,9 +35,10 @@
 
     <section class="shell choices" aria-label="체험 고르기">
       <article class="choice" data-testid="choice-tutorial">
+        <span class="tag soon">준비 중</span>
         <h2>튜토리얼 · AI 검토 따라하기</h2>
-        <p>미리 준비한 예시로 검토를 요청하고, 제안을 검토해 반영하거나 거절해 봅니다.</p>
-        <div class="actions"><a class="btn primary" href="tutorial/">튜토리얼 시작</a><a class="btn ghost" href="studio/?url=..%2Fsamples%2Freport-sample.hwpx&amp;filename=%EA%B2%B0%EA%B3%BC%EB%B3%B4%EA%B3%A0%EC%84%9C.hwpx">견본 보고서 열기</a></div>
+        <p>견본 보고서에 AI가 낸 수정 제안을 받아 [반영]·[거절]하는 과정을, 미리 준비한 답으로 따라 해 봅니다. 지금은 견본 보고서를 편집기에서 열어 볼 수 있습니다.</p>
+        <div class="actions"><a class="btn" href="studio/?url=..%2Fsamples%2Freport-sample.hwpx&amp;filename=%EA%B2%B0%EA%B3%BC%EB%B3%B4%EA%B3%A0%EC%84%9C.hwpx">견본 보고서 열기</a></div>
       </article>
       <article class="choice" data-testid="choice-editor">
         <h2>자유 편집기</h2>
