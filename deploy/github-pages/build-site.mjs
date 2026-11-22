@@ -52,6 +52,7 @@ fs.copyFileSync(path.join(here, 'intro.html'), path.join(intro, 'index.html'));
 fs.mkdirSync(path.join(out, 'samples'));
 fs.copyFileSync(path.join(root, 'tutorial', '결과보고서.hwpx'), path.join(out, 'samples', 'report-sample.hwpx'));
 fs.copyFileSync(path.join(here, 'site.css'), path.join(out, 'site.css'));
+fs.copyFileSync(path.join(root, 'web/icons/icon-128.png'), path.join(out, 'brand.png'));
 fs.copyFileSync(path.join(root, 'web/icons/icon-256.png'), path.join(out, 'icon.png'));
 fs.copyFileSync(path.join(root, 'web/favicon.ico'), path.join(out, 'favicon.ico'));
 fs.writeFileSync(path.join(out, '.nojekyll'), '');

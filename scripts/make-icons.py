@@ -3,8 +3,8 @@
 #   node scripts/make-icons.mjs        (= python -I scripts/make-icons.py, Pillow·numpy 필요)
 # 원본: icon/hwpx-cowork.png(1254px, 연보라 바탕 위 보라 문서 두 장 — 1MB). 원본은 그대로 두고 쓰임마다 알맞은 크기로 줄여 담는다.
 #   쓰는 모양 셋
-#     타일  = 문서 묶음이 한 변의 78% 가 되게 자른 연보라 둥근 사각형(바깥은 투명) — 브라우저 탭·Windows(.exe·바로 가기·설치 프로그램)·Mac·Android 예전 아이콘
-#     정사각 = 같은 구도의 불투명 정사각형 — iOS·홈 화면(모서리는 기기가 둥글린다), 편집기 apple-touch-icon
+#     투명  = 문서 두 장과 그림자 — 웹의 128px 브랜드 그림·브라우저 탭·Windows·Mac·Android 예전 아이콘
+#     정사각 = 같은 구도의 불투명 정사각형 — 홈 화면과 편집기 apple-touch-icon
 #     적응형 = Android 8+ 적응형 아이콘 앞층(108dp, 문서 묶음이 가운데 66dp 안전 원 안) + 바탕색 층
 #   용량: 낱장 PNG 는 128px 이하는 그대로(트루컬러), 그보다 큰 것은 256색 팔레트(k-평균, 오차 확산 없음 — 원본과 PSNR 약 48dB)로 줄인다.
 #         ICO·ICNS 안의 그림은 32비트 RGBA PNG 그대로 둔다(Windows·macOS 호환).
@@ -28,18 +28,22 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(ROOT, 'icon', 'hwpx-cowork.png')
 TILE_FRAC = 0.78        # 타일·정사각에서 문서 묶음(긴 변)이 차지하는 몫
 ROUND_FRAC = 0.74       # 둥근(원형) 아이콘 — 묶음이 원 안에 들도록 조금 작게
-TILE_RADIUS = 0.2237    # 둥근 모서리 반지름(한 변 대비 — iOS·macOS 아이콘과 비슷한 비율)
 MAC_BODY = 824 / 1024   # macOS 아이콘 격자: 1024 캔버스 안 824 몸체
 ADAPTIVE_SAFE = 33 / 108  # Android 적응형 아이콘 안전 원 반지름(108dp 층 대비)
 TRUECOLOR_MAX = 128     # 이 크기 이하는 팔레트로 줄이지 않는다
 SHARPEN_MAX = 48        # 이 크기 이하 타일은 살짝 또렷하게(16px 탭 아이콘의 글줄이 뭉개지지 않게)
 
 
+def backdrop(pixels):
+    edge = np.concatenate([pixels[:8].reshape(-1, 3), pixels[-8:].reshape(-1, 3),
+                           pixels[:, :8].reshape(-1, 3), pixels[:, -8:].reshape(-1, 3)])
+    return np.median(edge, axis=0)
+
+
 def load():
     img = Image.open(SRC).convert('RGB')
-    a = np.asarray(img).astype(float)
-    edge = np.concatenate([a[:8].reshape(-1, 3), a[-8:].reshape(-1, 3), a[:, :8].reshape(-1, 3), a[:, -8:].reshape(-1, 3)])
-    bg = np.median(edge, 0)
+    a = np.asarray(img, dtype=np.float32)
+    bg = backdrop(a)
     dist = np.sqrt(((a - bg) ** 2).sum(2))
     ys, xs = np.where(dist > 60)   # 바탕과 뚜렷이 다른 곳 = 문서 묶음(옅은 그림자 제외)
     cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
@@ -51,26 +55,43 @@ def load():
 SRC_IMG, BG, CENTER, SPAN, REACH = load()
 
 
-def framed(side_px, size):
+def transparent_mark(img):
+    """원본 바탕과 이어지는 영역에만 알파를 부여하고 문서 안 흰색은 보존한다."""
+    pixels = np.asarray(img, dtype=np.float32)
+    bg = backdrop(pixels)
+    difference = pixels - bg
+    distance = np.linalg.norm(difference, axis=2)
+
+    # 보라색 윤곽을 경계로 삼는다. 닫힌 윤곽 안쪽의 흰 문서 면은 바탕색과 가까워도 불투명하다.
+    exterior = Image.fromarray(np.where(distance >= 55, 255, 0).astype(np.uint8)).copy()
+    ImageDraw.floodfill(exterior, (0, 0), 128)
+    body = np.asarray(exterior) != 128
+    edge = np.asarray(Image.fromarray(body).convert('L').filter(ImageFilter.MaxFilter(5))) > 0
+    alpha = np.where(body, 1, np.clip((distance - 5) / 50, 0, 1))[:, :, None]
+    color = np.clip(bg + difference / np.maximum(alpha, 1 / 255), 0, 255)
+    # 로고에서 떨어진 곳의 그림자는 어두운 보라로 다시 합성한다. 원본의 밝은 바탕이 후광으로 남는 것을 막는다.
+    shadow = np.array([70, 35, 118], dtype=np.float32)
+    shadow_delta = shadow - bg
+    shadow_alpha = (difference * shadow_delta).sum(axis=2) / (shadow_delta ** 2).sum()
+    alpha = np.where(edge[:, :, None], alpha, np.clip(shadow_alpha - 0.018, 0, 1)[:, :, None])
+    color = np.where(alpha > 0, np.where(edge[:, :, None], color, shadow), 0)
+    return Image.fromarray(np.rint(np.concatenate((color, 255 * alpha), axis=2)).astype(np.uint8))
+
+
+MARK = transparent_mark(SRC_IMG)
+
+
+def framed(side_px, size, source=SRC_IMG):
     """묶음 가운데를 중심으로 원본에서 side_px 정사각을 잘라 size 로 줄인다. 원본 밖은 바탕색으로 채운다."""
     cx, cy = CENTER
     pad = int(math.ceil(max(0, side_px / 2 - min(cx, cy, SRC_IMG.width - cx, SRC_IMG.height - cy)))) + 2
-    base = SRC_IMG
+    base = source
     if pad:
-        base = Image.new('RGB', (SRC_IMG.width + 2 * pad, SRC_IMG.height + 2 * pad), BG)
-        base.paste(SRC_IMG, (pad, pad))
+        fill = (0, 0, 0, 0) if source.mode == 'RGBA' else BG
+        base = Image.new(source.mode, (source.width + 2 * pad, source.height + 2 * pad), fill)
+        base.paste(source, (pad, pad))
     x0, y0 = cx + pad - side_px / 2, cy + pad - side_px / 2
     return base.resize((size, size), Image.LANCZOS, box=(x0, y0, x0 + side_px, y0 + side_px))
-
-
-def shape_mask(size, kind, ss=4):
-    m = Image.new('L', (size * ss, size * ss), 0)
-    d = ImageDraw.Draw(m)
-    if kind == 'circle':
-        d.ellipse((0, 0, size * ss - 1, size * ss - 1), fill=255)
-    else:
-        d.rounded_rectangle((0, 0, size * ss - 1, size * ss - 1), radius=TILE_RADIUS * size * ss, fill=255)
-    return m.resize((size, size), Image.LANCZOS)
 
 
 def square(size):
@@ -78,18 +99,16 @@ def square(size):
 
 
 def tile(size):
-    img = square(size)
+    img = framed(SPAN / TILE_FRAC, size, MARK)
     if size <= SHARPEN_MAX:
-        img = img.filter(ImageFilter.UnsharpMask(radius=0.6, percent=80, threshold=0))
-    img = img.convert('RGBA')
-    img.putalpha(shape_mask(size, 'rounded'))
+        sharpened = img.convert('RGB').filter(ImageFilter.UnsharpMask(radius=0.6, percent=80, threshold=0))
+        sharpened.putalpha(img.getchannel('A'))
+        img = sharpened
     return img
 
 
 def round_icon(size):
-    img = framed(SPAN / ROUND_FRAC, size).convert('RGBA')
-    img.putalpha(shape_mask(size, 'circle'))
-    return img
+    return framed(SPAN / ROUND_FRAC, size, MARK)
 
 
 def adaptive_foreground(size):
@@ -229,18 +248,16 @@ ANIMATED = os.path.join(ROOT, 'icon', 'HWPX-Cowork-Animated.webp')   # 사용자
 
 
 def animated_tile(size):
-    """움직이는 원본을 타일 구도(묶음 78%)로 잘라 둥근 모서리를 입힌 움직이는 WebP — 데스크톱 앱 '여는 중' 화면"""
+    """타일 구도(묶음 78%)의 투명 WebP — 데스크톱 앱 '여는 중' 화면"""
     im = Image.open(ANIMATED)
     k = im.width / SRC_IMG.width   # 정지 원본과 같은 그림(구도)을 줄인 것
     side = SPAN / TILE_FRAC * k
     cx, cy = CENTER[0] * k, CENTER[1] * k
     box = (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
-    mask = shape_mask(size, 'rounded')
     frames, durations = [], []
     for i in range(im.n_frames):
         im.seek(i)
-        f = im.convert('RGB').resize((size, size), Image.LANCZOS, box=box).convert('RGBA')
-        f.putalpha(mask)
+        f = transparent_mark(im.convert('RGB')).resize((size, size), Image.LANCZOS, box=box)
         frames.append(f)
         durations.append(im.info.get('duration') or 40)
     out = io.BytesIO()
@@ -273,7 +290,8 @@ def main():
     made.append(write('web/favicon.ico', ico_bytes([tile(s) for s in (16, 20, 24, 32, 40, 48, 64)])))
     made.append(write('web/icons/hwpx-cowork.ico', ico_bytes([tile(s) for s in (16, 20, 24, 32, 40, 48, 64, 256)])))
     for s in (128, 192, 256, 512):
-        made.append(write(f'web/icons/icon-{s}.png', png_bytes(square(s))))
+        # 웹 머리글의 브랜드 그림은 배경을 비운다. 홈 화면용 이미지는 플랫폼이 모서리를 그린다.
+        made.append(write(f'web/icons/icon-{s}.png', png_bytes(tile(s) if s == 128 else square(s))))
     made.append(write('web/icons/hwpx-cowork.icns', icns_bytes()))
     remove('web/icons/icon.svg')   # 예전 도형 아이콘(파란 사각형) — 래스터 원본으로 바꾸며 뺐다
     # Android 앱(mobile-rhwp) — 앱 안 편집기 favicon·아이콘은 웹과 같은 파일
