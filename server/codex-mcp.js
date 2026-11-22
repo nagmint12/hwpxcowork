@@ -8,6 +8,7 @@ import { createBridge, installShutdown, apiBaseFrom } from './bridge.js';
 import { modelToolResult } from './editor-instructions.js';
 import { isTaskSurface, DOC_READ, REQUEST_READ, REQUEST_FLOW, REQUEST_WRITE, ORCHESTRATION_TASK, TOOL_PROFILES } from './tool-profiles.js';
 import { createDebugStdioTransport } from './ai-debug.js';
+import { pipeFetch } from './desktop-pipe.js';
 
 // 허용 목록은 server/tool-profiles.js(codex 프로필). READ 는 요청을 고정하지 않고, REQUEST 는 요청(쓰기는 시도까지)을 고정한다
 const READ = [...DOC_READ, 'download_attachment_file'];
@@ -90,24 +91,24 @@ export function codexToolPolicy(job, call, { claimState = null } = {}) {
   };
 }
 
-export async function createCodexMcpBridge({ job, url, token, session, filesDir, log = () => {} }) {
+export async function createCodexMcpBridge({ job, url, token, session, filesDir, fetchImpl = globalThis.fetch, log = () => {} }) {
   validateCodexJob(job);
   const client = new Client({ name: 'hwpx-codex-guard', version: '0.4.1' });
   const remote = new URL(url); remote.searchParams.set('agent', job.agentId || 'ChatGPT (Codex)');
   let bridge;
   try {
     // 가드(쓰기 직전 확인 get_request 등)는 예전 연결 도구를 쓴다 — 서버 기본 연결이 v2 로 바뀌어도(2026-11-17) 예전 연결임을 밝힌다
-    await client.connect(new StreamableHTTPClientTransport(remote, { requestInit: { headers: { Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session, 'X-Hwpx-Mcp': '1' }, redirect: 'error' } }));
+    await client.connect(new StreamableHTTPClientTransport(remote, { fetch: fetchImpl, requestInit: { headers: { Authorization: 'Bearer ' + token, 'X-Hwpx-Agent-Session': session, 'X-Hwpx-Mcp': '1' }, redirect: 'error' } }));
     const call = async (name, args) => mcpJson(await client.callTool({ name, arguments: args }));
     const v2 = isTaskSurface(job.surface);
     // 새 연결의 쓰기 직전 확인: 선점 상태만 돌려주는 REST(문서를 읽지 않는다). 답을 못 받으면 쓰기를 보내지 않는다
     const claimState = v2 ? async () => {
-      const response = await fetch(`${apiBaseFrom(url)}/api/docs/${encodeURIComponent(job.docId)}/requests/${job.requestId}/claim`,
+      const response = await fetchImpl(`${apiBaseFrom(url)}/api/docs/${encodeURIComponent(job.docId)}/requests/${job.requestId}/claim`,
         { headers: { Authorization: `Bearer ${token}`, 'X-Hwpx-Agent-Session': session }, redirect: 'error', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw Object.assign(new Error('요청 상태를 확인하지 못했습니다.'), { code: response.status === 404 ? 'SERVER_UPDATE_REQUIRED' : 'MCP_FAILED' });
       return response.json();
     } : null;
-    bridge = await createBridge({ url, token, session, agent: job.agentId || 'ChatGPT (Codex)', filesDir, toolPolicy: codexToolPolicy(job, call, { claimState }), transformToolResult: v2 ? null : modelToolResult, log,
+    bridge = await createBridge({ url, token, session, agent: job.agentId || 'ChatGPT (Codex)', filesDir, fetchImpl, toolPolicy: codexToolPolicy(job, call, { claimState }), transformToolResult: v2 ? null : modelToolResult, log,
       // 새 연결(v2): 서버가 작업 도구 넷과 그림·스킬 파일 도구만 준다(server/mcp2.js). 그 밖(예전 연결 요청·멀티에이전트 작업)은 예전 연결을 밝힌다 —
       // 2026-11-17 부터 브리지 기본이 새 연결이라, 밝히지 않으면 예전 도구(get_request·propose_*·orchestration 읽기)가 없는 목록을 받는다
       ...(v2 ? { surface: job.surface, toolset: 'core' } : { surface: 'v1' }),
@@ -122,8 +123,8 @@ export async function createCodexMcpBridge({ job, url, token, session, filesDir,
 
 export async function main(env = process.env) {
   try {
-    const { job, url, session, filesDir } = JSON.parse(env.HWPX_CODEX_JOB || '{}');
-    const bridge = await createCodexMcpBridge({ job, url, session, filesDir, token: env.HWPX_COWORK_TOKEN });
+    const { job, url, session, filesDir, pipe } = JSON.parse(env.HWPX_CODEX_JOB || '{}');
+    const bridge = await createCodexMcpBridge({ job, url, session, filesDir, fetchImpl: pipeFetch(pipe), token: env.HWPX_COWORK_TOKEN });
     installShutdown(bridge);
     await bridge.start(createDebugStdioTransport(StdioServerTransport, { context: { route: 'cli-mcp-wire', docId: job.docId, requestId: job.requestId, attempt: job.attempt, session } }));
   } catch { process.stderr.write('[hwpx Codex MCP] 배정된 작업의 MCP 연결을 시작하지 못했습니다.\n'); process.exitCode = 1; }

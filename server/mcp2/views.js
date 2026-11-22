@@ -191,7 +191,7 @@ export function textLines(doc, { pick = null, styles = true, boxLimit = 12, surf
     const marks = ownFigures.length ? pictureMarks(doc, p.ref) : [];
     for (const f of ownFigures) {
       const k = marks.findIndex((m) => m.bin === f.binId); const mark = k >= 0 ? marks.splice(k, 1)[0].mark : null;
-      out.push({ text: ` ▣ 그림${f.n > 1 ? `#${f.n}` : ''}${f.caption?.text ? ` 「${clip(oneLine(f.caption.text), 80)}」` : ''} ${Math.round(f.width / 283.46)}×${Math.round(f.height / 283.46)}mm${mark ? `(${mark})` : ''}`, body });
+      out.push({ text: ` ▣ 그림${f.n > 1 ? `#${f.n}` : ''}${f.caption?.text ? ` 「${clip(oneLine(f.caption.text), 80)}」` : ''} ${Math.round(f.width / 283.46)}×${Math.round(f.height / 283.46)}mm${mark ? `(${mark})` : ''} · 원본 read(view=\'figure\', id=\'${ownFigures.length > 1 ? `${f.ref}#${f.n}` : f.ref}\')`, body });
     }
     if (boxes.length > boxLimit) {
       const chars = boxes.reduce((s, q) => s + [...q.text].length, 0);

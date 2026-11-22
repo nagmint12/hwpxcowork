@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { desktopAiSupport } from './cli-versions.mjs';
 import { shareSupported, shareUrlFromLine } from './share.mjs';
 import { RunnerManager, RUNNER_AIS } from './runners.mjs';
@@ -34,10 +35,12 @@ export function runnerEnvironment(env) {
 const halted = (message = '실행기 켜기를 취소했습니다.') => Object.assign(new Error(message), { code: 'CANCELLED' });
 
 export class DesktopHost extends EventEmitter {
-  constructor({ payload, node, userdata, mode = 'personal', env = process.env, spawnImpl = spawn, platform = process.platform, vault = null, otherUserdata = [], runnerOptions = {} }) {
+  constructor({ payload, node, userdata, mode = 'personal', transport = 'loopback', env = process.env, spawnImpl = spawn, platform = process.platform, vault = null, otherUserdata = [], runnerOptions = {} }) {
     super();
     Object.assign(this, { payload, node, userdata, spawnImpl, mode: ['shared', 'runner'].includes(mode) ? mode : 'personal', place: placeName(platform) });
     this.env = desktopEnvironment(env, userdata, node, this.mode, otherUserdata);
+    this.portless = this.mode === 'personal' && transport === 'stdio';
+    this.fetch = globalThis.fetch;
     this.server = null; this.tunnel = null; this.operations = new Set(); this.cliOperations = new Map(); this.cliLocks = new Map(); this.stopping = false;
     this.state = { phase: 'starting', message: this.mode === 'runner' ? `${this.place}의 AI 실행기를 준비하고 있습니다.` : `${this.place}의 편집기를 준비하고 있습니다.`,
       mode: this.mode, share: 'off', shareUrl: null, shareSupported: this.mode === 'shared' && shareSupported(platform) };
@@ -61,13 +64,35 @@ export class DesktopHost extends EventEmitter {
   launch(script, args = [], { env = this.env, input = false, ipc = false } = {}) {
     return this.spawnImpl(this.node, [path.join(this.payload, script), ...args], { cwd: this.payload, env, shell: false, windowsHide: true, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(ipc ? ['ipc'] : [])] });
   }
-  async start() {
+  start() {
+    if (this.stopping) return Promise.reject(Error('앱을 종료하고 있습니다.'));
+    if (this.serviceStop) return this.serviceStop.then(() => this.start());
+    if (this.starting) return this.starting;
+    if (this.server && this.state.phase === 'ready') return Promise.resolve(this.editorUrl);
+    this.publish({ phase: 'starting' });
+    this.starting = this.startOwned().catch(async error => {
+      await this.stopChild(this.server);
+      this.server = null;
+      this.releasePipe();
+      this.publish({ phase: 'error', message: error.message });
+      throw error;
+    }).finally(() => { this.starting = null; });
+    return this.starting;
+  }
+  async startOwned() {
     if (this.mode === 'runner') {   // AI 실행기만: 이 PC 에 서버를 두지 않는다
       this.publish({ phase: 'ready', message: `${this.place}에서 AI 실행기를 관리합니다.` });
       return null;
     }
     const script = fs.existsSync(path.join(this.payload, 'portable/personal.mjs')) ? 'portable/personal.mjs' : 'deploy/portable/personal.mjs';
-    const child = this.launch(script, ['--no-window', '--ai', '', ...(this.mode === 'shared' ? ['--shared'] : [])], { input: true, ipc: true });
+    let env = this.env;
+    if (this.portless) {
+      this.pipeIO = await import(pathToFileURL(path.join(this.payload, 'server/desktop-pipe.js')).href);
+      this.pipe = this.pipeIO.createPipeSession();
+      this.fetch = this.pipeIO.pipeFetch(this.pipe);
+      env = { ...env, HWPX_COWORK_DESKTOP_PIPE: JSON.stringify(this.pipe), HWPX_COWORK_PUBLIC_URL: this.pipeIO.desktopOrigin };
+    }
+    const child = this.launch(script, ['--no-window', '--ai', '', ...(this.mode === 'shared' ? ['--shared'] : [])], { env, input: true, ipc: true });
     this.server = child;
     await new Promise((resolve, reject) => {
       let out = ''; let err = '';
@@ -78,20 +103,33 @@ export class DesktopHost extends EventEmitter {
       child.stderr.on('data', bytes => { err = (err + bytes.toString()).slice(-2000); });
       child.stdout.on('data', bytes => {
         out = (out + bytes.toString()).slice(-10000);
-        const match = /(?:^|\n)PERSONAL (\d+)\r?(?:\n|$)/.exec(out);
+        const match = /(?:^|\n)PERSONAL (\d+|STDIO)\r?(?:\n|$)/.exec(out);
         if (!match) return;
         clearTimeout(timer); child.off('exit', fail); child.off('error', fail);
-        this.port = Number(match[1]); resolve();
+        if ((match[1] === 'STDIO') !== this.portless) { reject(Error('앱의 연결 방식을 확인할 수 없습니다.')); return; }
+        this.port = this.portless ? null : Number(match[1]); resolve();
       });
     });
     const cfg = JSON.parse(fs.readFileSync(path.join(this.userdata, 'config.json'), 'utf8'));
     this.token = cfg.users.find(u => u.role === 'admin').token;
-    if (cfg.host !== '127.0.0.1' || cfg.port !== this.port) throw new Error('이 앱 전용 서버 설정을 확인하지 못했습니다.');
+    if (cfg.host !== '127.0.0.1' || (!this.portless && cfg.port !== this.port)) throw new Error('이 앱 전용 서버 설정을 확인하지 못했습니다.');
     const response = await this.api('/api/me');
     if (response.role !== 'admin') throw new Error('개인 문서함을 열지 못했습니다.');
-    child.once('exit', code => { if (!this.stopping) this.publish({ phase: 'error', message: `개인 서버가 종료되었습니다(${code}). 앱을 다시 실행해 주세요.` }); });
+    child.once('exit', code => {
+      if (this.server !== child) return;
+      this.server = null; this.releasePipe(); this.port = null;
+      if (this.state.phase === 'stop-error' && code === 0) this.publish({ phase: 'stopped', share: 'off', shareUrl: null });
+      else if (!this.stopping && this.state.phase !== 'stopping') this.publish({ phase: 'error', message: '문서 서비스가 종료되었습니다 (' + code + ').' });
+    });
+    if (this.pipe) this.pipeIO.writePipeSession(this.userdata, this.pipe);
+    this.editorUrl = this.origin + '/?teaser=0#/t/' + encodeURIComponent(this.token);
     this.publish({ phase: 'ready', message: `${this.place}에서 편집기가 실행 중입니다.` });
-    return `http://localhost:${this.port}/?teaser=0#/t/${encodeURIComponent(this.token)}`;
+    return this.editorUrl;
+  }
+  get origin() { return this.portless ? this.pipeIO?.desktopOrigin : 'http://localhost:' + this.port; }
+  releasePipe() {
+    if (this.pipe) this.pipeIO.clearPipeSession(this.userdata, this.pipe);
+    this.pipe = null; this.fetch = globalThis.fetch; this.editorUrl = null;
   }
   // 관리자가 화면(관리자 접속 토큰 안내·사용자 탭)에서 토큰을 바꾸면 서버가 설정 파일에 쓴다 — 앱도 그 값을 따라간다(2026-11-17)
   freshToken() {
@@ -100,12 +138,13 @@ export class DesktopHost extends EventEmitter {
   }
   /** '이 앱의 서버'에 붙는 실행기의 주소·토큰(관리자) — 서버가 준비되기 전·AI 실행기만 방식에서는 없음 */
   localTarget() {
-    if (this.mode === 'runner' || this.stopping || this.state.phase !== 'ready' || !this.port) return null;
+    if (this.mode === 'runner' || this.stopping || this.state.phase !== 'ready' || (!this.port && !this.pipe)) return null;
     const token = this.freshToken();
-    return token ? { mcpUrl: `http://127.0.0.1:${this.port}/mcp`, token } : null;
+    return token ? { mcpUrl: this.pipe ? this.origin + '/mcp' : 'http://127.0.0.1:' + this.port + '/mcp', token, ...(this.pipe ? { pipe: this.pipe } : {}) } : null;
   }
   async api(endpoint, { method = 'GET', body } = {}) {
-    const r = await fetch(`http://127.0.0.1:${this.port}${endpoint}`, { method, headers: { Authorization: `Bearer ${this.freshToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
+    const base = this.pipe ? this.origin : 'http://127.0.0.1:' + this.port;
+    const r = await this.fetch(base + endpoint, { method, headers: { Authorization: 'Bearer ' + this.freshToken(), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
     const result = await r.json(); if (!r.ok) throw new Error(result.message || '요청을 처리하지 못했습니다.'); return result;
   }
   async linkFolder(folder) { return this.api('/api/local/links', { method: 'POST', body: { path: folder } }); }
@@ -178,11 +217,11 @@ export class DesktopHost extends EventEmitter {
     for (const child of this.cliOperations.get(provider) || []) void this.stopChild(child).catch(() => {});
   }
   async stopChild(child) {
-    if (!child || child.exitCode !== null) return;
+    if (!child || child.exitCode !== null || child.signalCode || (!child.pid && child.spawnfile)) return;
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('저장 중인 작업이 끝나기를 기다리고 있습니다.')), 45000);
       child.once('exit', () => { clearTimeout(timer); resolve(); });
-      if (child.connected) child.send('stop'); else if (child.stdin?.writable) child.stdin.write('quit\n'); else child.kill();
+      if (child.connected) child.send('stop', () => {}); else if (child.stdin?.writable) child.stdin.write('quit\n'); else child.kill();
     });
   }
   // ── 외부 접속(공동 작업용, Windows) ── scripts/quick-tunnel.mjs 를 띄워 임시 https 주소를 받는다.
@@ -223,11 +262,26 @@ export class DesktopHost extends EventEmitter {
     await this.stopChild(child);
     this.publish({ share: 'off', shareUrl: null, message: '외부 접속을 닫았습니다. 이 PC에서만 열립니다.' });
   }
+  stopService() {
+    if (!this.serviceStop) this.serviceStop = this.stopOwned().catch(error => {
+      this.publish({ phase: this.server ? 'stop-error' : 'error', message: error.message });
+      throw error;
+    }).finally(() => { this.serviceStop = null; });
+    return this.serviceStop;
+  }
+  async stopOwned() {
+    if (this.starting) await this.starting.catch(() => {});
+    this.publish({ phase: 'stopping' });
+    if (!this.stopping) await this.runners.stopAll({ localOnly: true });
+    const tunnel = this.tunnel; this.tunnel = null; await this.stopChild(tunnel);   // 공유 주소를 되돌린 뒤 서버를 끈다
+    if (this.stopping) for (const operation of this.operations) await this.stopChild(operation);
+    await this.stopChild(this.server); this.server = null;
+    this.releasePipe(); this.port = null; this.token = null;
+    this.publish({ phase: 'stopped', share: 'off', shareUrl: null, message: '서버를 중지했습니다.' });
+  }
   async stop() {
     this.stopping = true;
-    await this.runners.shutdown();   // 실행기가 앱 서버와의 작업을 먼저 마치게 — 새로 켜지 않고 모두 정상 종료
-    const tunnel = this.tunnel; this.tunnel = null; await this.stopChild(tunnel);   // 공유 주소를 되돌린 뒤 서버를 끈다
-    for (const operation of this.operations) await this.stopChild(operation);
-    await this.stopChild(this.server); this.server = null;
+    await this.runners.shutdown();
+    await this.stopService();
   }
 }

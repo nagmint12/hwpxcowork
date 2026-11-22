@@ -155,7 +155,7 @@ export function fillFieldTracked(doc, ref, id, value, { author, date } = {}) {
   if (f.end > f.start) {
     // 필드 안 글이 있으면(값·안내문 자리 글) 그 범위를 바꾼다 — 넣을 글은 마지막 지운 글자 뒤(필드 끝 부호 앞)에 들어간다
     const res = doc.replaceTracked(ref, f.start, f.end, text, { author, date, ...(text ? { runs: [{ text, charPrId: String(base) }] } : {}) });
-    ids = [...(res.deleteIds || [res.deleteId]), res.insertId].filter((x) => x != null).map(Number);
+    ids = [...(res.deleteIds || [res.deleteId]), ...(res.insertIds || [res.insertId])].filter((x) => x != null).map(Number);
   } else if (text) {
     // 빈 누름틀: 최종본 자리(offset)로 넣으면 필드 시작 부호 앞(필드 밖)에 들어간다 — 시작 부호 바로 뒤(run 안)에 넣는다
     const { sec, p } = doc.resolve(ref);

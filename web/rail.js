@@ -540,6 +540,7 @@ export const ReviewRail = {
   setup(props) {
     const d = inject('doc');
     const el = ref(null); const pinned = ref(null); const tops = shallowRef({}); const edges = shallowRef({}); const pts = shallowRef({});
+    const office = inject('officeDocument', null);
     const railW = ref(0);
     const drag = ref(null);   // 끄는 중인 메모 { key, left, top }(층 안 좌표)
     if (d.s.railOpen === undefined) d.s.railOpen = true;
@@ -649,14 +650,17 @@ export const ReviewRail = {
       if (old && ro) ro.unobserve(old);
       if (e) { elMap.set(key, e); if (ro) ro.observe(e); } else elMap.delete(key);
     }
-    function schedule() { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; layout(); }); }
+    function schedule() {
+      if (raf || office?.active.value === false) return;
+      raf = requestAnimationFrame(() => { raf = 0; if (office?.active.value !== false) layout(); });
+    }
     /** iframe client 좌표 → 층 안 좌표: 편집기 iframe 왼쪽 위(호스트 쪽 좌표) - 층 왼쪽 위 */
     function frameOffset() {
       const rail = el.value; if (!rail) return { x: 0, y: 0 };
       const rr = rail.getBoundingClientRect();
       let fx = null; let fy = null;
       try { const r = d.editor?.anchorToPage?.({ x: 0, y: 0, w: 0, h: 0 }); if (r && Number.isFinite(r.y)) { fy = r.y; fx = Number.isFinite(r.x) ? r.x : null; } } catch { /* 편집기 없음 */ }
-      if (fy == null || fx == null) { const f = document.querySelector('.editorhost iframe') || document.querySelector('iframe'); if (f) { const b = f.getBoundingClientRect(); fy = fy ?? b.top; fx = fx ?? b.left; } }
+      if (fy == null || fx == null) { const f = d.editor?.frame?.() || rail.closest('.docview')?.querySelector('.editorhost iframe'); if (f) { const b = f.getBoundingClientRect(); fy = fy ?? b.top; fx = fx ?? b.left; } }
       return { x: fx == null ? 0 : fx - rr.left, y: fy == null ? 0 : fy - rr.top };
     }
     /** 지금 입력 중인(포커스가 안에 있는) 메모 */
@@ -809,13 +813,20 @@ export const ReviewRail = {
       schedule();
     });
     onBeforeUnmount(() => { if (ro) ro.disconnect(); cancelAnimationFrame(raf); removeEventListener('resize', onResize); stopDrag?.(); });
-    // 시험·진단용: 메모 자리(층 안 y·x)와 원하는 자리(sticky = 강조 자리 없이 입력 칸 때문에 남은 메모, edge = 끝에 붙임, free = 끌어 옮김)
+    // 시험·진단용: 활성 문서의 메모 자리
     if (typeof window !== 'undefined') {
-      window.__rail = {
+      const debug = {
         layout: () => { layout(); return { ...tops.value }; },
         cards: () => cards.value.map((c) => { const b = boxOf(c); return { key: c.item.key, id: c.item.id, y: c.y, top: tops.value[c.item.key] ?? null, left: b.left, width: b.width, sticky: !c.anchored, edge: edges.value[c.item.key] || null, free: !!posOf(c.item.key) }; }),
         links: () => links.value.map((l) => ({ key: l.key, cls: l.cls, d: l.d })),
       };
+      const show = shown => {
+        if (shown) { window.__rail = debug; schedule(); }
+        else if (window.__rail === debug) delete window.__rail;
+      };
+      if (office) watch(office.active, show, { flush: 'post' });
+      onMounted(() => show(office?.active.value !== false));
+      onBeforeUnmount(() => show(false));
     }
     return { d, el, pinned, tops, edges, open, cards, links, drag, emptyText, emptyTip, setEl, slotStyle, posOf, pin, unpin, startDrag, eatClick, onDbl, home, EDGE_MARK, EDGE_TIP };
   },

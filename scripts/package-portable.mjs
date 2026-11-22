@@ -23,6 +23,7 @@ import { removeFile } from '../server/fs-safe.js';
 import { findNpmCli } from '../deploy/portable/common/npm-location.mjs';
 import { assertFontDistributionBundle } from './rhwp-original-font-policy.mjs';
 import { inspectPublicBytes, publicOnboardingText } from './public-export-safety.mjs';
+import { buildStudioEmbed } from './build-studio-embed.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoots = new Map();
@@ -50,7 +51,7 @@ const SERVER_DEPENDENCIES = ['@modelcontextprotocol/sdk', '@resvg/resvg-wasm', '
 const WORKER_DEPENDENCIES = ['@modelcontextprotocol/sdk', 'zod'];   // Claude API 는 SDK 없이 fetch(api-messages-agent)
 // 배포물에 기관 자료·개인정보를 넣지 않는다. Windows 앱의 바탕인 personal-lite에 공개용 소개 영상과 실습 자료를 추가한다.
 // 설명서는 문서함에 미리 복사하지 않고, 묶은 뒤 auditPrivate가 글·압축 문서 안·로고 해시를 검사한다.
-const SERVER_TREES = ['server', 'engine', 'web', 'studio/dist'];   // 2026-11-17 두레이 확장(extensions/drive-bridge)은 두레이 API 방식으로 바꾸며 뺐다
+const SERVER_TREES = ['server', 'engine', 'web', 'studio/dist', 'cli'];   // 2026-11-17 두레이 확장(extensions/drive-bridge)은 두레이 API 방식으로 바꾸며 뺐다
 const SERVER_FILES = [
   // 웹 설명서(/manual.md·/manual-resources)·실행기 ZIP 이 읽는 안내
   'docs/DEPLOYMENT_AND_AI_GUIDE.md', 'docs/AGENT_SETUP.md', 'docs/MCP_EVENTS_GUIDE.md', 'docs/CHATGPT_WORK_FILES.md', 'docs/AUTOMATIC_AI_GUIDE.md', 'docs/MULTI_AGENT_ORCHESTRATION.md',
@@ -72,7 +73,7 @@ const SERVER_FILES = [
 ];
 // 서버 app 의 시작 파일 — 여기서부터 상대 import 를 따라가 빠진 파일이 없는지 묶기 전에 확인한다(checkRelativeImports)
 const SERVER_ENTRIES = ['server/launcher.js', 'server/index.js', 'server/control-cli.js', 'server/mcp-stdio.js', 'scripts/ai-worker.mjs', 'scripts/orchestration-worker.mjs',
-  'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs'];
+  'scripts/codex-agent.mjs', 'scripts/setup-agent.mjs', 'scripts/setup-personal.mjs', 'scripts/setup-worker.mjs', 'scripts/connection-info.mjs', 'scripts/quick-tunnel.mjs', 'portable/portable.mjs', 'portable/manager.mjs', 'portable/personal.mjs', 'cli/hwpx-mcp.mjs'];
 const WORKER_FILES = [...WORKER_PACKAGE_FILES, 'server/mcp-stdio.js', 'scripts/setup-agent.mjs', 'scripts/run-settings.mjs', 'docs/AGENT_SETUP.md', 'agent/CLAUDE.md', 'agent/v1/CLAUDE.md', 'agent/.claude/settings.json',
   'agent/guides/figure-files.md', 'agent/guides/orchestration.md', 'agent/guides/change-requests.md'];
 // 트리 안에서 빼는 것: 편집기 빌드의 rhwp 예제 문서·쓰지 않는 옛 사본, 파이썬 캐시
@@ -251,7 +252,7 @@ function nodeModuleNotices(stage) {
 function checkImports(stage, names) {
   const specifiers = new Set();
   const re = /(?:import|export)\s[^'"`;]*?from\s*['"]([^'"./][^'"]*)['"]|import\(\s*['"]([^'"./][^'"]*)['"]\s*\)/g;
-  for (const dir of ['server', 'engine', 'scripts', 'portable']) {
+  for (const dir of ['server', 'engine', 'scripts', 'portable', 'cli']) {
     if (!fs.existsSync(path.join(stage, dir))) continue;
     for (const rel of walk(path.join(stage, dir))) {
       if (!/\.m?js$/.test(rel)) continue;
@@ -546,6 +547,7 @@ function buildInfo(kind, nodeVersion) {
 /** 서버 app/ 폴더를 staging 에 만든다 → 통계 */
 function stageServerApp(stage, install = false) {
   copyTrees(stage, SERVER_TREES, install ? SERVER_FILES.filter((f) => !f.startsWith('node_modules/')) : SERVER_FILES);
+  buildStudioEmbed(path.join(stage, 'studio/dist'));
   const deps = install ? { packages: 0, stripped: 0 } : copyDependencies(stage, SERVER_DEPENDENCIES);
   fs.writeFileSync(path.join(stage, 'package.json'), appManifest('hwpx-cowork', 'HWPX 공동 검토·편집 서버(포터블)', [...SERVER_DEPENDENCIES, 'vue'], {
     start: 'node server/launcher.js', setup: 'node scripts/setup-personal.mjs', 'setup:personal': 'node scripts/setup-personal.mjs', worker: 'node scripts/ai-worker.mjs', orchestrator: 'node scripts/orchestration-worker.mjs',

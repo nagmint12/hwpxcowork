@@ -1,5 +1,6 @@
 // HWPX 공동 검토 서버: 웹 UI + REST API + WebSocket + MCP(Streamable HTTP) + 편집기(/studio/)
 import http from 'node:http';
+import { desktopService } from './desktop-service.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -89,6 +90,11 @@ function trackOperation(fn) {
 const restartControl = createRuntimeControl({ onPrepareRestart: prepareShutdown });
 
 const app = express();
+const pipeSession = process.env.HWPX_COWORK_DESKTOP_PIPE ? JSON.parse(process.env.HWPX_COWORK_DESKTOP_PIPE) : null;
+if (pipeSession && (!cfg.local.enabled || cfg.personal?.app !== true)) throw Error('개인용 앱에서만 직접 연결을 열 수 있습니다.');
+const desktop = pipeSession && desktopService({ session: pipeSession, cfg, service, version: pkg.version, trackOperation, isDraining: () => draining });
+if (desktop) app.use((req, res, next) => desktop.authorize(req) ? next() : res.sendStatus(403));
+if (desktop) app.get('/api/local/document-events', desktop.events);
 app.disable('x-powered-by');
 installReleaseDownloads(app, { root });
 app.use((req, res, next) => {
@@ -665,6 +671,8 @@ server.on('upgrade', (req, socket, head) => {
   socket.on('error', () => socket.destroy());
   if (draining) { socket.destroy(); return; }
   let u; try { u = new URL(req.url, 'http://x'); } catch { socket.destroy(); return; }
+  if (desktop && !desktop.authorize(req)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+  if (desktop && u.pathname === '/local/stdio') { desktop.upgrade(req, socket, head); return; }
   if (u.pathname !== '/ws') { socket.destroy(); return; }
   const user = userByToken(cfg, u.searchParams.get('token')); const docId = u.searchParams.get('doc');
   let meta = null; try { meta = docId ? store.readMeta(docId) : null; } catch { meta = null; }
@@ -676,17 +684,20 @@ server.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `[hwpx-cowork] 포트 ${cfg.port} 를 이미 쓰고 있습니다(${cfg.host}). 다른 서버를 끄거나 HWPX_COWORK_PORT 를 바꾸세요.` : `[hwpx-cowork] 서버 오류: ${e.message}`);
   process.exit(1);
 });
-server.listen(cfg.port, cfg.host, () => {
-  if (cfg.port === 0) {
+server.listen(pipeSession ? { path: pipeSession.socketPath } : { port: cfg.port, host: cfg.host }, () => {
+  if (!pipeSession && cfg.port === 0) {
     // 시험 받침(§6.0): 빈 포트로 띄우면 실제 포트를 stdout 첫 줄에, 이 프로세스 표식(nonce)을 둘째 줄에 알린다
     cfg.port = server.address().port;
     if (cfg.publicUrlAuto) cfg.publicUrl = `http://localhost:${cfg.port}`;
     console.log(`LISTENING ${cfg.port}`);
     console.log(`NONCE ${NONCE}`);
   }
-  restartControl.markReady({ host: cfg.host, port: cfg.port, nonce: NONCE, publicUrl: cfg.publicUrl });
-  console.log(`[hwpx-cowork ${pkg.version}] http://${cfg.host}:${cfg.port}  (publicUrl ${cfg.publicUrl})`);
-  console.log(`  MCP endpoint: ${cfg.publicUrl}/mcp  (Authorization: Bearer <token>)  또는 ${cfg.publicUrl}/mcp/t/<token>`);
+  restartControl.markReady({ host: cfg.host, port: pipeSession ? null : cfg.port, nonce: NONCE, publicUrl: cfg.publicUrl });
+  if (pipeSession) console.log('[hwpx-cowork] 개인 문서함 · 로컬 stdio 연결');
+  else {
+    console.log(`[hwpx-cowork ${pkg.version}] http://${cfg.host}:${cfg.port}  (publicUrl ${cfg.publicUrl})`);
+    console.log(`  MCP endpoint: ${cfg.publicUrl}/mcp  (Authorization: Bearer <token>)  또는 ${cfg.publicUrl}/mcp/t/<token>`);
+  }
   console.log(`  서버 AI: ${ai.enabled ? (ai.mock ? '모의 AI' : '켜짐 (' + ai.agentName + ' · ' + cfg.ai.model + ')') : '꺼짐 — ' + ai.reason}`);
   console.log(`  사용자 ${cfg.users.length}명, 문서 ${store.list().length}건, 데이터 ${cfg.dataDir}`);
   const st = studioInfo();
@@ -726,6 +737,7 @@ async function prepareShutdown({ reason = 'restart' } = {}) {
   clearInterval(mcpSessionTimer);
   await adminMcp.close();
   routeCtx.agents?.closeAll();
+  desktop?.close();
   // 긴 SSE·MCP·WS 연결은 저장이 끝난 다음 정리한다.
   const sessions = [...mcpSessions.values()]; mcpSessions.clear();
   await Promise.race([

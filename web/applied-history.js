@@ -1,30 +1,12 @@
 import { computed, inject, nextTick, ref, watch } from '/vendor/vue.esm-browser.prod.js';
 import { diffText } from './diff.js';
-import { proposalPlace, refWords } from './proposal-place.js';
+import { proposalPlace, refWords, appliedRange } from './proposal-place.js';
 import { fmtStamp } from './util.js';
 import { focusIn, FormatPreview, ResultItem } from './ui.js';
 
 const PAGE_SIZE = 20;
 const isReplacement = p => !p.type || p.type === 'replace';
 
-// 저장 범위는 최종본의 유니코드 코드포인트다. 이후 글이 바뀌어 같은 자리라고
-// 확인할 수 없으면 문단까지만 안내한다. 삭제로 빈 문자열이 된 자리는 양옆 문맥으로 확인한다.
-function appliedRange(p, paragraph, version) {
-  const r = p.appliedRange;
-  if (!paragraph || !r || r.ref !== paragraph.ref || typeof paragraph.text !== 'string' || typeof p.replace !== 'string') return null;
-  const { start, end } = r;
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return null;
-  const text = Array.from(paragraph.text);
-  if (end > text.length || text.slice(start, end).join('') !== p.replace) return null;
-  if (!p.replace || !version || version !== p.appliedVersion) {
-    if (typeof r.pre !== 'string' || typeof r.post !== 'string') return null;
-    const left = Array.from(r.pre).length, right = Array.from(r.post).length;
-    if ((!left && start !== 0) || (!right && end !== text.length) ||
-        text.slice(Math.max(0, start - left), start).join('') !== r.pre ||
-        text.slice(end, end + right).join('') !== r.post) return null;
-  }
-  return { ref: r.ref, start, end };
-}
 
 function entryLocation(p, doc) {
   const place = proposalPlace(p);

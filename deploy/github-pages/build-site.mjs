@@ -10,7 +10,7 @@
 // - 이 사이트는 누구나 여는 공개 주소다(비공개 저장소라도 Pages 는 공개). AI 도우미의 API 키를 저장하지 않게
 //   편집기 index.html 에 <meta name="hwpx-ai-key-storage" content="off"> 를 넣고, 그 막음 코드(studio/build/ai-key-storage-patches.mjs)가
 //   든 편집기 빌드인지 확인한다 — 없으면 만들지 않는다. *.github.io 주소는 그 코드가 주소만으로도 막는다.
-// - 편집기 예시 문서(studio/dist/samples)는 싣지 않는다.
+// - 편집기 예시 문서와 서버용 내장 편집기 시작 페이지는 싣지 않는다.
 // - 공개 체험 페이지의 편집기에서는 AI 도우미를 올리지 않는다(<meta name="hwpx-ai-assistant" content="off"> — 사용자 결정, 패치 ai-assistant-hidden-on-public-page).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,7 +58,8 @@ fs.writeFileSync(path.join(out, '.nojekyll'), '');
 
 // ── 편집기 ──
 const studio = path.join(out, 'studio');
-fs.cpSync(dist, studio, { recursive: true, filter: (src) => path.relative(dist, src).split(path.sep)[0] !== 'samples' });
+const excludedStudioEntries = new Set(['samples', 'cowork-embed.html']);
+fs.cpSync(dist, studio, { recursive: true, filter: (src) => !excludedStudioEntries.has(path.relative(dist, src).split(path.sep)[0]) });
 const texts = [];
 (function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -84,5 +85,5 @@ const html = fs.readFileSync(index, 'utf8');
 if (!/<head>/i.test(html)) fail('편집기 index.html 에 <head> 가 없습니다');
 fs.writeFileSync(index, html.replace(/<head>/i, '<head>\n  <meta name="hwpx-ai-key-storage" content="off">\n  <meta name="hwpx-ai-assistant" content="off">'));
 if (!fs.readdirSync(path.join(studio, 'assets')).some((f) => f.endsWith('.js') && fs.readFileSync(path.join(studio, 'assets', f), 'utf8').includes('hwpx-ai-assistant'))) fail('AI 도우미 숨김 패치가 든 편집기 빌드가 아닙니다');
-if (fs.existsSync(path.join(studio, 'samples'))) fail('예시 문서가 남았습니다');
+for (const name of excludedStudioEntries) if (fs.existsSync(path.join(studio, name))) fail(`공개 체험에 포함하지 않는 편집기 항목이 남았습니다: ${name}`);
 console.log(`[pages] ${out} — 편집기 경로 ${replaced}곳을 ${base} 로, AI 키 저장 막음·AI 도우미 숨김 확인, 소개 영상·견본 보고서${serverUrl ? ', app/ 입구' : ''}`);

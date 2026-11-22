@@ -7,7 +7,7 @@ export const WORKER_PACKAGE_PREFIX = 'hwpx-ai-worker/';
 export const WORKER_PACKAGE_FILES = Object.freeze([
   'server/worker.js', 'server/ai.js', 'server/codex-ai.js', 'server/codex-mcp.js', 'server/claude-cli-ai.js', 'server/google-cli-ai.js', 'server/aimock.js', 'server/bridge.js', 'server/format-schema.js', 'server/table-schema.js', 'scripts/ai-worker.mjs',
   'server/api-mcp-tools.js', 'server/api-responses-agent.js', 'server/api-messages-agent.js', 'server/api-gemini-agent.js', 'server/api-tool-loop.js', 'server/tool-profiles.js', 'server/image-integrity.js', 'engine/picture.js', 'engine/xmlscan.js', 'engine/table-edit.js', 'engine/errors.js',
-  'server/editor-instructions.js', 'server/lean.js', 'server/edit-usage.js', 'server/codex-model-selection.js', 'server/ai-debug.js',
+  'server/editor-instructions.js', 'server/lean.js', 'server/edit-usage.js', 'server/codex-model-selection.js', 'server/ai-debug.js', 'server/desktop-pipe.js',
   'server/orchestration-worker.js', 'scripts/orchestration-worker.mjs', 'docs/MULTI_AGENT_ORCHESTRATION.md',
   'scripts/codex-agent.mjs', 'scripts/ai-debug.mjs', 'agent/.claude/ai-debug-hook.mjs', 'server/edit-workflow-runner.js',
 ]);

@@ -1,11 +1,12 @@
 // PC 폴더 연결·함께 검토 경로(docs/LOCAL_FOLDER_APP_2026-11-10.md — server/local-folders.js). config.local.enabled 일 때만 단다.
 // 서버 PC 의 폴더를 열고 다른 서버에 내 토큰으로 올리는 일이라, 모든 경로는 관리자가 이 PC 에서 보낸 요청만 받는다
 // (터널·프록시를 거쳐 온 요청은 127.0.0.1 로 보여도 거절 — isSameMachine).
+import { localPeer } from '../desktop-pipe.js';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /** 이 PC 에서 직접 온 요청인가: 소켓이 loopback 이고, 주소도 localhost 이며, 프록시 머리글이 없고, Origin 이 있으면 같은 주소 */
 export function isSameMachine(req) {
-  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)) return false;
+  if (!req.socket?.[localPeer] && !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)) return false;
   if (!LOCAL_HOSTS.has(String(req.hostname).toLowerCase())) return false;
   if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers.forwarded || req.headers['cf-connecting-ip']) return false;
   if (req.headers.origin) {

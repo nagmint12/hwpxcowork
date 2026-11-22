@@ -9,6 +9,7 @@ import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { assertFontDistributionTree } from './font-distribution-policy.mjs';
+import { buildStudioEmbed } from './build-studio-embed.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 모르는 인자는 빌드하지 않고 멈춘다(2026-11-18: `--help` 를 주자 인자를 무시하고 운영 번들 studio/dist 를 통째로 다시 빌드했다).
@@ -170,6 +171,7 @@ const config = {
 
 const t0 = Date.now();
 await vite.build(config);
+buildStudioEmbed(outDir);
 await assertFontDistributionTree(outDir);
 const pluginPkg = (() => { try { return /PLUGIN_VERSION\s*=\s*'([^']+)'/.exec(fs.readFileSync(path.join(pluginDir, 'types.ts'), 'utf8'))?.[1] ?? null; } catch { return null; } })();
 const info = {

@@ -16,6 +16,7 @@ import { shareUrlFromLine, signedByCloudflare, findCloudflared, installCloudflar
 import { RunnerManager, RUNNER_AIS, RUNNER_STATES, RUNNER_PAYLOAD_FILES, LOCAL_SERVER, serverAddress, runnerLine, redact, privateHost, hostLabel } from '../deploy/desktop/runners.mjs';
 import { personalConfig, sharedConfig } from '../deploy/portable/personal.mjs';
 import { parseWorkerArgs } from '../scripts/ai-worker.mjs';
+import { WORKER_PACKAGE_FILES } from '../server/worker-package.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hwpx-desktop-win-'));
@@ -35,7 +36,7 @@ test('알림 영역은 실제 서버 상태를 표시하고 창 복원과 정상
   for (const [mode, name] of [['personal', '개인 서버'], ['shared', '공동 작업 서버']]) {
     const control = createServerTray({ Tray: FakeTray, Menu: { buildFromTemplate: items => items }, icon: {}, mode,
       showWindow: () => actions.push('open'), quit: () => actions.push('quit') });
-    assert.equal(tray.tooltip, `Hwpx Cowork · ${name} · 시작 중`);
+    assert.equal(tray.tooltip, `HWPX Cowork · ${name} · 시작 중`);
     control.update('ready');
     assert.equal(tray.items[0].label, `${name} · 실행 중`);
     tray.click(); tray.items.find(item => item.label === '앱과 서버 종료').click();
@@ -319,6 +320,25 @@ test('다른 서버 확인 실패: 토큰 틀림·서버 아님·체험 계정·
     assert.equal(fs.existsSync(path.join(dir, 'runner-secrets.json')), false);
     assert.deepEqual(manager(dir).m.snapshot().servers, []);
   } finally { cleanup(dir); }
+});
+
+test('서버 관리 화면은 이 앱의 서버에 연결한 실행기만 함께 켜고 끈다', async () => {
+  const dir = temporary();
+  const { m, runners } = manager(dir);
+  try {
+    const remote = await m.addServer({ url: 'https://cowork.example.com', token: TOKEN });
+    m.addRunner({ ai: 'codex', server: remote.id, autoStart: true });
+    m.addRunner({ ai: 'codex', server: LOCAL_SERVER, autoStart: true });
+    await m.startAuto('remote');
+    assert.equal(runners.children.length, 1);
+    await m.startAuto('local');
+    assert.equal(runners.children.length, 2);
+    await m.stopAll({ localOnly: true });
+    assert.deepEqual(runners.children[0].sent, []);
+    assert.deepEqual(runners.children[1].sent, ['stop']);
+    await m.startAuto('local');
+    assert.equal(runners.children.length, 3);
+  } finally { await m.shutdown(); cleanup(dir); }
 });
 
 test('연결 방식: 새 연결을 모르는 서버에는 v2 를 막고 v1 은 허용, Google CLI 는 --mcp 없이, 같은 AI·서버는 하나만', async () => {
@@ -683,7 +703,7 @@ test('진짜 프로세스: setup-worker(그대로) + 가짜 ai-worker — 상태
   } finally { await host.stop(); cleanup(dir); }
 });
 
-// ── 2026-11-17 루트 bat 정리: 아래 bat 을 지우고 앱(AI 실행기 창·운영 방식)이 같은 일을 한다(사본: backups/v2_default_gui_2026-11-17/) ──
+// ── 2026-11-17 루트 bat 정리: 공개판은 앱의 AI 실행기와 서버 시작 명령을 사용한다. ──
 //   start-codex-agent(-v2)·start-claude-worker(-v2)·start-gemini-agent·start-antigravity-agent·start-google-agent → [AI → 실행기 관리]의 실행기
 //   start-server·stop-server → 앱이 자기 서버를 켜고 끈다(혼자/함께 쓰기), 개발 폴더는 npm start(server/launcher.js)·node server/control-cli.js stop
 //   start-tunnel → [함께 쓰기 → 외부 접속 열기](scripts/quick-tunnel.mjs), start-https → 서버 감시 작업이 https/run-https.mjs 를 띄운다(docs/SERVER_RECOVERY.md)
@@ -695,13 +715,18 @@ const REMOVED_BATS = {
   'start-gemini-agent.bat': { ai: 'gemini-cli' }, 'start-antigravity-agent.bat': { ai: 'antigravity' }, 'start-google-agent.bat': { ai: 'gemini-cli' },
   'start-server.bat': null, 'stop-server.bat': null, 'start-tunnel.bat': null, 'start-https.bat': null,
 };
-test('지운 실행기 bat 이 하던 일을 앱 실행기가 같은 실행기·같은 인자로 한다(bat 은 저장소·공개 목록에 없다)', async () => {
+test('공개 배포는 폐기된 루트 bat 대신 앱 실행기와 지원되는 명령을 제공한다', async () => {
+  const manifests = [...RUNNER_PAYLOAD_FILES, ...WORKER_PACKAGE_FILES];
   for (const name of Object.keys(REMOVED_BATS)) {
     assert.equal(fs.existsSync(path.join(root, name)), false, `${name} 은 지웠다`);
-    assert.ok(fs.existsSync(path.join(root, 'backups/v2_default_gui_2026-11-17', name)), `${name} 사본`);
+    assert.ok(!manifests.includes(name), `실행기 배포 목록에 ${name} 없음`);
   }
-  const exportList = fs.readFileSync(path.join(root, 'scripts/export-public-repo.mjs'), 'utf8');
-  for (const name of Object.keys(REMOVED_BATS)) assert.ok(!exportList.includes(`'${name}'`), `공개 목록에 ${name} 없음`);
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(scripts.start, 'node server/launcher.js');
+  assert.equal(scripts.worker, 'node scripts/ai-worker.mjs');
+  for (const file of ['server/launcher.js', 'server/control-cli.js', 'scripts/quick-tunnel.mjs', 'scripts/setup-worker.mjs', 'scripts/ai-worker.mjs']) {
+    assert.ok(fs.statSync(path.join(root, file)).isFile(), file);
+  }
   const dir = temporary();
   try {
     const { m, runners } = manager(dir);

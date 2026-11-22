@@ -239,7 +239,8 @@ export class ClaudeCodeProposer {
       // 새 연결이면 지침도 새 연결용(작업 도구 넷 — 예전 도구 이름 없음). 브리지(server/codex-mcp.js)는 HWPX_CODEX_JOB 의 job.surface 'v2' 로 작업 도구 넷만 중계한다
       const args = claudeArgs({ model: this.model, effort: this.effort, mcpConfigFile, systemPrompt: v2 ? taskEditorInstructions(job.surface) : EDITOR_INSTRUCTIONS });
       const env = { ...claudeEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_DEBUG_DIR: currentAiDebug()?.directory, HWPX_COWORK_TOKEN: token,
-        HWPX_CODEX_JOB: JSON.stringify({ job: { ...job, agentId: this.agentName }, url, session, filesDir: work }) };
+        HWPX_CODEX_JOB: JSON.stringify({ job: { ...job, agentId: this.agentName }, url, session, filesDir: work,
+          ...(this.env.HWPX_COWORK_DESKTOP_PIPE ? { pipe: JSON.parse(this.env.HWPX_COWORK_DESKTOP_PIPE) } : {}) }) };
       const prompt = v2 ? claudeMcpPromptV2(job, brief) : codexMcpPrompt(job, requestContext) + (job.workflow === 'content_format'
         ? '\n명령·코드 실행 도구는 없습니다. 그림은 edit_workspace의 figure(svg)·chart 동작으로 만듭니다. 별도 결과 파일은 Write로 work/out/에 쓴 뒤 upload_result_file로 저장한 첨부 id를 사용합니다.' : CLAUDE_NOTE);
       const metadata = (usage) => ({ usage, model: this.model || 'claude-code-default', effort: this.effort, execution: 'tool-agent' });

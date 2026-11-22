@@ -429,6 +429,7 @@ export const agentServiceMethods = {
     if (view === 'changes') return compact(await this.changes(id));
     if (view === 'fields') return compact((await this.fields(id)).map(({ id: fid, ...f }) => f));
     if (view === 'figures') return compact(await this.listFigures(id));
+    if (view === 'figure') return this.readFigureImage(id, item);
     if (view === 'attachments') return compact(await this.listAttachments(id));
     if (view === 'attachment') {
       if (!item) throw new ServiceError('BAD_ARGS', "view='attachment' 는 id 에 첨부 aid 를 줍니다(read view='attachments')");

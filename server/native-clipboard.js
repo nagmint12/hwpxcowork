@@ -1,12 +1,13 @@
 // Windows clipboard bridge. Public-origin writes require a fresh physical clipboard marker.
 // Reading the host clipboard remains limited to direct loopback requests.
 import { execFile } from 'node:child_process';
+import { localPeer } from './desktop-pipe.js';
 import { fileURLToPath } from 'node:url';
 
 const helper = fileURLToPath(new URL('../scripts/native-clipboard.py', import.meta.url));
 const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 export function isLocalClipboardRequest(req) {
-  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)) return false;
+  if (!req.socket?.[localPeer] && !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)) return false;
   if (!localHosts.has(String(req.hostname).toLowerCase())) return false;
   if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers.forwarded) return false;
   if (req.headers.origin) {

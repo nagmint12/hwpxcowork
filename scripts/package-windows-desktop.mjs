@@ -75,6 +75,9 @@ const builder = requireTools('electron-builder');
 // ── 2. 앱 코드(deploy/desktop)를 한 번 고정해 쓴다 ──
 const desktopSource = path.join(out, 'desktop-source');
 fs.cpSync(path.join(root, 'deploy/desktop'), desktopSource, { recursive: true, errorOnExist: true, force: false });
+const desktopManifestFile = path.join(desktopSource, 'package.json');
+const desktopManifest = JSON.parse(fs.readFileSync(desktopManifestFile, 'utf8'));
+put(desktopManifestFile, JSON.stringify({ ...desktopManifest, distribution: 'installed' }, null, 2) + '\n');
 // AI 실행기 창(2026-11-17 — 실행기 bat 을 대신한다): 창·관리 코드가 빠지면 메뉴 [AI → 실행기 관리]가 빈 창이 된다
 for (const need of ['main.mjs', 'host.mjs', 'runners.mjs', 'runners.html', 'runners.js', 'runners.css', 'preload.cjs', 'mode.mjs', 'desktop-ai.mjs', 'cli-versions.mjs']) {
   if (!fs.existsSync(path.join(desktopSource, need))) throw new Error('앱 코드에 빠진 파일: deploy/desktop/' + need);

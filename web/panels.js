@@ -31,7 +31,7 @@ const goTo = (d, ref_, start, end) => { if (ref_) focusIn(d, { ref: ref_, start,
 const realSummary = (r) => (r?.summaryBy === 'ai' || r?.summaryBy === 'user' ? String(r.summary || '') : '');
 export const AiTab = {
   components: { Composer, ResultView, MemoEditor, AttachChips, CollabHost, RequestActions, RequestActivity, Hint },
-  template: `<div class="tab-ai"><CollabHost/>
+  template: `<div class="tab-ai" ref="aiRoot" :data-office-unsent="pm.phase === 'edit' && (!!pm.instruction.trim() || !!pm.attachments.length)"><CollabHost/>
     <div class="sec-h">새 요청<Hint text="본문에서 범위를 고르면 그 범위가, 고르지 않으면 문서 전체가 대상입니다" href="/help.html#review"/></div>
     <Composer :model="pm" docked :key="pm.key"/>
     <div class="result-card" v-if="d.s.activeRid != null && d.request(d.s.activeRid) && !(pm.phase === 'result' && pm.rid === d.s.activeRid)">
@@ -66,6 +66,7 @@ export const AiTab = {
   </div>`,
   setup() {
     const d = inject('doc'); const filter = ref(''); const editing = ref(null);
+    const aiRoot = ref(null); const office = inject('officeDocument', null);
     const pm = reactive({ key: 1, target: null, kind: 'review', preset: null, instruction: '', attachments: [], count: 1, includeInstruction: false, anchor: null, phase: 'edit', rid: null, error: '', route: 'auto' });
     // 대상: 편집기 선택(CoworkSelection — 캐럿만이면 문서 전체)
     function targetNow() {
@@ -89,8 +90,8 @@ export const AiTab = {
     const badge = (r) => badges.value.get(r.rid) || requestBadge(d, r);
     // [결과](레일·목록): 결과가 이미 위 요청 창에 떠 있으면 그 창을, 아니면 결과 카드를 보이게
     watch(() => d.s.activeRid, (rid) => {
-      if (rid == null) return;
-      nextTick(() => document.querySelector(pm.phase === 'result' && pm.rid === rid ? '.tab-ai .composer.docked' : '.tab-ai .result-card')?.scrollIntoView({ block: 'nearest' }));
+      if (rid == null || office?.active.value === false) return;
+      nextTick(() => aiRoot.value?.querySelector(pm.phase === 'result' && pm.rid === rid ? '.composer.docked' : '.result-card')?.scrollIntoView({ block: 'nearest' }));
     });
     const mine = (r) => r.by === state.me?.name || state.me?.role === 'admin';
     // 제안의 진행은 RequestActions(진행 줄 '제안 n건 — 반영 · 거절 · 남음'), 여기는 AI 의견 수만
@@ -102,7 +103,7 @@ export const AiTab = {
       try { await d.patchRequest(r, { summary: t }); editing.value = null; toast('메모 요약을 고쳤습니다'); } catch (e) { toastError(e); } finally { savingSummary.value = false; }
     }
     async function copyAgent(r) { if (await copyText(agentPrompt(d, r))) toast('프롬프트를 복사했습니다 — AI 대화창에 붙여 넣으세요'); }
-    return { d, pm, filter, editing, list, glance, badge, kindText: requestKindText, realSummary, mine, nComments, savingSummary, saveSummary, copyAgent, retryTip, ICON, COPY_TIP, requestWait, go: (...a) => goTo(d, ...a), err: toastError, clip, fmtShort };
+    return { d, pm, aiRoot, filter, editing, list, glance, badge, kindText: requestKindText, realSummary, mine, nComments, savingSummary, saveSummary, copyAgent, retryTip, ICON, COPY_TIP, requestWait, go: (...a) => goTo(d, ...a), err: toastError, clip, fmtShort };
   },
 };
 

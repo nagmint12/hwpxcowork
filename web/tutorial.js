@@ -29,7 +29,7 @@ const visible = (el) => { if (!el || !el.isConnected) return false; const r = el
  * 따라 하기 시작 → { stop() }.
  * @param o { d(문서 store), docId, me, onEnd(끝·그만 — 저장 상태는 여기서 정리) }
  */
-export function runTour({ d, docId, me, config = {}, showIntro = false, onComplete = async () => true, onRestore = async () => {}, onReload = () => location.reload(), onNext = null, onEnd = () => {} }) {
+export function runTour({ d, docId, host = document, topBar, me, config = {}, showIntro = false, onComplete = async () => true, onRestore = async () => {}, onReload = () => location.reload(), onNext = null, onEnd = () => {} }) {
   const s = d.s;
   const st = tourState(docId) || { docId, i: 0 };
   if (st.docId !== docId) { st.docId = docId; st.i = 0; }
@@ -131,7 +131,14 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
     if (!timeline.current(ticket)) return null;
     return sel && !sel.collapsed && selHas(probe) ? d.targetFromCw(sel) : { ...at, text: phrase, refs: [at.ref], endRef: at.ref };
   }
-  const q = (sel, root = document) => { const el = root?.querySelector(sel); return el && visible(el) ? el : null; };
+  const q = (sel, root = [host, topBar]) => {
+    for (const area of Array.isArray(root) ? root : [root]) {
+      if (area?.matches?.(sel) && visible(area)) return area;
+      const element = Array.from(area?.querySelectorAll(sel) || []).find(visible);
+      if (element) return element;
+    }
+    return null;
+  };
   const besideOrBelow = (el) => { const f = frameRect(); const r = el?.getBoundingClientRect?.(); return f && r && r.top >= f.y + f.h - 2 ? '아래' : '문서 옆'; };
   const saveButton = () => q('[data-testid="save-hangul"]') || q('[data-testid="more-save-hangul"]');
   // 휴대폰·태블릿은 마우스 대신 길게 누른 뒤 끌어 고른다(studio 터치 선택)
@@ -209,7 +216,7 @@ export function runTour({ d, docId, me, config = {}, showIntro = false, onComple
   function exampleFilled(text) {
     const want = norm(text); if (!want) return false;
     if (norm(s.composer?.instruction) === want || norm(s.popover?.text) === want) return true;
-    for (const input of document.querySelectorAll('.memoedit textarea, .composer-win textarea')) if (norm(input.value) === want) return true;
+    for (const input of host.querySelectorAll('.memoedit textarea, .composer-win textarea')) if (norm(input.value) === want) return true;
     return false;
   }
   // 준비 동작이 예시를 한 글자씩 치는 동안에는 같은 글을 카드에 또 보이지 않는다

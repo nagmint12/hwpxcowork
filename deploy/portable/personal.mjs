@@ -169,10 +169,11 @@ async function main() {
     return;
   }
   fs.mkdirSync(userDir, { recursive: true });
+  const portless = desktopManaged && !o.shared && o.noWindow && !!process.env.HWPX_COWORK_DESKTOP_PIPE;
   const first = !fs.existsSync(configFile);
   if (first) {
     const example = JSON.parse(fs.readFileSync(path.join(appDir, 'config.example.json'), 'utf8'));
-    const port = o.port || (await listening(DEFAULT_PORT) ? await freePort(DEFAULT_PORT + 1) : DEFAULT_PORT);
+    const port = o.port || (!portless && await listening(DEFAULT_PORT) ? await freePort(DEFAULT_PORT + 1) : DEFAULT_PORT);
     writeConfig((o.shared ? sharedConfig : personalConfig)(example, { name: authorName(o.name), port, token: randomToken() }));
   }
   let cfg = readConfig();
@@ -184,13 +185,13 @@ async function main() {
   const appUrl = () => `http://localhost:${port}/?teaser=0#/t/${encodeURIComponent(admin.token)}`;
 
   // 이미 떠 있으면 폴더만 더 연결하고 창을 하나 더 연다
-  if (await ours(port, admin.token)) {
+  if (!portless && await ours(port, admin.token)) {
     say(`이미 켜져 있습니다 — http://localhost:${port}/`);
     await linkFolders(client(port, admin.token), o.folders);
     if (!o.noWindow) openApp(appUrl());
     return;
   }
-  if (await listening(port)) {
+  if (!portless && await listening(port)) {
     const to = await freePort(port + 1);
     say(`포트 ${port} 을 다른 프로그램이 쓰고 있어 ${to} 을 씁니다.`);
     cfg = { ...cfg, port: to }; writeConfig(cfg); port = to;
@@ -241,6 +242,12 @@ async function main() {
   });
   startingServer = false;
   if (stopRequested) { await shutdown(0); return; }
+  if (portless) {
+    // The desktop owns folder selection and AI workers, and waits for this ready
+    // signal only after the supervisor has acquired its per-profile writer lock.
+    console.log('PERSONAL STDIO');
+    return;
+  }
   const api = client(port, admin.token);
   const linked = await linkFolders(api, o.folders);
   // 처음 실행: 연결한 폴더가 없으면 폴더 고르기 창을 띄운다(취소하면 문서함의 [PC 폴더 연결]로 나중에)

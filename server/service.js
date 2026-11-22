@@ -3160,6 +3160,25 @@ export class Service {
     });
   }
 
+  /** 문서 안의 그림을 읽기 전용 MCP 이미지로 전달한다. 첨부나 새 문서 버전을 만들지 않는다. */
+  async readFigureImage(id, figure) {
+    const target = parseFigureRef(figure);
+    if (!target) throw new ServiceError('BAD_FIGURE', "read(view='figures')의 figure 주소를 id로 주세요");
+    return this._read(id, async () => {
+      const doc = await this.store.doc(id);
+      if (!doc) throw new ServiceError('NO_DOC', '문서가 없습니다', 404);
+      const f = this._figureAt(doc, target);
+      const item = doc.binaryItem(f.binId);
+      if (!item) throw new ServiceError('NO_FILE', '문서 안에서 그림 원본을 찾을 수 없습니다', 404);
+      const img = imageForModel(item.bytes, item.mime);
+      if (!img) throw new ServiceError('BAD_IMAGE', '모델에 전달할 수 없는 그림 형식입니다');
+      return { content: [
+        { type: 'text', text: `문서 그림 ${figure}${f.caption?.text ? ' · ' + f.caption.text : ''}` },
+        { type: 'image', mimeType: img.mime, data: img.bytes.toString('base64') },
+      ] };
+    });
+  }
+
   /**
    * 문서 속 그림 파일을 요청의 입력 첨부로 꺼낸다(MCP export_figure) — 그 뒤 첨부 경로(read_attachment·get_attachment_file·브리지 내려받기)로 쓴다.
    * 요청자·현재 시도·선점·열린 요청만. 같은 요청에 같은 그림 파일을 다시 꺼내면 있던 첨부를 돌려준다(duplicate)
@@ -3826,7 +3845,7 @@ export class Service {
         if (finalMode) this.applyLiveText(ctx, ref, after + tail, author);
         else if (e > s) {
           const res = this._trackedRetry(ctx, ref, () => doc.replaceTracked(ref, s, e, lines[0], { author }), () => ({ s, e }));
-          p.changeIds = [...(res.deleteIds || [res.deleteId]), res.insertId].filter((x) => x != null).map(Number);
+          p.changeIds = [...(res.deleteIds || [res.deleteId]), ...(res.insertIds || [res.insertId])].filter((x) => x != null).map(Number);
         } else if (lines[0]) p.changeIds = [Number(this._trackedRetry(ctx, ref, () => doc.insertTracked(ref, s, lines[0], { author }), () => ({ s, e })))];
         if (!tail) {
           // 꼬리가 없으면(문단 끝에서 바꿈) 가를 것이 없다 — 나머지 줄을 뒤에 새 문단으로
@@ -3877,7 +3896,7 @@ export class Service {
       } else {
         const res = this._trackedRetry(ctx, ref, () => { locate(); return doc.replaceTracked(ref, s, e, rep, { author, format: p.format, runs: p.runs }); }, () => ({ s, e }));
         // 지울 범위에 개체(다른 메모 경계 등)가 끼면 엔진이 삭제를 나눈다(deleteIds, V3 §4.3) — 되돌릴 때 조각을 모두 거절하도록 다 기억한다
-        p.changeIds = [...(res.deleteIds || [res.deleteId]), res.insertId].filter((x) => x != null);
+        p.changeIds = [...(res.deleteIds || [res.deleteId]), ...(res.insertIds || [res.insertId])].filter((x) => x != null);
       }
       if (rich) {
         if (finalMode) {

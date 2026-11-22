@@ -72,6 +72,7 @@ const SYNC_RETRY_MS = 150;   // 밀어 넣기·열기 중이면 이만큼 뒤 �
 const SYNC_BUSY_MS = 300;    // 플러그인이 BUSY(한글 조합·머리말 편집 중)면 이만큼 뒤 다시
 const SYNC_BUSY_MAX = 10;    // BUSY 가 이만큼 되풀이되면 다시 열기로
 const EVENTS = ['ready', 'selection', 'menu-action', 'annotation-click', 'annotation-hover', 'anchors', 'edited', 'draft', 'editing', 'key'];
+const DOCUMENT_INPUT = 'textarea[aria-label="문서 편집 입력"], [contenteditable="true"][aria-label="문서 편집 입력"]';
 
 /** 이 동작의 WS cr 알림은 서버 내 수정본(작성자 = 나)의 글·상태를 바꾼다 → 이 창이 아는 것과 같은지 확인한다 */
 const MINE_ACTIONS = new Set(['draft', 'deleted', 'rebased', 'reopened', 'closed', 'merged']);
@@ -352,7 +353,7 @@ async function fetchBytes(path) {
  * @param el 편집기를 넣을 요소(iframe 이 100% 로 들어간다)
  * @param d 문서 store(web/store.js) — d.editor 에 손잡이를 단다
  */
-export function mountEditor(el, d) {
+export function mountEditor(el, d, { foreground = true } = {}) {
   const s = d.s;
   let studio = null; let cw = null; let iframe = null; let destroyed = false;
   const offs = []; const stops = [];
@@ -421,7 +422,7 @@ export function mountEditor(el, d) {
     syncDraft,
     anchorToPage,
     reload: (o) => open(o || {}),
-    saveNow, saveSoon, cancelSave, destroy, lock, carryOver,
+    saveNow, saveSoon, cancelSave, destroy, lock, carryOver, setForeground, focusDocumentInput,
     /** 시험·문제 찾기용: 지금 쓰는 기준 지도가 있는가(편집기 기준 ≠ 지금 기준) */
     mapping: () => !!edMap(),
     frame: () => iframe,
@@ -461,8 +462,25 @@ export function mountEditor(el, d) {
 
   /** 잠금·입력 막기가 하나라도 있으면 iframe 을 inert 로(포커스가 안에 있으면 먼저 뺀다 — 키 입력이 편집기로 가지 않게) */
   function applyInert() {
-    const on = locks + holds > 0 || (h.loading && h.previewReady);
+    const on = !foreground || locks + holds > 0 || (h.loading && h.previewReady);
     try { if (iframe) { if (on && document.activeElement === iframe) iframe.blur(); iframe.inert = on; } } catch { /* iframe 없음 */ }
+  }
+  function setForeground(value) {
+    foreground = value;
+    applyInert();
+    if (!foreground) { editPending = null; flushEditing(); }
+  }
+  function focusDocumentInput() {
+    if (destroyed || !foreground || !h.ready || h.loading || h.locked || !iframe || iframe.inert) return false;
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc || doc.querySelector('dialog[open], .modal-overlay, [aria-modal="true"]')) return false;
+      const input = doc.querySelector(DOCUMENT_INPUT);
+      if (!input) return false;
+      // 기존 캐럿과 선택을 그대로 두고 실제 키 입력만 Studio로 돌려보낸다.
+      input.focus({ preventScroll: true });
+      return doc.activeElement === input && document.activeElement === iframe;
+    } catch { return false; }
   }
   /**
    * 편집기 잠그기 → 푸는 함수(여러 번 불러도 한 번만 푼다). 잠근 동안 iframe 은 inert(입력·포커스·우클릭 없음)이고
@@ -720,7 +738,7 @@ export function mountEditor(el, d) {
     let doc = null; try { doc = iframe?.contentDocument || null; } catch { doc = null; }
     const view = doc?.defaultView;
     if (!doc || !view?.matchMedia?.('(pointer: coarse)')?.matches) return;
-    const input = doc.querySelector('textarea[aria-label="문서 편집 입력"], [contenteditable="true"][aria-label="문서 편집 입력"]');
+    const input = doc.querySelector(DOCUMENT_INPUT);
     if (!input) return;
     // iOS(contentEditable div — 16px 라 확대는 없다)는 자리만, 나머지(textarea)는 글자도 크게. 캐럿을 아직 모르면 화면 가운데
     const big = input.tagName === 'TEXTAREA' ? { width: '1px', height: '1.2em', fontSize: '72px', lineHeight: '1.2', padding: '0', border: '0', opacity: '0', resize: 'none', overflow: 'hidden' } : {};
@@ -782,10 +800,11 @@ export function mountEditor(el, d) {
   async function start() {
     try {
       if (state.config?.studio?.mode === 'remote') { await startRemote(); return; }
-      studio = await createStudio(el, { studioUrl: `${location.origin}/studio/?chrome=embed`, plugins: ['cowork'], renderer: 'canvas2d', requestTimeoutMs: 120000 });
+      studio = await createStudio(el, { studioUrl: `${location.origin}/studio/cowork-embed.html?chrome=embed`, plugins: ['cowork'], renderer: 'canvas2d', requestTimeoutMs: 120000 });
       if (destroyed) { try { studio.destroy(); } catch { /* 이미 없음 */ } studio = null; return; }
       iframe = studio.element || el.querySelector('iframe');
       iframe?.setAttribute('title', '문서 편집기');
+      applyInert();
       cw = await waitCowork();
       if (!cw) throw new Error('편집기에 cowork 플러그인이 없습니다(npm run build:studio 로 다시 빌드하세요)');
       hookFrame();
@@ -808,6 +827,7 @@ export function mountEditor(el, d) {
     studio = await createStudio(el, { studioUrl: state.config.studioUrl, plugins: [], requestTimeoutMs: 120000 });
     if (destroyed) { try { studio.destroy(); } catch { /* 이미 없음 */ } studio = null; return; }
     iframe = studio.element || el.querySelector('iframe');
+    applyInert();
     const f = await fetchBytes(`${d.base}/file?kind=working`);
     await studio.loadFile(f.bytes, fileName(), { skipUnsavedGuard: true, suppressDialogs: true });
     h.baseVersion = Number(f.headers.get('X-Doc-Version')) || 0; h.source = 'working';
@@ -1065,7 +1085,7 @@ export function mountEditor(el, d) {
       }
     },
     // 타이핑 중 문단도 지금 기준 ref 로 알린다(편집기 기준에만 있는 문단이면 null — 남의 화면에 엉뚱한 문단을 표시하지 않게). 읽기 전용은 알리지 않는다
-    editing(p) { if (mode === 'follow') return; const M = edMap(); editPending = p?.ref ? (M ? M.ref('c', p.ref) : p.ref) : null; flushEditing(); },
+    editing(p) { if (!foreground || mode === 'follow') return; const M = edMap(); editPending = p?.ref ? (M ? M.ref('c', p.ref) : p.ref) : null; flushEditing(); },
     key(p) { if (p) d.emit('editor-key', p); },
     ready() { /* nextReady 가 받는다 */ },
   };
@@ -1559,7 +1579,7 @@ export function mountEditor(el, d) {
       cw.debug.select(rg.ref, rg.start ?? 0, rg.end ?? rg.start ?? 0, rg.endRef && rg.endRef !== rg.ref ? rg.endRef : undefined);
       if (sc) await restoreScroll(sc);
       // 편집기 밖(메모 창 등)에 포커스가 있었으면 돌려준다(선택은 편집기로 포커스를 옮긴다)
-      if (!hadFocus && prevActive && typeof prevActive.focus === 'function' && prevActive !== document.body) prevActive.focus({ preventScroll: true });
+      if (foreground && !hadFocus && prevActive && typeof prevActive.focus === 'function' && prevActive !== document.body && prevActive.isConnected) prevActive.focus({ preventScroll: true });
     } catch (e) { console.warn('[editor] 캐럿 되살리기:', e); }
   }
 
@@ -1581,6 +1601,7 @@ export function mountEditor(el, d) {
     if (destroyed || !h.ready) return;
     if (switching) { switchAgain = true; return; }
     switching = true;
+    let deferred = false;
     try {
       let carry = false;
       if (mode === 'live' && lastSeq > savedSeq) {
@@ -1594,12 +1615,20 @@ export function mountEditor(el, d) {
       if (info && (!s.info || (Number(info.version) || 0) >= (Number(s.info.version) || 0))) d.applyInfo?.(info);
       const next = info ? modeOfInfo(info) : null;
       if (carry && next === 'review') { await carryOver({ quiet: true }); return; }
-      if (carry && next === 'follow') toast('이 문서의 수정 권한이 없어져 이 창에서 고친 글을 문서에 넣지 못했습니다 — 읽기 전용으로 엽니다', { kind: 'error', ms: 9000 });
+      if (next && next !== mode && (h.dirty || lastSeq > savedSeq)) {
+        deferred = true;
+        const message = '저장하지 못한 변경이 이 탭에 남아 있습니다. 변경을 저장한 뒤 편집 방식을 바꿀 수 있습니다.';
+        if (s.draft.error !== message) {
+          s.draft.error = message;
+          toast(message, { kind: 'warn', ms: 9000 });
+        }
+        return;
+      }
       if (next && next !== mode) await reopenKeep();
     } finally {
       switching = false; switchAgain = false;
       // 바꾸는 사이 설정이 또 바뀌었으면(그때 온 알림은 기다리지 않았다) 한 번 더 본다
-      setTimeout(() => maybeSwitchMode(), 0);
+      if (!deferred) setTimeout(() => maybeSwitchMode(), 0);
     }
   }
 
@@ -1871,6 +1900,7 @@ export function mountEditor(el, d) {
     stops.push(watch(() => [s.memos, s.proposals, s.changes, s.requests, s.crs, s.editing, s.paragraphs, s.view, s.settings?.editMode, s.canEdit], () => pushAnnotations()));
     // v0.4 문서 설정(WS doc settings·문서 정보)이 바뀌어 방식(실시간·승인·읽기 전용)이 달라지면 지금 방식으로 저장한 뒤 새 방식으로 다시 연다
     stops.push(watch(() => [s.settings?.editMode, s.canEdit], () => maybeSwitchMode()));
+    stops.push(watch(() => s.draft.dirty, dirty => { if (!dirty) maybeSwitchMode(); }));
     stops.push(watch(() => (s.active ? `${s.active.kind}\u0000${s.active.id}` : ''), () => { if (h.ready) h.setActive(s.active); }));
     stops.push(watch(() => s.focus, (f) => {
       if (!f?.ref || !h.ready) return;

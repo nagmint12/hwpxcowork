@@ -323,7 +323,8 @@ export class CodexProposer {
       const leanTools = v2 && (this.leanTools || this.env.HWPX_COWORK_CODEX_LEAN_TOOLS === '1');
       const args = codexExecArgs({ model: selected.model, effort: selected.effort, instructionsFile, leanTools, features: checked.features, toolOutputTokens });
       const env = { ...codexEnvironment(this.env), TEMP: temp, TMP: temp, TMPDIR: temp, HWPX_COWORK_DEBUG_DIR: currentAiDebug()?.directory,
-        HWPX_COWORK_TOKEN: token, HWPX_CODEX_JOB: JSON.stringify({ job, url, session, filesDir: path.join(directory, 'work') }) };
+        HWPX_COWORK_TOKEN: token, HWPX_CODEX_JOB: JSON.stringify({ job, url, session, filesDir: path.join(directory, 'work'),
+          ...(this.env.HWPX_COWORK_DESKTOP_PIPE ? { pipe: JSON.parse(this.env.HWPX_COWORK_DESKTOP_PIPE) } : {}) }) };
       const result = await runProcess(launch, args, { spawn: this.spawn, env, cwd: directory, input: prompt, signal, timeoutMs: this.timeoutMs })
         .catch(e => { throw Object.assign(e, { usage: combineCodexUsage(selected.usage, e.usage), model: selected.model || 'codex-default', effort: selected.effort, selection: selected.selection, execution: 'tool-agent' }); });
       const usage = combineCodexUsage(selected.usage, codexUsage(result.stdout));

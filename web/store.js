@@ -146,7 +146,7 @@ export function revertArgOf(p) {
 /**
  * @param id 문서 id
  */
-export function createDocStore(id) {
+export function createDocStore(id, { onUnavailable } = {}) {
   const s = reactive({
     id, info: null, memos: [], proposals: [], changes: [], requests: [], attachments: [], paragraphs: [], history: { versions: [], activity: [], milestones: [] },
     paraVersion: 0,    // paragraphs 가 어느 기준 버전의 것인지(모르면 0)
@@ -264,9 +264,18 @@ export function createDocStore(id) {
   // ── 읽기 ──
   let pending = new Set(); let timer = null; let inflight = null;
   async function refreshNow(what = ALL) {
+    if (closed) return;
     const jobs = {
       // 버전은 늘기만 한다 — 같이 돌던 문단 읽기가 더 새 정보를 이미 넣었으면 덮지 않는다
-      info: async () => { const x = await api(base); if (!s.info || (Number(x?.version) || 0) >= (Number(s.info.version) || 0)) applyInfo(x); },
+      info: async () => {
+        try {
+          const x = await api(base);
+          if (!closed && (!s.info || (Number(x?.version) || 0) >= (Number(s.info.version) || 0))) applyInfo(x);
+        } catch (e) {
+          if (!closed && onUnavailable && (e.status === 403 || e.status === 404)) onUnavailable(e.status === 404 ? 'deleted' : 'denied');
+          else throw e;
+        }
+      },
       memos: async () => { s.memos = (await api(`${base}/memos`)).map(normMemo); },
       proposals: async () => { s.proposals = await api(`${base}/proposals`); },
       changes: async () => { s.changes = await api(`${base}/changes`); },
@@ -303,6 +312,7 @@ export function createDocStore(id) {
   /** 짧은 시간 안의 요청을 묶어서 한 번에 */
   let waiters = [];
   function refresh(what = ALL) {
+    if (closed) return Promise.resolve();
     for (const w of what) pending.add(w);
     clearTimeout(timer);
     return new Promise((resolve) => {
@@ -991,6 +1001,8 @@ export function createDocStore(id) {
   };
   /** 떠 있는 창(kind)에 보내지 않은 글이 있는가 */
   const windowHasText = (kind) => { const m = s[kind]; return !!m && !!WIN[kind]?.text(m).trim(); };
+  const hasUnsentWindowDrafts = () => unsent.size > 0 || Object.keys(WIN).some(windowHasText)
+    || (s.composer?.phase === 'edit' && !!s.composer.attachments?.length);
   function stashWindow(kind) {
     const m = s[kind]; const w = WIN[kind]; if (!m || !w) return;
     const key = w.key(m); const text = w.text(m);
@@ -1046,7 +1058,12 @@ export function createDocStore(id) {
   function connect() {
     if (closed) return;   // 다시 붙기를 기다리는 사이 문서를 떠났다(close) — 새로 붙지 않는다
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(state.token)}&doc=${id}`);
+    const query = new URLSearchParams({ token: state.token, doc: id });
+    if (window.hwpxDesktopEnvironment?.portless) {
+      const room = new EventSource('/api/local/document-events?' + query);
+      room.onerror = () => { room.close(); room.onclose?.(); };
+      ws = room;
+    } else ws = new WebSocket(proto + '://' + location.host + '/ws?' + query);
     ws.onopen = () => {
       retryMs = 1500;
       // 끊겼다 다시 붙으면 그사이 놓친 알림이 있을 수 있다 → 전체 다시 읽기(v0.2 의 빠진 부분)
@@ -1065,7 +1082,11 @@ export function createDocStore(id) {
       if (msg.type === 'memo') add('memos', 'info', 'requests');
       else if (msg.type === 'proposal') add('proposals', 'memos', 'info', 'changes', 'paragraphs', 'requests');
       else if (msg.type === 'doc') {
-        if (msg.action === 'deleted') { toast('문서가 지워졌습니다'); location.hash = '#/'; return; }
+        if (msg.action === 'deleted') {
+          if (onUnavailable) onUnavailable('deleted');
+          else { toast('문서가 지워졌습니다'); location.hash = '#/'; }
+          return;
+        }
         // 사람용 버전(이정표, §9.4)만 생김 — 글은 그대로: 문서 정보(상단 v)·이력만 다시 읽는다
         if (msg.action === 'milestone') add('info', 'history');
         // v0.4 문서 설정이 바뀜(§1): 곧바로 설정·내 수정 권한을 맞추고(편집기가 방식을 바꿔 다시 연다) 문서 정보만 다시 읽는다
@@ -1166,7 +1187,13 @@ export function createDocStore(id) {
       emit('my-cr', msg);
     }
   }
-  function close() { closed = true; clearTimeout(timer); clearTimeout(retryTimer); retryTimer = null; if (ws) { ws.onclose = null; ws.close(); } }
+  function close() {
+    closed = true;
+    clearTimeout(timer); clearTimeout(retryTimer); retryTimer = null;
+    for (const resolve of waiters.splice(0)) resolve();
+    if (ws) { ws.onmessage = null; ws.onopen = null; ws.onerror = null; ws.onclose = null; ws.close(); ws = null; }
+    listeners.clear();
+  }
 
   /**
    * 실시간 문서에 남은 내 수정본(승인 방식 때의 진행 중 변경 요청 — V4 §5)을 지금 문서에 반영(merge — 실시간 문서는 수정 권한이면 승인 없이).
@@ -1206,7 +1233,7 @@ export function createDocStore(id) {
     addMemo, editMemo, deleteMemo, replyMemo, askAiFromMemo, resolveMemo, applyProposal, rejectProposal, undoProposal, reopenProposal, patchProposal, resolveChange,
     createRequest, patchRequest, cancelRequest, retryRequest, uploadFiles, deleteAttachment, attachmentText, download, replaceVersion,
     progress, canResolve, resolveRequest, recoverRequest, proposalDone, saveMilestone, versionLabel,
-    openComposer, openPopover, openReply, closeWindow, windowHasText, connect, close,
+    openComposer, openPopover, openReply, closeWindow, windowHasText, hasUnsentWindowDrafts, connect, close,
     isMe, colorOf, setMyCr, adoptedByMe,
     refreshCrs, crDetail, submitCr, patchCr, reviewCr, addThread, replyThread, resolveThread, mergeCr, closeCr, reopenCr,
     rebaseMine, discardMine, saveDraftNow, adoptProposal, undoAdoptFormat, loadFormatting, downloadHangul,

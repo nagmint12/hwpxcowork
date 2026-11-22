@@ -8,12 +8,31 @@ import path from 'node:path';
 export const MODES = ['personal', 'shared', 'runner'];
 /** 메뉴·확인 창에 쓰는 이름 */
 export const MODE_LABELS = Object.freeze({ personal: '혼자 쓰기(개인용)', shared: '여러 사람과 함께 쓰기(공동 작업용)', runner: 'AI 실행기만(다른 서버에 연결)' });
+export function savePersonalTransport(dir, transport) {
+  if (!['stdio', 'loopback'].includes(transport)) throw Error('지원하지 않는 개인 연결 방식입니다.');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, 'personal-connection.json');
+  const temp = file + '.' + process.pid + '.tmp';
+  fs.writeFileSync(temp, JSON.stringify({ transport }) + '\n', { mode: 0o600 });
+  fs.renameSync(temp, file);
+}
+export function personalTransport(dir) {
+  const file = path.join(dir, 'personal-connection.json');
+  if (fs.existsSync(file)) {
+    const { transport } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (['stdio', 'loopback'].includes(transport)) return transport;
+    throw Error('개인 연결 방식 설정을 확인해 주세요.');
+  }
+  const transport = fs.existsSync(path.join(dir, 'config.json')) ? 'loopback' : 'stdio';
+  savePersonalTransport(dir, transport);
+  return transport;
+}
 export const MODE_CHOICE = Object.freeze({
-  message: 'Hwpx Cowork를 어떻게 쓰시겠어요?',
-  detail: '혼자 쓰기 — 이 PC의 한글 문서를 혼자 열고 고칩니다. PC 폴더를 바로 연결할 수 있습니다.\n\n'
-    + '여러 사람과 함께 쓰기 — 이 PC가 공동 작업 서버가 됩니다. 참여자를 추가하고, 외부 접속 주소를 열어 다른 PC에서도 함께 고칩니다.\n\n'
+  message: 'HWPX Cowork를 어떻게 쓰시겠어요?',
+  detail: '혼자 쓰기 — 내 PC 폴더를 연결하고 포트 없이 편집합니다. 개인 연결 메뉴에서 브라우저용 서버로도 열 수 있습니다.\n\n'
+    + '여러 사람과 함께 쓰기 — 앱에서 공동 작업 서버를 켜고 끕니다. 참여자를 추가하고 외부 접속 주소를 열 수 있습니다.\n\n'
     + 'AI 실행기만 — 이 PC에 서버를 두지 않고, 이미 있는 서버(공동 작업 서버 등)에 내 구독 AI만 연결합니다. 문서는 그 서버의 웹 화면에서 엽니다.\n\n'
-    + '나중에 [Hwpx Cowork → 운영 방식 바꾸기]에서 바꿀 수 있습니다. 방식마다 문서와 설정은 따로 보관됩니다.',
+    + '나중에 [HWPX Cowork → 운영 방식 바꾸기]에서 바꿀 수 있습니다. 방식마다 문서와 설정은 따로 보관됩니다.',
   buttons: ['혼자 쓰기', '여러 사람과 함께 쓰기', 'AI 실행기만'],
   modes: ['personal', 'shared', 'runner'],
 });

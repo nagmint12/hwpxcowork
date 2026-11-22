@@ -1,0 +1,11 @@
+{
+  "name": "hwpx-cowork-mcp-cli",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "hwpx-mcp": "node hwpx-mcp.mjs"
+  }
+}

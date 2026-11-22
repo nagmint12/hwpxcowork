@@ -13,6 +13,7 @@ import { imageInfo, scanPictures, pictureXml, PX, MM } from './picture.js';
 import { importChartParts, releaseChartParts, chartPartKey, fixSwitchIds, pruneChartParts, syncSwitchCopies } from './chart-parts.js';
 import { SHAPE_TAGS, shapeProps, shapePrintText, shapeChange, shapeKey, pairShapes, patchShape, shapeName, shapeFlowsText } from './shapes.js';
 import { planBody, planBodyAnchored, charOps, entryKind, foldOwners } from './diff.js';
+import { crossrefFields, crossrefOps } from './crossref-text.js';
 import { inspectFormatting, formattingCatalog, formatRange, formatParagraphs, undoFormatting, validateTextFormatting, formattingTransaction, applyInsertedFormatting, replacementShapes, formattingFingerprint, formattingChanged, copyFormattingFrom, copyFormattingBatch, copyStyleDefinitionsFrom, normalizedInsertedText, importFormattingRefs, formattingPartsFor, breakChangeLabels } from './formatting.js';
 export { validateFormatSpec } from './formatting.js';
 
@@ -154,6 +155,7 @@ export class HwpxDoc {
    */
   paragraphs({ view = 'final', nested = true } = {}) {
     const out = [];
+    const noteLocations = new WeakMap();
     for (const sec of this.sections) {
       const ti = nested ? this._tableIndex(sec) : null;
       for (const p of sec.paras) {
@@ -163,6 +165,16 @@ export class HwpxDoc {
         if (!Section.visibleParagraph(p, view)) continue;
         const text = view === 'markup' ? Section.markupText(p) : Section.text(p, view);
         const c = ti ? ti.cellOf.get(p) : null;
+        if (p.container === 'hp:footNote' && p.parent && !noteLocations.has(p.parent)) {
+          const notes = p.parent.anchors.filter(a => (a.inner ?? a.name) === 'hp:footNote');
+          const locations = new Map();
+          for (const [index, a] of notes.entries()) {
+            const children = p.parent.children.filter(child => child.container === 'hp:footNote' && child.start >= a.start && child.end <= a.end);
+            children.forEach((child, paragraph) => locations.set(child, { index, count: notes.length, paragraph, paragraphs: children.length }));
+          }
+          noteLocations.set(p.parent, locations);
+        }
+        const note = p.parent && noteLocations.get(p.parent)?.get(p);
         out.push({
           ref: p.ref, section: sec.index, body: p.body, where: Section.where(p), text,
           length: Section.visibleChars(p, 'final').length,
@@ -170,6 +182,7 @@ export class HwpxDoc {
           memos: Section.fieldCtrls(p).filter((a) => a.inner === 'hp:fieldBegin' && a.innerAttrs?.get('type') === 'MEMO').map((a) => memoParamAt(sec.xml, a, 'ID')),
           parent: p.parent ? p.parent.ref : null,
           container: p.parent ? p.container : null,
+          ...(note ? { note } : {}),
           cell: c ? { table: c.table.key, row: c.row, col: c.col, rowSpan: c.rowSpan, colSpan: c.colSpan } : null,
           ...(p.hidden ? { hidden: true } : {}), // [hwpx-cowork] 'markup'·'all' 보기의 지운 개체 안 문단(ref '/d' — 고칠 수 없음)
         });
@@ -387,7 +400,10 @@ export class HwpxDoc {
     const authorId = this.header.ensureAuthor(author);
     const id = this.header.addChange('Insert', authorId, date);
     if (!this.header.trackingEnabled()) this.header.setTracking(true);
-    const edits = [insertEdit(sec, p, offset, `<hp:insertBegin Id="${id}" TcId="${id}"/>${inlineXml(text)}<hp:insertEnd Id="${id}" TcId="${id}" paraend="0"/>`)];
+    const inline = `<hp:insertBegin Id="${id}" TcId="${id}"/>${inlineXml(text)}<hp:insertEnd Id="${id}" TcId="${id}" paraend="0"/>`;
+    const fields = crossrefFields(p, fc);
+    const edge = fields.find(f => f.lo === offset)?.begin.start ?? fields.find(f => f.hi === offset)?.end.end;
+    const edits = [edge == null ? insertEdit(sec, p, offset, inline) : { pos: edge, insert: `<hp:t>${inline}</hp:t>` }];
     dropLineseg(p, edits);
     sec.load(applyEdits(sec.xml, edits));
     applyInsertedFormatting(this, ref, offset, text, { format, runs }, Array.from(normalizedInsertedText(text), () => cp));
@@ -405,7 +421,7 @@ export class HwpxDoc {
    * — 개체를 품은 삭제는 수락할 때 CTRL_INSIDE 가 나서 편집기용 최종본을 만들 수 없기 때문. 개체는 제자리에 남고,
    * 넣을 글은 첫 조각 뒤에 한 번만 들어간다(최종본에서 start 자리). 나뉘면 반환에 deleteIds(모든 삭제 id, 문서 순서)가 더해진다
    * (deleteId = 첫 조각; 번호는 첫 삭제 → 삽입 → 나머지 삭제 순). 변경 id 를 기억했다가 되돌리는(거절) 호출자는
-   * deleteId 하나가 아니라 deleteIds 를 모두 담아야 한다(예: [...(r.deleteIds || [r.deleteId]), r.insertId]) — 첫 조각만 거절하면 나머지 삭제가 남는다.
+   * 상호참조 본문 양쪽은 별도로 고쳐 insertIds 도 여럿일 수 있다. 거절할 때 두 종류의 ID 배열을 모두 사용한다.
    */
   replaceTracked(ref, start, end, text, options = {}) {
     validateTextFormatting(text, options);
@@ -418,6 +434,17 @@ export class HwpxDoc {
     const fc = Section.visibleChars(p, 'final');
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end > fc.length || start > end) throw new EngineError('RANGE', `범위가 문단 밖입니다 (0..${fc.length})`);
     if (start === end) { if (!text) return {}; return { insertId: this.insertTracked(ref, start, text, { author, date, format, runs }) }; }
+    const protectedOps = crossrefOps(p, fc, start, end, normalizedInsertedText(text));
+    if (protectedOps) {
+      const deleteIds = [], insertIds = [];
+      for (const op of protectedOps.reverse()) {
+        const r = this._replaceTracked(ref, op.start, op.end, op.text, { author, date });
+        deleteIds.unshift(...(r.deleteIds ?? (r.deleteId == null ? [] : [r.deleteId])));
+        insertIds.unshift(...(r.insertIds ?? (r.insertId == null ? [] : [r.insertId])));
+      }
+      if (format || runs) applyInsertedFormatting(this, ref, start, text, { format, runs });
+      return { deleteId: deleteIds[0] ?? null, insertId: insertIds[0] ?? null, deleteIds, insertIds };
+    }
     const shapes = text ? replacementShapes(fc.slice(start, end), normalizedInsertedText(text), fc[start]?.run?.charPr ?? '0') : [];
     const ciA = p.chars.indexOf(fc[start]); const ciB = p.chars.indexOf(fc[end - 1]);
     assertNoOverlap(p, ciA, ciB);
@@ -1396,6 +1423,11 @@ export class HwpxDoc {
   mergeParagraphText(ref, newText, { author, date } = {}) {
     const oldText = this.text(ref, 'final');
     if (oldText === newText) return [];
+    const { p } = this.resolve(ref);
+    if (Section.fieldCtrls(p).some(a => a.innerAttrs?.get('type') === 'CROSSREF')) {
+      const r = this.replaceTracked(ref, 0, [...oldText].length, newText, { author, date });
+      return [...(r.deleteIds ?? [r.deleteId]), ...(r.insertIds ?? [r.insertId])].filter(id => id != null);
+    }
     // 최종본 오프셋(코드포인트) 기준 op 목록(engine/diff.js charOps)을 뒤에서부터 적용.
     // 지우는 범위에 개체(메모 경계·그림·표 등)가 끼면 replaceTracked 가 개체 앞뒤로 나눠 지운다(deleteIds)
     const ops = charOps(oldText, newText);

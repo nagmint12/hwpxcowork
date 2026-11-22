@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'">
+<title>공동 작업 서버 · HWPX Cowork</title><link rel="stylesheet" href="server-console.css"></head>
+<body><main><header><img src="app-icon.png" width="44" height="44" alt=""><span>HWPX Cowork</span></header>
+<h1>공동 작업 서버</h1>
+<section aria-labelledby="runtime"><div class="row"><h2 id="runtime">문서 서비스</h2><strong id="phase" role="status">상태 확인 중</strong></div>
+<p id="detail" aria-live="polite"></p><div class="actions"><button id="start" class="primary" disabled>서버 시작</button><button id="open" class="primary" hidden>문서함 열기</button><button id="stop" hidden>서버 중지</button></div></section>
+<section aria-labelledby="connect"><h2 id="connect">접속 및 AI</h2><dl><div><dt>이 PC의 주소</dt><dd id="address">서버 시작 후 표시</dd></div><div><dt>외부 접속</dt><dd id="shareState">닫힘</dd></div></dl>
+<div class="actions"><button id="share" disabled>외부 접속 열기</button><button id="copy" hidden>외부 주소 복사</button><button id="ai">AI 실행기 관리</button></div></section>
+<p role="alert" id="error"></p></main><script src="server-console.js"></script></body></html>

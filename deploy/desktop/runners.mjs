@@ -396,7 +396,8 @@ export class RunnerManager extends EventEmitter {
       const target = this.#target(runner);
       rt.secrets = [target.token];
       const args = ['--provider', runner.ai, '--url', target.mcpUrl, ...(kind.mcp ? ['--mcp', String(runner.mcp)] : [])];
-      const child = this.#launch(args, { ...this.#env(), HWPX_COWORK_TOKEN: target.token });
+      const child = this.#launch(args, { ...this.#env(), HWPX_COWORK_TOKEN: target.token,
+        ...(target.pipe ? { HWPX_COWORK_DESKTOP_PIPE: JSON.stringify(target.pipe) } : {}) });
       rt.child = child;
       rt.gone = new Promise((resolve) => { rt.markGone = resolve; });
       this.#attach(id, child);
@@ -521,7 +522,12 @@ export class RunnerManager extends EventEmitter {
     this.#timers.clearTimeout(rt.restartTimer); rt.restartTimer = null;
     const child = rt.child;
     if (!child) {
-      if (rt.state === 'preparing') { try { this.#cancelPrepare(runner.ai); } catch { /* 이미 끝남 */ } }
+      if (rt.state === 'preparing') {
+        // CLI setup is shared by provider. Let other targets finish using it;
+        // the generation check still cancels this particular runner.
+        const shared = this.#list.runners.some(r => r.id !== id && r.ai === runner.ai && this.#runtime.get(r.id)?.state === 'preparing');
+        if (!shared) { try { this.#cancelPrepare(runner.ai); } catch { /* 이미 끝남 */ } }
+      }
       if (rt.state !== 'off') { this.#set(id, 'off', ''); this.#log(id, '[앱] 껐습니다.'); }
       return this.#view(runner);
     }
@@ -530,7 +536,10 @@ export class RunnerManager extends EventEmitter {
     try { await this.#halt(id, child); } finally { rt.stopping = false; this.#changed(); }
     return this.#view(runner);
   }
-  async stopAll() { await Promise.allSettled(this.#list.runners.map((r) => this.stop(r.id))); }
+  async stopAll({ localOnly = false } = {}) {
+    const runners = this.#list.runners.filter(r => !localOnly || r.server === LOCAL_SERVER);
+    await Promise.allSettled(runners.map(r => this.stop(r.id)));
+  }
   /** 앱을 끌 때: 새로 켜지 않게 막고 모두 정상 종료한다 */
   async shutdown() {
     this.#closing = true;
@@ -538,9 +547,10 @@ export class RunnerManager extends EventEmitter {
     await this.stopAll();
   }
   /** 자동 시작 실행기를 켠다(설치·로그인 창 없이) → 켜지 못한 것 [{ id, message }] */
-  async startAuto() {
+  async startAuto(scope = 'all') {
     const failed = [];
-    await Promise.all(this.#list.runners.filter((r) => r.autoStart).map(async (r) => {
+    const runners = this.#list.runners.filter(r => r.autoStart && (scope === 'all' || (r.server === LOCAL_SERVER) === (scope === 'local')));
+    await Promise.all(runners.map(async (r) => {
       try { await this.#start(r.id, { interactive: false, restart: false }); } catch (error) { failed.push({ id: r.id, message: error.message }); }
     }));
     return failed;

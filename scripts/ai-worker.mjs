@@ -5,6 +5,7 @@ import { AiProposer, AI_GATEWAYS, AI_EFFORTS, apiBaseUrl } from '../server/ai.js
 import { CodexProposer, CODEX_EFFORTS } from '../server/codex-ai.js';
 import { GoogleCliProposer } from '../server/google-cli-ai.js';
 import { createApiWorker } from '../server/worker.js';
+import { pipeFetch } from '../server/desktop-pipe.js';
 import { apiBaseFrom } from '../server/bridge.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -189,8 +190,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const ai = createWorkerAi(options, env);
     const auth = typeof ai.check === 'function' ? await ai.check() : { ready: true, authMode: 'api_key_configured', note: 'API 키의 실제 유효성은 모델 호출 시 확인됩니다.' };
     if (!auth.ready) throw Object.assign(new Error(auth.reason || (options.provider === 'claude-code' ? 'claude auth login으로 본인 Claude 계정에 로그인하세요.' : 'codex login으로 본인 ChatGPT 계정에 로그인하세요.')), { code: 'PREFLIGHT_FAILED' });
-    worker = createApiWorker({ url: options.url, token: options.token, ai, agent: workerAgentName(options), clientName: ['codex', 'claude-code', 'gemini-cli', 'antigravity'].includes(options.provider) ? `hwpx-${options.provider}-worker` : 'hwpx-api-worker' });
-    const connection = await checkWorkerConnection(worker);
+    const fetchImpl = pipeFetch(env.HWPX_COWORK_DESKTOP_PIPE && JSON.parse(env.HWPX_COWORK_DESKTOP_PIPE));
+    worker = createApiWorker({ url: options.url, token: options.token, ai, agent: workerAgentName(options), fetchImpl,
+      clientName: ['codex', 'claude-code', 'gemini-cli', 'antigravity'].includes(options.provider) ? 'hwpx-' + options.provider + '-worker' : 'hwpx-api-worker' });
+    const connection = await checkWorkerConnection(worker, { fetchImpl });
     if (options.check) {
       process.stdout.write(`${JSON.stringify({ provider: options.provider, auth, ...connection, modelCalled: false, queueClaimed: false }, null, 2)}\n`);
       await worker.stop(); return;

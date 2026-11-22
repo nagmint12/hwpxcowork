@@ -41,7 +41,7 @@ export function buildTutorialModule(moduleId, env) {
       const { frameButton } = stepHelpers(env);
       const { q, pad, rectOf } = env;
       // 복사 모듈 없이 단독 배치해도 편집 메뉴부터 켤 수 있습니다.
-      steps.push({ title: '편집 명령을 위한 도구 막대', text: '편집기 메뉴와 도구 막대를 켭니다. 위 [⋯] 메뉴에서 [편집 도구 막대]를 누르세요. 이미 켜져 있으면 바로 다음으로 갑니다.',
+      steps.push({ title: '편집 명령을 위한 도구 막대', text: '위 [문서 작업]에서 [편집 메뉴 및 서식 막대]를 켜세요. 이미 켜져 있으면 다음으로 넘어갑니다.',
         ring: () => pad(rectOf(q('[data-testid="toggle-editor-tools"]') || q('[data-testid="bar-more-toggle"]')), 4),
         until: () => !!frameButton('글자모양', '문단모양', '복사하기') });
       indexes.unshift(steps.length - 1);

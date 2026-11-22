@@ -1,9 +1,10 @@
 const allowed = new Set(['local-fonts', 'clipboard-read', 'clipboard-sanitized-write']);
-export function desktopPermission(owned, contents, permission, origin, details = {}, port) {
-  if (!owned || contents !== owned || !allowed.has(permission) || !Number.isInteger(port) || port <= 0) return false;
+export function desktopPermission(owned, contents, permission, origin, details = {}, port, portless = false) {
+  if (!owned || contents !== owned || !allowed.has(permission) || (!portless && (!Number.isInteger(port) || port <= 0))) return false;
   const local = value => {
-    try { const u = new URL(value); return u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname)
-      && Number(u.port) === port && !u.username && !u.password ? u : null; } catch { return null; }
+    try { const u = new URL(value); const expected = portless ? u.origin === 'http://localhost'
+      : ['localhost', '127.0.0.1'].includes(u.hostname) && Number(u.port) === port;
+      return u.protocol === 'http:' && expected && !u.username && !u.password ? u : null; } catch { return null; }
   };
   const top = local(contents.getURL());
   if (!top || (origin && local(origin)?.origin !== top.origin)) return false;

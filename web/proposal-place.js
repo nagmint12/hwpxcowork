@@ -11,6 +11,25 @@
 
 const ADDS = ['insert', 'table', 'figure'];
 
+// 저장 범위는 최종본의 유니코드 코드포인트다. 이후 글이 바뀌어 같은 자리라고
+// 확인할 수 없으면 문단까지만 안내한다. 삭제로 빈 문자열이 된 자리는 양옆 문맥으로 확인한다.
+export function appliedRange(p, paragraph, version) {
+  const r = p.appliedRange;
+  if (!paragraph || !r || r.ref !== paragraph.ref || typeof paragraph.text !== 'string' || typeof p.replace !== 'string') return null;
+  const { start, end } = r;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return null;
+  const text = Array.from(paragraph.text);
+  if (end > text.length || text.slice(start, end).join('') !== p.replace) return null;
+  if (!p.replace || !version || version !== p.appliedVersion) {
+    if (typeof r.pre !== 'string' || typeof r.post !== 'string') return null;
+    const left = Array.from(r.pre).length, right = Array.from(r.post).length;
+    if ((!left && start !== 0) || (!right && end !== text.length) ||
+        text.slice(Math.max(0, start - left), start).join('') !== r.pre ||
+        text.slice(end, end + right).join('') !== r.post) return null;
+  }
+  return { ref: r.ref, start, end };
+}
+
 /**
  * 제안의 지금 자리 → { ref, endRef(여러 문단이면 마지막 문단 | null), after(그 문단 '뒤'에 넣을 제안인가), gone(그 자리가 없어졌는가), count(문단 수) }
  *  - 넣기(문단·표·그림) 반영: 실제로 넣은 문단. 그 뒤 지워졌으면 gone

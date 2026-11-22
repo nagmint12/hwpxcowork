@@ -8,7 +8,7 @@
 // 상태 칩은 실시간이면 '실시간 · 저장됨 10:31'·'보내는 중…'·'보내지 못함 — [다시]'·'읽기 전용', 승인 방식이면 v0.3 칩(내 수정본·새 버전 있음 [최신으로 맞추기]·[검토 요청]…). 보이는 글은 docs/UI_TERMS.md 대로.
 // 한글로 저장은 단추 하나(설정대로 — /file?kind=export), ⚙ 문서 설정 창(web/settings.js — 설정할 수 있는 사람만), 패널 탭은 보기 규칙(web/view.js),
 // 실시간 문서에 내게 남은 승인 방식 때 수정본(진행 중 변경 요청)이 있으면 편집기 위 띠 '남은 내 수정본 · 변경 요청 #n · n문단' [반영] [닫기].
-import { createApp, ref, computed, provide, inject, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from '/vendor/vue.esm-browser.prod.js';
+import { createApp, ref, reactive, computed, provide, inject, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from '/vendor/vue.esm-browser.prod.js';
 import { createDepartureSaves } from './departure-saves.js';
 import { state, api, toast, toasts, toastError, fmt, isTyping, clip, kindLabel, roleLabel, josa, versionTip, milestoneAt, workEnv, docWorkEnv, agentEnvName, personalEnvName, presets, NO_AI_TIP, CONNECT_HELP, copyText } from './util.js';
 import { quickPrompt } from './menumodel.js';
@@ -27,9 +27,9 @@ import { ReviewRail } from './rail.js';
 import { addHunkThread, addThreadByHid, hunkKeys, crCounts, crChipText } from './crs.js';
 import { paragraphGeo, memoRange, covers } from './annotations.js';
 import { SettingsDialog } from './settings.js';
-import { liveChip, exportTip, READONLY_TIP, VIEW_LABEL, PANEL, readPanel, writePanel, clampPanelW, clampPanelH, panelHeightFrom, panelWidthFrom, marginBox, railVisible, readMemoPos, writeMemoPos, readTools, writeTools } from './view.js';
+import { liveChip, exportTip, READONLY_TIP, VIEW_LABEL, PANEL, readPanel, writePanel, clampPanelW, clampPanelH, panelHeightFrom, panelWidthFrom, marginBox, railVisible, readMemoPos, writeMemoPos } from './view.js';
 import { connectionUrls } from './connections.js';
-import { HelpDialog } from './help-dialog.js';
+import { HelpDialog, openHelp } from './help-dialog.js';
 import { AdminTokenNotice, shouldShowTokenNotice } from './admin-token-notice.js';
 import { AdminServerPanel } from './admin.js';
 import { PersonalAiPanel, AiRunPanel } from './personal-ai.js';
@@ -39,6 +39,7 @@ import { SideSplitter, useSideWidth } from './side-splitter.js';
 import { ICON } from './icons.js';
 import { LocalFoldersDialog, ReviewServersDialog, ReviewDialog, localTip, localLabel } from './local.js';
 import { LibraryTree, AccessDialog, MoveDialog, NameDialog, PUBLIC_ROOT, parseLocKey, locKey, locExists, foldersAt, docsAt, crumbs, permsAt, docLoc, docBadge, SORTS, DEFAULT_SORT, sortOk, sortDocs, sortFolders, nextSort } from './library.js';
+import { createTabs, docOf, routeOf, tabId, panelId, overlayId, officeFileName, officeFileBytes, uploadHeaders, officeTabNames } from './office-tabs.js';
 
 /**
  * 사람용 버전 글(§9.4): 마지막 이정표 v. 옛 서버(milestone 칸 없음)면 그때의 version 이 곧 버전이고, 새 서버인데 이정표가 없으면 ''.
@@ -51,14 +52,19 @@ function verText(info) {
 }
 
 const DOCLIST_POLL_MS = 30000;   // 문서 목록: 창이 보이는 동안 이 간격으로 다시 읽는다(창으로 돌아올 때도)
+const EDITING_ROW_KEY = 'hwpx.office.editingRow';
+const STATUS_MARKERS = {
+  clean: ['수정 없음', '✓'], saved: ['저장됨', '✓'], dirty: ['저장 대기', '●'],
+  saving: ['저장 중', '◷'], error: ['저장 실패', '!'], readonly: ['읽기 전용', '▣'], idle: ['준비 중', '…'],
+};
 
-// 화면을 옮기기 전에 할 일(문서 화면이 단다: 저장 안 된 편집 저장 → 저장하지 못했으면 나갈지 묻기). 브라우저 '뒤로'·주소 바꾸기·'← 목록'도
-// 여기를 지난다. guard() → false 면 머문다(주소를 되돌린다 — 편집기와 그 안 글이 그대로). 같은 문서 안의 주소 바꾸기(?legacy=1 등)는 화면을 옮기지 않는다
+// 방문한 편집기는 탭이 닫힐 때까지 살려 둔다. 화면을 옮길 때에는 배경 저장을 예약한다.
 const retainedDocIds = ref([]);
-const leaveGuards = new Map();
+const officeDocs = new Map();
+let preparedExit = false;
 const retainedSaves = createDepartureSaves({
   changed: ids => { retainedDocIds.value = ids; },
-  failed: (id, error) => toast(`저장을 완료하지 못했습니다. 문서를 다시 열면 작성한 글을 확인할 수 있습니다. ${error.message}`, { kind: 'warn', ms: 9000 }),
+  failed: (id, error) => toast(`‘${retainedSaves.status(id)?.title || '문서'}’ 저장을 완료하지 못했습니다. 작성한 글은 탭에 남아 있습니다. ${error.message}`, { kind: 'warn', ms: 9000 }),
   afterPaint: callback => {
     let fired = false;
     const start = () => { if (!fired) { fired = true; clearTimeout(timer); setTimeout(callback, 0); } };
@@ -66,21 +72,7 @@ const retainedSaves = createDepartureSaves({
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(start));
   },
 });
-let routeGen = 0; let leaving = null;
-const docOf = (route) => (/^#\/doc\/([\w-]+)/.exec(route || '') || [])[1] || null;
-window.addEventListener('hashchange', async () => {
-  const gen = ++routeGen;
-  const next = location.hash || '#/';
-  const guard = leaveGuards.get(docOf(state.route));
-  if (guard && next !== state.route && docOf(next) !== docOf(state.route)) {
-    // 잇달아 옮기면(두 번 누름) 확인은 한 번만
-    if (!leaving) leaving = Promise.resolve().then(guard).catch(e => { toastError(e, '문서를 나가기 전에 상태를 확인하지 못했습니다: '); return false; }).finally(() => { leaving = null; });
-    const go = await leaving;
-    if (gen !== routeGen) return;   // 그사이 또 옮겼다 — 나중 것이 맡는다
-    if (go === false) { try { history.replaceState(null, '', state.route); } catch { /* 옛 브라우저 */ } return; }
-  }
-  state.route = location.hash || '#/';
-});
+function libraryLocation() { return { space: 'private', owner: state.me?.name, folderId: null }; }
 // #/t/<토큰>[/doc/<id>] : 토큰을 저장하고 이동(관리자가 링크로 나눠 줄 때 · 시작 파일·앱이 이 PC 설정의 관리자 토큰으로 열 때)
 let viaTokenLink = false;   // 이번에 토큰 주소로 들어왔는가 — 관리자 토큰 안내(admin-token-notice.js)를 띄울지 정한다
 (function tokenRoute() {
@@ -183,6 +175,7 @@ const Login = {
 const LOC_KEY = 'hwpx.lib.loc';
 const LIB_SIDE_W = { min: 180, max: 520 };   // 문서함 나무 폭 범위(px) — 기본 240 은 library.css
 const DocList = {
+  emits: ['open', 'logout'],
   components: { PersonalAiPanel, AiRunPanel, OrchestrationPanel, DriveTab, LibraryTree, AccessDialog, MoveDialog, NameDialog, LocalFoldersDialog, ReviewServersDialog, ReviewDialog, SideSplitter },
   template: `<div class="listpage">
     <header class="topbar listbar"><div class="listbar-inner">
@@ -232,7 +225,7 @@ const DocList = {
               <button class="icon" v-if="f.perms.includes('manage') && !(f.local && f.local.root)" title="폴더 삭제(비어 있어야)" aria-label="폴더 삭제" @click="removeFolder(f)" v-html="ICON.trash"></button>
               <button class="icon" v-if="f.local && f.local.root && lib.local && lib.local.canLink" title="연결 끊기 — PC 의 파일은 그대로 남습니다" aria-label="연결 끊기" data-testid="local-unlink" @click="unlinkFolder(f)" v-html="ICON.x"></button></td></tr>
           <tr class="doc" v-for="d in shownDocs" :key="d.id" :data-doc="d.id" :class="{selected:selectedDoc===d.id}" :aria-selected="selectedDoc===d.id" tabindex="0" @click="selectedDoc=d.id" @dblclick="open(d)" @keydown.enter.self.prevent="open(d)" title="제목을 누르거나 두 번 클릭·Enter로 문서 열기">
-            <td class="lib-name"><a class="doc-link" :href="'#/doc/' + d.id" data-testid="doc-open-title" title="문서 열기" @click.stop><b>{{ d.title }}</b></a><span class="lib-badge" v-if="badge(d)" :title="badge(d).title"><span class="ic" v-html="ICON[badge(d).icon]"></span>{{ badge(d).text }}</span><span class="lib-badge pc" v-if="d.local" :class="'st-' + d.local.state" :title="localTip(d.local)" data-testid="doc-pc"><span class="ic" v-html="ICON.pc"></span>{{ localLabel(d.local) }}</span><span class="lib-badge rv" v-if="d.review" :title="reviewTip(d)" data-testid="doc-review"><span class="ic" v-html="ICON.send"></span>{{ d.review.server }}</span>
+            <td class="lib-name"><a class="doc-link" :href="'#/doc/' + d.id" data-testid="doc-open-title" title="문서 열기" @click.stop="openLink($event, d)"><b>{{ d.title }}</b></a><span class="lib-badge" v-if="badge(d)" :title="badge(d).title"><span class="ic" v-html="ICON[badge(d).icon]"></span>{{ badge(d).text }}</span><span class="lib-badge pc" v-if="d.local" :class="'st-' + d.local.state" :title="localTip(d.local)" data-testid="doc-pc"><span class="ic" v-html="ICON.pc"></span>{{ localLabel(d.local) }}</span><span class="lib-badge rv" v-if="d.review" :title="reviewTip(d)" data-testid="doc-review"><span class="ic" v-html="ICON.send"></span>{{ d.review.server }}</span>
               <div class="muted">{{ d.fileName }} · {{ d.createdBy }}<template v-if="sortField === 'created' && d.createdAt"> · {{ fmt(d.createdAt) }} 올림</template><template v-if="query.trim()"> · {{ placeOf(d) }}</template></div></td>
             <td class="doc-ver" :title="verTip(d)">{{ verText(d) }}</td><td class="doc-props">{{ d.proposals.pending }} / {{ d.proposals.applied }}</td><td class="doc-reqs">{{ d.requests }}</td><td class="doc-updated" title="마지막 수정">{{ fmt(d.updatedAt) }}</td>
             <td class="lib-acts" @click.stop>
@@ -250,11 +243,13 @@ const DocList = {
             <p v-if="personalLine">{{ personalLine }}</p>
             <ol class="ai-ways" data-testid="ai-ways">
               <li data-way="subscription" :title="WAY_TIPS.subscription"><b>내 PC의 구독 AI</b> — Codex·Claude Code 실행기 <a href="/help.html#agents" target="_blank" rel="noopener">설정 방법</a></li>
-              <li data-way="chatgpt-app" :title="WAY_TIPS.app"><b>ChatGPT 앱</b> — MCP 주소 <code>{{ urls.mcpUrl }}</code> <a href="/help.html#chatgpt-oauth" target="_blank" rel="noopener">설정 방법</a></li>
+              <li v-if="portless"><b>로컬 AI 클라이언트</b> · 앱의 [개인 연결 → AI 앱의 MCP 설정 복사]에서 연결합니다.</li>
+              <li v-else data-way="chatgpt-app" :title="WAY_TIPS.app"><b>ChatGPT 앱</b> — MCP 주소 <code>{{ urls.mcpUrl }}</code> <a href="/help.html#chatgpt-oauth" target="_blank" rel="noopener">설정 방법</a></li>
               <li data-way="api-key" :title="WAY_TIPS.key"><b>내 AI 키</b> <span class="muted">· 사용료 별도</span><span v-if="keyLine"> — {{ keyLine }}</span></li>
             </ol>
-            <p>현재 주소 <code>{{ urls.currentWebUrl }}</code></p>
-            <p>공유 주소 <code>{{ urls.sharedWebUrl }}</code><span v-if="urls.localOnly" class="muted"> · 이 PC 전용</span></p>
+            <p v-if="portless">연결 방식 · 이 PC에서 포트 없이 편집</p>
+            <template v-else><p>현재 주소 <code>{{ urls.currentWebUrl }}</code></p>
+            <p>공유 주소 <code>{{ urls.sharedWebUrl }}</code><span v-if="urls.localOnly" class="muted"> · 이 PC 전용</span></p></template>
             <p><a href="/help.html#ai" target="_blank" rel="noopener">연결 설명서</a></p>
           </details>
           <AiRunPanel/>
@@ -271,7 +266,7 @@ const DocList = {
     <ReviewServersDialog v-if="dlg && dlg.type === 'remotes'" :local="lib.local" @close="dlg = null" @changed="localChanged"/>
     <ReviewDialog v-if="dlg && dlg.type === 'review'" :doc="dlg.doc" :local="lib.local" @close="dlg = null" @changed="localChanged" @saved="load({ quiet: true })"/>
   </div>`,
-  setup() {
+  setup(_, { expose, emit }) {
     const me = state.me;
     const lib = ref(null); const loaded = ref(false);
     const sectionKey = 'hwpx.lib.section:' + me.name;
@@ -424,11 +419,20 @@ const DocList = {
       try { await api(`/api/docs/${d.id}`, { method: 'DELETE' }); } catch (err) { toastError(err); }
       await load();
     }
-    function open(d) { location.hash = `#/doc/${d.id}`; }
-    function logout() {
-      if (retainedSaves.hasAny()) { toast('저장 중인 문서가 있습니다. 해당 문서에서 저장 상태를 확인한 뒤 로그아웃하세요.', { kind:'warn' }); return; }
-      try { localStorage.removeItem('hwpx.token'); } catch { /* ignore */ } state.token = ''; state.me = null; location.hash = '#/';
+    function open(d) { emit('open', d); }
+    function openLink(event, doc) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      open(doc);
     }
+    function logout() { emit('logout'); }
+    async function beginNewDocument() {
+      if (!loaded.value) await load();
+      if (!can('write')) { toast('현재 위치에 새 문서를 만들 권한이 없습니다.', { kind: 'warn' }); return; }
+      showDrive.value = false;
+      dlg.value = { type: 'name', mode: 'newdoc' };
+    }
+    expose({ beginNewDocument, refresh: () => load({ quiet: true }) });
     // 다른 사람이 올리거나 고친 문서가 보이게: 창으로 돌아올 때(focus·다시 보임)와 창이 보이는 동안 30초마다 다시 읽는다
     const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
     const onFocus = () => load({ quiet: true });
@@ -473,9 +477,9 @@ const DocList = {
     const connTip = computed(() => { const st = conn.value; const a = st?.automatic; if (!a) return ''; return a.method == null && !st.apiOnly ? NO_AI_TIP : a.message || ''; });
     const folderLoc = (f) => ({ space: f.space, owner: f.space === 'private' ? f.owner : null, folderId: f.id });
     return {
-      lib, loaded, cur, query, dlg, showDrive, sideW, saveSideW, SIDE_W: LIB_SIDE_W, selectedDoc, me, config: state.config, urls, personalLine, keyLine, WAY_TIPS, connSummary, connTip, onConnToggle, crumbList, subfolders, shownDocs, curAccess, placeNote,
+      lib, loaded, cur, query, dlg, showDrive, sideW, saveSideW, SIDE_W: LIB_SIDE_W, selectedDoc, me, config: state.config, urls, portless: !!window.hwpxDesktopEnvironment?.portless, personalLine, keyLine, WAY_TIPS, connSummary, connTip, onConnToggle, crumbList, subfolders, shownDocs, curAccess, placeNote,
       sort, sortField, sortArrow, sortBy, ariaSort, SORTS,
-      go, goLibrary, can, has, badge, placeOf, locOfDoc, parentOf, folderLoc, folderTarget, docTarget, upload, uploading, saveName, nameDlg, canRename, removeFolder, remove, open, logout, load, driveImported,
+      go, goLibrary, can, has, badge, placeOf, locOfDoc, parentOf, folderLoc, folderTarget, docTarget, upload, uploading, saveName, nameDlg, canRename, removeFolder, remove, open, openLink, logout, load, driveImported,
       localChanged, linkTip, reviewTip, unlinkFolder, localTip, localLabel,
       fmt, roleLabel, verText, verTip, ICON,
     };
@@ -547,88 +551,111 @@ const QuickReply = {
 };
 
 const DocView = {
-  props: ['id'],
+  props: { id: String, active: Boolean },
+  emits: ['state', 'unavailable', 'restore'],
   components: { FloatWin, Composer, EditPopover, QuickReply, ReviewRail, SettingsDialog, InlineConfirm },
-  template: `<div class="docview v3" :class="{ 'view-simple': s.view !== 'detail', 'view-detail': s.view === 'detail', 'doc-live': realtime, stacked, 'panel-min': stacked && panel.min, 'panel-folded': folded, 'panel-peek': folded && !!peek, 'fold-hint': foldHint, resizing }" :style="panelVars" data-view="v3" :data-mode="ed?.mode || ''">
-    <div class="topbar v3bar">
-      <a href="#/" class="back" title="문서 목록" @click.prevent="goBack">←<span class="back-text"> 목록</span></a>
-      <input v-if="titleEdit !== null" ref="titleInp" class="title title-edit" data-testid="doc-title-input" v-model="titleEdit" maxlength="100" aria-label="문서 이름"
-        @keydown.enter.prevent="saveTitle" @keydown.esc.prevent="titleEdit = null" @blur="saveTitle"/>
-      <span v-else-if="canRename" class="title title-click" role="button" tabindex="0" data-testid="doc-title" :title="'눌러서 이름 바꾸기' + (s.info?.fileName ? ' · ' + s.info.fileName : '')"
-        @click="editTitle" @keydown.enter.prevent="editTitle">{{ s.info?.title }}</span>
-      <span v-else class="title" data-testid="doc-title" :title="s.info?.fileName">{{ s.info?.title }}</span>
-      <button class="pill ver" v-if="verLabel" data-testid="version-pill" :title="verTitle" @click="s.tab = 'history'">{{ verLabel }}</button>
-      <span class="pill pcpill" v-if="s.info?.local" :class="'st-' + s.info.local.state" :title="localTip(s.info.local)" data-testid="pc-pill">{{ localLabel(s.info.local) }}</span>
-      <button v-for="copy in recoveryFiles" :key="copy.key" type="button" class="pill" :title="copy.message"
-        @click="d.download(d.base+'/departure-saves/'+copy.key+'/file', (s.info?.title || '문서')+'_접수본.hwpx')">저장 접수본 복구 · {{ new Date(copy.time).toLocaleTimeString('ko-KR') }}</button>
-      <span class="draftchip" :class="chip.cls" :title="chip.tip" data-testid="draft-chip"><span class="dot" aria-hidden="true"></span><span class="chip-text">{{ chip.text }}</span>
-        <button v-if="chip.retry" class="linkbtn" data-testid="chip-retry" :title="chip.reopen || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ chip.reopen || (s.draft.stale && !liveMode) ? '다시 열기' : '다시' }}</button>
-        <button v-if="chip.keep" class="linkbtn" data-testid="chip-keep" title="서버의 내 수정본을 이 창의 글로 덮어씁니다" @click="keepMine">이 글로 저장</button>
-        <button v-if="chip.carry" class="linkbtn" data-testid="chip-carry" :disabled="carrying" title="서버의 지금 수정본을 열고 이 창에서 고친 문단을 그 위에 다시 넣습니다" @click="carryMine">내 글 옮기기</button></span>
-      <template v-if="!liveDoc">
-        <span class="behindchip" v-if="behind" data-testid="behind-chip" :title="behindTip"><span class="bc-text">새 버전 있음 →</span>
-          <button class="small" :disabled="rebasing" title="내 수정본을 공유 문서의 새 버전 위로 옮깁니다(겹치는 곳은 내 글을 남김)" @click="rebase"><span v-if="rebasing" class="spin dark"></span><span class="bc-full">최신으로 맞추기</span><span class="bc-short">최신으로</span></button></span>
-        <span class="warnchip" v-if="s.draft.unsupported?.length" :title="unsupportedTip">반영 불가 {{ s.draft.unsupported.length }}건</span>
-        <button v-if="s.myCr?.status==='draft'" class="primary small" data-testid="submit-cr" @click="openSubmit">검토 요청</button>
-        <button v-else-if="s.myCr?.status==='open'" class="crchip" data-testid="cr-chip" :title="crChipTip" @click="openCr(s.myCr.cid)"><span class="cc-text"><span class="cc-head">{{ crChipHead }}</span><span class="cc-rest">{{ crChip.slice(crChipHead.length) }}</span></span></button>
-      </template>
-      <span class="spacer"></span>
-      <div class="whobox" tabindex="0" aria-label="접속자" data-testid="presence">
-        <span class="who" v-for="u in present" :key="u.name" :style="{ background: u.color }" :class="{ me: u.me }" :title="u.me ? u.name + '(나' + (myRole ? ' · ' + myRole : '') + ')' : u.name">{{ u.name.slice(0, 1) }}<i v-if="u.editing" class="typing" aria-hidden="true"></i></span>
-        <div class="whopop" role="tooltip">
-          <div class="wp-h">누가 어디를 고치는 중</div>
-          <div class="wp-row" v-for="u in people" :key="u.name">
-            <span class="wp-dot" :style="{ background: u.color }"></span><b>{{ u.name }}</b><span class="muted wp-me" v-if="u.me">(나{{ myRole ? ' · ' + myRole : '' }})</span><span class="muted" v-else-if="!u.present">(접속 안 함)</span>
-            <div class="wp-what" v-if="u.editing"><span class="ref" @click="go(u.editing)">● {{ u.editing }}</span> 입력 중 <span class="muted">「{{ clip(d.textOf(u.editing), 24) }}」</span></div>
-            <div class="wp-what" v-for="c in u.crs" :key="c.cid"><a href="#" class="wp-link" @click.prevent="openCr(c.cid)">✎ 변경 요청 #{{ c.cid }}</a> {{ c.status === 'open' ? '검토 중' : '수정 중' }} · {{ c.hunkCount ?? (c.hunks || []).length }}문단</div>
-            <div class="wp-what muted" v-if="!u.editing && !u.crs.length">고치는 곳 없음</div>
+  template: `<div ref="rootEl" class="docview v3" :class="{ 'view-simple': s.view !== 'detail', 'view-detail': s.view === 'detail', 'doc-live': realtime, stacked, 'panel-min': stacked && panel.min, 'panel-folded': folded, 'panel-peek': folded && !!peek, 'fold-hint': foldHint, resizing }" :style="panelVars" data-view="v3" :data-mode="ed?.mode || ''">
+    <Teleport to="#office-document-controls">
+      <div v-if="active" ref="moreEl" class="office-document-tools" :data-doc-id="s.id" @keydown.esc.stop.prevent="closeMore(true)" @focusout="onMoreFocusOut">
+        <button ref="statusTrigger" type="button" class="office-save-status" :class="compactStatus.cls" data-testid="draft-chip"
+          :aria-expanded="moreOpen === 'status'" aria-controls="office-save-details" :aria-label="'저장 상태: ' + compactStatus.label"
+          :title="[chip.text, chip.tip].filter(Boolean).join(' · ')" @click="toggleMore('status')">
+          <span class="office-status-mark" aria-hidden="true">{{ compactStatus.mark }}</span><span class="office-status-caption">{{ compactStatus.label }}</span>
+        </button>
+        <button type="button" class="office-direct-export" data-testid="save-hangul" :disabled="saving || !s.info" :title="saveTip" @click="saveHangul">
+          <span v-if="saving" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">↓</span><span>한글로 저장</span>
+        </button>
+        <button ref="actionTrigger" type="button" class="office-document-menu" data-testid="bar-more-toggle" aria-label="문서 작업" title="문서 작업"
+          :aria-expanded="moreOpen === 'actions'" aria-controls="office-document-actions" @click="toggleMore('actions')">
+          <span class="ic" aria-hidden="true" v-html="ICON.more"></span><span class="office-work-label">문서 작업</span>
+        </button>
+        <section v-if="moreOpen === 'status'" id="office-save-details" ref="popoverEl" class="office-popover" aria-labelledby="office-save-heading" tabindex="-1" data-testid="office-save-details">
+          <h2 id="office-save-heading">저장 상태</h2>
+          <div class="office-save-summary">
+            <b>{{ chip.text }}</b>
+            <p v-if="chip.tip">{{ chip.tip }}</p>
+            <span v-if="s.info?.local" data-testid="pc-pill" :title="localTip(s.info.local)">{{ localLabel(s.info.local) }}</span>
+            <button v-if="verLabel" type="button" data-testid="version-pill" :title="verTitle" @click="s.tab = 'history'; closeMore(true)">{{ verLabel }} · 버전 이력</button>
           </div>
-          <div class="muted" v-if="!people.length">접속자가 없습니다</div>
-        </div>
-      </div>
-      <button class="agentpill" :class="{ on: !!env.connected }" data-testid="agent-pill" :aria-label="agentLabel" :title="agentTip" @click="openAgentHelp"><span class="ap-full">{{ agentLabel }}</span><span class="ap-short" aria-hidden="true">{{ env.connected ? '● AI' : '○ AI' }}</span></button>
-      <a v-if="stateMeTutorial" class="btnlike small tourbtn tutorial-nav" href="#/tutorial" data-testid="tutorial-doc-nav">튜토리얼</a>
-      <span v-if="s.info?.tutorialSession" class="tutorial-temp-label">임시 연습 문서</span>
-      <button v-if="tourOn && tourPaused" class="small tourbtn" data-testid="tour-open" @click="openTour">튜토리얼 계속하기</button>
-      <button v-if="s.info?.tutorialSession" class="small primary" data-testid="tutorial-complete" :disabled="tutorialSaving" @click="completeTutorial">{{ tutorialSaving ? '저장 중…' : '완료하고 문서함에 저장' }}</button>
-      <button v-if="s.info?.tutorialCompletedAt && nextCourse" class="small" data-testid="tutorial-next-course" :disabled="tutorialSaving" @click="startNextTutorial">다음 튜토리얼로 가기</button>
-      <button class="small savebtn" data-testid="save-hangul" :disabled="saving" :title="saveTip" @click="saveHangul"><span v-if="saving" class="spin dark"></span>한글로 저장</button>
-      <div class="barmore" :class="{ open: moreOpen }" ref="moreEl" data-testid="bar-more">
-        <button class="more-btn" data-testid="bar-more-toggle" aria-haspopup="true" :aria-expanded="moreOpen" aria-label="메뉴 더 보기" title="메뉴 더 보기" @click="moreOpen = !moreOpen">⋯</button>
-        <div class="more-items" @click="onMoreClick">
-          <button class="small more-save" data-testid="more-save-hangul" :disabled="saving" :title="saveTip" @click="saveHangul"><span v-if="saving" class="spin dark"></span>한글로 저장</button>
-          <button class="small more-tools" role="menuitemcheckbox" :aria-checked="tools" :disabled="!ed?.ready" data-testid="toggle-editor-tools" title="편집기 메뉴·도구 막대 보이기(휴대전화 폭에서는 기본으로 숨겨 문서를 넓게 봅니다)" @click="toggleTools"><span class="chk">{{ tools ? '✓' : '' }}</span>편집 도구 막대</button>
-          <button v-if="mobileEnvironment" class="small" :disabled="!ed?.ready" data-testid="mobile-options" @click="openMobileOptions">모바일 옵션</button>
-          <button v-if="s.canConfigure" class="small icon-text docset" data-testid="doc-settings" title="문서 설정 — 편집 방식·수정 권한·한글로 저장·AI 작업 메모" @click="s.settingsOpen = true">⚙ 문서 설정</button>
-          <button v-if="isAdmin" class="small admin-nav" data-testid="admin-doc" @click="showAdmin">관리자</button>
-          <a class="btnlike help-link" href="/help.html#review" data-testid="help-doc" title="프로그램 안에서 사용 설명서 열기">사용 설명서</a>
-          <details class="doc-view-options" data-testid="document-view-options" @toggle="readDocumentView" @keydown.esc.prevent="$event.currentTarget.open = false">
-            <summary>보기</summary>
-            <div class="doc-view-menu" role="menu" aria-label="문서 보기">
-              <button role="menuitemcheckbox" :aria-checked="documentView.paragraph" :disabled="!ed?.ready" data-testid="show-paragraph-marks" @click="toggleDocumentView('view:para-mark')"><span>{{ documentView.paragraph ? '✓' : '' }}</span>문단 부호 보기<kbd>Ctrl+G,T</kbd></button>
-              <button role="menuitemcheckbox" :aria-checked="documentView.controls" :disabled="!ed?.ready" data-testid="show-control-codes" @click="toggleDocumentView('view:ctrl-mark')"><span>{{ documentView.controls ? '✓' : '' }}</span>조판 부호 보기<kbd>Ctrl+G,C</kbd></button>
-              <div class="dvm-sep" role="separator"></div>
-              <button role="menuitemcheckbox" :aria-checked="memosOn" data-testid="show-memos" title="메모·AI 작업·제안을 문서 옆 여백에 띄웁니다(끄면 AI 작업 창의 메모 탭에서 봄)" @click="toggleMemos"><span>{{ memosOn ? '✓' : '' }}</span>문서 옆 메모 보기</button>
-              <button role="menuitem" data-testid="memo-pos-reset" :disabled="!movedMemos" title="끌어 옮긴 메모를 모두 쪽 옆 제자리로" @click="resetMemoPos"><span></span>메모 제자리로</button>
+          <div v-if="chip.retry || chip.keep || chip.carry" class="office-popover-actions">
+            <button v-if="chip.retry" type="button" data-testid="chip-retry" :title="chip.reopen || (s.draft.stale && !liveMode) ? '서버의 지금 문서를 다시 엽니다(여기서 친 저장 안 된 글은 버림)' : '다시 저장합니다'" @click="retrySave">{{ chip.reopen || (s.draft.stale && !liveMode) ? '다시 열기' : '저장 재시도' }}</button>
+            <button v-if="chip.keep" type="button" data-testid="chip-keep" title="서버의 내 수정본을 이 창의 글로 덮어씁니다" @click="keepMine">이 글로 저장</button>
+            <button v-if="chip.carry" type="button" data-testid="chip-carry" :disabled="carrying" title="서버의 지금 수정본 위에 이 창에서 고친 문단을 넣습니다" @click="carryMine">내 글 옮기기</button>
+          </div>
+          <div v-if="!liveDoc && behind" class="office-popover-group" data-testid="behind-chip" :title="behindTip">
+            <b>새 버전 있음</b><button type="button" :disabled="rebasing" @click="rebase"><span v-if="rebasing" class="spin dark"></span>최신으로 맞추기</button>
+          </div>
+          <p v-if="!liveDoc && s.draft.unsupported?.length" class="office-warn" :title="unsupportedTip">반영 불가 {{ s.draft.unsupported.length }}건</p>
+          <div v-if="recoveryFiles.length" class="office-popover-group" aria-label="저장 접수본">
+            <button v-for="copy in recoveryFiles" :key="copy.key" type="button" :title="copy.message"
+              @click="d.download(d.base+'/departure-saves/'+copy.key+'/file', (s.info?.title || '문서')+'_접수본.hwpx')">저장 접수본 복구 · {{ new Date(copy.time).toLocaleTimeString('ko-KR') }}</button>
+          </div>
+        </section>
+        <section v-else-if="moreOpen === 'actions'" id="office-document-actions" ref="popoverEl" class="office-popover" aria-labelledby="office-work-heading" tabindex="-1" data-testid="office-document-actions">
+          <h2 id="office-work-heading">문서 작업</h2>
+          <div class="office-popover-group">
+            <button type="button" data-testid="more-save-hangul" :disabled="saving || !s.info" :title="saveTip" @click="saveHangul(); closeMore(true)">
+              <span v-if="saving" class="spin dark" aria-hidden="true"></span>한글로 저장</button>
+            <button v-if="canRename && titleEdit === null" ref="renameTrigger" type="button" data-testid="office-rename-document" @click="editTitle">문서 이름 바꾸기</button>
+            <form v-else-if="canRename" class="office-rename" @submit.prevent="saveTitle" @keydown.esc.stop.prevent="cancelTitle">
+              <label>문서 이름<input ref="titleInp" data-testid="doc-title-input" v-model="titleEdit" maxlength="100"/></label>
+              <div class="office-popover-actions"><button class="primary small" type="submit">바꾸기</button><button class="small" type="button" @click="cancelTitle">취소</button></div>
+            </form>
+            <button v-if="s.canConfigure" type="button" data-testid="doc-settings" @click="closeMore(); s.settingsOpen = true">문서 설정</button>
+          </div>
+          <div class="office-popover-group" data-testid="document-view-options" aria-labelledby="office-view-heading">
+            <h3 id="office-view-heading">보기</h3>
+            <button type="button" :aria-pressed="tools" :disabled="!ed?.ready" data-testid="toggle-editor-tools" @click="toggleTools">편집 메뉴 및 서식 막대</button>
+            <button v-if="mobileEnvironment" type="button" :disabled="!ed?.ready" data-testid="mobile-options" @click="closeMore(); openMobileOptions()">모바일 옵션</button>
+            <button type="button" :aria-pressed="documentView.paragraph" :disabled="!ed?.ready" data-testid="show-paragraph-marks" @click="toggleDocumentView('view:para-mark')">문단 부호 보기<kbd>Ctrl+G,T</kbd></button>
+            <button type="button" :aria-pressed="documentView.controls" :disabled="!ed?.ready" data-testid="show-control-codes" @click="toggleDocumentView('view:ctrl-mark')">조판 부호 보기<kbd>Ctrl+G,C</kbd></button>
+            <button type="button" :aria-pressed="memosOn" data-testid="show-memos" @click="toggleMemos">문서 옆 메모 보기</button>
+            <button type="button" :disabled="!movedMemos" data-testid="memo-pos-reset" @click="resetMemoPos">메모 제자리로</button>
+            <div class="office-view-modes" role="group" aria-label="검토 표시 방식" data-testid="view-toggle">
+              <button v-for="v in ['simple', 'detail']" :key="v" type="button" :data-view="v" :aria-pressed="s.view === v" @click="d.setView(v)">{{ VIEW_LABEL[v] }}</button>
             </div>
-          </details>
-          <div class="viewseg" role="group" aria-label="보기" data-testid="view-toggle" title="보기: 간단히(남의 AI 작업은 한 줄 요약 · 필요한 탭만) / 자세히(모든 제안·변경 요청·변경 추적)">
-            <button v-for="v in ['simple', 'detail']" :key="v" class="seg" :class="{ on: s.view === v }" :data-view="v" :aria-pressed="s.view === v" @click="d.setView(v)">{{ VIEW_LABEL[v] }}</button>
           </div>
-        </div>
+          <div class="office-popover-group" aria-labelledby="office-review-heading">
+            <h3 id="office-review-heading">검토와 공동 작업</h3>
+            <template v-if="!liveDoc">
+              <button v-if="s.myCr?.status==='draft'" type="button" data-testid="submit-cr" @click="closeMore(); openSubmit()">검토 요청</button>
+              <button v-else-if="s.myCr?.status==='open'" type="button" data-testid="cr-chip" :title="crChipTip" @click="openCr(s.myCr.cid); closeMore(true)">{{ crChip }}</button>
+            </template>
+            <div v-if="leftover" class="office-leftover" data-testid="leftover-banner">
+              <b>남은 내 수정본 · 변경 요청 #{{ leftover.cid }} · {{ leftover.n }}문단</b>
+              <div v-if="!loConfirm" class="office-popover-actions">
+                <button type="button" data-testid="leftover-merge" :disabled="loBusy || !s.canEdit" @click="mergeLeftover">반영</button>
+                <button type="button" data-testid="leftover-close" :disabled="loBusy" @click="loConfirm = true">닫기</button>
+              </div>
+              <InlineConfirm v-else :message="loMsg" ok-label="닫기" danger :busy="loBusy" @ok="closeLeftover" @cancel="loConfirm = false"/>
+            </div>
+            <details class="office-participants" data-testid="presence">
+              <summary>접속자 {{ present.length }}명</summary>
+              <div class="wp-row" v-for="u in people" :key="u.name">
+                <span class="wp-dot" :style="{ background: u.color }"></span><b>{{ u.name }}</b><span class="muted wp-me" v-if="u.me">(나{{ myRole ? ' · ' + myRole : '' }})</span><span class="muted" v-else-if="!u.present">(접속 안 함)</span>
+                <div class="wp-what" v-if="u.editing"><button type="button" class="office-link" @click="go(u.editing); closeMore()">{{ u.editing }}</button> 입력 중 <span class="muted">「{{ clip(d.textOf(u.editing), 24) }}」</span></div>
+                <div class="wp-what" v-for="c in u.crs" :key="c.cid"><button type="button" class="office-link" @click="openCr(c.cid); closeMore(true)">변경 요청 #{{ c.cid }}</button> {{ c.status === 'open' ? '검토 중' : '수정 중' }} · {{ c.hunkCount ?? (c.hunks || []).length }}문단</div>
+                <div class="wp-what muted" v-if="!u.editing && !u.crs.length">고치는 곳 없음</div>
+              </div>
+              <p class="muted" v-if="!people.length">접속자가 없습니다</p>
+            </details>
+            <button type="button" data-testid="agent-pill" :title="agentTip" @click="openDocumentHelp(agentHelpHash)">AI 연결 <span class="office-item-value">{{ agentLabel }}</span></button>
+          </div>
+          <div class="office-popover-group">
+            <button v-if="isAdmin" type="button" data-testid="admin-doc" @click="closeMore(); showAdmin()">관리자 설정</button>
+            <button type="button" data-testid="help-doc" @click="openDocumentHelp('#review')">사용 설명서</button>
+            <a v-if="stateMeTutorial" href="#/tutorial" data-testid="tutorial-doc-nav">튜토리얼</a>
+            <span v-if="s.info?.tutorialSession" class="tutorial-temp-label">임시 연습 문서</span>
+            <button v-if="tourOn && tourPaused" type="button" data-testid="tour-open" @click="closeMore(); openTour()">튜토리얼 계속하기</button>
+            <button v-if="s.info?.tutorialSession" type="button" data-testid="tutorial-complete" :disabled="tutorialSaving" @click="completeTutorial">{{ tutorialSaving ? '저장 중…' : '완료하고 문서함에 저장' }}</button>
+            <button v-if="s.info?.tutorialCompletedAt && nextCourse" type="button" data-testid="tutorial-next-course" :disabled="tutorialSaving" @click="startNextTutorial">다음 튜토리얼로 가기</button>
+          </div>
+        </section>
       </div>
-    </div>
+    </Teleport>
     <div v-if="serverNotice" class="admin-server-notice" data-testid="server-restart-notice" role="status">{{ serverNotice }}</div>
     <div class="v3layout">
-      <div class="editorarea" :class="{ 'has-strip': !!leftover }">
-        <div class="leftover-strip" v-if="leftover" data-testid="leftover-banner" role="status">
-          <span class="lo-text" title="승인 방식일 때 고친 내 수정본이 아직 문서에 들어가지 않았습니다 — 반영하거나 닫으세요">남은 내 수정본 · 변경 요청 #{{ leftover.cid }} · {{ leftover.n }}문단</span>
-          <template v-if="!loConfirm">
-            <button class="small primary" data-testid="leftover-merge" :disabled="loBusy || !s.canEdit" :title="s.canEdit ? '그 수정본을 지금 공유 문서에 반영합니다(겹친 곳은 최신으로 맞춘 뒤)' : '이 문서의 수정 권한이 없습니다'" @click="mergeLeftover"><span v-if="loBusy" class="spin"></span>반영</button>
-            <button class="small" data-testid="leftover-close" :disabled="loBusy" title="그 변경 요청을 닫습니다(변경 요청 탭에서 다시 열 수 있음)" @click="loConfirm = true">닫기</button>
-          </template>
-          <InlineConfirm v-else :message="loMsg" ok-label="닫기" danger :busy="loBusy" @ok="closeLeftover" @cancel="loConfirm = false"/>
-        </div>
+      <div class="editorarea">
         <div class="editorhost" ref="editorEl"></div>
         <div class="railover" v-if="railOver" data-testid="rail" :style="overStyle"><ReviewRail :col="over?.col || null"/></div>
         <div class="loadingpane muted" v-if="!ed?.ready && !ed?.previewReady && !ed?.error && !ed?.notice"><span class="spin dark"></span> {{ ed?.loading === false ? '' : '편집기를 불러오는 중…' }}</div>
@@ -659,25 +686,39 @@ const DocView = {
     <QuickReply v-if="s.reply" :key="s.reply.key" :model="s.reply" @close="d.closeWindow('reply')"/>
     <SettingsDialog v-if="s.settingsOpen" @close="s.settingsOpen = false"/>
   </div>`,
-  setup(props) {
-    const d = createDocStore(props.id); provide('doc', d); const s = d.s;
+  setup(props, { emit }) {
+    const d = createDocStore(props.id, { onUnavailable: reason => emit('unavailable', props.id, reason) });
+    const s = d.s;
+    const rootEl = ref(null);
+    const active = computed(() => props.active);
+    const overlay = '#' + overlayId(props.id);
+    provide('doc', d);
+    provide('officeDocument', { active, overlay });
+
+    watch(() => [s.info?.title, s.draft.dirty, s.draft.saving, s.draft.error || s.draft.stale], ([title, dirty, saving, failed]) => {
+      emit('state', props.id, { ...(title ? { title } : {}), dirty, saving, failed: !!failed });
+    }, { immediate: true });
     // 상단 문서 이름: 눌러서 그 자리에서 바꾼다(Enter·칸 밖 = 저장, Esc = 취소). 권한 = 수정 또는 설정(서버 renameDocument)
     const canRename = computed(() => !!s.info && (!!s.canEdit || !!s.canConfigure));
-    const titleEdit = ref(null); const titleInp = ref(null); let titleBusy = false;
+    const titleEdit = ref(null); const titleInp = ref(null); const renameTrigger = ref(null); let titleBusy = false;
     function editTitle() {
       if (!canRename.value) return;
       titleEdit.value = s.info?.title || '';
       nextTick(() => { titleInp.value?.focus(); titleInp.value?.select(); });
     }
+    function cancelTitle() {
+      titleEdit.value = null;
+      nextTick(() => renameTrigger.value?.focus({ preventScroll: true }));
+    }
     async function saveTitle() {
       if (titleEdit.value === null || titleBusy) return;
       const name = titleEdit.value.trim();
-      if (!name || name === s.info?.title) { titleEdit.value = null; return; }
+      if (!name || name === s.info?.title) { cancelTitle(); return; }
       titleBusy = true;
       try {
         const out = await api(`/api/docs/${encodeURIComponent(props.id)}`, { method: 'PATCH', body: { title: name } });
         if (s.info) s.info.title = out.title;
-        titleEdit.value = null;
+        cancelTitle();
         toast('이름을 바꿨습니다');
       } catch (e) { toastError(e, '이름을 바꾸지 못했습니다: '); nextTick(() => titleInp.value?.focus()); } finally { titleBusy = false; }
     }
@@ -711,33 +752,30 @@ const DocView = {
       catch { if (!automationClosed) { automation.value = null; automationError.value = true; } }
       finally { automationLoading.value = false; }
     }
-    const refreshAutomation = () => { if (document.visibilityState !== 'hidden') loadAutomation(); };
+    const refreshAutomation = () => { if (props.active && document.visibilityState !== 'hidden') loadAutomation(); };
     const openAdmin = inject('openAdmin');
+    const prepareOfficeRestart = inject('prepareOfficeRestart');
     const isAdmin = computed(() => state.me?.role === 'admin');
     function showAdmin() {
       if (!isAdmin.value) return;
-      openAdmin({ prepareRestart: async () => {
-        if (s.draft.dirty || s.draft.saving) {
-          try { await Promise.race([d.saveDraftNow(), new Promise((resolve) => setTimeout(resolve, 8000))]); } catch { /* 설정 창에서 저장 상태를 안내한다 */ }
-        }
-        return !s.draft.dirty && !s.draft.saving;
-      } });
+      openAdmin({ prepareRestart: prepareOfficeRestart });
     }
-    watch(() => docOf(state.route) === props.id, active => {
+    watch(active, active => {
       if (active) window.__doc = d;
       else if (window.__doc === d) delete window.__doc;
     }, { immediate: true });
     const editorEl = ref(null);
     const recoveryFiles = ref([]);
     const observingSaves = new Set();
+    const recoveryRequests = new AbortController();
     async function refreshRecoveryFiles() {
       try {
-        const result = await api(d.base + '/departure-saves');
+        const result = await api(d.base + '/departure-saves', { signal: recoveryRequests.signal });
         recoveryFiles.value = result.files || [];
         for (const key of result.pending || []) {
           if (observingSaves.has(key)) continue;
           observingSaves.add(key);
-          api(d.base + '/departure-saves/' + key).then(refreshRecoveryFiles, error => {
+          api(d.base + '/departure-saves/' + key, { signal: recoveryRequests.signal }).then(refreshRecoveryFiles, error => {
             if (error.data?.receipt) void refreshRecoveryFiles();
           }).finally(() => observingSaves.delete(key));
         }
@@ -805,6 +843,12 @@ const DocView = {
       const t = hhmm(dr.savedAt || cr?.updatedAt);
       return { text: `${n ? `수정 ${n}문단` : '수정 없음'}${t ? ` · 저장됨 ${t}` : ''}`, cls: 'saved', tip: cr ? `내 수정본 = 변경 요청 #${cr.cid}(${cr.status === 'open' ? '검토 중' : '초안'})${myBaseV.value ? ` · v${myBaseV.value}에서 고침` : ''}` : '' };
     });
+    const compactStatus = computed(() => {
+      const status = chip.value.cls.split(' ')[0];
+      const cls = recoveryFiles.value.length && status !== 'error' ? 'recovery' : status;
+      const [label, mark] = cls === 'recovery' ? ['접수본 복구', '!'] : (STATUS_MARKERS[cls] || STATUS_MARKERS.idle);
+      return { cls, label, mark };
+    });
     // ── 사람용 버전(§9.4 — 기록 번호는 내지 않는다) ──
     const verLabel = computed(() => verText(s.info));
     const verTitle = computed(() => (s.info?.milestone ? versionTip(s.info.milestone, s.info.sinceMilestone ?? Math.max(0, (Number(s.info.version) || 0) - (Number(s.info.milestone.n) || 0))) : '이력 탭에서 보기'));
@@ -819,7 +863,7 @@ const DocView = {
     async function retrySave() {
       if (s.draft.tutorialRestored) {
         if (s.draft.dirty && !confirm('이 창에서 아직 저장하지 못한 글은 복구한 문서에 넣지 않습니다. 복구한 문서를 다시 열까요?')) return;
-        location.reload(); return;
+        emit('restore', props.id); return;
       }
       if (s.draft.fileReplaced) {
         if (s.draft.dirty && !confirm('저장하지 못한 편집을 버리고 교체된 문서를 다시 열까요?')) return;
@@ -856,7 +900,6 @@ const DocView = {
     // 내 변경 요청 칩(검토 중): '검토 중 #3 · 승인 1 · 의견 2'(0 인 수정 요청·의견은 뺌) — 남의 승인·수정 요청·의견이 오면 store 가 알리고 목록으로 맞춘다
     const crChip = computed(() => crChipText(s.myCr));
     // 휴대전화 폭은 '검토 중 #3' 만(수는 title) — 나머지(' · 승인 1 …')는 CSS 가 숨긴다
-    const crChipHead = computed(() => crChip.value.split(' · ')[0]);
     const crChipTip = computed(() => {
       const c = crCounts(s.myCr);
       return `내 변경 요청 ${crChip.value}${c.stale ? ` · 다시 승인 필요 ${c.stale}` : ''} — 눌러서 변경 요청 탭에서 보기`;
@@ -886,10 +929,10 @@ const DocView = {
       return env.value.connected ? `${env.value.connected} 연결됨 — 새 AI 작업은 이 작업 환경으로 갑니다. 처리 결과는 AI 작업 탭에서 확인하세요` : `${NO_AI_TIP}${more}`;
     });
     // 연결 방법은 화면에 펼쳐 두지 않고 사용 설명서 ①절 '#agents'(내 PC의 AI — 문서 화면 안 창 — help-dialog.js openHelp)로(docs/UI_TERMS.md §1-5)
-    async function openAgentHelp(e) {
-      const from = e?.currentTarget || null;   // 기다린 뒤에는 이벤트의 currentTarget 이 비므로 먼저
-      const { openHelp } = await import('./help-dialog.js');
-      openHelp(new URL(CONNECT_HELP, location.href).hash, from);   // ① 내 PC의 AI(#agents)부터
+    const agentHelpHash = new URL(CONNECT_HELP, location.href).hash;
+    function openDocumentHelp(hash) {
+      closeMore(true);
+      openHelp(hash, actionTrigger.value);
     }
 
     // ── 한글로 저장(단추 하나 — V4 §3: 무엇을 담을지는 문서 설정) ──
@@ -921,29 +964,40 @@ const DocView = {
 
     // ── 편집기 ──
     let handle = null;
-    function mount() { handle = mountEditor(editorEl.value, d); }
+    function mount() { handle = mountEditor(editorEl.value, d, { foreground: props.active }); }
     function remount() { try { handle?.destroy(); } catch { /* 이미 없음 */ } if (editorEl.value) editorEl.value.innerHTML = ''; mount(); }
-    function goBack() { location.hash = '#/'; }
-    // 뒤로 가기는 편집기를 보유한 채 화면을 먼저 전환한다. 이미 알려진 충돌은 나가기 전에 확인한다.
-    async function guard() {
-      if (tour && tourOn.value && !await tour.requestLeave()) return false;
-      if (tourOn.value) await flushTour(props.id).catch(() => {});
-      // [hwpx-cowork] 라우트가 바뀌어도 기존 iframe·문서·저장 세대가 살아 있다.
-      // 저장 오류/충돌은 같은 문서를 다시 열어 해결할 수 있다.
+    function backgroundSave() {
       if (handle?.ready && !s.draft.stale && !s.draft.error && (s.draft.dirty || s.draft.saving)) {
         retainedSaves.leave(props.id, () => d.saveDraftNow({ departure: true }), () => !s.draft.dirty && !s.draft.saving,
           () => handle?.editRevision?.() ?? 0, s.info?.title || props.id);
-        return true;
       }
-      if (s.draft.dirty || s.draft.saving) {
-        try { await Promise.race([d.saveDraftNow(), new Promise((r) => setTimeout(r, 8000))]); } catch { /* 아래에서 묻는다 */ }
+    }
+    const bodyNeedsSave = () => !!(s.draft.dirty || s.draft.saving || handle?.dirty);
+    function hasUnsentInput() {
+      return d.hasUnsentWindowDrafts() || !!titleEdit.value?.trim() && titleEdit.value.trim() !== s.info?.title
+        || !!rootEl.value?.querySelector('[data-office-unsent="true"]') || !!document.querySelector(overlay + ' [data-office-unsent="true"]');
+    }
+    async function saveForClose() {
+      retainedSaves.discard(props.id);
+      if (!bodyNeedsSave()) return;
+      const unlock = handle?.lock('문서를 저장하는 중…');
+      try {
+        await d.saveDraftNow({ departure: true });
+        if (bodyNeedsSave()) throw new Error(s.draft.error || '저장할 수정 내용이 남아 있습니다.');
+      } finally { unlock?.(); }
+    }
+    async function prepareClose() {
+      await saveForClose();
+      if (hasUnsentInput() && !confirm(`‘${s.info?.title || '문서'}’에 작성 중인 메모, 요청 또는 이름이 있습니다. 입력을 버리고 닫을까요?`)) return false;
+      if (tourOn.value) await flushTour(props.id, { strict: true });
+      return true;
+    }
+    async function leaveTutorial() {
+      if (tour && tourOn.value && !await tour.requestLeave()) return false;
+      if (tourOn.value) {
+        await flushTour(props.id).catch(() => {});
       }
-      if (!s.draft.dirty && !s.draft.saving) { retainedSaves.discard(props.id); return true; }
-      const p = s.live.progress;
-      const why = s.draft.stale ? `저장을 멈춤${s.draft.elsewhere ? ` — ${s.draft.elsewhere}` : ''}` : s.draft.saving ? `아직 저장 중${p?.total ? ` — 문서에 넣는 중 ${p.done}/${p.total}` : ''}` : '저장 실패';
-      const discard = confirm(`저장하지 못한 글이 있습니다(${why}).\n나가면 그 글이 사라집니다. 그래도 나갈까요?\n([취소]: 남아서 상단 칩의 단추로 저장)`);
-      if (discard) retainedSaves.discard(props.id);
-      return discard;
+      return true;
     }
     watch(() => [s.draft.dirty, s.draft.saving], ([dirty, saving]) => {
       if (!dirty && !saving && retainedSaves.status(props.id)?.running === false) retainedSaves.discard(props.id);
@@ -1056,12 +1110,13 @@ const DocView = {
       d.openPopover('memo', t, winAnchor(sel?.rect ? d.editor.anchorToPage(sel.rect) : null));
     }
     function onEditorKey(k) {
+      if (!props.active) return;
       if (k.key === 'Escape') { if (!closeFloating({ fromEditor: true }) && peek.value) closePeek(); }
       else if (k.key === 'M' && (k.ctrl || k.meta) && k.alt) memoOnSelection();
     }
     function onKey(e) {
-      if (docOf(state.route) !== props.id) return;
-      if (e.key === 'Escape' && moreOpen.value) moreOpen.value = false;
+      if (!props.active) return;
+      if (e.key === 'Escape' && moreOpen.value) { e.preventDefault(); closeMore(true); }
       else if (e.key === 'Escape' && !isTyping()) { if (!closeFloating() && peek.value) closePeek(); }
       else if ((e.ctrlKey || e.metaKey) && e.altKey && !isTyping() && (e.code === 'KeyM' || e.key.toLowerCase() === 'm')) { e.preventDefault(); memoOnSelection(); }
       else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'F10' || e.key === 'F10')) openSymbols(e);
@@ -1077,7 +1132,7 @@ const DocView = {
     }
 
     // ── 창 폭: 좁은 창(900px 이하 — 패널이 아래로)이면 문서 옆 메모를 숨기고 패널 '검토' 탭이 대신 ──
-    function onResize() { syncRail(); measureOver(); }
+    function onResize() { if (props.active) { syncRail(); measureOver(); } }
     // ── 오른쪽 창(패널) 크기: 경계선(.splitter)을 끌어 폭을, 좁은 창(900px 이하 — 패널이 아래로)이면 높이를 바꾼다(view.js PANEL, 이 브라우저에 기억) ──
     // 넓은 창에서 끝까지(wFold 아래로) 줄이면 접는다. 좁은 창에서는 아주 낮게 끌거나 경계선을 누르면 탭 줄만 남기고 접고, 탭을 누르면 다시 편다. 두 번 누르면(Home) 기본 크기
     const stackQuery = matchMedia('(max-width: 900px)');
@@ -1102,6 +1157,7 @@ const DocView = {
     const panelEl = ref(null);
     let peekTimer = 0; let overPanel = false;
     function onViewportLeave(e) {
+      if (!props.active) return;
       if (e?.type === 'pointerleave' && e.pointerType !== 'mouse') return;
       overPanel = false;
       clearTimeout(peekTimer); peekTimer = 0;
@@ -1123,13 +1179,12 @@ const DocView = {
       edgeTimer = setTimeout(() => { edgeTimer = 0; openPeek('hover'); }, 200);
     }
     function onHostMove(e) {
-      if (docOf(state.route) !== props.id) return;
-      if (e.pointerType !== 'mouse' || stacked.value) return;
+      if (!props.active || e.pointerType !== 'mouse' || stacked.value) return;
       if (e.target.closest?.('.floatwin, .toasts, dialog')) { clearTimeout(edgeTimer); edgeTimer = 0; return; }
       edgeSense(e, e.clientX, e.clientY);
     }
     function onFrameMove(e) {
-      if (e.pointerType !== 'mouse' || stacked.value) return;
+      if (!props.active || e.pointerType !== 'mouse' || stacked.value) return;
       const f = editorEl.value?.querySelector('iframe'); const r = f && e.clientX >= (e.view?.innerWidth || 0) - 40 ? f.getBoundingClientRect() : null;
       edgeSense(e, r ? r.left + e.clientX : -1, r ? r.top + e.clientY : -1);
     }
@@ -1169,18 +1224,31 @@ const DocView = {
     function onAnnClick(p) { if (p?.viaMark && (p.kind === 'change' || !s.railOpen)) reveal(); }
     // 창 밖을 누르면 펼쳐 둔 패널을 접는다(떠 있는 창·메뉴·문서 옆 메모를 누를 때는 그대로 — 메모의 [결과 보기] 등이 다시 부른다)
     function onDownOutside(e) {
+      if (!props.active) return;
       edgeStop();
       if (!peek.value || panelEl.value?.contains(e.target) || e.target.closest?.('.floatwin, .toasts, dialog, .barmore, .doc-view-options, .railover, .tour')) return;
       closePeek();
     }
-    // 편집기 안을 누르면(iframe — 같은 출처) 펼쳐 둔 패널을 접는다(표식을 눌러 연 것은 누른 뒤에 열리므로 그 누름은 닫지 않는다)
+    // iframe의 누름은 바깥 문서로 전달되지 않으므로 열린 문서 메뉴를 여기서도 접는다.
     let frameDoc = null;
-    const onFrameDown = () => { edgeStop(); if (peek.value) closePeek(); };
+    function onFrameDown() {
+      if (!props.active) return;
+      if (moreOpen.value) closeMore();
+      edgeStop();
+      if (peek.value) closePeek();
+    }
+    const editorOfficeKeys = inject('officeKeyboard');
+    const onFrameKey = e => { if (props.active) editorOfficeKeys(e); };
+    const onFrameFocus = e => { if (props.active && isTyping(e.target)) lastWorkInput = null; };
     function hookFrame() {
       let doc = null; try { doc = editorEl.value?.querySelector('iframe')?.contentDocument || null; } catch { doc = null; }
       if (doc === frameDoc) return;
       frameDoc?.removeEventListener('pointerdown', onFrameDown, true); frameDoc?.removeEventListener('pointermove', onFrameMove, true);
+      frameDoc?.removeEventListener('keydown', onFrameKey, true);
+      frameDoc?.removeEventListener('focusin', onFrameFocus, true);
       frameDoc = doc; frameDoc?.addEventListener('pointerdown', onFrameDown, true); frameDoc?.addEventListener('pointermove', onFrameMove, { capture: true, passive: true });
+      frameDoc?.addEventListener('keydown', onFrameKey, true);
+      frameDoc?.addEventListener('focusin', onFrameFocus, true);
     }
     let foldTimer = 0;
     watch(folded, (f) => { if (!f) closePeek(); clearTimeout(foldTimer); foldTimer = setTimeout(measureOver, 220); });
@@ -1197,7 +1265,7 @@ const DocView = {
       if (!open && !folded.value && s.tab !== 'review') { quietTab = true; s.tab = 'review'; }
     }
     function toggleMemos() { panel.value = { ...panel.value, rmode: memosOn.value ? 'off' : 'margin' }; savePanel(); syncRail(); }
-    watch(stacked, syncRail);
+    watch(stacked, () => { if (props.active) syncRail(); });
     // 끌어 옮긴 메모 자리(rail.js 가 d.s.memoPos 에 두고 이 브라우저에 기억 — view.js readMemoPos)
     if (!s.memoPos) s.memoPos = readMemoPos(s.id);
     const movedMemos = computed(() => Object.keys(s.memoPos || {}).length);
@@ -1206,6 +1274,7 @@ const DocView = {
     // 강조 자리·창 폭이 바뀔 때와 1초마다
     const over = ref(null);
     function measureOver() {
+      if (!props.active) return;
       const host = editorEl.value; const f = host?.querySelector('iframe');
       let doc = null; try { doc = f?.contentDocument; } catch { /* 다른 출처(원격 편집기) */ }
       const sc = doc?.getElementById('scroll-container');
@@ -1231,12 +1300,12 @@ const DocView = {
     }
     const overStyle = computed(() => (over.value ? { top: `${over.value.top}px`, bottom: `${over.value.bottom}px`, left: `${over.value.left}px`, right: `${over.value.right}px` } : { visibility: 'hidden' }));
     let overTimer = null;
-    watch(railOver, (on) => {
+    watch(() => props.active && railOver.value, (on) => {
       clearInterval(overTimer); overTimer = null;
-      if (!on) { over.value = null; return; }
+      if (!on) return;
       nextTick(measureOver); overTimer = setInterval(measureOver, 1000);
     }, { immediate: true });
-    watch(() => [s.anchors, panel.value.w, leftover.value], () => { if (railOver.value) requestAnimationFrame(measureOver); });
+    watch(() => [s.anchors, panel.value.w, leftover.value], () => { if (props.active && railOver.value) requestAnimationFrame(measureOver); });
     watch(() => ed.value?.ready, (r) => { if (r) { hookFrame(); nextTick(measureOver); } });
 
     /** 경계선 끌기 — 오른쪽 창 폭(넓은 창 — 끝까지 밀면 접기)·높이(좁은 창) */
@@ -1285,49 +1354,45 @@ const DocView = {
       const dw = { ArrowLeft: 1, ArrowRight: -1 }[e.key] * (e.shiftKey ? 80 : 24);
       if (dw) { e.preventDefault(); panel.value = { ...panel.value, w: clampPanelW(panel.value.w + dw, e.currentTarget.closest('.v3layout')?.clientWidth || 0) }; savePanel(); }
     }
-    // ── 편집기 메뉴·도구 막대: 휴대전화 폭(600px 이하)이면 기본으로 숨긴다 — [⋯] 메뉴 '편집 도구 막대'로 켜면 기억(view.js readTools) ──
-    const phoneQuery = matchMedia('(max-width: 600px)');
-    const phone = ref(phoneQuery.matches);
+    // 하나로 묶인 편집 메뉴와 서식은 모든 화면에서 기본으로 보인다.
     const mobileEnvironment = ref(isMobileDevice(window));
-    const onPhone = () => { phone.value = phoneQuery.matches; mobileEnvironment.value = isMobileDevice(window); };
     function openMobileOptions() { documentAutomation()?.execute('tool:options', undefined, { allowDialog: true }); }
-    const toolsPref = ref(readTools());
-    const tools = computed(() => !phone.value || toolsPref.value);
-    function applyTools() { if (ed.value?.ready) d.editor?.setChrome?.({ menu: tools.value, toolbar: tools.value }); }
-    function toggleTools() { toolsPref.value = !tools.value; writeTools(toolsPref.value); }
-    watch(tools, applyTools);
-    watch(() => ed.value?.ready, (r) => { if (r && !tools.value) applyTools(); });
-    // ── [⋯] 메뉴(좁은 창): 밖을 누르거나(편집기 안을 누르면 이 창이 blur 된다)·Esc·메뉴 안 단추·링크를 고르면 닫는다 ──
-    const moreOpen = ref(false); const moreEl = ref(null);
-    function onMoreClick(e) { if (!e.target.closest('summary') && e.target.closest('button, a')) moreOpen.value = false; }
-    function onDocDown(e) { if (moreOpen.value && !moreEl.value?.contains(e.target)) moreOpen.value = false; }
-    const closeMore = () => { moreOpen.value = false; };
-    // 휴대전화 폭에서는 위 막대가 여러 줄로 접혀 [⋯]가 왼쪽에 올 수 있다 — 오른쪽 맞춤 메뉴가 화면 왼쪽 밖으로 잘리지 않게 옮긴다
-    watch(moreOpen, async (open) => {
-      const menu = moreEl.value?.querySelector('.more-items'); if (!menu) return;
-      menu.style.transform = '';
-      if (!open) return;
-      await nextTick();
-      const r = menu.getBoundingClientRect(); const room = document.documentElement.clientWidth;
-      const dx = r.left < 8 ? 8 - r.left : r.right > room - 8 ? room - 8 - r.right : 0;
-      if (dx) menu.style.transform = `translateX(${Math.round(dx)}px)`;
+    const tools = inject('officeEditingRowVisible');
+    const toggleTools = () => { tools.value = !tools.value; };
+    watch([tools, () => ed.value?.ready], ([shown, ready]) => {
+      if (ready) d.editor?.setChrome?.({ menu: shown, toolbar: shown });
     });
+
+    const moreOpen = ref(null); const moreEl = ref(null); const popoverEl = ref(null);
+    const statusTrigger = ref(null); const actionTrigger = ref(null);
+    function toggleMore(kind) {
+      if (moreOpen.value === kind) { closeMore(true); return; }
+      moreOpen.value = kind;
+      if (kind === 'actions') readDocumentView();
+      nextTick(() => { if (moreOpen.value === kind) popoverEl.value?.focus({ preventScroll: true }); });
+    }
+    function closeMore(restoreFocus = false) {
+      const trigger = moreOpen.value === 'status' ? statusTrigger : actionTrigger;
+      moreOpen.value = null;
+      if (restoreFocus === true) nextTick(() => { if (props.active && !moreOpen.value) trigger.value?.focus({ preventScroll: true }); });
+    }
+    function onDocDown(e) { if (props.active && moreOpen.value && !moreEl.value?.contains(e.target)) closeMore(); }
+    function onMoreFocusOut(e) { if (e.relatedTarget && !moreEl.value?.contains(e.relatedTarget)) closeMore(); }
     // 다룰 곳(편집기·요청 창·첨부 칸) 밖에 파일을 놓아도 브라우저가 파일을 열어 화면을 떠나지 않게. 패널에 놓으면 첨부만
     const isFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
     function onWinDragOver(e) {
-      if (docOf(state.route) !== props.id) return;
+      if (!props.active) return;
       if (!isFiles(e)) return; const handled = e.defaultPrevented; e.preventDefault();
       if (!handled) e.dataTransfer.dropEffect = e.target.closest?.('.panel') ? 'copy' : 'none';
     }
     function onWinDrop(e) {
-      if (docOf(state.route) !== props.id) return;
+      if (!props.active) return;
       if (!isFiles(e) || e.defaultPrevented) { if (isFiles(e)) e.preventDefault(); return; }
       e.preventDefault();
       if (e.target.closest?.('.panel')) d.uploadFiles([...e.dataTransfer.files]);
     }
-    let reloadingTutorialRestore = false;
     function onBeforeUnload(e) {
-      if (!reloadingTutorialRestore && (s.draft.dirty || s.draft.saving) && !handle?.departureReceived?.()) {
+      if (!preparedExit && (bodyNeedsSave() || hasUnsentInput())) {
         e.preventDefault(); e.returnValue = '';
       }
     }
@@ -1344,37 +1409,78 @@ const DocView = {
       if (!serverNotice.value) return;
       serverNotice.value = s.draft.dirty || s.draft.saving ? '서버에 다시 연결했습니다. 상단에서 입력한 글의 저장 상태를 확인하세요.' : '';
     }
-    const offs = [d.on('menu-action', onMenuAction), d.on('editor-key', onEditorKey), d.on('ws', serverRestarting), d.on('reconnect', serverReconnected), d.on('annotation-click', onAnnClick)];
+    const offs = [d.on('menu-action', p => { if (props.active) onMenuAction(p); }), d.on('editor-key', onEditorKey), d.on('ws', serverRestarting), d.on('reconnect', serverReconnected), d.on('annotation-click', onAnnClick)];
     s.railOpen = railVisible(panel.value.rmode, { stacked: stacked.value });
-    onMounted(async () => {
+    let viewClosed = false; let connected = false;
+    let lastWorkInput = null;
+    function rememberWorkInput(event) {
+      const input = event.target;
+      if (input === handle?.frame?.()) lastWorkInput = null;
+      else if (isTyping(input) && rootEl.value?.parentElement?.contains(input)) lastWorkInput = input;
+    }
+    async function restoreWorkFocus(canRestore) {
+      if (!props.active || !canRestore()) return false;
+      const input = lastWorkInput;
+      if (input?.isConnected && !input.matches(':disabled') && rootEl.value?.parentElement?.contains(input)) {
+        if (folded.value && panelEl.value?.contains(input)) { openPeek('held'); await nextTick(); }
+        if (!props.active || !canRestore()) return false;
+        if (!input.closest('[inert], [hidden]') && getComputedStyle(input).visibility === 'visible' && input.getClientRects().length) {
+          input.focus({ preventScroll: true });
+          if (document.activeElement === input) return true;
+        }
+      }
+      return !s.settingsOpen && !!handle?.focusDocumentInput();
+    }
+    function activateView() {
+      document.addEventListener('focusin', rememberWorkInput);
       addEventListener('keydown', onKey); addEventListener('resize', onResize); addEventListener('dragover', onWinDragOver); addEventListener('drop', onWinDrop);
-      void refreshRecoveryFiles();
-      addEventListener('beforeunload', onBeforeUnload);
-      leaveGuards.set(props.id, guard);
-      loadAutomation(); addEventListener('focus', refreshAutomation); document.addEventListener('visibilitychange', refreshAutomation);
+      refreshAutomation(); addEventListener('focus', refreshAutomation); document.addEventListener('visibilitychange', refreshAutomation);
       automationPoll = setInterval(refreshAutomation, 15000);
-      stackQuery.addEventListener('change', onStack); phoneQuery.addEventListener('change', onPhone); document.addEventListener('pointerdown', onDocDown, true); addEventListener('blur', closeMore);
+      document.addEventListener('pointerdown', onDocDown, true); addEventListener('blur', closeMore);
       document.addEventListener('pointerdown', onDownOutside, true); document.addEventListener('pointermove', onHostMove, { capture: true, passive: true });
       document.documentElement.addEventListener('pointerleave', onViewportLeave);
       addEventListener('blur', onViewportLeave);
+      onResize();
+      if (connected) void readInitialTour();
+    }
+    function deactivateView() {
+      clearInterval(automationPoll); automationPoll = null;
+      clearTimeout(foldTimer); closeMore(); closePeek();
+      document.removeEventListener('pointerdown', onDownOutside, true); document.removeEventListener('pointermove', onHostMove, true);
+      document.documentElement.removeEventListener('pointerleave', onViewportLeave);
+      removeEventListener('blur', onViewportLeave);
+      removeEventListener('focus', refreshAutomation); document.removeEventListener('visibilitychange', refreshAutomation);
+      document.removeEventListener('pointerdown', onDocDown, true); removeEventListener('blur', closeMore);
+      document.removeEventListener('focusin', rememberWorkInput);
+      removeEventListener('keydown', onKey); removeEventListener('resize', onResize); removeEventListener('dragover', onWinDragOver); removeEventListener('drop', onWinDrop);
+    }
+    watch(active, shown => {
+      handle?.setForeground(shown);
+      if (shown) activateView();
+      else { deactivateView(); tourStartGeneration++; }
+    }, { flush: 'post' });
+
+    const discardLocalChanges = async () => {
+      retainedSaves.discard(props.id);
+      await handle?.cancelSave();
+    };
+    const session = { backgroundSave, leaveTutorial, saveForClose, prepareClose, bodyNeedsSave, hasUnsentInput, discardLocalChanges, restoreWorkFocus };
+    onMounted(async () => {
+      void refreshRecoveryFiles();
+      officeDocs.set(props.id, session);
+      addEventListener('beforeunload', onBeforeUnload);
+      stackQuery.addEventListener('change', onStack);
+      if (props.active) activateView();
       mount();
-      await d.refresh(); d.connect();
+      await d.refresh();
+      if (viewClosed) return;
+      d.connect(); connected = true;
       try {
         const key = `hwpx.tutorial-recovery-notice:${props.id}`;
         const notice = sessionStorage.getItem(key); sessionStorage.removeItem(key);
         if (notice === 'AI_IN_FLIGHT') toast('진행 중인 AI 작업을 다시 보내지 않도록 요청 전 단계로 돌아왔습니다.');
       } catch { /* 알림 저장을 사용할 수 없어도 복구한 문서는 엽니다. */ }
-      // 체험 따라 하기: 이 문서가 진행 중인 체험 문서면 편집기가 뜬 뒤 붙인다(web/tutorial.js)
-      if (s.info?.tutorialSession && s.info?.tutorialGuided) {
-        try {
-          await loadTour(props.id);
-          const showIntro = state.tutorialIntroDocId === props.id;
-          const resume = state.tutorialResumeDocId === props.id;
-          if (resume) state.tutorialResumeDocId = null;
-          state.tutorialIntroDocId = null;
-          await startTourHere({ showIntro, resume });
-        } catch (e) { tourPaused.value = true; toastError(e, '안내 진행 정보를 읽지 못했습니다: '); }
-      }
+      if (props.active) void readInitialTour();
     });
     // ── 체험(공모전 체험 계정 — server/tutorial.js·web/tutorial.js) ──
     // [체험 안내]는 체험 문서(서버가 만든 사본 — info.tutorial)에서만. 다른 문서에서 누르면 엉뚱한 문서로 따라 하기가 열렸다
@@ -1417,28 +1523,41 @@ const DocView = {
       finally { tutorialSaving.value = false; }
     }
     let tour = null; let tutorialClosed = false; let tourStartGeneration = 0; const tourPaused = ref(false);
+    let tourRead = false;
+    async function readInitialTour() {
+      if (!tourOn.value || tour || tourRead) return;
+      tourRead = true;
+      try {
+        await loadTour(props.id);
+        if (tutorialClosed || !props.active) { tourRead = false; return; }
+        const showIntro = state.tutorialIntroDocId === props.id;
+        const resume = state.tutorialResumeDocId === props.id;
+        if (resume) state.tutorialResumeDocId = null;
+        if (showIntro) state.tutorialIntroDocId = null;
+        await startTourHere({ showIntro, resume });
+      } catch (e) { tourPaused.value = true; toastError(e, '안내 진행 정보를 읽지 못했습니다: '); }
+    }
     async function startTourHere({ showIntro = false, resume = false } = {}) {
       const generation = ++tourStartGeneration;
-      for (let k = 0; k < 150 && !(s.editor?.ready && s.paragraphs?.length) && !tutorialClosed && generation === tourStartGeneration; k++) await new Promise((r) => setTimeout(r, 200));
-      if (tutorialClosed || !tourOn.value || generation !== tourStartGeneration) return;
+      for (let k = 0; k < 150 && !(s.editor?.ready && s.paragraphs?.length) && !tutorialClosed && props.active && generation === tourStartGeneration; k++) await new Promise((r) => setTimeout(r, 200));
+      if (tutorialClosed || !props.active || !tourOn.value || generation !== tourStartGeneration) { if (!tour) tourRead = false; return; }
       if (!(s.editor?.ready && s.paragraphs?.length)) { tourPaused.value = true; toast('편집기가 아직 준비되지 않았습니다. 준비된 뒤 [튜토리얼 계속하기]를 눌러 주세요.'); return; }
       if (tour) tour.stop();
       const m = await import('./tutorial.js');
       await refreshTutorialCatalog().catch(() => { tutorialItems.value = []; });
-      if (tutorialClosed || !tourOn.value || generation !== tourStartGeneration) return;
+      if (tutorialClosed || !props.active || !tourOn.value || generation !== tourStartGeneration) { if (!tour) tourRead = false; return; }
       const saved = m.tourState(props.id);
       if (saved?.ctx?.guidePaused && !resume) { tourPaused.value = true; return; }
       if (saved?.ctx) saved.ctx.guidePaused = false;
       tourPaused.value = false;
-      tour = m.runTour({ d, docId: props.id, me: state.me, config: state.config, showIntro, onComplete: completeTutorial,
+      tour = m.runTour({ d, docId: props.id, host: rootEl.value.parentElement, topBar: document.querySelector('[data-testid="office-primary-row"]'), me: state.me, config: state.config, showIntro, onComplete: completeTutorial,
+        onReload: () => emit('restore', props.id),
         onRestore: async value => {
           tour = null;
           if (value.recoveryFallback?.reason === 'AI_IN_FLIGHT') {
             try { sessionStorage.setItem(`hwpx.tutorial-recovery-notice:${props.id}`, 'AI_IN_FLIGHT'); } catch { /* 알림만 생략 */ }
           }
-          // 편집기의 undo·자동 저장·지연 응답을 함께 버리고 서버 복구본으로 새 실행을 시작합니다.
-          reloadingTutorialRestore = true;
-          location.reload();
+          emit('restore', props.id);
         },
         onNext: nextCourse.value ? startNextTutorial : null, onEnd: ({ done }) => {
         tour = null; tourPaused.value = !done;
@@ -1451,18 +1570,21 @@ const DocView = {
       catch (e) { tourPaused.value = true; toastError(e, '튜토리얼 안내를 다시 열지 못했습니다: '); }
     }
     onBeforeUnmount(() => {
+      viewClosed = true;
+      recoveryRequests.abort();
       tutorialClosed = true;
       tourStartGeneration++;
       automationClosed = true; clearInterval(automationPoll); clearInterval(overTimer); clearTimeout(peekTimer); clearTimeout(edgeTimer); clearTimeout(foldTimer);
-      document.removeEventListener('pointerdown', onDownOutside, true); document.removeEventListener('pointermove', onHostMove, true);
-      document.documentElement.removeEventListener('pointerleave', onViewportLeave);
-      removeEventListener('blur', onViewportLeave);
-      try { frameDoc?.removeEventListener('pointerdown', onFrameDown, true); frameDoc?.removeEventListener('pointermove', onFrameMove, true); } catch { /* 이미 없음 */ }
-      removeEventListener('focus', refreshAutomation); document.removeEventListener('visibilitychange', refreshAutomation);
-      stackQuery.removeEventListener('change', onStack); phoneQuery.removeEventListener('change', onPhone); document.removeEventListener('pointerdown', onDocDown, true); removeEventListener('blur', closeMore);
-      removeEventListener('keydown', onKey); removeEventListener('resize', onResize); removeEventListener('dragover', onWinDragOver); removeEventListener('drop', onWinDrop);
+      deactivateView();
+      try {
+        frameDoc?.removeEventListener('pointerdown', onFrameDown, true);
+        frameDoc?.removeEventListener('pointermove', onFrameMove, true);
+        frameDoc?.removeEventListener('keydown', onFrameKey, true);
+        frameDoc?.removeEventListener('focusin', onFrameFocus, true);
+      } catch { /* 편집기 창이 이미 없음 */ }
+      stackQuery.removeEventListener('change', onStack);
       removeEventListener('beforeunload', onBeforeUnload);
-      if (leaveGuards.get(props.id) === guard) leaveGuards.delete(props.id);
+      if (officeDocs.get(props.id) === session) officeDocs.delete(props.id);
       try { tour?.stop(); } catch { /* 없음 */ }
       for (const off of offs) off();
       try { handle?.destroy(); } catch { /* 이미 없음 */ }
@@ -1470,13 +1592,13 @@ const DocView = {
       if (window.__doc === d) delete window.__doc;
     });
     return {
-      d, s, ed, editorEl, recoveryFiles, canRename, titleEdit, titleInp, editTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipHead, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
-      env, agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, onMoreClick, tools, toggleTools, mobileEnvironment, openMobileOptions,
+      d, s, ed, rootEl, editorEl, active, ICON, recoveryFiles, canRename, titleEdit, titleInp, renameTrigger, editTitle, cancelTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
+      agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, popoverEl, statusTrigger, actionTrigger, toggleMore, closeMore, onMoreFocusOut, tools, toggleTools, mobileEnvironment, openMobileOptions,
       folded, peek, panelEl, openPeek, togglePin, edgeTip, aiGlance, onTabEnter, onTabLeave, onPanelEnter, onPanelLeave, onPanelFocusOut,
       memosOn, toggleMemos, movedMemos, resetMemoPos, railOver, over, overStyle,
-      documentView, readDocumentView, toggleDocumentView,
+      documentView, toggleDocumentView,
       realtime, liveMode, liveDoc, saveTip, leftover, loBusy, loConfirm, loMsg, VIEW_LABEL,
-      retrySave, keepMine, carryMine, rebase, openSubmit, openCr, openAgentHelp, saveHangul, mergeLeftover, closeLeftover, remount, goBack, go, clip,
+      retrySave, keepMine, carryMine, rebase, openSubmit, openCr, openDocumentHelp, agentHelpHash, saveHangul, mergeLeftover, closeLeftover, remount, go, clip,
       tourOn, tourPaused, openTour, tutorialSaving, completeTutorial, startNextTutorial, nextCourse, stateMeTutorial,
     };
   },
@@ -1484,17 +1606,79 @@ const DocView = {
 
 const App = {
   components: { Login, DocList, DocView, HelpDialog, AdminServerPanel, TutorialMenu, AdminTokenNotice },
-  template: `<div class="app">
+  template: `<div class="app office-app">
     <Login v-if="!state.me && ready"/>
-    <DocView v-for="id in editorIds" :key="id" :id="id" v-show="id===docId" :inert="id!==docId"/>
-    <TutorialMenu v-if="state.me && !docId && tutorialRoute"/>
-    <main v-else-if="state.me && !docId && adminRoute" class="admin-page"><AdminServerPanel v-if="state.me.role==='admin'"/>
-      <section v-else class="admin-denied" data-testid="admin-denied"><h1>관리자만 사용할 수 있습니다</h1><p>서버 설정은 관리자에게 요청하세요.</p><a href="#/">문서 목록으로</a></section></main>
-    <DocList v-else-if="state.me && !docId"/>
-    <aside v-if="backgroundDocs.length" class="departure-status" aria-live="polite">
-      <a v-for="doc in backgroundDocs" :key="doc.id" :href="'#/doc/'+doc.id">{{ doc.title }} · {{ doc.running ? '저장 중' : '저장 상태 확인' }}</a>
+    <header v-if="state.me" class="office-bar" aria-label="문서 작업 공간" data-testid="office-primary-row" :inert="introOpen">
+      <div class="office-product-menu-wrap" ref="productMenuWrap">
+        <button ref="productMenuButton" type="button" class="office-action office-app-menu" data-testid="office-app-menu"
+          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><span class="office-app-menu-icon" aria-hidden="true">☰</span><span class="office-action-text">HWPX Cowork</span></button>
+        <div v-if="productMenuOpen" class="office-product-menu" data-testid="office-product-menu">
+          <button type="button" data-testid="cowork-tutorial" @click="openTutorial">튜토리얼</button>
+          <button type="button" data-testid="cowork-intro" @click="openIntro">소개 영상 보기</button>
+        </div>
+      </div>
+      <button ref="homeButton" type="button" class="office-action" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
+        :disabled="windowClosing" title="문서함" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
+      <div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey" v-if="tabs.items.length">
+        <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
+          <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"
+            data-testid="office-tab" :data-doc-id="tab.id" :title="tabLabel(tab)" :aria-label="tabLabel(tab)" :aria-busy="tab.closing || tab.saving || reviewedSavings.has(tab.id)" :disabled="windowClosing" @click="activateTab(tab.id)">
+            <span class="office-tab-icon" aria-hidden="true" v-html="ICON.file"></span>
+            <span class="office-tab-name" :class="{ split: officeNames.get(tab.id)?.prefix }" :data-testid="tab.id === docId ? 'doc-title' : undefined">
+              <template v-if="officeNames.get(tab.id)?.prefix"><span class="office-tab-prefix">{{ officeNames.get(tab.id).prefix }}</span><span class="office-tab-suffix">{{ officeNames.get(tab.id).suffix }}</span></template>
+              <template v-else>{{ tab.title }}</template>
+            </span>
+            <span v-if="officeNames.get(tab.id)?.duplicate" class="office-tab-number" aria-hidden="true">{{ officeNames.get(tab.id).duplicate }}</span>
+            <span v-if="tab.failed || tab.unavailable" class="office-tab-state failed" aria-hidden="true">!</span><span v-else-if="tab.dirty" class="office-tab-state" aria-hidden="true">●</span>
+          </button>
+          <button type="button" class="office-tab-close" tabindex="-1" data-testid="office-tab-close" :data-doc-id="tab.id" :disabled="tab.closing || windowClosing"
+            :title="tab.closing ? '저장 중' : '탭 닫기'" :aria-label="tab.title + ' 탭 닫기'" @click="closeTab(tab.id, true)">
+            <span v-if="tab.closing" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">×</span>
+          </button>
+        </div>
+      </div>
+      <button type="button" class="office-action" data-testid="office-new-document" :disabled="windowClosing" title="새 문서" aria-label="새 문서" @click="newDocument"><span class="office-plus" aria-hidden="true">+</span></button>
+      <button type="button" class="office-action" data-testid="office-open-files" :disabled="opening || windowClosing" :aria-busy="opening" :title="openFilesTip" @click="pickFiles">
+        <span v-if="opening" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.file"></span><span class="office-action-text">파일 열기</span></button>
+      <input ref="fileInput" type="file" accept=".hwpx" multiple hidden data-testid="office-file-input" @change="filesPicked"/>
+      <small v-if="opening" class="office-visually-hidden" role="status">파일 여는 중…</small>
+      <div id="office-document-controls" :inert="windowClosing || !!tabs.find(docId)?.closing"></div>
+    </header>
+    <aside v-if="closeIssue" class="office-close-problem" data-testid="office-close-problem" :data-doc-id="closeIssue.id" aria-label="탭 닫기 확인" @keydown.esc.stop.prevent="cancelCloseIssue">
+      <div class="office-close-message" role="status">
+        <strong>‘{{ closeIssue.title }}’</strong>
+        <template v-if="discardConfirm"> 이 탭에서 저장되지 않은 변경과 작성 중인 내용을 버리고 닫을까요?</template>
+        <template v-else> 탭을 닫기 전에 저장을 마치지 못했습니다. 작성한 내용은 탭에 남아 있습니다.<span v-if="closeIssue.message" class="office-close-detail">{{ closeIssue.message }}</span></template>
+      </div>
+      <div class="office-close-actions" v-if="discardConfirm">
+        <button ref="cancelDiscard" type="button" class="small" data-testid="office-close-cancel" @click="cancelCloseIssue">취소</button>
+        <button type="button" class="small danger" data-testid="office-close-discard-confirm" :disabled="windowClosing" @click="discardFailedTab">변경 버리고 닫기</button>
+      </div>
+      <div class="office-close-actions" v-else>
+        <button ref="retryButton" type="button" class="small" data-testid="office-close-retry" :disabled="windowClosing" @click="retryCloseIssue">저장 재시도</button>
+        <button type="button" class="small" data-testid="office-close-discard" :disabled="windowClosing" @click="askDiscard">변경 버리고 닫기…</button>
+        <button type="button" class="small" data-testid="office-close-cancel" @click="cancelCloseIssue">취소</button>
+      </div>
     </aside>
+    <div v-if="state.me" class="office-workspace" :inert="windowClosing || introOpen">
+      <section v-for="tab in tabs.items" :key="tab.id" :id="panelId(tab.id)" role="tabpanel" :aria-labelledby="tabId(tab.id)"
+        class="office-document" :class="{parked: tab.id !== docId}" :aria-hidden="tab.id !== docId" :inert="tab.id !== docId || tab.closing"
+        data-testid="office-document" :data-doc-id="tab.id">
+        <div :id="overlayId(tab.id)"></div>
+        <DocView v-if="tab.visited" :key="tab.generation || 0" :id="tab.id" :active="tab.id === docId" @state="updateTab" @unavailable="documentUnavailable" @restore="restoreTab"/>
+      </section>
+      <TutorialMenu v-if="!docId && tutorialRoute"/>
+      <main v-else-if="!docId && adminRoute" class="admin-page"><AdminServerPanel v-if="state.me.role==='admin'" :prepare-restart="saveAllTabs"/>
+        <section v-else class="admin-denied" data-testid="admin-denied"><h1>관리자만 사용할 수 있습니다</h1><p>서버 설정은 관리자에게 요청하세요.</p><a href="#/">문서 목록으로</a></section></main>
+      <DocList v-else-if="!docId" ref="library" @open="openDocument" @logout="logout"/>
+    </div>
     <AdminServerPanel v-if="adminOpen && state.me?.role==='admin'" modal :prepare-restart="adminContext?.prepareRestart" @close="adminOpen = false"/>
+    <div v-if="introOpen" class="office-intro-overlay" @pointerdown.self="closeIntro">
+      <section class="office-intro-dialog" role="dialog" aria-modal="true" aria-labelledby="office-intro-title" data-testid="cowork-intro-dialog" @keydown.esc.stop.prevent="closeIntro">
+        <header><h2 id="office-intro-title">HWPX Cowork 소개 영상</h2><button ref="introClose" type="button" data-testid="cowork-intro-close" @click="closeIntro">닫기</button></header>
+        <iframe title="HWPX Cowork 소개 영상" src="/teaser/" allow="autoplay" @load="bindIntroEscape"></iframe>
+      </section>
+    </div>
     <HelpDialog/>
     <AdminTokenNotice v-if="tokenNotice && state.me" @close="tokenNotice = false"/>
     <div class="toasts" aria-live="polite"><div class="toast" v-for="t in toasts" :key="t.id" :class="t.kind">{{ t.msg }}</div></div></div>`,
@@ -1502,21 +1686,395 @@ const App = {
     const ready = ref(false);
     const adminRoute = computed(() => /^#\/admin(?:[/?]|$)/.test(state.route));
     const tutorialRoute = computed(() => /^#\/tutorial(?:[/?]|$)/.test(state.route));
+    const docId = computed(() => docOf(state.route));
+    const isLibrary = computed(() => !docId.value && !adminRoute.value && !tutorialRoute.value);
+    const tabs = reactive(createTabs());
+    const officeNames = computed(() => officeTabNames(tabs.items));
+    const tabStopId = computed(() => docId.value || tabs.visits[0] || tabs.items[0]?.id);
+    const reviewedSavings = computed(() => new Set(retainedDocIds.value.filter(id => retainedSaves.status(id)?.running)));
+    const fileInput = ref(null); const homeButton = ref(null); const library = ref(null);
+    const windowClosing = ref(false); const opening = ref(false);
+    const closeIssue = ref(null); const discardConfirm = ref(false);
+    const cancelDiscard = ref(null); const retryButton = ref(null);
+    const desktop = window.hwpxDesktopEnvironment;
+    const hasApplicationMenu = typeof desktop?.openApplicationMenu === 'function';
+    const productMenuOpen = ref(false); const productMenuWrap = ref(null); const productMenuButton = ref(null);
+    const introOpen = ref(false); const introClose = ref(null);
+    function closeProductMenu(restoreFocus = false) {
+      if (!productMenuOpen.value) return;
+      productMenuOpen.value = false;
+      if (restoreFocus) productMenuButton.value?.focus({ preventScroll: true });
+    }
+    function openApplicationMenu() {
+      if (hasApplicationMenu) { desktop.openApplicationMenu(); return; }
+      productMenuOpen.value = !productMenuOpen.value;
+    }
+    function productOutside(event) {
+      if (!productMenuWrap.value?.contains(event.target)) closeProductMenu();
+    }
+    function productEscape(event) {
+      if (event.key === 'Escape' && productMenuOpen.value) { event.preventDefault(); closeProductMenu(true); }
+    }
+    const productBlur = () => closeProductMenu();
+    function openTutorial() {
+      closeProductMenu();
+      if (state.me) void navigate('#/tutorial');
+    }
+    async function openIntro() {
+      closeProductMenu();
+      introOpen.value = true;
+      await nextTick();
+      introClose.value?.focus({ preventScroll: true });
+    }
+    async function closeIntro() {
+      introOpen.value = false;
+      await nextTick();
+      productMenuButton.value?.focus({ preventScroll: true });
+    }
+    function bindIntroEscape(event) {
+      event.target.contentWindow?.addEventListener('keydown', key => {
+        if (key.key === 'Escape') { key.preventDefault(); void closeIntro(); }
+      });
+    }
+    const editingRowVisible = ref(true);
+    try { editingRowVisible.value = localStorage.getItem(EDITING_ROW_KEY) !== 'hidden'; } catch { /* 기본값 유지 */ }
+    watch(editingRowVisible, shown => {
+      try { localStorage.setItem(EDITING_ROW_KEY, shown ? 'shown' : 'hidden'); } catch { /* 저장소 사용 불가 */ }
+    });
+    provide('officeEditingRowVisible', editingRowVisible);
+    let exitAttempt = 0; let nativeCloseToken = null;
+    const openFilesTip = 'HWPX를 선택하면 내 개인 문서함에 사본을 만들고 탭에서 엽니다.';
     const adminOpen = ref(false); const adminContext = ref(null); const tokenNotice = ref(false);
     provide('openAdmin', (context) => { if (state.me?.role !== 'admin') return; adminContext.value = context; adminOpen.value = true; });
-    // #/tutorial은 원본 목록만 연다. 시작 버튼을 눌렀을 때 임시 문서를 만든다.
-    // #/doc/<id>[?…] — 옛 주소 #/doc/<id>?legacy=1(v0.2 검토 보기)도 같은 편집기 화면을 연다
-    const docId = computed(() => (/^#\/doc\/([\w-]+)/.exec(state.route) || [])[1] || null);
+    provide('prepareOfficeRestart', saveAllTabs);
+    provide('officeKeyboard', onOfficeKey);
+
+    let routeGeneration = 0; let leaving = null;
+    function setRoute(route, replace = false) {
+      if (location.hash !== route) {
+        if (replace) history.replaceState(null, '', route);
+        else history.pushState(null, '', route);
+      }
+      state.route = route;
+    }
+    async function navigate(route) {
+      const generation = ++routeGeneration;
+      if (route === state.route) return true;
+      const previous = docId.value;
+      const session = officeDocs.get(previous);
+      if (session && docOf(route) !== previous) {
+        if (!leaving) leaving = session.leaveTutorial().catch(e => { toastError(e); return false; }).finally(() => { leaving = null; });
+        const allowed = await leaving;
+        if (generation !== routeGeneration) return false;
+        if (!allowed) { setRoute(state.route, true); return false; }
+        session.backgroundSave();
+      }
+      setRoute(route);
+      return true;
+    }
+    const onHashChange = () => { if (!windowClosing.value) void navigate(location.hash || '#/'); };
+    watch([() => state.me, docId], ([me, id]) => { if (me && id) tabs.visit(id); }, { flush: 'sync' });
+    function scrollToTab(id, focus = false) {
+      if (id !== docId.value) return;
+      const element = document.getElementById(tabId(id));
+      if (focus) element?.focus({ preventScroll: true });
+      element?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    watch(docId, id => { if (id) scrollToTab(id); }, { flush: 'post' });
+    async function activateTab(id, target = 'work') {
+      if (!tabs.find(id)) return;
+      const navigation = navigate(routeOf(id));
+      const generation = routeGeneration;
+      if (!await navigation) return;
+      await nextTick();
+      const canRestore = () => generation === routeGeneration && id === docId.value && !windowClosing.value
+        && !tabs.find(id)?.closing && !document.querySelector('dialog[open]');
+      if (!canRestore()) return;
+      scrollToTab(id);
+      const restored = target === 'work' && await officeDocs.get(id)?.restoreWorkFocus(canRestore);
+      if (!restored && canRestore()) scrollToTab(id, true);
+    }
+    function updateTab(id, updates) {
+      const tab = tabs.find(id); if (tab) Object.assign(tab, updates);
+    }
+    function openDocument(doc) {
+      tabs.add(doc);
+      return activateTab(doc.id);
+    }
+    function goLibrary() { return navigate('#/'); }
+    async function newDocument() {
+      if (!await goLibrary()) return;
+      await nextTick();
+      await library.value?.beginNewDocument();
+    }
+    function removeTab(id) {
+      const next = tabs.remove(id);
+      retainedSaves.discard(id);
+      if (closeIssue.value?.id === id) { closeIssue.value = null; discardConfirm.value = false; }
+      if (docId.value === id) { ++routeGeneration; setRoute(routeOf(next), true); }
+    }
+    async function focusCurrentTab() {
+      await nextTick();
+      if (docId.value) scrollToTab(docId.value, true);
+      else homeButton.value?.focus();
+    }
+    function reportCloseIssue(tab, error) {
+      closeIssue.value = { id: tab.id, title: tab.title, message: error?.message };
+      discardConfirm.value = false;
+      nextTick(() => retryButton.value?.focus({ preventScroll: true }));
+    }
+    async function closeTab(id, focus = false) {
+      const tab = tabs.find(id);
+      if (!tab || tab.closing || windowClosing.value) return;
+      tab.closing = true;
+      try {
+        await nextTick();
+        const session = officeDocs.get(id);
+        if (session && !await session.prepareClose()) return;
+        removeTab(id);
+      } catch (error) {
+        reportCloseIssue(tab, error);
+      } finally {
+        tab.closing = false;
+        if (focus && closeIssue.value?.id !== id) await focusCurrentTab();
+      }
+    }
+    function cancelCloseIssue() {
+      if (discardConfirm.value) {
+        discardConfirm.value = false;
+        nextTick(() => retryButton.value?.focus({ preventScroll: true }));
+        return;
+      }
+      closeIssue.value = null;
+      void focusCurrentTab();
+    }
+    function askDiscard() {
+      discardConfirm.value = true;
+      nextTick(() => cancelDiscard.value?.focus({ preventScroll: true }));
+    }
+    function retryCloseIssue() {
+      const id = closeIssue.value?.id;
+      if (!id) return;
+      closeIssue.value = null;
+      void closeTab(id, true);
+    }
+    async function discardFailedTab() {
+      const id = closeIssue.value?.id;
+      const tab = tabs.find(id);
+      if (!discardConfirm.value || !tab || tab.closing || windowClosing.value) return;
+      tab.closing = true;
+      try {
+        await officeDocs.get(id)?.discardLocalChanges();
+        removeTab(id);
+      } finally {
+        tab.closing = false;
+        await focusCurrentTab();
+      }
+    }
+    function documentUnavailable(id, reason) {
+      const tab = tabs.find(id); const session = officeDocs.get(id);
+      if (!tab || tab.closing || tab.unavailable) return;
+      const why = reason === 'deleted' ? '문서가 삭제됐습니다.' : '문서에 접근할 수 없습니다.';
+      if (session?.bodyNeedsSave() || session?.hasUnsentInput()) {
+        updateTab(id, { failed: true, unavailable: true });
+        toast(`‘${tab.title}’ ${why} 작성한 내용은 열린 탭에서 확인할 수 있습니다.`, { kind: 'warn', ms: 9000 });
+      } else {
+        removeTab(id);
+        toast(`‘${tab.title}’ ${why}`);
+      }
+    }
+    function restoreTab(id) {
+      const tab = tabs.find(id); if (!tab) return;
+      retainedSaves.discard(id);
+      Object.assign(tab, { generation: (tab.generation || 0) + 1, dirty: false, saving: false, failed: false });
+    }
+    function tabLabel(tab) {
+      const duplicate = officeNames.value.get(tab.id)?.duplicate;
+      const title = duplicate ? tab.title + ' · 같은 이름의 탭 ' + duplicate : tab.title;
+      if (tab.failed || tab.unavailable) return title + ' · 저장 상태 확인';
+      if (tab.saving || tab.closing || reviewedSavings.value.has(tab.id)) return title + ' · 저장 중';
+      if (tab.dirty) return title + ' · 저장되지 않은 변경';
+      return title;
+    }
+    function cycleTab(step) {
+      const next = tabs.cycle(docId.value, step);
+      if (next) void activateTab(next);
+    }
+    function onTabKey(event) {
+      const id = event.target.dataset?.docId;
+      if (!id || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+      let next;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') next = tabs.cycle(id, event.key === 'ArrowRight' ? 1 : -1);
+      else if (event.key === 'Home') next = tabs.items[0]?.id;
+      else if (event.key === 'End') next = tabs.items.at(-1)?.id;
+      else if (event.key === 'Delete') { event.preventDefault(); void closeTab(id, true); return; }
+      if (next) { event.preventDefault(); void activateTab(next, 'tab'); }
+    }
+    function onOfficeKey(event) {
+      if (!state.me || windowClosing.value || event.defaultPrevented || event.altKey || event.isComposing || !(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === 'tab' && tabs.items.length) { event.preventDefault(); cycleTab(event.shiftKey ? -1 : 1); }
+      else if (key === 'w' && docId.value && !event.shiftKey) { event.preventDefault(); void closeTab(docId.value, true); }
+      else if (key === 'o' && !event.shiftKey) { event.preventDefault(); pickFiles(); }
+    }
+    function scrollTabs(event) {
+      const strip = event.currentTarget;
+      if (event.deltaX || !event.deltaY || strip.scrollWidth <= strip.clientWidth) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 20 : 1);
+    }
+
+    function pickFiles() {
+      if (!state.me || opening.value || windowClosing.value) return;
+      if (desktop?.pickOfficeFiles) desktop.pickOfficeFiles();
+      else fileInput.value?.click();
+    }
+    let lastBatch = null;
+    let pendingImports = Promise.resolve(); let importCount = 0;
+    async function importFiles(files, where, me) {
+      let first;
+      for (const input of files) {
+        try {
+          const source = typeof input.source === 'string' ? input.source : undefined;
+          let tab = tabs.fromSource(source);
+          if (!tab) {
+            const name = officeFileName(input.name);
+            const body = await officeFileBytes(input);
+            if (!body?.byteLength) throw new Error('파일에 내용이 없습니다.');
+            const doc = await api('/api/docs', { method: 'POST', body, raw: true, headers: { ...uploadHeaders(where), 'x-file-name': encodeURIComponent(name) } });
+            if (state.me !== me) continue;
+            tabs.add({ ...doc, source });
+            tab = tabs.find(doc.id);
+          }
+          if (!input.batch || input.batch !== lastBatch) {
+            first ||= tab.id;
+            lastBatch = input.batch || null;
+          }
+        } catch (error) { toastError(error, `${String(input.name || '파일').split(/[\\/]/).pop()} 열기 실패. `); }
+      }
+      if (first && state.me === me) await activateTab(first);
+      await library.value?.refresh();
+    }
+    function queueFiles(files) {
+      if (!Array.isArray(files) || !files.length) return;
+      files = files.filter(file => file && typeof file === 'object');
+      const acknowledge = () => { for (const input of files) if (input.receipt) desktop?.finishOfficeFile?.(input.receipt); };
+      const me = state.me;
+      if (!me || windowClosing.value) {
+        acknowledge();
+        return;
+      }
+      const where = libraryLocation();
+      opening.value = true;
+      importCount++;
+      pendingImports = pendingImports.then(() => importFiles(files, where, me)).catch(toastError).finally(() => {
+        opening.value = --importCount > 0;
+        acknowledge();
+      });
+    }
+    function filesPicked(event) {
+      const files = [...event.currentTarget.files]; event.currentTarget.value = '';
+      queueFiles(files);
+    }
+
+    async function saveAllTabs() {
+      for (const tab of tabs.items) {
+        try { await officeDocs.get(tab.id)?.saveForClose(); }
+        catch (error) { toastError(error, `‘${tab.title}’ 저장 실패. `); return false; }
+      }
+      return true;
+    }
+    async function prepareExit() {
+      if (windowClosing.value || tabs.items.some(tab => tab.closing)) return false;
+      const attempt = ++exitAttempt;
+      windowClosing.value = true;
+      try {
+        await nextTick();
+        await pendingImports;
+        for (const tab of tabs.items) {
+          if (attempt !== exitAttempt) return false;
+          try { if (await officeDocs.get(tab.id)?.prepareClose() === false) return false; }
+          catch (error) { reportCloseIssue(tab, error); return false; }
+        }
+        if (attempt !== exitAttempt) return false;
+        preparedExit = true;
+        return true;
+      } finally { if (attempt === exitAttempt && !preparedExit) windowClosing.value = false; }
+    }
+    async function logout() {
+      if (!await prepareExit()) return;
+      try {
+        for (const id of retainedDocIds.value) retainedSaves.discard(id);
+        tabs.items = []; tabs.visits = [];
+        try { localStorage.removeItem('hwpx.token'); } catch { /* 저장소를 쓸 수 없는 환경 */ }
+        state.token = ''; state.me = null; setRoute('#/', true);
+      } finally { windowClosing.value = false; preparedExit = false; }
+    }
+    function onNativeCommand(event) {
+      if (!state.me || windowClosing.value) return;
+      if (event.detail === 'open-files') pickFiles();
+      else if (event.detail === 'tutorial') openTutorial();
+      else if (event.detail === 'intro') void openIntro();
+      else if (event.detail === 'new-document') void newDocument();
+      else if (event.detail === 'close-tab' && docId.value) void closeTab(docId.value, true);
+      else if (event.detail === 'next-tab') cycleTab(1);
+      else if (event.detail === 'previous-tab') cycleTab(-1);
+      else if (event.detail === 'library') void goLibrary();
+      else if (event.detail === 'refresh-library') void library.value?.refresh();
+    }
+    const onNativeFiles = event => queueFiles(event.detail);
+    async function onNativeClose(event) {
+      if (typeof event.detail !== 'string' || !desktop?.finishClosing) return;
+      const token = event.detail;
+      nativeCloseToken = token;
+      let allowed = false;
+      try { allowed = await prepareExit(); }
+      catch (error) { toastError(error, '창을 닫지 못했습니다. '); }
+      if (nativeCloseToken !== token) return;
+      desktop.finishClosing(token, allowed);
+      if (!allowed) nativeCloseToken = null;
+    }
+    function onNativeCancelClose(event) {
+      if (event.detail !== nativeCloseToken) return;
+      nativeCloseToken = null;
+      ++exitAttempt;
+      preparedExit = false;
+      windowClosing.value = false;
+    }
     onMounted(async () => {
+      addEventListener('hashchange', onHashChange);
+      addEventListener('pointerdown', productOutside, true);
+      addEventListener('keydown', productEscape, true);
+      addEventListener('blur', productBlur);
+      addEventListener('keydown', onOfficeKey, true);
+      addEventListener('hwpx-office-command', onNativeCommand);
+      addEventListener('hwpx-office-files', onNativeFiles);
+      addEventListener('hwpx-office-prepare-close', onNativeClose);
+      addEventListener('hwpx-office-cancel-close', onNativeCancelClose);
       try { state.config = await (await fetch('/api/config')).json(); } catch { state.config = {}; }
       if (state.token) { try { await enterApp(await api('/api/me')); } catch (e) { if (e.status !== 401) toastError(e, '화면을 열지 못했습니다: '); state.token = ''; } }
       tokenNotice.value = shouldShowTokenNotice({ me: state.me, viaLink: viaTokenLink, storage: localStorage });
       ready.value = true;
     });
-    const editorIds = computed(() => state.me ? [...new Set([...retainedDocIds.value, ...(docId.value ? [docId.value] : [])])] : []);
-    const backgroundDocs = computed(() => state.me ? retainedDocIds.value.filter(id => id !== docId.value)
-      .map(id => ({ id, ...retainedSaves.status(id) })) : []);
-    return { state, docId, editorIds, backgroundDocs, toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice };
+    watch(() => ready.value && !!state.me, value => { if (value) desktop?.markOfficeTabsReady?.(); }, { flush: 'post' });
+    onBeforeUnmount(() => {
+      removeEventListener('hashchange', onHashChange);
+      removeEventListener('pointerdown', productOutside, true);
+      removeEventListener('keydown', productEscape, true);
+      removeEventListener('blur', productBlur);
+      removeEventListener('keydown', onOfficeKey, true);
+      removeEventListener('hwpx-office-command', onNativeCommand);
+      removeEventListener('hwpx-office-files', onNativeFiles);
+      removeEventListener('hwpx-office-prepare-close', onNativeClose);
+      removeEventListener('hwpx-office-cancel-close', onNativeCancelClose);
+    });
+    return {
+      state, docId, tabs, officeNames, tabId, panelId, overlayId, tabStopId, reviewedSavings, tabLabel, ICON, isLibrary, opening, windowClosing, fileInput, homeButton, library, openFilesTip, hasApplicationMenu, openApplicationMenu,
+      productMenuOpen, productMenuWrap, productMenuButton, openTutorial, openIntro, introOpen, introClose, closeIntro, bindIntroEscape,
+      activateTab, closeTab, scrollTabs, onTabKey, goLibrary, newDocument, pickFiles, filesPicked, openDocument, updateTab, documentUnavailable, restoreTab, logout, saveAllTabs,
+      closeIssue, discardConfirm, cancelDiscard, retryButton, cancelCloseIssue, askDiscard, retryCloseIssue, discardFailedTab,
+      toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice,
+    };
   },
 };
 createApp(App).mount('#app');

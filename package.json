@@ -107,7 +107,8 @@
     "layout:combos": "node scripts/layout-combos.mjs",
     "layout:matrix": "node scripts/layout-matrix.mjs",
     "layout:pagesplit": "node scripts/layout-pagesplit.mjs",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "mcp:cli": "node cli/hwpx-mcp.mjs"
   },
   "keywords": [],
   "author": "",

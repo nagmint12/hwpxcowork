@@ -8,9 +8,9 @@ import { ICON } from './icons.js';
 import { requestWait, requestRunLabel } from './request-wait.js';
 import { useRequestModel } from './request-model.js';
 import { activityRows, secText } from './activity-rows.js';
-import { proposalPlace, refWords, placeNote } from './proposal-place.js';
+import { proposalPlace, refWords, placeNote, appliedRange } from './proposal-place.js';
 import { agentPrompt as agentPromptText, groupChanges } from './menumodel.js';
-import { colorForUser } from './annotations.js';
+import { colorForUser, paragraphGeo, proposalRange } from './annotations.js';
 import { adoptionInEffect } from './store.js';
 import { installHoldToEdit, focusEditingInput } from './hold-to-edit.js';
 import { paragraphFormatRequested, formatSummary, runPreviewStyle, isRichProposal, formatAdoptionOf, adoptionRecord } from './formatting.js';
@@ -80,7 +80,7 @@ export const MemoEditor = {
   // askLabel 을 주면 [AI에게 요청] 단추(보라 ✦ — 같은 글을 AI 작업으로 이어 맡김, emit 'ask')가 [답글 달기] 앞에 붙는다
   props: { value: String, modelValue: { type: String, default: undefined }, placeholder: String, rows: { type: Number, default: 4 }, okLabel: { type: String, default: '저장' }, busy: Boolean, autofocus: { type: Boolean, default: true }, askLabel: { type: String, default: '' }, askTip: { type: String, default: '' } },
   emits: ['save', 'cancel', 'ask', 'update:modelValue'],
-  template: `<div class="memoedit"><textarea ref="ta" v-model="text" :rows="rows" :placeholder="placeholder" @keydown.ctrl.enter.prevent="save" @keydown.meta.enter.prevent="save" @keydown.esc.stop.prevent="$emit('cancel')"></textarea>
+  template: `<div class="memoedit" :data-office-unsent="text !== (value || '') && !!text.trim()"><textarea ref="ta" v-model="text" :rows="rows" :placeholder="placeholder" @keydown.ctrl.enter.prevent="save" @keydown.meta.enter.prevent="save" @keydown.esc.stop.prevent="$emit('cancel')"></textarea>
     <div class="row end"><span class="muted kbd">Ctrl+Enter</span><button class="small" @click="$emit('cancel')">취소</button><button v-if="askLabel" class="small ai-send me-ask" :disabled="busy || !text.trim()" :title="askTip || null" @click="ask">{{ askLabel }}</button><button class="small primary" :disabled="busy || !text.trim()" @click="save">{{ okLabel }}</button></div></div>`,
   setup(props, { emit }) {
     const local = ref(props.modelValue ?? props.value ?? ''); const ta = ref(null);
@@ -525,6 +525,14 @@ export const ResultItem = {
     });
     function goPlace() {
       const pl = place.value; if (!pl.ref || pl.gone) return;
+      const para = d.byRef(pl.ref);
+      if (para?.container === 'hp:footNote' && !pl.endRef) {
+        const row = p.value;
+        const range = row.status === 'applied' ? appliedRange(row, para, d.s.paraVersion)
+          : proposalRange(row, new Map((d.s.memos || []).map(m => [m.id, m])), paragraphGeo([para]));
+        focusIn(d, range || { ref: pl.ref });
+        return;
+      }
       const tail = pl.endRef ? d.byRef(pl.endRef) : null;
       // 여러 문단이면 첫 문단 머리부터 마지막 문단 끝까지 깜빡인다(마지막 문단 글을 모르면 첫 문단만)
       focusIn(d, tail ? { ref: pl.ref, start: 0, end: Array.from(String(tail.text ?? '')).length, endRef: pl.endRef } : { ref: pl.ref });

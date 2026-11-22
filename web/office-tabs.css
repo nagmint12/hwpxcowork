@@ -1,0 +1,206 @@
+.office-app { display: flex; flex-direction: column; }
+.office-bar {
+  height: 40px;
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 7px;
+  position: relative;
+  z-index: 30;
+  background: var(--entry-tint, #f2edf9);
+  border-bottom: 1px solid var(--line, #ded9e6);
+}
+.office-bar > .office-action,
+.office-product-menu-wrap > .office-action,
+.office-tab-item > button,
+.office-document-tools > button {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  height: 30px;
+  min-height: 30px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.office-bar button:focus-visible { outline: 2px solid var(--entry-accent, #654ab0); outline-offset: -3px; }
+.office-bar > .office-action:hover:not(:disabled),
+.office-product-menu-wrap > .office-action:hover:not(:disabled),
+.office-tab-item > button:hover:not(:disabled),
+.office-document-tools > button:hover:not(:disabled) { background: #e8e0f2; }
+.office-bar > .office-action, .office-product-menu-wrap > .office-action { flex: 0 0 auto; gap: 5px; padding: 0 8px; color: var(--text); }
+.office-action[aria-current="page"] { color: var(--entry-accent); font-weight: 700; background: var(--panel); border-color: var(--line); }
+.office-action .ic, .office-tab-icon, .office-document-menu .ic { width: 15px; height: 15px; }
+.office-app-menu-icon { font-size: 14px; line-height: 1; }
+.office-product-menu-wrap { position: relative; flex: none; }
+.office-product-menu {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #d9dde5);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px #0003;
+}
+.office-product-menu button { border: 0; background: transparent; text-align: left; color: inherit; }
+.office-product-menu button:is(:hover, :focus-visible) { background: var(--hover, #64748b20); }
+.office-intro-overlay { position: fixed; inset: 0; z-index: 12500; display: grid; place-items: center; padding: 10px; background: #101729aa; }
+.office-intro-dialog { width: min(900px, 100%); max-height: calc(100vh - 20px); overflow: auto; background: #121925; color: #fff; border-radius: 9px; }
+.office-intro-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; }
+.office-intro-dialog h2 { margin: 0; font-size: 1rem; }
+.office-intro-dialog iframe { display: block; width: 100%; height: min(70vh, 506px); border: 0; background: #121925; }
+.office-plus { font-size: 19px; line-height: 1; }
+.office-tablist {
+  height: 100%;
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #c8bfd7 transparent;
+}
+.office-tab-item {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+}
+.office-tab-item.selected { color: var(--ink, #26212e); background: var(--panel, white); border-color: #c9badf; box-shadow: inset 0 -2px var(--entry-accent, #6747a6); }
+.office-tab-item .office-tab { min-width: 0; max-width: 240px; padding: 0 4px 0 8px; gap: 5px; }
+.office-tab-item.selected .office-tab { color: var(--entry-accent, #4f3a90); font-weight: 700; }
+.office-tab-icon { display: inline-flex; flex-shrink: 0; }
+.office-tab-icon svg, .office-action .ic svg, .office-document-menu .ic svg { width: 100%; height: 100%; vertical-align: top; }
+.office-tab-name, .office-tab-prefix, .office-tab-suffix { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-tab-name.split { display: flex; }
+.office-tab-prefix { flex: 1 1 auto; }
+.office-tab-suffix { flex: 0 0 auto; max-width: 112px; }
+.office-tab-number { flex: none; padding: 0 3px; border-radius: 4px; background: #e9e2f3; color: #543884; font-size: 10px; }
+.office-tab-item .office-tab-close { color: inherit; width: 24px; min-width: 24px; padding: 0; height: 26px; min-height: 26px; margin: 0 3px; border-radius: 4px; justify-content: center; }
+.office-tab-close span { font-size: 17px; line-height: 1; }
+.office-tab-state { flex: none; color: var(--entry-accent, #4f3a90); line-height: 1; }
+.office-tab-state.failed { color: var(--bad, #a12e33); font-weight: 800; }
+#office-document-controls { flex: 0 0 auto; margin-inline-start: auto; }
+.office-document-tools { display: flex; align-items: center; gap: 4px; padding-inline-start: 5px; border-inline-start: 1px solid #d8cde5; }
+.office-document-tools > button { padding: 0 7px; }
+.office-document-tools > .office-save-status { height: 26px; min-height: 26px; padding: 0 6px; border-color: #d8cde5; background: #fff9; }
+.office-save-status.saved .office-status-mark,
+.office-save-status.clean .office-status-mark { color: #23653c; }
+.office-save-status.dirty .office-status-mark { color: #9a5810; }
+.office-save-status.saving .office-status-mark { color: #6747a6; }
+.office-document-tools > .office-save-status.error,
+.office-document-tools > .office-save-status.recovery { color: #9a2731; background: #fff0f0; border-color: #dfb4bb; font-weight: 650; }
+.office-status-mark { min-width: 12px; text-align: center; font-weight: 750; }
+.office-document-tools > button[aria-expanded="true"] { border-color: #c5b5e0; background: #e9e1f4; }
+.office-popover {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(100% + 5px);
+  inset-inline-end: 7px;
+  width: min(345px, calc(100vw - 14px));
+  max-height: min(65vh, calc(100dvh - 60px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border: 1px solid #d8cee6;
+  border-radius: 10px;
+  background: var(--panel, white);
+  box-shadow: var(--shadow-lg, 0 10px 26px #30244729);
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.office-popover h2 { padding: 3px 7px 5px; margin: 0; font-size: 14px; }
+.office-popover h3 { margin: 0; padding: 4px 7px 2px; color: var(--muted); font-size: 11.5px; font-weight: 650; }
+.office-popover p { margin: 4px 0; }
+.office-save-summary { display: grid; justify-items: start; gap: 5px; padding: 5px 7px; }
+.office-save-summary p { font-size: 12px; color: var(--muted); white-space: pre-line; }
+.office-popover-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 7px; }
+.office-popover-actions button { white-space: normal; text-align: start; }
+.office-popover-group { display: grid; gap: 2px; border-top: 1px solid #ece6f1; padding: 4px 0; }
+.office-popover-group > button,
+.office-popover-group > a,
+.office-participants summary {
+  min-height: 29px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  text-decoration: none;
+  white-space: normal;
+}
+.office-popover-group > button:hover:not(:disabled),
+.office-popover-group > a:hover,
+.office-participants summary:hover { background: #f1ebf8; }
+.office-popover-group > b, .office-popover-group > span { padding-inline: 7px; }
+.office-popover-group button[aria-pressed="true"] { color: var(--entry-accent, #58369a); background: #ede7f6; font-weight: 600; }
+.office-popover-group kbd, .office-item-value { margin-inline-start: auto; color: var(--muted); font-size: 11px; }
+.office-view-modes { display: flex; gap: 5px; padding: 4px 7px; }
+.office-view-modes button { flex: 1; justify-content: center; padding-block: 3px; }
+.office-rename { display: grid; gap: 5px; padding: 5px 7px; }
+.office-rename label { display: grid; gap: 4px; }
+.office-rename .office-popover-actions { padding-inline: 0; }
+.office-leftover { padding: 4px 7px; }
+.office-leftover .office-popover-actions { padding-inline: 0; }
+.office-warn { color: var(--warn, #8f5013); padding-inline: 7px; }
+.office-participants summary { cursor: pointer; display: revert; }
+.office-participants .wp-row { padding-inline: 7px; }
+.office-participants button.office-link { display: inline; padding: 0; border: 0; background: transparent; color: var(--accent); text-decoration: underline; }
+.office-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.office-close-problem {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  background: #fff4e0;
+  border-bottom: 1px solid #e5c48d;
+  color: #38260d;
+  font-size: 13px;
+}
+.office-close-message { overflow-wrap: anywhere; }
+.office-close-detail { display: block; }
+.office-close-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.office-workspace { flex: 1 1 auto; min-height: 0; position: relative; }
+.office-document { position: absolute; inset: 0; }
+.office-document.parked { visibility: hidden; pointer-events: none; }
+.office-document.parked * { visibility: hidden !important; }
+.office-document .docview { height: 100%; }
+.office-workspace > .admin-page { height: 100%; }
+@media (max-width: 899px) { .office-document-tools > .office-direct-export { display: none; } }
+@media (max-width: 759px) {
+  .office-action > .office-action-text, .office-work-label { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+  .office-bar > .office-action, .office-product-menu-wrap > .office-action { min-width: 30px; padding: 0 6px; justify-content: center; }
+  .office-document-tools > .office-document-menu { justify-content: center; min-width: 30px; }
+  .office-tab-item .office-tab { max-width: min(198px, 43vw); }
+}
+@media (max-width: 560px) {
+  .office-bar, .office-document-tools { gap: 2px; padding-inline: 3px; }
+  .office-status-caption { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+  .office-tab-item .office-tab { max-width: min(143px, 30vw); }
+  .office-tab-suffix { max-width: min(82px, 20vw); }
+}
+@media (max-width: 380px) {
+  .office-tab-item .office-tab { padding-inline: 4px 2px; }
+  .office-tab-icon { display: none; }
+  .office-tab-item .office-tab-close { min-width: 22px; width: 22px; margin-inline: 1px; }
+}

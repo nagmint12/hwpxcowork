@@ -81,7 +81,7 @@ async function startManagedChild({ root = projectRoot, entry = path.join(root, '
     reservation = ticket;
     try {
       ticket.config = readLaunchConfiguration(root, childEnv);
-      if (ticket.config.port && (ticket.config.port !== readyInfo.port || ticket.config.host !== readyInfo.host)) {
+      if (!childEnv.HWPX_COWORK_DESKTOP_PIPE && ticket.config.port && (ticket.config.port !== readyInfo.port || ticket.config.host !== readyInfo.host)) {
         try { await probe(ticket.config.host, ticket.config.port); }
         catch (error) {
           // 127.0.0.1 ↔ 0.0.0.0 처럼 같은 포트의 범위를 바꾸면 현재 자식 자신과 겹친다.

@@ -639,7 +639,7 @@ export const CrSubmitDialog = {
   components: { FloatWin },
   props: { cid: Number },
   emits: ['close'],
-  template: `<FloatWin :anchor="null" :width="440" title="검토 요청" cls="cr-submit" @close="$emit('close')">
+  template: `<FloatWin :anchor="null" :width="440" title="검토 요청" cls="cr-submit" :data-office-unsent="unsent" @close="$emit('close')">
     <template v-if="cr">
       <div class="muted" title="변경 요청을 열어 다른 사람에게 검토를 받습니다. 저장 안 된 수정은 먼저 저장합니다">변경 요청 #{{ cr.cid }} · 문단 {{ n }}<span v-if="baseV(cr) != null"> · v{{ baseV(cr) }}에서 고침</span></div>
       <label class="fld">제목 <span class="err" v-if="tried && !String(title || '').trim()">— 제목을 적어 주세요</span>
@@ -668,6 +668,8 @@ export const CrSubmitDialog = {
     });
     const n = computed(() => hunkCount(cr.value));
     const draftDirty = computed(() => !!(d.s.draft?.dirty || d.s.draft?.saving));
+    const unsent = computed(() => desc.value.trim() !== String(cr.value?.description || '').trim()
+      || !!title.value.trim() && title.value.trim() !== (cr.value?.title || (cr.value ? defaultTitle(cr.value) : '')));
     function fillDefault() {
       const f = d.s.submitForm;
       if (!f || f.titled || !cr.value) return;
@@ -699,7 +701,7 @@ export const CrSubmitDialog = {
       } catch (e) { toastError(e, '검토 요청 실패: '); }
       finally { busy.value = false; }
     }
-    return { titleEl, title, desc, busy, tried, loading, cr, n, draftDirty, submit, baseV: baseVOf };
+    return { titleEl, title, desc, busy, tried, loading, cr, n, draftDirty, unsent, submit, baseV: baseVOf };
   },
 };
 
@@ -710,9 +712,10 @@ const hosts = reactive([]); let hostSeq = 0;
 export const CollabHost = {
   components: { CrSubmitDialog },
   props: { priority: { type: Number, default: 1 } },
-  template: `<Teleport to="body"><CrSubmitDialog v-if="isHost && open" :key="'s' + (cid ?? 'mine')" :cid="cid ?? undefined" @close="close"/></Teleport>`,
+  template: `<Teleport :to="overlay"><CrSubmitDialog v-if="isHost && open" :key="'s' + (cid ?? 'mine')" :cid="cid ?? undefined" @close="close"/></Teleport>`,
   setup(props) {
     const d = inject('doc'); const id = ++hostSeq;
+    const overlay = inject('officeDocument', null)?.overlay || 'body';
     // hosts 는 반응형 배열이라 넣은 store 를 꺼내면 프록시가 된다 — 문서 id 로 견준다
     onMounted(() => { hosts.push({ id, doc: String(d.id ?? ''), pri: props.priority }); });
     onBeforeUnmount(() => { const i = hosts.findIndex((h) => h.id === id); if (i >= 0) hosts.splice(i, 1); });
@@ -727,7 +730,7 @@ export const CollabHost = {
     const close = () => { d.s.submitOpen = false; d.s.submitForm = null; };
     // 다른 곳(셸)이 창을 닫았으면 적던 글도 지운다(다음에 열면 새로)
     watch(() => d.s.submitOpen, (v) => { if (!v && d.s.submitForm) d.s.submitForm = null; });
-    return { isHost, open, cid, close };
+    return { isHost, open, cid, close, overlay };
   },
 };
 

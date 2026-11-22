@@ -5,7 +5,7 @@ import { tutorialScene } from '../tutorial-scenes.js';
 export function buildClipboard(env) {
   const { d, s, ctx, config, focusIn, rectOf, pad, q, fdoc, inFrame, frameRect, selectFor, locate, phraseRect, cw } = env;
   const { finish, intro, paragraph, focus, frameButton, frameDialog, closeFrameDialog, openShape, reveal, top, memo, memoCard, fill } = stepHelpers(env);
-    // 휴대폰: 편집기 메뉴·도구 막대가 기본으로 숨겨져 [복사하기]·[모두 선택]이 없다(Ctrl 단축키도 없다) — 먼저 도구 막대를 켜게 한다
+    // 휴대폰에서 도구 막대를 접어 두었으면 먼저 펼친다.
     const charPicked = () => !!s.selection && !s.selection.collapsed && !!String(s.selection.text || '').trim();
     const studio = () => { try { return fdoc()?.defaultView?.rhwpStudio?.automation || null; } catch { return null; } };
     const codesShown = () => { try { return !!studio()?.getContext?.()?.showControlCodes; } catch { return false; } };
@@ -20,7 +20,7 @@ export function buildClipboard(env) {
     // 두 표식은 남겨 두고 표·그림만 지운 경우도 실제 전체 복사 결과로 감지합니다.
     const selectionLost = () => !copied() && (!locate('영역 시작') || !locate('영역 끝') || copiedSelection()) ? (env.touch ? 2 : 1) : null;
     const selectAll = () => { if (!studio()?.execute) throw new Error('편집기가 준비된 뒤 다시 눌러 주세요.'); return studio().execute('edit:select-all'); };
-    const toolsStep = { title: '편집 도구 막대 켜기', text: () => (q('[data-testid="toggle-editor-tools"]') ? '[편집 도구 막대]를 누르세요. 편집기 메뉴와 도구 막대가 나타납니다.' : '휴대폰 화면에서는 편집기 메뉴와 도구 막대가 숨겨져 있습니다. 위 [⋯] 메뉴를 여세요.'),
+    const toolsStep = { title: '편집 도구 막대 켜기', text: () => (q('[data-testid="toggle-editor-tools"]') ? '[편집 메뉴 및 서식 막대]를 누르세요.' : '위 [문서 작업]을 열어 편집 메뉴 및 서식 막대를 켜세요.'),
       ring: () => pad(rectOf(q('[data-testid="toggle-editor-tools"]') || q('[data-testid="bar-more-toggle"]')), 4), open: () => pad(rectOf(q('[data-testid="toggle-editor-tools"]') || q('[data-testid="bar-more-toggle"]')), 4),
       until: toolsOn };
     const steps = [
