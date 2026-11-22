@@ -1,27 +1,27 @@
-# GitHub Pages: 소개 쪽 + 브라우저 편집기 체험(2026-11-18). 사이트는 deploy/github-pages/build-site.mjs 가 만든다.
-# 이 사이트는 누구나 여는 공개 주소다 — 편집기 AI 도우미의 API 키를 저장하지 않는 빌드인지 build-site.mjs 가 확인한다.
 name: GitHub Pages
-
 on:
   push:
     branches: [main]
     paths:
+      - 'web/**'
       - 'studio/dist/**'
+      - 'vendor/rhwp/npm/editor/**'
       - 'deploy/github-pages/**'
-      - 'web/icons/**'
-      - 'web/teaser3/**'
+      - 'engine/**'
+      - 'server/**'
+      - 'docs/manuals/**'
+      - 'skill/hwpx-standard-report/reference/**'
+      - 'tutorial/**'
+      - 'package*.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -32,20 +32,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
+            web
             studio/dist
+            vendor/rhwp/npm/editor
             deploy/github-pages
-            web/icons
-            web/favicon.ico
-            web/teaser3
-            tutorial/결과보고서.hwpx
-          sparse-checkout-cone-mode: false
+            server
+            engine
+            tutorial
+            docs
+            skill/hwpx-standard-report/reference
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build site
-        # HWPX_SERVER_URL(저장소 변수): 주면 app/ 에 그 서버 입구를 더 만든다 — 2026-11-18 부터 비워 둔다(공개 페이지는 서버와 연결하지 않음)
-        env:
-          HWPX_SERVER_URL: ${{ vars.HWPX_SERVER_URL }}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix deploy/github-pages --no-audit --no-fund
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tutorial chart renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
+          python3 -m pip install matplotlib
+      - name: Build personal workspace
         run: node deploy/github-pages/build-site.mjs _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

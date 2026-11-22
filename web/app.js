@@ -76,6 +76,7 @@ function libraryLocation() { return { space: 'private', owner: state.me?.name, f
 // #/t/<토큰>[/doc/<id>] : 토큰을 저장하고 이동(관리자가 링크로 나눠 줄 때 · 시작 파일·앱이 이 PC 설정의 관리자 토큰으로 열 때)
 let viaTokenLink = false;   // 이번에 토큰 주소로 들어왔는가 — 관리자 토큰 안내(admin-token-notice.js)를 띄울지 정한다
 (function tokenRoute() {
+  if (globalThis.hwpxPages) return;
   const m = /^#\/t\/([^/]+)(\/.*)?$/.exec(location.hash || '');
   if (m) { viaTokenLink = true; const t = decodeURIComponent(m[1]); try { localStorage.setItem('hwpx.token', t); } catch { /* 저장 불가 */ } state.token = t; location.hash = m[2] ? `#${m[2]}` : '#/'; state.route = location.hash; }
 })();
@@ -182,11 +183,11 @@ const DocList = {
       <div class="listbar-identity"><a class="entry-brand" href="#/"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
         <span class="muted me-role" :data-role="me.role">{{ me.name }} · {{ roleLabel(me.role) }}</span></div>
       <nav class="listbar-nav" aria-label="문서함 메뉴">
-        <a v-if="me.role==='admin'" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
+        <a v-if="me.role==='admin' && !me.browserPersonal" class="btnlike small admin-nav" href="#/admin" data-testid="admin-list">관리자</a>
         <a v-if="me.tutorial" class="btnlike small tutorial-nav" href="#/tutorial" data-testid="tutorial-nav">튜토리얼</a>
         <a class="btnlike small" href="/onboarding.html?next=%2F%3Fteaser%3D0" data-testid="onboarding-list">시작 안내</a>
         <a class="btnlike help-link" href="/help.html#start" target="_blank" rel="noopener" data-testid="help-list">사용 설명서</a>
-        <button class="small" @click="logout">나가기</button>
+        <button v-if="!me.browserPersonal" class="small" @click="logout">나가기</button>
       </nav></div></header>
     <div class="libpage" :class="{'drive-mode':showDrive}" :style="sideW != null ? { '--lib-side-w': sideW + 'px' } : null">
       <aside class="libside"><LibraryTree v-if="lib" :lib="lib" :cur="cur" :me="me" :drive-active="showDrive" @go="goLibrary" @drive="showDrive=true"/></aside>
@@ -204,7 +205,7 @@ const DocList = {
         <div class="row lib-tools">
           <button class="small" data-testid="lib-newfolder" :disabled="!can('write')" :title="can('write') ? '이 자리에 폴더를 만듭니다' : '이 자리에 폴더를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'new' }"><span class="ic" v-html="ICON.folder"></span>새 폴더</button>
           <label class="btnlike small primary" :class="{ disabled: !can('write'), busy: !!uploading }" :aria-busy="uploading ? 'true' : 'false'" :title="uploading ? uploading.name + ' 올리는 중' : can('write') ? '이 자리에 HWPX 를 올립니다' : '이 자리에 올릴 권한이 없습니다'" data-testid="lib-upload">
-            <input type="file" accept=".hwpx" multiple style="display:none" :disabled="!can('write') || !!uploading" @change="upload"/><template v-if="uploading"><span class="spin"></span>올리는 중 {{ uploading.n }}/{{ uploading.total }}</template><template v-else>＋ HWPX 올리기</template></label>
+            <input type="file" :accept="me.browserPersonal ? '.hwpx,.hwp' : '.hwpx'" multiple style="display:none" :disabled="!can('write') || !!uploading" @change="upload"/><template v-if="uploading"><span class="spin"></span>올리는 중 {{ uploading.n }}/{{ uploading.total }}</template><template v-else>＋ HWPX 올리기</template></label>
           <button class="small" data-testid="lib-newdoc" :disabled="!can('write')" :title="can('write') ? '이 자리에 빈 한글 문서를 만들어 엽니다' : '이 자리에 문서를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'newdoc' }"><span class="ic" v-html="ICON.edit"></span>새 문서로 시작</button>
           <button class="small" v-if="curAccess" data-testid="lib-access" :title="curAccess.tip" @click="dlg = { type: 'access', target: curAccess.target }"><span class="ic" v-html="ICON.people"></span>권한</button>
           <template v-if="lib && lib.local && lib.local.canLink">
@@ -237,7 +238,7 @@ const DocList = {
               <button class="icon" v-if="has(d, 'manage')" title="권한" aria-label="권한" @click="dlg = { type: 'access', target: docTarget(d) }" v-html="ICON.people"></button>
               <button class="icon" v-if="has(d, 'delete')" title="삭제" aria-label="삭제" @click="remove(d)" v-html="ICON.trash"></button></td></tr>
           <tr class="lib-empty" v-if="!subfolders.length && !shownDocs.length"><td colspan="6" class="muted">{{ query.trim() ? '찾는 문서가 없습니다' : loaded ? (can('write') ? 'HWPX를 올리거나 새 문서를 만들어 보세요.' : '문서가 없습니다') : '읽는 중…' }}</td></tr></tbody></table></div>
-        <section class="lib-ai" aria-labelledby="lib-ai-title">
+        <section v-if="!me.browserPersonal" class="lib-ai" aria-labelledby="lib-ai-title">
           <h2 id="lib-ai-title">AI 설정</h2>
           <details class="list-connections" v-if="config" data-testid="list-connections" @toggle="onConnToggle"><summary>AI 연결 <span class="muted" v-if="connSummary" :title="connTip" data-testid="list-conn-state">— {{ connSummary }}</span></summary>
             <p v-if="personalLine">{{ personalLine }}</p>
@@ -639,10 +640,10 @@ const DocView = {
               </div>
               <p class="muted" v-if="!people.length">접속자가 없습니다</p>
             </details>
-            <button type="button" data-testid="agent-pill" :title="agentTip" @click="openDocumentHelp(agentHelpHash)">AI 연결 <span class="office-item-value">{{ agentLabel }}</span></button>
+            <button v-if="!browserPersonal" type="button" data-testid="agent-pill" :title="agentTip" @click="openDocumentHelp(agentHelpHash)">AI 연결 <span class="office-item-value">{{ agentLabel }}</span></button>
           </div>
           <div class="office-popover-group">
-            <button v-if="isAdmin" type="button" data-testid="admin-doc" @click="closeMore(); showAdmin()">관리자 설정</button>
+            <button v-if="isAdmin && !browserPersonal" type="button" data-testid="admin-doc" @click="closeMore(); showAdmin()">관리자 설정</button>
             <button type="button" data-testid="help-doc" @click="openDocumentHelp('#review')">사용 설명서</button>
             <a v-if="stateMeTutorial" href="#/tutorial" data-testid="tutorial-doc-nav">튜토리얼</a>
             <span v-if="s.info?.tutorialSession" class="tutorial-temp-label">임시 연습 문서</span>
@@ -1592,7 +1593,7 @@ const DocView = {
       if (window.__doc === d) delete window.__doc;
     });
     return {
-      d, s, ed, rootEl, editorEl, active, ICON, recoveryFiles, canRename, titleEdit, titleInp, renameTrigger, editTitle, cancelTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
+      d, s, ed, rootEl, editorEl, active, ICON, browserPersonal: !!state.me?.browserPersonal, recoveryFiles, canRename, titleEdit, titleInp, renameTrigger, editTitle, cancelTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
       agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, popoverEl, statusTrigger, actionTrigger, toggleMore, closeMore, onMoreFocusOut, tools, toggleTools, mobileEnvironment, openMobileOptions,
       folded, peek, panelEl, openPeek, togglePin, edgeTip, aiGlance, onTabEnter, onTabLeave, onPanelEnter, onPanelLeave, onPanelFocusOut,
       memosOn, toggleMemos, movedMemos, resetMemoPos, railOver, over, overStyle,
@@ -1640,7 +1641,7 @@ const App = {
       <button type="button" class="office-action" data-testid="office-new-document" :disabled="windowClosing" title="새 문서" aria-label="새 문서" @click="newDocument"><span class="office-plus" aria-hidden="true">+</span></button>
       <button type="button" class="office-action" data-testid="office-open-files" :disabled="opening || windowClosing" :aria-busy="opening" :title="openFilesTip" @click="pickFiles">
         <span v-if="opening" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.file"></span><span class="office-action-text">파일 열기</span></button>
-      <input ref="fileInput" type="file" accept=".hwpx" multiple hidden data-testid="office-file-input" @change="filesPicked"/>
+      <input ref="fileInput" type="file" :accept="state.me?.browserPersonal ? '.hwpx,.hwp' : '.hwpx'" multiple hidden data-testid="office-file-input" @change="filesPicked"/>
       <small v-if="opening" class="office-visually-hidden" role="status">파일 여는 중…</small>
       <div id="office-document-controls" :inert="windowClosing || !!tabs.find(docId)?.closing"></div>
     </header>
@@ -1684,7 +1685,7 @@ const App = {
     <div class="toasts" aria-live="polite"><div class="toast" v-for="t in toasts" :key="t.id" :class="t.kind">{{ t.msg }}</div></div></div>`,
   setup() {
     const ready = ref(false);
-    const adminRoute = computed(() => /^#\/admin(?:[/?]|$)/.test(state.route));
+    const adminRoute = computed(() => !state.me?.browserPersonal && /^#\/admin(?:[/?]|$)/.test(state.route));
     const tutorialRoute = computed(() => /^#\/tutorial(?:[/?]|$)/.test(state.route));
     const docId = computed(() => docOf(state.route));
     const isLibrary = computed(() => !docId.value && !adminRoute.value && !tutorialRoute.value);
@@ -1938,7 +1939,7 @@ const App = {
           const source = typeof input.source === 'string' ? input.source : undefined;
           let tab = tabs.fromSource(source);
           if (!tab) {
-            const name = officeFileName(input.name);
+            const name = officeFileName(input.name, state.me?.browserPersonal);
             const body = await officeFileBytes(input);
             if (!body?.byteLength) throw new Error('파일에 내용이 없습니다.');
             const doc = await api('/api/docs', { method: 'POST', body, raw: true, headers: { ...uploadHeaders(where), 'x-file-name': encodeURIComponent(name) } });

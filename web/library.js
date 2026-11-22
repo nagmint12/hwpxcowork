@@ -46,7 +46,7 @@ export const LibraryTree = {
         <span class="lt-ic" v-html="ICON[r.icon]"></span><span class="lt-name">{{ r.label }}</span><span class="lt-count muted" v-if="r.count">{{ r.count }}</span></div>
       <ul><TreeNode v-for="f in r.folders" :key="f.id" :lib="lib" :folder="f" :cur="cur" :active="!driveActive" :open="open" :depth="1" @go="go" @toggle="toggle"/></ul>
     </section>
-    <section class="lt-sec" data-testid="lib-drive"><button class="lt-row lt-root lt-drive" :class="{on:driveActive}" :aria-current="driveActive?'page':undefined" @click="$emit('drive')" title="두레이 드라이브 탐색"><span class="lt-ic" v-html="ICON.folder"></span><span class="lt-name">드라이브</span></button></section>
+    <section v-if="!me.browserPersonal" class="lt-sec" data-testid="lib-drive"><button class="lt-row lt-root lt-drive" :class="{on:driveActive}" :aria-current="driveActive?'page':undefined" @click="$emit('drive')" title="두레이 드라이브 탐색"><span class="lt-ic" v-html="ICON.folder"></span><span class="lt-name">드라이브</span></button></section>
     <section class="lt-sec" v-if="shared.length" data-testid="lib-shared">
       <div class="lt-head muted">{{ me.role === 'admin' ? '다른 사람 문서함' : '공유받은 문서함' }}</div>
       <template v-for="r in shared" :key="r.key">

@@ -3,7 +3,7 @@ import { reactive, ref } from '/vendor/vue.esm-browser.prod.js';
 import { PAGES_HOST, PAGES_HOST_HEADER } from './pages-host.js';
 
 const readToken = () => { try { return localStorage.getItem('hwpx.token') || ''; } catch { return ''; } };
-export const state = reactive({ token: readToken(), me: null, config: null, route: location.hash || '#/' });
+export const state = reactive({ token: globalThis.hwpxPages ? 'browser-personal' : readToken(), me: null, config: null, route: location.hash || '#/' });
 
 export async function api(path, { method = 'GET', body, raw, headers = {}, signal, keepalive } = {}) {
   const h = { Authorization: `Bearer ${state.token}`, ...(PAGES_HOST ? { [PAGES_HOST_HEADER]: 'github-pages' } : {}), ...headers };

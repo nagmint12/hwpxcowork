@@ -66,12 +66,13 @@ export function officeTabNames(items) {
 }
 
 // 헤더에는 파일명만 보낸다. 윈도 경로 구분자·예약 이름·제어 문자에 의존하지 않는다.
-export function officeFileName(value) {
+export function officeFileName(value, allowHwp = false) {
   const name = String(value || '').split(/[\\/]/).pop().normalize('NFC');
-  if (!/\.hwpx$/i.test(name)) throw new Error('HWPX 파일을 선택하세요.');
-  const base = Array.from(name.slice(0, -5).replace(/[\u0000-\u001F\u007F<>:"|?*]/g, '_').trim().replace(/[. ]+$/g, '')).slice(0, 120).join('').replace(/[. ]+$/g, '');
+  const extension = allowHwp && /\.hwp$/i.test(name) ? '.hwp' : '.hwpx';
+  if (!name.toLowerCase().endsWith(extension)) throw new Error(allowHwp ? 'HWP 또는 HWPX 파일을 선택하세요.' : 'HWPX 파일을 선택하세요.');
+  const base = Array.from(name.slice(0, -extension.length).replace(/[\u0000-\u001F\u007F<>:"|?*]/g, '_').trim().replace(/[. ]+$/g, '')).slice(0, 120).join('').replace(/[. ]+$/g, '');
   const safe = base || '문서';
-  return (/^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(safe) ? '_' : '') + safe + '.hwpx';
+  return (/^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(safe) ? '_' : '') + safe + extension;
 }
 
 export function officeFileBytes(file) {

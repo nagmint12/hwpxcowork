@@ -23,11 +23,12 @@ function detect() {
   return origins.some((o) => { try { return PAGES_RE.test(new URL(o).hostname); } catch { return false; } });
 }
 
-export const PAGES_HOST = detect();
+const framedPages = detect();
+export const PAGES_HOST = !!globalThis.hwpxPages || framedPages;
 export const PAGES_HOST_HEADER = 'X-Hwpx-Host';
 export const PAGES_NO_SECRET = 'GitHub 페이지에서는 API 키·토큰을 저장하지 않습니다. 서버 주소에서 직접 열어 저장하세요.';
 
-if (PAGES_HOST) {
+if (framedPages) {
   // /download 는 다른 창 안에서 열리지 않는다(frame-ancestors 'none') — 새 탭으로
   document.addEventListener('click', (e) => {
     const a = e.target?.closest?.('a[href]');

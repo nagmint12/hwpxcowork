@@ -1059,7 +1059,8 @@ export function createDocStore(id, { onUnavailable } = {}) {
     if (closed) return;   // 다시 붙기를 기다리는 사이 문서를 떠났다(close) — 새로 붙지 않는다
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const query = new URLSearchParams({ token: state.token, doc: id });
-    if (window.hwpxDesktopEnvironment?.portless) {
+    if (window.hwpxPages) ws = window.hwpxPages.room(id);
+    else if (window.hwpxDesktopEnvironment?.portless) {
       const room = new EventSource('/api/local/document-events?' + query);
       room.onerror = () => { room.close(); room.onclose?.(); };
       ws = room;
