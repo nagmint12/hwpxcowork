@@ -2,7 +2,7 @@
 
 **한/글 문서를 웹에서 함께 편집하고, 각자의 구독 AI로 검토하는 도구입니다.**
 
-![개인 구독 AI로 검토하고 반영하는 흐름, 한/글과 HWPX Cowork 사이의 양방향 복사, 줄·쪽 나눔과 편집 성능 개선](docs/assets/readme-overview.webp)
+[![개인 구독 AI로 검토하고 반영하는 흐름, 한/글과 HWPX Cowork 사이의 양방향 복사, 줄·쪽 나눔과 편집 성능 개선](docs/assets/readme-overview.svg)](docs/assets/readme-overview.svg?raw=1)
 
 **[설치 없이 개인 편집기 열기](https://nagmint12.github.io/hwpxcowork/)** · **[최신 다운로드](https://github.com/nagmint12/hwpxcowork/releases/latest)** · **[설치 안내](#설치--두-가지-길)**
 
