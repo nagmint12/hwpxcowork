@@ -54,6 +54,22 @@ jobs:
             Start-Process -FilePath $app -ArgumentList '--mode','personal','--disable-gpu' -PassThru -WindowStyle Normal
           }
           function Server {
+            $profileDir = Split-Path $config
+            $connectionFile = Join-Path $profileDir 'personal-connection.json'
+            if ((Test-Path $connectionFile) -and (Get-Content -Raw $connectionFile | ConvertFrom-Json).transport -eq 'stdio') {
+              $probe = @'
+          import { join } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const [home, profile] = process.argv.slice(2);
+          const { desktopOrigin, readPipeSession, pipeFetch } = await import(pathToFileURL(join(home, 'resources/payload/app/server/desktop-pipe.js')));
+          const response = await pipeFetch(readPipeSession(profile))(desktopOrigin + '/api/config', { signal: AbortSignal.timeout(2000) });
+          if (!response.ok) process.exit(1);
+          console.log(JSON.stringify({ nonce: (await response.json()).nonce }));
+          '@
+              $result = $probe | & (Join-Path $homeDir 'resources/runtime/node.exe') --input-type=module - $homeDir $profileDir 2>$null
+              if ($LASTEXITCODE) { throw 'Personal pipe is not ready' }
+              return $result | ConvertFrom-Json
+            }
             $cfg = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
             Invoke-RestMethod "http://127.0.0.1:$($cfg.port)/api/config" -TimeoutSec 2
           }
