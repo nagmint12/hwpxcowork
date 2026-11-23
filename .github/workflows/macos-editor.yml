@@ -32,6 +32,6 @@ jobs:
           grep -F "  $archive" SHA256SUMS.txt | shasum -a 256 -c -
           ditto -x -k "$archive" .
           codesign --verify --deep --strict --verbose=2 'Hwpx Editor.app'
-          lipo -verify_arch x86_64 arm64 'Hwpx Editor.app/Contents/MacOS/Hwpx Editor'
+          lipo 'Hwpx Editor.app/Contents/MacOS/Hwpx Editor' -verify_arch x86_64 arm64
           python3 -m pip install playwright==1.65.2
           python3 "$GITHUB_WORKSPACE/tests/macos_release_editor.py" 'Hwpx Editor.app'
