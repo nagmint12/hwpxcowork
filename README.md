@@ -6,6 +6,8 @@
 
 **[설치 없이 개인 편집기 열기](https://nagmint12.github.io/hwpxcowork/)** · **[최신 다운로드](https://github.com/nagmint12/hwpxcowork/releases/latest)** · **[설치 안내](#설치--두-가지-길)**
 
+[앱 소개](https://nagmint12.github.io/hwpxcowork/about.html) · [개인정보처리방침](https://nagmint12.github.io/hwpxcowork/privacy.html) · [서비스 이용약관](https://nagmint12.github.io/hwpxcowork/terms.html)
+
 GitHub Pages에서 **파일 열기**로 내 HWP·HWPX를 열고, 문서에 메모를 단 뒤 **한글로 저장**으로 HWPX를 내려받을 수 있습니다. 문서함과 연습 진도는 해당 브라우저에 저장됩니다. **HWPX Cowork → 튜토리얼**에서는 준비된 예시 답변으로 실제 문서에 수정 제안을 반영하거나 거절합니다.
 
 [rhwp](https://github.com/edwardkim/rhwp)를 바탕으로 다음 기능을 더했습니다.

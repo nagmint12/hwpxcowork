@@ -54,10 +54,13 @@ export async function buildPersonal(out, base) {
   for (const name of ['AGENT_SETUP.md','MCP_EVENTS_GUIDE.md','CHATGPT_WORK_FILES.md','AUTOMATIC_AI_GUIDE.md']) if(fs.existsSync(from('docs',name))) fs.copyFileSync(from('docs',name),dest('manual-resources', name));
   fs.copyFileSync(path.join(here,'browser/start.js'), dest('personal-start.js'));
   fs.copyFileSync(path.join(here,'browser/personal.css'), dest('personal.css'));
+  for (const name of ['about.html', 'privacy.html', 'terms.html', 'site.css']) {
+    fs.copyFileSync(path.join(here, name), dest(name));
+  }
   const html = index.replace(/<script src="\/intro\.js"><\/script>/,'')
-    .replace('</head>', '<link rel="stylesheet" href="./personal.css"></head>')
+    .replace('</head>', '<link rel="stylesheet" href="./personal.css"><link rel="help" href="./about.html"><link rel="privacy-policy" href="./privacy.html"><link rel="terms-of-service" href="./terms.html"></head>')
     .replace(/<script type="module">[\s\S]*?<\/script>/, '<meta name="hwpx-personal-app" content="' + prefix + entry + '"><script type="module" src="./personal-start.js"></script>')
-    .replace('<div id="app"></div>', '<div id="app"><p role="status" style="padding:1rem">개인 문서함을 여는 중…</p></div>');
+    .replace('<div id="app"></div>', '<noscript><a href="./about.html">HWPX Cowork 앱 소개와 이용 안내</a></noscript><div id="app"><p role="status" style="padding:1rem">개인 문서함을 여는 중…</p></div>');
   fs.writeFileSync(dest('index.html'), rebase(html));
   await buildWorker(dest('personal-worker.js'));
   await buildSeed(root, dest('personal-seed.zip'));

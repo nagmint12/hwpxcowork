@@ -60,6 +60,14 @@ h2 { margin: 0 0 16px; font-size: 21px; letter-spacing: -.03em; }
 .foot { padding: 32px 0 48px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 32px; }
 .foot p { margin: 0; }
 
+.app-info .info-main { max-width: 46rem; padding-block: 2.5rem 4rem; }
+.info-main h1 { margin: 0 0 1rem; font-size: clamp(1.9rem, 5vw, 2.65rem); line-height: 1.2; }
+.info-main h2 { margin: 0 0 .5rem; font-size: 1.25rem; }
+.info-main section { margin-block: 2rem; }
+.info-main p { margin-block: .5rem 1rem; }
+.info-main .actions { margin-block: 1.5rem 2rem; }
+.info-links { display: flex; flex-wrap: wrap; gap: .65rem 1.25rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+
 @media (max-width: 560px) {
   .hero { padding: 40px 0 28px; }
   .lead { font-size: 16px; }
