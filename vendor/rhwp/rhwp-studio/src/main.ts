@@ -61,6 +61,7 @@ import { CommandPalette } from '@/ui/command-palette';
 import { MODAL_DIALOG_CLOSED_EVENT } from '@/ui/dialog';
 import { showHmlImportWarning } from '@/ui/hml-import-warning';
 import { showToast } from '@/ui/toast';
+import { coworkFrameFiles, coworkFileCommands } from './ui/cowork-file-menu';
 import { addRecentDoc, listRecentDocs } from '@/recent/recent-store';
 import { showDropConfirmDialog } from '@/ui/drop-confirm-dialog';
 import { showHwpPasswordDialog } from '@/ui/hwp-password-dialog';
@@ -254,6 +255,9 @@ async function startDevelopmentRenderRuntime(): Promise<void> {
 // 파라미터가 없거나 미지원 값이면 full — 기존 표면 그대로다.
 const chromeModeRequest = resolveChromeModeRequest(window.location.search);
 const chromeMode = chromeModeRequest.mode;
+const coworkFiles = chromeMode === 'embed' ? coworkFrameFiles() : undefined;
+// [hwpx-cowork] A comparison loads its right-hand document. Give it a separate editor.
+const compareWindow = chromeMode === 'embed' && window === window.top && new URLSearchParams(location.search).get('compare') === '1';
 if (chromeModeRequest.unsupportedReason) {
   console.warn(
     `[main] 지원하지 않는 chrome 값입니다: ${chromeModeRequest.requested}; full 프로파일을 사용합니다.`,
@@ -408,12 +412,15 @@ const plugins = new PluginHostRegistry({
 // Ctrl+Shift+S의 셀 블록 문맥 라우터도 Save As가 미등록이면 이벤트만 소비하므로
 // table:block-sum으로 폴스루하지 않는다. 미등록 커맨드 dispatch는 무해하게 false를 반환한다.
 registry.registerAll(
-  chromeMode === 'embed'
+  coworkFiles ? coworkFileCommands(fileCommands, coworkFiles) : chromeMode === 'embed'
     ? fileCommands.filter((cmd) => !EMBED_HIDDEN_FILE_COMMAND_IDS.includes(cmd.id))
     : fileCommands,
 );
 registry.registerAll(
-  chromeMode === 'embed'
+  coworkFiles ? editCommands.map(cmd => cmd.id !== 'edit:compare-documents' ? cmd : {
+    ...cmd,
+    execute: () => window.open(new URL('index.html?chrome=embed&compare=1', location.href), '_blank', 'noopener'),
+  }) : chromeMode === 'embed' && !compareWindow
     ? editCommands.filter((cmd) => !EMBED_HIDDEN_EDIT_COMMAND_IDS.includes(cmd.id))
     : editCommands,
 );
@@ -437,11 +444,12 @@ registry.registerAll(toolCommands);
  * setupFileInput이 존재를 전제한다.
  */
 function pruneEmbedChrome(): void {
-  for (const id of [...EMBED_HIDDEN_FILE_COMMAND_IDS, ...EMBED_HIDDEN_EDIT_COMMAND_IDS]) {
+  for (const id of [...(coworkFiles ? [] : EMBED_HIDDEN_FILE_COMMAND_IDS), ...(coworkFiles || compareWindow ? [] : EMBED_HIDDEN_EDIT_COMMAND_IDS)]) {
     document.querySelectorAll(`[data-cmd="${id}"]`).forEach((item) => item.remove());
   }
   const dropdown = document.querySelector('.menu-item[data-menu="file"] .menu-dropdown');
   if (!dropdown) return;
+  if (coworkFiles) return; // The host supplies its own recent documents.
   dropdown.querySelectorAll('.md-sub[data-recent]').forEach((sub) => sub.remove());
   // 고아가 된 구분선 정리: 선행 항목이 없거나 구분선끼리 연속이면 제거하고,
   // 말단에 남은 구분선도 제거한다.
@@ -928,6 +936,7 @@ async function initialize(): Promise<void> {
       // 없는 문서 교체 경로이므로 띄우지 않는다 (드래프트 기록 자체는 유지).
       if (chromeMode !== 'embed') await offerAutosaveRecoveryIfIdle();
       await openBlankDocumentIfIdle();
+      if (compareWindow) dispatcher.dispatch('edit:compare-documents');
     })();
     // embed 프로파일: PWA launch queue로 문서를 넘겨받는 진입도 문서 교체 경로이므로
     // 설치하지 않는다.
@@ -1900,7 +1909,7 @@ async function renderRecentSubmenu(): Promise<void> {
 
   let recents;
   try {
-    recents = await listRecentDocs();
+    recents = coworkFiles ? coworkFiles.recent() : await listRecentDocs();
   } catch (err) {
     console.warn('[recent] 최근 문서 조회 실패:', err);
     return;

@@ -68,6 +68,7 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .btnlike.disabled { opacity: .45; cursor: default; pointer-events: none; }
 .btnlike.busy { opacity: 1; cursor: progress; pointer-events: none; }
 .btnlike.small { padding: 3px 9px; font-size: 12.5px; }
+.lib-tools > .small { padding-inline-end: 11px; }
 
 .libtable tr.folder:hover, .libtable tr.doc:hover { background: #f5f8fc; cursor: pointer; }
 .libtable tr.doc.selected { background: var(--accent-soft); }

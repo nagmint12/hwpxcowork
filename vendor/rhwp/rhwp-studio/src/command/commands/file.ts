@@ -1,3 +1,4 @@
+import { coworkFrameFiles } from '../../ui/cowork-file-menu';
 import { RecoveryCipher } from '../../recovery/recovery-crypto';
 import type { CommandDef, CommandServices } from '../types';
 import {
@@ -335,6 +336,15 @@ async function saveAsFormat(services: CommandServices, format: SaveFormat): Prom
 
     flushDeferredPaginationBeforeExplicitOutput(services, 'save-as');
     const saveName = options.fileName;
+    if (coworkFrameFiles()) {
+      // [hwpx-cowork] Export an independent copy. A download must not mark the shared draft clean,
+      // associate a local handle or change its filename/password.
+      if (services.wasm.documentGeneration !== generation) throw new Error('DOCUMENT_CHANGED_DURING_SAVE');
+      const copy = createSavePayload(services, format, password ?? undefined);
+      downloadBlob(copy.blob, saveName);
+      if (copy.contentLoss) showExportContentLoss(copy.contentLoss);
+      return;
+    }
     recoveryCipher = password !== null ? await RecoveryCipher.create(password) : null;
     if (services.wasm.documentGeneration !== generation) throw new Error('DOCUMENT_CHANGED_DURING_SAVE');
     const payload = createSavePayload(services, format, password ?? undefined);

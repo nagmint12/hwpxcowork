@@ -562,14 +562,14 @@ const DocView = {
         <button ref="statusTrigger" type="button" class="office-save-status" :class="compactStatus.cls" data-testid="draft-chip"
           :aria-expanded="moreOpen === 'status'" aria-controls="office-save-details" :aria-label="'저장 상태: ' + compactStatus.label"
           :title="[chip.text, chip.tip].filter(Boolean).join(' · ')" @click="toggleMore('status')">
-          <span class="office-status-mark" aria-hidden="true">{{ compactStatus.mark }}</span><span class="office-status-caption">{{ compactStatus.label }}</span>
+          <span class="office-status-mark" aria-hidden="true">{{ compactStatus.mark }}</span><span class="office-status-caption toolbar-label">{{ compactStatus.label }}</span>
         </button>
         <button type="button" class="office-direct-export" data-testid="save-hangul" :disabled="saving || !s.info" :title="saveTip" @click="saveHangul">
-          <span v-if="saving" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">↓</span><span>한글로 저장</span>
+          <span v-if="saving" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">↓</span><span class="toolbar-label">한글로 저장</span>
         </button>
         <button ref="actionTrigger" type="button" class="office-document-menu" data-testid="bar-more-toggle" aria-label="문서 작업" title="문서 작업"
           :aria-expanded="moreOpen === 'actions'" aria-controls="office-document-actions" @click="toggleMore('actions')">
-          <span class="ic" aria-hidden="true" v-html="ICON.more"></span><span class="office-work-label">문서 작업</span>
+          <span class="ic" aria-hidden="true" v-html="ICON.more"></span><span class="office-work-label toolbar-label">문서 작업</span>
         </button>
         <section v-if="moreOpen === 'status'" id="office-save-details" ref="popoverEl" class="office-popover" aria-labelledby="office-save-heading" tabindex="-1" data-testid="office-save-details">
           <h2 id="office-save-heading">저장 상태</h2>
@@ -966,7 +966,22 @@ const DocView = {
 
     // ── 편집기 ──
     let handle = null;
-    function mount() { handle = mountEditor(editorEl.value, d, { foreground: props.active }); }
+    const officeFiles = inject('officeFiles');
+    function mount() {
+      // Studio reads this same-origin host interface when the iframe boots.
+      editorEl.value.coworkFiles = {
+        enabled: cmd => props.active && !officeFiles.busy() && !!s.info && !!handle?.ready &&
+          (cmd !== 'file:save' || (!s.readOnly && !s.draft.stale)),
+        recent: officeFiles.recent,
+        run(cmd, id) {
+          if (!this.enabled(cmd)) return;
+          if (cmd === 'file:save') {
+            void d.saveDraftNow().catch(e => toastError(e, '저장 실패: '));
+          } else officeFiles.run(cmd, id);
+        },
+      };
+      handle = mountEditor(editorEl.value, d, { foreground: props.active });
+    }
     function remount() { try { handle?.destroy(); } catch { /* 이미 없음 */ } if (editorEl.value) editorEl.value.innerHTML = ''; mount(); }
     function backgroundSave() {
       if (handle?.ready && !s.draft.stale && !s.draft.error && (s.draft.dirty || s.draft.saving)) {
@@ -1623,24 +1638,24 @@ const App = {
       </div>
       <button ref="homeButton" type="button" class="office-action office-library-home" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
         :disabled="windowClosing" title="문서함 (메인 화면)" aria-label="문서함 (메인 화면)" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text toolbar-label">문서함</span></button>
-      <div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey" v-if="tabs.items.length">
+      <div v-if="tabs.items.length" class="office-tab-region"><div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey">
         <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
           <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"
             data-testid="office-tab" :data-doc-id="tab.id" :title="tabLabel(tab)" :aria-label="tabLabel(tab)" :aria-busy="tab.closing || tab.saving || reviewedSavings.has(tab.id)" :disabled="windowClosing" @click="activateTab(tab.id)">
             <span class="office-tab-icon" aria-hidden="true" v-html="ICON.file"></span>
             <span class="office-tab-name" :class="{ split: officeNames.get(tab.id)?.prefix }" :data-testid="tab.id === docId ? 'doc-title' : undefined">
-              <template v-if="officeNames.get(tab.id)?.prefix"><span class="office-tab-prefix">{{ officeNames.get(tab.id).prefix }}</span><span class="office-tab-suffix">{{ officeNames.get(tab.id).suffix }}</span></template>
-              <template v-else>{{ tab.title }}</template>
+              <template v-if="officeNames.get(tab.id)?.prefix"><span class="office-tab-prefix"><span class="toolbar-label">{{ officeNames.get(tab.id).prefix }}</span></span><span class="office-tab-suffix"><span class="toolbar-label">{{ officeNames.get(tab.id).suffix }}</span></span></template>
+              <span v-else class="toolbar-label">{{ tab.title }}</span>
             </span>
             <span v-if="officeNames.get(tab.id)?.duplicate" class="office-tab-number" aria-hidden="true">{{ officeNames.get(tab.id).duplicate }}</span>
             <span v-if="tab.failed || tab.unavailable" class="office-tab-state failed" aria-hidden="true">!</span><span v-else-if="tab.dirty" class="office-tab-state" aria-hidden="true">●</span>
           </button>
           <button type="button" class="office-tab-close" tabindex="-1" data-testid="office-tab-close" :data-doc-id="tab.id" :disabled="tab.closing || windowClosing"
             :title="tab.closing ? '저장 중' : '탭 닫기'" :aria-label="tab.title + ' 탭 닫기'" @click="closeTab(tab.id, true)">
-            <span v-if="tab.closing" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">×</span>
+            <span v-if="tab.closing" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.x"></span>
           </button>
         </div>
-      </div>
+      </div></div>
       <button type="button" class="office-action" data-testid="office-new-document" :disabled="windowClosing" title="새 문서" aria-label="새 문서" @click="newDocument"><span class="ic" aria-hidden="true" v-html="ICON.plus"></span></button>
       <button type="button" class="office-action" data-testid="office-open-files" :disabled="opening || windowClosing" :aria-busy="opening" :title="openFilesTip" @click="pickFiles">
         <span v-if="opening" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.file"></span><span class="office-action-text toolbar-label">파일 열기</span></button>
@@ -1752,6 +1767,37 @@ const App = {
     provide('openAdmin', (context) => { if (state.me?.role !== 'admin') return; adminContext.value = context; adminOpen.value = true; });
     provide('prepareOfficeRestart', saveAllTabs);
     provide('officeKeyboard', onOfficeKey);
+    let recentDocs = [];
+    const recentKey = computed(() => state.me?.name && 'hwpx-cowork.recent-files.' + state.me.name);
+    function writeRecents(items) {
+      recentDocs = items;
+      try { if (recentKey.value) sessionStorage.setItem(recentKey.value, JSON.stringify(items)); } catch { /* 메모리 목록 유지 */ }
+    }
+    watch(recentKey, key => {
+      recentDocs = [];
+      try {
+        const saved = key && JSON.parse(sessionStorage.getItem(key) || '[]');
+        if (Array.isArray(saved)) recentDocs = saved.filter(doc => typeof doc?.id === 'string' && typeof doc.fileName === 'string');
+      } catch { /* 잘못된 세션 기록은 무시한다. */ }
+    }, { immediate: true, flush: 'sync' });
+    function rememberTab(id) {
+      const tab = tabs.find(id);
+      if (!tab?.title || tab.unavailable) return;
+      writeRecents([{ id, fileName: tab.title, sourceFormat: '' }, ...recentDocs.filter(doc => doc.id !== id)].slice(0, 32));
+    }
+    provide('officeFiles', {
+      busy: () => windowClosing.value || !state.me || !!tabs.find(docId.value)?.closing,
+      recent: () => recentDocs,
+      run(cmd, id) {
+        if (cmd === 'file:new-doc') void newDocument();
+        if (cmd === 'file:open') pickFiles();
+        if (cmd === 'file:clear-recent' && confirm('최근 문서 목록을 지울까요?')) writeRecents([]);
+        if (cmd === 'file:open-recent') {
+          const recent = recentDocs.find(doc => doc.id === id);
+          if (recent) void openDocument({ id, title: recent.fileName });
+        }
+      },
+    });
 
     let routeGeneration = 0; let leaving = null;
     function setRoute(route, replace = false) {
@@ -1777,7 +1823,7 @@ const App = {
       return true;
     }
     const onHashChange = () => { if (!windowClosing.value) void navigate(location.hash || '#/'); };
-    watch([() => state.me, docId], ([me, id]) => { if (me && id) tabs.visit(id); }, { flush: 'sync' });
+    watch([() => state.me, docId], ([me, id]) => { if (me && id) { tabs.visit(id); rememberTab(id); } }, { flush: 'sync' });
     function scrollToTab(id, focus = false) {
       if (id !== docId.value) return;
       const element = document.getElementById(tabId(id));
@@ -1799,7 +1845,10 @@ const App = {
       if (!restored && canRestore()) scrollToTab(id, true);
     }
     function updateTab(id, updates) {
-      const tab = tabs.find(id); if (tab) Object.assign(tab, updates);
+      const tab = tabs.find(id);
+      if (!tab) return;
+      Object.assign(tab, updates);
+      if (id === docId.value && updates.title) rememberTab(id);
     }
     function openDocument(doc) {
       tabs.add(doc);
@@ -1950,6 +1999,7 @@ const App = {
             tabs.add({ ...doc, source });
             tab = tabs.find(doc.id);
           }
+          rememberTab(tab.id);
           if (!input.batch || input.batch !== lastBatch) {
             first ||= tab.id;
             lastBatch = input.batch || null;
@@ -2009,7 +2059,7 @@ const App = {
       if (!await prepareExit()) return;
       try {
         for (const id of retainedDocIds.value) retainedSaves.discard(id);
-        tabs.items = []; tabs.visits = [];
+        tabs.items = []; tabs.visits = []; writeRecents([]);
         try { localStorage.removeItem('hwpx.token'); } catch { /* 저장소를 쓸 수 없는 환경 */ }
         state.token = ''; state.me = null; setRoute('#/', true);
       } finally { windowClosing.value = false; preparedExit = false; }

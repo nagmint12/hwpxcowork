@@ -1,4 +1,4 @@
-.office-app { display: flex; flex-direction: column; }
+.office-app { --office-control-height: 30px; display: flex; flex-direction: column; }
 .office-bar {
   height: 40px;
   flex: 0 0 40px;
@@ -20,8 +20,8 @@
   background: transparent;
   border-radius: 6px;
   box-shadow: none;
-  height: 30px;
-  min-height: 30px;
+  height: var(--office-control-height);
+  min-height: var(--office-control-height);
   white-space: nowrap;
   font-size: 12px;
 }
@@ -79,11 +79,11 @@
 .office-intro-dialog h2 { margin: 0; font-size: 1rem; }
 .office-intro-dialog iframe { display: block; width: 100%; height: min(70vh, 506px); border: 0; background: #121925; }
 .office-action > .ic { margin-inline-end: 0; }
+/* Let overflowing tabs scroll below the controls without moving their centerline. */
+.office-tab-region { min-width: 0; flex: 0 1 auto; height: var(--office-control-height); }
 .office-tablist {
-  height: 100%;
   display: flex;
-  flex: 0 1 auto;
-  align-items: flex-start;
+  align-items: center;
   min-width: 0;
   gap: 3px;
   overflow-x: auto;
@@ -91,7 +91,13 @@
   scrollbar-width: thin;
   scrollbar-color: #c8bfd7 transparent;
 }
+@supports selector(::-webkit-scrollbar) {
+  .office-tablist { scrollbar-width: auto; scrollbar-color: auto; }
+  .office-tablist::-webkit-scrollbar { height: 4px; }
+  .office-tablist::-webkit-scrollbar-thumb { background: #c8bfd7; border-radius: 2px; }
+}
 .office-tab-item {
+  height: var(--office-control-height);
   display: flex;
   align-items: center;
   flex: 0 0 auto;
@@ -101,7 +107,7 @@
   color: var(--muted);
 }
 .office-tab-item.selected { color: var(--ink, #26212e); background: var(--panel, white); border-color: #c9badf; box-shadow: inset 0 -2px var(--entry-accent, #6747a6); }
-.office-tab-item .office-tab { min-width: 0; max-width: 240px; padding: 0 4px 0 8px; gap: 5px; }
+.office-tab-item .office-tab { height: 100%; min-height: 0; min-width: 0; max-width: 240px; padding: 0 4px 0 8px; gap: 5px; }
 .office-tab-item.selected .office-tab { color: var(--entry-accent, #4f3a90); font-weight: 700; }
 .office-tab-icon { display: inline-flex; flex-shrink: 0; }
 .office-tab-icon svg, .office-action .ic svg, .office-document-menu .ic svg { width: 100%; height: 100%; vertical-align: top; }
@@ -111,7 +117,7 @@
 .office-tab-suffix { flex: 0 0 auto; max-width: 112px; }
 .office-tab-number { flex: none; padding: 0 3px; border-radius: 4px; background: #e9e2f3; color: #543884; font-size: 10px; }
 .office-tab-item .office-tab-close { color: inherit; width: 24px; min-width: 24px; padding: 0; height: 26px; min-height: 26px; margin: 0 3px; border-radius: 4px; justify-content: center; }
-.office-tab-close span { font-size: 17px; line-height: 1; }
+.office-tab-close .ic { margin-inline-end: 0; }
 .office-tab-state { flex: none; color: var(--entry-accent, #4f3a90); line-height: 1; }
 .office-tab-state.failed { color: var(--bad, #a12e33); font-weight: 800; }
 #office-document-controls { flex: 0 0 auto; margin-inline-start: auto; }

@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-21T23:19:21.919Z",
-  "enginePackage": "artifacts\\deploy-20261122\\engine-pkg",
+  "builtAt": "2026-11-23T02:16:34.742Z",
+  "enginePackage": "vendor\\rhwp\\pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "651e02c41001dc3ea156f6b69e94de49b51038e4"
+    "commit": "4ca26c170b7ea716b6d26320f63cb777d5eb8c24"
   },
   "patches": [
     {
