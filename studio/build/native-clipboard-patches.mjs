@@ -52,22 +52,23 @@ ${a}`,
       pasteDocumentFragment.call(this, portable, hasSelection);
       return;
     }
-    const position = JSON.stringify([this.cursor.getPosition(), this.cursor.getSelectionOrdered()]);
-    const generation = this.wasm.documentGeneration;
-    let changed = false;
-    const stop = this.eventBus.on('document-changed', () => { changed = true; });
+    const guard = guardPasteTarget.call(this);
     const status = document.getElementById('sb-message');
     if (status) status.textContent = '한글 원본 구조를 가져오고 있습니다…';
     void (async () => {
       try {
         const prepared = await prepareHancomNativeFragment(portable!);
-        if (changed || this.wasm.documentGeneration !== generation || position !== JSON.stringify([this.cursor.getPosition(), this.cursor.getSelectionOrdered()])) return;
+        if (!guard.current()) return;
         const warnings = (prepared as Uint8Array & { clipboardWarnings?: unknown[] }).clipboardWarnings;
-        if (pasteDocumentFragment.call(this, prepared, hasSelection) && status) status.textContent = warnings?.length ? '한글 원본 구조를 붙였습니다. 원본 없는 그림 ' + warnings.length + '개를 표시했습니다' : '한글 원본 구조를 붙여넣었습니다';
+        if (chooseCellPaste.call(this, 'document', prepared, hasSelection)) {
+          if (status) status.textContent = '셀 붙이기 방식을 선택해 주세요';
+        } else if (pasteDocumentFragment.call(this, prepared, hasSelection, true, false) && status) {
+          status.textContent = warnings?.length ? '한글 원본 구조를 붙였습니다. 원본 없는 그림 ' + warnings.length + '개를 표시했습니다' : '한글 원본 구조를 붙여넣었습니다';
+        }
       } catch (error) {
         showToast({ message: error instanceof Error && error.message === 'FRAGMENT_TOO_LARGE' ? '복사한 내용이 처리 용량을 넘습니다. 범위를 나누어 복사해 주세요.' : '한글 원본을 가져오지 못했습니다. 잠시 후 다시 붙여넣어 주세요.', durationMs: 6000 });
         if (status) status.textContent = '한글 원본 변환을 완료하지 못했습니다';
-      } finally { stop(); }
+      } finally { guard.stop(); }
     })();
     return;
   }`,

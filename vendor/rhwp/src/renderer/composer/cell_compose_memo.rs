@@ -431,6 +431,7 @@ pub(crate) fn paragraph_fingerprint(
         para_shape_id,
         hwpx_missing_para_shape,
         interactive_format_dirty: _, // [hwpx-cowork] 스케줄러 상태, 원본 입력은 아래 각 필드에 포함된다.
+        interactive_format_spacing: _, // [hwpx-cowork] 원문 속성은 별도로 판정한다.
         interactive_format_reflow: _, // [hwpx-cowork] 원본 글·서식은 별도로 지문화한다.
         style_id,
         column_type,

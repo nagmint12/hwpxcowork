@@ -530,11 +530,13 @@ fn from_bytes_inner(
             batch_mode: false,
             pending_cell_format_vpos: false,
             event_log: Vec::new(),
+            range_event_log: Vec::new(),
             overflow_links_cache: RefCell::new(HashMap::new()),
             snapshot_store: Vec::new(),
             next_snapshot_id: 0,
             fragment_store: Vec::new(),
             next_fragment_id: 0,
+            whole_body_fragments: Default::default(),
             section_raw_store: Vec::new(),
             next_section_raw_id: 0,
             border_paint_store: Vec::new(),
@@ -2953,6 +2955,18 @@ fn from_bytes_inner(
         let sec_count = document.sections.len();
 
         self.document = document;
+        // [hwpx-cowork] 독립 편집기의 새 문서도 문서함의 새 문서처럼 본고딕 10pt로
+        // 시작한다. 기존 HWP/HWPX를 여는 경로는 문서가 지정한 바탕글을 그대로 쓴다.
+        let style_id = self.document.sections[0].paragraphs[0].style_id as usize;
+        let shape_id = self.document.doc_info.styles[style_id].char_shape_id as usize;
+        let fonts = self
+            .find_or_register_font_ids("Noto Sans KR")
+            .ok_or_else(|| HwpError::InvalidFile("invalid blank template font table".into()))?;
+        let body = &mut self.document.doc_info.char_shapes[shape_id];
+        body.font_ids = fonts;
+        body.base_size = 1000;
+        body.raw_data = None;
+        self.document.doc_info.raw_stream_dirty = true;
         self.pending_cell_format_vpos = false;
         self.canvas_metrics = None;
         self.render_normalization.text_reflowed_tables.clear();
@@ -3919,6 +3933,7 @@ fn from_bytes_inner(
     /// dirty 표시만 다시 만들고 측정 캐시를 그대로 둬 새 문서의 문단이 **이전 문서의
     /// 측정값**을 재사용했다.
     pub fn set_document(&mut self, doc: Document) {
+        self.interactive_layout = Default::default(); // [hwpx-cowork] 교체 전 문서의 논리 범위를 폐기
         self.border_paint_store.clear();
         self.document = doc;
         self.host_font_environment = None;
@@ -4154,8 +4169,10 @@ fn from_bytes_inner(
 
     /// Batch 모드를 시작한다. 이후 Command 호출 시 paginate()를 건너뛴다.
     pub fn begin_batch_native(&mut self) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 배치가 직접 읽을 원문 경계
         self.batch_mode = true;
         self.event_log.clear();
+        self.range_event_log.clear();
         Ok(super::super::helpers::json_ok())
     }
 
@@ -4167,6 +4184,7 @@ fn from_bytes_inner(
         self.paginate();
         let result = self.serialize_event_log();
         self.event_log.clear();
+        self.range_event_log.clear();
         Ok(result)
     }
 
@@ -4187,6 +4205,7 @@ fn from_bytes_inner(
     pub const MAX_SNAPSHOTS: usize = 100;
 
     pub fn save_snapshot_native(&mut self) -> u32 {
+        self.finish_range_source(); // [hwpx-cowork] 완전 스냅샷은 당시의 미방문 원문 서식까지 소유한다.
         self.flush_cell_format_vpos();
         let snapshot = crate::document_core::UndoSnapshot::Full(
             Box::new(self.document.clone()), self.text_reflowed_table_paths_for_snapshot(),
@@ -4197,6 +4216,8 @@ fn from_bytes_inner(
     // [hwpx-cowork] 일반 스냅샷의 절대 복원 계약은 보존한다. 웹의 단일 Ctrl+Enter만
     // 캡처 범위를 지정하고, 저장 좌표·정규화 등 다른 의존성이 있으면 전체 상태를 잡는다.
     pub fn save_page_break_undo(&mut self, section: usize, para: usize, offset: usize) -> u32 {
+        // [hwpx-cowork] 쪽 나누기는 대상 또는 바로 다음 문단의 서식을 보존한다.
+        self.resolve_body_format_span(section, para, para.saturating_add(1));
         self.flush_cell_format_vpos();
         if let Some(local) = self.capture_page_break_undo(section, para, offset) {
             self.store_undo_snapshot(crate::document_core::UndoSnapshot::PageBreak(Box::new(local)))
@@ -4275,6 +4296,7 @@ fn from_bytes_inner(
     /// 지정 ID의 스냅샷으로 Document를 복원한다.
     /// 스타일 재해소 + 문단 구성 + 페이지네이션까지 수행.
     pub fn restore_snapshot_native(&mut self, id: u32) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 복원 전 현재 세대의 미완 이력 캡처
         let idx = self
             .snapshot_store
             .iter()

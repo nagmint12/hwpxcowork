@@ -374,7 +374,9 @@ export interface BodyRangeHistory {
 }
 interface BodyRangeApi {
   applyBodyRangeFormat(section: number, paragraph: number, offset: number,
-    endSection: number, endParagraph: number, endOffset: number, properties: string, page: number): BodyRangeHistory;
+    endSection: number, endParagraph: number, endOffset: number, properties: string, page: number, paragraphFormat?: boolean): BodyRangeHistory;
+  bodyRangeSourcePending?(): boolean;
+  tryDeleteWholeBodySelection?(section: number, first: number, offset: number, last: number, until: number): number | undefined;
   swapBodyRangeFormat(history: BodyRangeHistory, page: number): void;
 }
 export class WasmBridge {
@@ -382,12 +384,15 @@ export class WasmBridge {
   supportsBodyRangeFormat(): boolean {
     return typeof (this.doc as unknown as Partial<BodyRangeApi> | null)?.applyBodyRangeFormat === 'function';
   }
+  supportsTypedBodyRangeFormat(): boolean {
+    return typeof (this.doc as unknown as Partial<BodyRangeApi> | null)?.bodyRangeSourcePending === 'function';
+  }
   applyBodyRangeFormat(
-    start: DocumentPosition, end: DocumentPosition, props: Record<string, unknown>, page: number,
+    start: DocumentPosition, end: DocumentPosition, props: Record<string, unknown>, page: number, paragraph?: boolean,
   ): BodyRangeHistory {
     return (this.doc as unknown as BodyRangeApi).applyBodyRangeFormat(
       start.sectionIndex, start.paragraphIndex, start.charOffset,
-      end.sectionIndex, end.paragraphIndex, end.charOffset, JSON.stringify(props), page,
+      end.sectionIndex, end.paragraphIndex, end.charOffset, JSON.stringify(props), page, paragraph,
     );
   }
   swapBodyRangeFormat(history: BodyRangeHistory, page: number): void {
@@ -3665,6 +3670,16 @@ export class WasmBridge {
     return this.doc.copyControl(sec, para, cellPathJson, ci);
   }
 
+  // [hwpx-cowork] A multiple-object selection is one clipboard payload.
+  copyControls(targets: string): string {
+    if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
+    return this.doc.copyControls(targets);
+  }
+
+  exportClipboardFragmentHtml(): string {
+    return this.doc?.exportClipboardFragmentHtml() ?? '';
+  }
+
   exportControlHtml(sec: number, para: number, ci: number, cellPathJson = ''): string {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return this.doc.exportControlHtml(sec, para, cellPathJson, ci);
@@ -3683,6 +3698,25 @@ export class WasmBridge {
   clipboardHasControl(): boolean {
     if (!this.doc) return false;
     return this.doc.clipboardHasControl();
+  }
+
+  // [hwpx-cowork] Ctrl+C on a cell block uses the portable table fragment.
+  copyCellBlock(sec: number, para: number, path: string, startRow: number, startCol: number, endRow: number, endCol: number): void {
+    if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
+    this.doc.copyCellBlock(sec, para, path, startRow, startCol, endRow, endCol);
+  }
+
+  exportCellBlockHtml(): string {
+    return this.doc?.exportCellBlockHtml() ?? '';
+  }
+
+  canPasteCells(sec: number, para: number, path: string, format: string, bytes: Uint8Array): boolean {
+    return this.doc?.canPasteCells(sec, para, path, format, bytes) ?? false;
+  }
+
+  pasteCells(sec: number, para: number, path: string, offset: number, format: string, bytes: Uint8Array, mode: string, origin: string): string {
+    if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
+    return this.doc.pasteCells(sec, para, path, offset, format, bytes, mode, origin);
   }
 
   // [hwpx-cowork] Snapshot the internal clipboard before a cut edits the source.
@@ -4144,6 +4178,12 @@ export class WasmBridge {
   }
 
   // ─── [#5769] 삭제 조각(fragment) API ──────────────────
+
+  tryDeleteWholeBodySelection(start: DocumentPosition, end: DocumentPosition): number | undefined {
+    const doc = this.doc as unknown as Partial<BodyRangeApi> | null;
+    return doc?.tryDeleteWholeBodySelection?.(start.sectionIndex, start.paragraphIndex, start.charOffset,
+      end.paragraphIndex, end.charOffset);
+  }
 
   captureDeleteRange(sectionIdx: number, startPara: number, endPara: number): number {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');

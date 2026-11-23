@@ -94,6 +94,29 @@ COMPARE = """async ({family}) => {
 }"""
 
 
+def check_paint(results, family):
+    assert {r['c'] for r in results} == set('a2.한'), results
+    for row in results:
+        assert row['ready'], row
+        if row['hasWingdings'] and row['c'] in 'a2.':
+            assert row['distinct'], row
+        if family == 'Wingdings':
+            if row['c'] == '한':
+                continue  # Wingdings does not contain Hangul.
+            assert family in row['original'], row
+            if row['hasWingdings']:
+                assert row['original'][0] == family and row['samePixels'], row
+        else:
+            assert not any('wingdings' in f.lower() for f in row['original']), row
+            assert row['samePixels'], row
+            if family == 'KoPub돋움체':
+                if row['hasKoPub']:
+                    assert row['original'][0].startswith('KoPub') and row['usesKoPub'], row
+            if family == 'Noto Sans KR':
+                assert row['original'][0] == family and row['size'] == '13.333px', row
+                assert row['weight'] in ('', 'normal', '400'), row
+
+
 def run(pw, url, channel):
     browser = pw.chromium.launch(**({'channel': channel} if channel else {}))
     context = browser.new_context(viewport={'width': 1440, 'height': 900})
@@ -119,25 +142,7 @@ def run(pw, url, channel):
         frame = next(f for f in page.frames if '/studio/cowork-embed.html' in f.url)
         frame.wait_for_function("['a','2','.','한'].every(c => window.bodyDraws?.has(c))", timeout=60000)
         results = frame.evaluate(COMPARE, {'family': family})
-        for row in results:
-            assert row['ready'], row
-            if row['hasWingdings'] and row['c'] in 'a2.':
-                assert row['distinct'], row
-            if family == 'Wingdings':
-                if row['c'] == '한':
-                    continue  # Wingdings does not contain Hangul.
-                assert family in row['original'], row
-                if row['hasWingdings']:
-                    assert row['original'][0] == family and row['samePixels'], row
-            else:
-                assert not any('wingdings' in f.lower() for f in row['original']), row
-                assert row['samePixels'], row
-                if family == 'KoPub돋움체':
-                    if row['hasKoPub']:
-                        assert row['original'][0].startswith('KoPub') and row['usesKoPub'], row
-                if family == 'Noto Sans KR':
-                    assert row['original'][0] == family and row['size'] == '13.333px', row
-                    assert row['weight'] in ('', 'normal', '400'), row
+        check_paint(results, family)
         # Resolve the original font references from the persisted HWPX, separately from paint.
         saved = page.evaluate("""async () => {
           const r = await fetch(new URL('api/docs/' + window.__doc.id + '/file', location.href));

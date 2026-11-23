@@ -16,6 +16,7 @@ export interface EngineParagraph {
   where?: string;
   parent?: string | null;
   container?: string | null;
+  note?: { index: number; count: number; paragraph: number; paragraphs: number };
   cell?: { table: string; row: number; col: number; rowSpan?: number; colSpan?: number } | null;
   /** 본문 문단 종류(엔진 bodyEntries 와 같은 규칙) — 서버가 주면 쓰고, 없으면 중첩 칸 정보로 짐작한다 */
   kind?: string;

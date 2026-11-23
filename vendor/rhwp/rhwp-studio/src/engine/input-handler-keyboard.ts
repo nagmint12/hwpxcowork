@@ -33,6 +33,7 @@ import { queueNativeClipboard, readHancomNativeClipboard } from './native-clipbo
 import { appendHancomBoard, portableClipboardHtml, readPortableClipboard } from './portable-clipboard';
 import { unwrapEngineHtmlFragment } from '@/command/export-html'; // [hwpx-cowork]
 import { showToast } from '@/ui/toast';
+import { CellPasteDialog } from '@/ui/cell-paste-dialog'; // [hwpx-cowork]
 
 const RHWP_CLIPBOARD_MARKER_RE = /<!--\s*rhwp-studio-clipboard:([A-Za-z0-9._:-]+)\s*-->/;
 const PAGINATION_BOUNDARY_KEYS = new Set([
@@ -615,12 +616,12 @@ function positionAfterPasteResult(pos: DocumentPosition, parsed: any): DocumentP
     const nextCellParaIndex = parsed.cellParaIdx ?? parsed.cellParaIndex ?? pos.cellParaIndex;
     newPos.parentParaIndex = pos.parentParaIndex;
     newPos.controlIndex = pos.controlIndex;
-    newPos.cellIndex = pos.cellIndex;
+    newPos.cellIndex = parsed.cellIndex ?? pos.cellIndex;
     newPos.cellParaIndex = nextCellParaIndex;
     if (pos.cellPath) {
       newPos.cellPath = pos.cellPath.map((entry, index) =>
         index === pos.cellPath!.length - 1
-          ? { ...entry, cellParaIndex: nextCellParaIndex ?? entry.cellParaIndex }
+          ? { ...entry, cellIndex: parsed.cellIndex ?? entry.cellIndex, cellParaIndex: nextCellParaIndex ?? entry.cellParaIndex }
           : entry,
       );
     }
@@ -1575,6 +1576,10 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
     // 파생 상태를 해제하면(#2339) undo 쪽은 커맨드가 실어 둔 셀 블록으로 다시 세워진다.
     if (dispatchCellBlockGlobalShortcut.call(this, e)) return;
 
+    // [hwpx-cowork] Leave Ctrl+C/X/V to the clipboard events with the block intact.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey
+      && (/^Key[CXV]$/.test(e.code) || /^[cxv]$/i.test(e.key))) return;
+
     // [Task #6741] 선택한 칸들의 내용을 한 번에 지우고 블록을 유지한다 — 한컴과 같다.
     // 종전에는 아래 "그 외 키"로 떨어져 블록이 풀리고 캐럿에서 한 글자만 지워졌다.
     if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -2132,11 +2137,50 @@ function copyHeaderFooterSelection(this: any, e: ClipboardEvent): boolean {
   }
 }
 
-export function onCopy(this: any, e: ClipboardEvent): boolean {
+export function copyMultipleObjects(this: any): { text: string; html: string } {
+  const refs = this.cursor.getSelectedPictureRefs() as Array<{
+    sec: number; ppi: number; ci: number;
+    cellPath?: Array<{ controlIndex: number; cellIndex: number; cellParaIndex: number }>;
+  }>;
+  const targets = refs.map(ref => [
+    ref.sec, ref.ppi, (ref.cellPath ?? []).map(p => [p.controlIndex, p.cellIndex, p.cellParaIndex]), ref.ci,
+  ]);
+  if (!JSON.parse(this.wasm.copyControls(JSON.stringify(targets))).ok) {
+    throw new Error('선택한 개체를 복사하지 못했습니다.');
+  }
+  const text = this.wasm.getClipboardText();
+  return { text, html: prepareRhwpInternalClipboardHtml(this, this.wasm.exportClipboardFragmentHtml(), text) };
+}
+
+export function onCopy(this: any, e: ClipboardEvent, includeMultiple = true): boolean {
   if (!this.active) return false;
 
   if (this.cursor.isInHeaderFooter() && this.getNonEmptyHeaderFooterSelection()) {
     return copyHeaderFooterSelection.call(this, e);
+  }
+
+  const range = this.cursor.getSelectedCellRange();
+  if (range) {
+    e.preventDefault();
+    if (!e.clipboardData) return false;
+    if (this.cursor.getExcludedCells().size) {
+      showToast({ message: '직사각형 셀 블록을 선택해 주세요.', durationMs: 4000 });
+      return false;
+    }
+    try {
+      const p = this.cursor.getPosition();
+      const target = fragmentTarget(p);
+      this.wasm.copyCellBlock(p.sectionIndex, target.para, target.path,
+        range.startRow, range.startCol, range.endRow, range.endCol);
+      const text = this.wasm.getClipboardText();
+      const html = prepareRhwpInternalClipboardHtml(this, this.wasm.exportCellBlockHtml(), text);
+      e.clipboardData.setData('text/plain', text);
+      e.clipboardData.setData('text/html', html);
+      return true;
+    } catch (error) {
+      console.warn('[copy] 셀 블록 복사 실패:', error);
+      return false;
+    }
   }
 
   // 개체(글상자/그림) 선택 모드 → 개체 복사
@@ -2146,6 +2190,12 @@ export function onCopy(this: any, e: ClipboardEvent): boolean {
       e.preventDefault();
       if (!e.clipboardData) return false;
       try {
+        if (includeMultiple && this.cursor.getSelectedPictureRefs().length > 1) {
+          const { text, html } = copyMultipleObjects.call(this);
+          e.clipboardData.setData('text/plain', text);
+          e.clipboardData.setData('text/html', html);
+          return true;
+        }
         const cellPathJson = pictureCellPathJson(ref);
         const result = this.wasm.copyControl(ref.sec, ref.ppi, ref.ci, cellPathJson);
         if (JSON.parse(result).ok !== true) return false;
@@ -2272,6 +2322,15 @@ export function onCut(this: any, e: ClipboardEvent): void {
     return;
   }
 
+  if (this.cursor.isInCellSelectionMode()) {
+    e.preventDefault();
+    if (!this.cursor.isProtectedCellSelectionMode() && this.onCopy(e)) {
+      this.clearSelectedCellBlock();
+      this.updateCellSelection();
+    }
+    return;
+  }
+
   if (this.cursor.isInHeaderFooter() && this.getNonEmptyHeaderFooterSelection()) {
     if (copyHeaderFooterSelection.call(this, e)) this.deleteSelection();
     return;
@@ -2281,7 +2340,7 @@ export function onCut(this: any, e: ClipboardEvent): void {
   if (this.cursor.isInPictureObjectSelection()) {
     const ref = this.cursor.getSelectedPictureRef();
     if (ref) {
-      if (!this.onCopy(e)) return;
+      if (!onCopy.call(this, e, false)) return;
       this.cursor.moveOutOfSelectedPicture();
       this.pictureObjectRenderer?.clear();
       this.executeOperation({ kind: 'snapshot', operationType: 'cutObject', operation: (wasm: WasmBridge) => {
@@ -2306,6 +2365,7 @@ export function onPaste(this: any, e: ClipboardEvent): void {
   e.preventDefault();
   if (this.cursor.hasSelection() && this.canDeleteSelectionInFormMode?.() === false) return;
   if (this.isFormMode?.()) return;
+  if (this.cursor.isProtectedCellSelectionMode() || document.querySelector('.modal-overlay')) return;
 
   // 개체/표 선택 모드 해제 후 붙여넣기 진행
   if (this.cursor.isInPictureObjectSelection()) {
@@ -2355,6 +2415,14 @@ export function onPaste(this: any, e: ClipboardEvent): void {
   // [hwpx-cowork] Only a matching unique marker authorizes this editor's
   // in-memory clipboard. Text such as '[그림]' does not identify its source.
   if (useInternalClipboard) {
+    if (pos.parentParaIndex !== undefined && this.wasm.clipboardHasControl()) {
+      try {
+        if (chooseCellPaste.call(this, 'document', this.wasm.exportClipboardHwpx(), hasSelection)) return;
+      } catch (error) {
+        console.warn('[paste] 내부 복사 조각을 읽지 못했습니다:', error);
+      }
+    }
+    releasePasteCellBlock.call(this);
     // 컨트롤(개체) 붙여넣기 — 본문에서만 허용
     if (this.wasm.clipboardHasControl() && pos.parentParaIndex === undefined) {
       this.executeOperation({ kind: 'snapshot', operationType: 'pasteControl', operation: (wasm: WasmBridge) => {
@@ -2409,34 +2477,33 @@ export function onPaste(this: any, e: ClipboardEvent): void {
   // Read its structure before considering those images or generic HTML.
   const model = extractHwpJsonModel(html);
   if (model || /hancom|hwp/i.test(html)) {
-    const position = JSON.stringify([this.cursor.getPosition(), this.cursor.getSelectionOrdered()]);
-    const generation = this.wasm.documentGeneration;
-    let changed = false;
-    const stop = this.eventBus.on('document-changed', () => { changed = true; });
+    const guard = guardPasteTarget.call(this);
     void (async () => {
-      let native: Uint8Array | null = null;
-      try { native = await readHancomNativeClipboard(text, model); } catch { /* use embedded HWP model */ }
-      stop();
-      if (changed || this.wasm.documentGeneration !== generation ||
-          position !== JSON.stringify([this.cursor.getPosition(), this.cursor.getSelectionOrdered()])) return;
-      if (native && pasteDocumentFragment.call(this, native, hasSelection, false)) return;
-      if (model && pasteHwpJsonModel.call(this, model, hasSelection)) return;
-      if (model) {
-        showToast({ message: '한글 원본 구조를 읽지 못했습니다. 원본 문서를 HWPX로 열어 복사해 주세요.', durationMs: 6000 });
-        return;
+      try {
+        let native: Uint8Array | null = null;
+        try { native = await readHancomNativeClipboard(text, model); } catch { /* use embedded HWP model */ }
+        if (!guard.current()) return;
+        if (native && pasteDocumentFragment.call(this, native, hasSelection, false)) return;
+        if (model && pasteHwpJsonModel.call(this, model, hasSelection)) return;
+        if (model) {
+          showToast({ message: '한글 원본 구조를 읽지 못했습니다. 원본 문서를 HWPX로 열어 복사해 주세요.', durationMs: 6000 });
+          return;
+        }
+        let fallback = html;
+        if (needsRtfImageInlining(html, rtf)) {
+          try { fallback = await inlineOfficeClipboardImages(html, rtf); } catch { /* ordinary HTML fallback */ }
+        }
+        if (guard.current()) pasteExternalHtml.call(this, liftImagesToBlockLevel(fallback), text, hasSelection);
+      } finally {
+        guard.stop();
       }
-      let fallback = html;
-      if (needsRtfImageInlining(html, rtf)) {
-        try { fallback = await inlineOfficeClipboardImages(html, rtf); } catch { /* ordinary HTML fallback */ }
-      }
-      pasteExternalHtml.call(this, liftImagesToBlockLevel(fallback), text, hasSelection);
     })();
     return;
   }
 
   // 외부 클립보드: 이미지 파일이 있으면 그림으로 삽입
   const items = clipboardData?.items;
-  if (items) {
+  if (items && !/<table[\s>]/i.test(html)) {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -2455,6 +2522,7 @@ export function onPaste(this: any, e: ClipboardEvent): void {
     // 한글은 그림을 HTML 에 file:/// 로만 적고 실제 픽셀은 같은 클립보드의
     // text/rtf 안에 둔다. 그 경우에만 RTF 에서 그림을 꺼내 data URI 로 채운 뒤 붙여넣는다.
     if (needsRtfImageInlining(html, rtf)) {
+      const guard = guardPasteTarget.call(this);
       void (async () => {
         let merged = html;
         try {
@@ -2462,7 +2530,11 @@ export function onPaste(this: any, e: ClipboardEvent): void {
         } catch (error) {
           console.warn('[paste] RTF 그림 삽입 실패 — 그림 없이 붙여넣기:', error);
         }
-        pasteExternalHtml.call(this, merged, text, hasSelection);
+        try {
+          if (guard.current()) pasteExternalHtml.call(this, liftImagesToBlockLevel(merged), text, hasSelection);
+        } finally {
+          guard.stop();
+        }
       })();
       return;
     }
@@ -2471,6 +2543,7 @@ export function onPaste(this: any, e: ClipboardEvent): void {
   }
 
   // 플레인 텍스트 붙여넣기 (fallback — 기존 InsertTextCommand 사용, 정밀 undo 유지)
+  releasePasteCellBlock.call(this);
   pastePlainText.call(this, text, hasSelection);
 }
 
@@ -2484,7 +2557,78 @@ function fragmentTarget(p: DocumentPosition): { para: number; path: string } {
   return { para: p.parentParaIndex ?? p.paragraphIndex, path: JSON.stringify(path) };
 }
 
-function pasteDocumentFragment(this: any, bytes: Uint8Array, hasSelection: boolean, reportFailure = true): boolean {
+// [hwpx-cowork] Keep the target and its selection intact until confirmation.
+export function pastePositionKey(this: any): string {
+  return JSON.stringify([
+    this.cursor.getPosition(), this.cursor.getSelectionOrdered(), this.cursor.captureCellSelection(),
+  ]);
+}
+
+export function guardPasteTarget(this: any): { current: () => boolean; stop: () => void } {
+  const position = pastePositionKey.call(this);
+  const generation = this.wasm.documentGeneration;
+  let changed = false;
+  const invalidate = () => { changed = true; };
+  const stopChange = this.eventBus.on('document-changed', invalidate);
+  const stopMutation = this.eventBus.on('document-mutated', invalidate);
+  return {
+    current: () => this.active && !this.isFormMode?.() && !changed
+      && generation === this.wasm.documentGeneration && position === pastePositionKey.call(this),
+    stop: () => { stopChange(); stopMutation(); },
+  };
+}
+
+function releasePasteCellBlock(this: any): void {
+  if (!this.cursor.isInCellSelectionMode()) return;
+  this.cursor.exitCellSelectionMode();
+  this.cellSelectionRenderer?.clear();
+}
+
+function chooseCellPaste(
+  this: any, format: 'document' | 'model' | 'html', bytes: Uint8Array, hasSelection: boolean,
+): boolean {
+  const pos: DocumentPosition = this.cursor.getPosition();
+  if (pos.parentParaIndex === undefined || this.cursor.isInFootnote()) return false;
+  const target = fragmentTarget(pos);
+  if (!this.wasm.canPasteCells(pos.sectionIndex, target.para, target.path, format, bytes)) return false;
+  const block = this.cursor.captureCellSelection();
+  const range = this.cursor.getSelectedCellRange();
+  const origin = JSON.stringify(range ? [range.startRow, range.startCol] : null);
+  const guard = guardPasteTarget.call(this);
+  const dialog = new CellPasteDialog(mode => {
+    if (!guard.current()) {
+      showToast({ message: '붙일 위치가 바뀌었습니다. 다시 붙여넣어 주세요.', durationMs: 4000 });
+      return true;
+    }
+    try {
+      this.executeOperation({
+        kind: 'snapshot', operationType: 'pasteCells',
+        selectionBefore: block ? { mode: 'cellBlock', state: block } : undefined,
+        operation: (wasm: WasmBridge) => {
+          if (mode === 'nested' && hasSelection) this.deleteSelection({ deferRecord: true });
+          const p = this.cursor.getPosition();
+          const at = fragmentTarget(p);
+          const result = JSON.parse(wasm.pasteCells(p.sectionIndex, at.para, at.path, p.charOffset,
+            format, bytes, mode, origin));
+          if (!result.ok) throw new Error(result.error || '셀 붙이기 실패');
+          releasePasteCellBlock.call(this);
+          return positionAfterPasteResult(p, result);
+        },
+      });
+      return true;
+    } catch (error) {
+      showToast({ message: String(error), durationMs: 5000 });
+      return false;
+    }
+  });
+  dialog.afterClose = guard.stop;
+  dialog.show();
+  return true;
+}
+
+function pasteDocumentFragment(this: any, bytes: Uint8Array, hasSelection: boolean, reportFailure = true, checkCells = true): boolean {
+  if (checkCells && chooseCellPaste.call(this, 'document', bytes, hasSelection)) return true;
+  releasePasteCellBlock.call(this);
   let applied = false;
   try {
     this.executeOperation({ kind: 'snapshot', operationType: 'pasteDocumentFragment', operation: (wasm: WasmBridge) => {
@@ -2527,6 +2671,9 @@ export function extractHwpJsonModel(html: string): string | null {
  * 호출한 쪽이 종전 HTML 경로로 되돌아가게 한다.
  */
 function pasteHwpJsonModel(this: any, model: string, hasSelection: boolean): boolean {
+  if (this.cursor.getPosition().parentParaIndex !== undefined
+    && chooseCellPaste.call(this, 'model', new TextEncoder().encode(model), hasSelection)) return true;
+  releasePasteCellBlock.call(this);
   let ok = false;
   try {
     this.executeOperation({
@@ -2556,14 +2703,15 @@ function pasteHwpJsonModel(this: any, model: string, hasSelection: boolean): boo
 /** jb: 외부 HTML 붙여넣기 본체 — 코어 정리 → pasteHtml → 실패 시 text/plain 폴백. */
 function pasteExternalHtml(this: any, html: string, text: string, hasSelection: boolean): void {
   const htmlForCore = sanitizeOfficeHtmlForCore(html);
+  if (/<table[\s>]/i.test(htmlForCore) && this.cursor.getPosition().parentParaIndex !== undefined
+    && chooseCellPaste.call(this, 'html', new TextEncoder().encode(htmlForCore), hasSelection)) return;
+  releasePasteCellBlock.call(this);
   console.debug(`[paste] HTML 붙여넣기 시작: 원본 ${html.length}자 → 정리 ${htmlForCore.length}자, img ${(htmlForCore.match(/<img\b/gi) ?? []).length}개`);
   let htmlPasted = false;
-  let selectionConsumed = false;
   try {
     this.executeOperation({ kind: 'snapshot', operationType: 'pasteHtml', operation: (wasm: WasmBridge) => {
       if (hasSelection) {
         this.deleteSelection({ deferRecord: true });
-        selectionConsumed = true;
       }
       const p = this.cursor.getPosition();
       let result: string;
@@ -2586,18 +2734,19 @@ function pasteExternalHtml(this: any, html: string, text: string, hasSelection: 
         return positionAfterPasteResult(p, parsed);
       }
       console.warn('[paste] HTML 가져오기 거절(ok=false) — 텍스트로 폴백:', parsed.error ?? parsed);
-      return p;
+      throw new Error(parsed.error || 'HTML 붙여넣기 실패');
     }});
   } catch (error) {
     console.warn('[paste] HTML 붙여넣기 실패 — 텍스트로 폴백:', error);
   }
   if (!htmlPasted && text) {
-    pastePlainText.call(this, text, hasSelection && !selectionConsumed);
+    pastePlainText.call(this, text, hasSelection);
   }
 }
 
 /** 클립보드의 이미지 파일을 커서 위치에 삽입한다. */
 async function pasteImageFile(this: any, file: File, hasSelection: boolean): Promise<void> {
+  const guard = guardPasteTarget.call(this);
   try {
     const data = new Uint8Array(await file.arrayBuffer());
     const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
@@ -2611,6 +2760,7 @@ async function pasteImageFile(this: any, file: File, hasSelection: boolean): Pro
     } finally {
       URL.revokeObjectURL(url);
     }
+    if (!guard.current()) return;
 
     // px → HWPUNIT (1px = 75 HWPUNIT at 96 DPI)
     let wHwp = Math.round(img.naturalWidth * 75);
@@ -2633,27 +2783,28 @@ async function pasteImageFile(this: any, file: File, hasSelection: boolean): Pro
 
     // 스냅샷으로 삽입 (Undo 지원)
     this.executeOperation({ kind: 'snapshot', operationType: 'pasteImage', operation: (wasm: WasmBridge) => {
-      if (hasSelection) this.deleteSelection();
+      if (hasSelection) this.deleteSelection({ deferRecord: true });
       const p = this.cursor.getPosition();
       // 표 셀 안 paste (#1151): floating picture 분기 — parentParaIndex + cellPath 전달.
-      const inCell = (p.cellPath?.length ?? 0) > 0 && p.parentParaIndex !== undefined;
-      const paraForCall = inCell ? p.parentParaIndex! : p.paragraphIndex;
-      const cellPathJson = inCell ? JSON.stringify(p.cellPath) : '';
+      const target = fragmentTarget(p);
       const result = wasm.insertPicture(
-        p.sectionIndex, paraForCall, p.charOffset,
-        cellPathJson, data, wHwp, hHwp, natW, natH, ext, '',
+        p.sectionIndex, target.para, p.charOffset,
+        target.path, data, wHwp, hHwp, natW, natH, ext, '',
       );
       if (result.ok) {
+        releasePasteCellBlock.call(this);
         return {
           sectionIndex: p.sectionIndex,
           paragraphIndex: result.paraIdx + 1,
           charOffset: 0,
         } as DocumentPosition;
       }
-      return p;
+      throw new Error('클립보드 그림을 삽입하지 못했습니다.');
     }});
   } catch (err) {
     console.warn('[InputHandler] 클립보드 이미지 삽입 실패:', err);
+  } finally {
+    guard.stop();
   }
 }
 

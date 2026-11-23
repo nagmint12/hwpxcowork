@@ -444,6 +444,7 @@ impl DocumentCore {
         row_count: u16,
         col_count: u16,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 기존 문단을 복제·재배열하기 전 논리 범위 확정
         self.create_table_with_options_native(
             section_idx,
             para_idx,

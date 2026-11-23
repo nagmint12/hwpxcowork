@@ -428,6 +428,8 @@ pub struct DocumentCore {
     pub(crate) pending_cell_format_vpos: bool,
     /// 이벤트 로그 (Command 실행 시 누적)
     pub(crate) event_log: Vec<DocumentEvent>,
+    // [hwpx-cowork] 앞선 일반 이벤트 개수와 서식 명령을 함께 기록해 지연 실행 후에도 순서를 보존한다.
+    range_event_log: Vec<(usize, range_format::RangeEvents)>,
     /// 글상자 오버플로우 연결 캐시 (섹션별, 지연 계산)
     pub(crate) overflow_links_cache:
         RefCell<HashMap<usize, Vec<queries::doc_tree_nav::OverflowLink>>>,
@@ -440,6 +442,8 @@ pub struct DocumentCore {
     pub(crate) fragment_store: Vec<(u32, commands::delete_fragment::DeleteFragment)>,
     /// 다음 삭제 조각 ID
     pub(crate) next_fragment_id: u32,
+    // [hwpx-cowork] Ctrl+A 치환은 원래 본문과 진행 중이던 조판을 통째로 소유권 이동한다.
+    whole_body_fragments: HashMap<u32, commands::delete_fragment::WholeBodyFragment>,
     /// [#5769] Stage 4 구역 raw 저널 (ID → SectionRawCapture).
     /// 조각 저장소와 ID 계열을 나눈다. 자동 축출 없음 — discardSectionRaw 계약.
     pub(crate) section_raw_store: Vec<(u32, commands::section_raw_journal::SectionRawCapture)>,
@@ -624,8 +628,23 @@ impl DocumentCore {
     }
 
     /// 이벤트 로그를 JSON 배열로 직렬화한다.
-    pub fn serialize_event_log(&self) -> String {
-        crate::model::event::serialize_event_log(&self.event_log)
+    pub fn serialize_event_log(&mut self) -> String {
+        if self.range_event_log.is_empty() {
+            return crate::model::event::serialize_event_log(&self.event_log);
+        }
+        self.finish_range_source();
+        for saved in self.whole_body_fragments.values() {
+            saved.view.record_detached_range_events();
+        }
+        let mut items = Vec::new();
+        let mut first = 0;
+        for (index, group) in &self.range_event_log {
+            items.extend(self.event_log[first..*index].iter().map(DocumentEvent::to_json));
+            items.extend(group.lock().unwrap().values().map(DocumentEvent::to_json));
+            first = *index;
+        }
+        items.extend(self.event_log[first..].iter().map(DocumentEvent::to_json));
+        format!(r#"{{"ok":true,"events":[{}]}}"#, items.join(","))
     }
 
     /// 세션 설정(호환 모드)을 합성한 유효 레이아웃 프로필.
@@ -865,11 +884,13 @@ impl DocumentCore {
             batch_mode: false,
             pending_cell_format_vpos: false,
             event_log: Vec::new(),
+            range_event_log: Vec::new(),
             overflow_links_cache: RefCell::new(HashMap::new()),
             snapshot_store: Vec::new(),
             next_snapshot_id: 0,
             fragment_store: Vec::new(),
             next_fragment_id: 0,
+            whole_body_fragments: Default::default(),
             section_raw_store: Vec::new(),
             next_section_raw_id: 0,
             border_paint_store: Vec::new(),

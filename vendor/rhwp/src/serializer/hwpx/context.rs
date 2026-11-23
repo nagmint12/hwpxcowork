@@ -488,6 +488,21 @@ impl SerializeContext {
             }
         }
 
+        // [hwpx-cowork] Charts occupy content positions but have no DocInfo
+        // record. A picture inserted after a chart uses its content position,
+        // as the renderer does, and its own storage ID in the HWPX package.
+        let mut after_chart = false;
+        for (index, part) in doc.bin_data_content.iter().enumerate() {
+            if part.extension == "ooxml_chart" {
+                after_chart = true;
+            } else if after_chart && ctx.bin_data_map.contains_key(&part.id) {
+                if let Ok(position) = u16::try_from(index + 1) {
+                    storage.reserve_map(&mut ctx.bin_seq_to_storage, 1).map_err(context_error)?;
+                    ctx.bin_seq_to_storage.insert(position, part.id);
+                }
+            }
+        }
+
         // [#5168] 외부 연결(Link) BinData 는 `storage_id` 가 없어(0) 위 등록 루프들에서
         // 모두 빠진다. 그러면 Link 를 참조하는 그림(`bin_data_id` = BIN_DATA 레코드 순번)이
         // `resolve_bin_id` 의 직접 조회 폴백으로 떨어져, 순번이 내장 이미지의 `storage_id`

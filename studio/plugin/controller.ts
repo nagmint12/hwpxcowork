@@ -28,6 +28,7 @@ import {
   type CurPara, type Located, type SyncEdit, type SyncFail, type SyncIssue, type SyncPlan,
 } from './align';
 import { Geometry, type CurPoint } from './geometry';
+import { isNoteContainer, locateNote, focusNote } from './note';
 import { Overlay, type OverlayItem } from './overlay';
 import { ReviewMenu, readOnlyEntries, type MenuContext, type MenuEntry } from './menu';
 import { MiniToolbar } from './toolbar';
@@ -1007,6 +1008,10 @@ export class CoworkController {
   /** 기준 범위·개체의 iframe 좌표. 스크롤을 움직이지 않아 지속적인 초점 테두리에도 쓸 수 있다. */
   rangeRects(p: import('./types').RangeLocation): Rect[] {
     if (!p || !this.viewReady || !this.geo.ready()) return [];
+    if (isNoteContainer(this.align.baseParagraph(p.ref)?.container)) {
+      const note = this.services && locateNote(this.services.wasm, this.align, p);
+      return (note?.rects ?? []).map(r => this.geo.toClient(r));
+    }
     const a = this.align.locate(p.ref); if (!a) return [];
     const rects = p.object ? this.geo.objectRects(a.cur, p.object, Number(p.objectIndex ?? 0))
       : this.rectsFor({ ref: p.ref, start: Number(p.start) || 0, end: p.end == null ? cpLen(a.baseText) : Number(p.end), ...(p.endRef ? { endRef: p.endRef } : {}) });
@@ -1016,6 +1021,15 @@ export class CoworkController {
   focusRange(p: import('./types').RangeLocation & { flash?: boolean; select?: boolean }): boolean {
     const x = jsonCopy(p ?? ({} as typeof p));
     if (!x || typeof x.ref !== 'string' || !this.viewReady || !this.geo.ready()) return false;
+    if (isNoteContainer(this.align.baseParagraph(x.ref)?.container)) {
+      const note = this.services && locateNote(this.services.wasm, this.align, x);
+      const ih = this.ih();
+      if (!note || !ih || !focusNote(ih, note, !!x.select)) return false;
+      this.scrollIntoView(note.rects[0]);
+      if (x.flash !== false) this.startFlash(note.rects);
+      this.renderRaf();
+      return true;
+    }
     const a = this.align.locate(x.ref);
     if (!a) return false;
     const whole = x.start == null && x.end == null;
@@ -1025,7 +1039,11 @@ export class CoworkController {
     };
     const rects = x.object ? this.geo.objectRects(a.cur, x.object, Number(x.objectIndex ?? 0)) : this.rectsFor(rg);
     if (!rects.length) return false;
-    if (x.select) this.selectBase(x.ref, rg.start, rg.end, rg.endRef);
+    const cursor = internals.cursorOf(this.ih());
+    if (cursor?.isInFootnote()) {
+      cursor.exitFootnoteMode();
+      this.selectBase(x.ref, rg.start, x.select ? rg.end : rg.start, x.select ? rg.endRef : undefined);
+    } else if (x.select) this.selectBase(x.ref, rg.start, rg.end, rg.endRef);
     this.scrollIntoView(rects[0]);
     if (x.flash !== false) this.startFlash(rects);
     this.renderRaf();

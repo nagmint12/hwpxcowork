@@ -91,6 +91,7 @@ impl DocumentCore {
         end: usize,
         json: &str,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec, para); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         let runs: Vec<CharShapeRun> = serde_json::from_str(json)
             .map_err(|error| range_error(format!("JSON 디코딩 실패: {error}")))?;
         let paragraph = self

@@ -15,7 +15,7 @@ use crate::renderer::composer::{
 use crate::renderer::page_layout::PageLayoutInfo;
 use crate::renderer::style_resolver::ResolvedStyleSet;
 
-pub(super) fn char_shape_mods_affect_text_flow(mods: &crate::model::style::CharShapeMods) -> bool {
+pub(crate) fn char_shape_mods_affect_text_flow(mods: &crate::model::style::CharShapeMods) -> bool {
     mods.base_size.is_some()
         || mods.font_ids.is_some()
         || mods.ratios.is_some()
@@ -127,7 +127,7 @@ pub(super) fn rebase_para_shape(
 /// 다시 계산하는 vpos/페이지네이션 단계에서 처리된다. `tab_def_id`는 현재
 /// `resolve_single_para_style`이 `default_tab_width`를 4000 HWPUNIT 상수로 고정해
 /// 두므로(별개 결함 가능성, 이 이슈 범위 밖) 오늘 시점 코드에서 흐름에 영향이 없다.
-pub(super) fn para_shape_mods_affect_text_flow(mods: &crate::model::style::ParaShapeMods) -> bool {
+pub(crate) fn para_shape_mods_affect_text_flow(mods: &crate::model::style::ParaShapeMods) -> bool {
     mods.line_spacing.is_some()
         || mods.line_spacing_type.is_some()
         || mods.margin_left.is_some()
@@ -141,7 +141,7 @@ pub(super) fn para_shape_mods_affect_text_flow(mods: &crate::model::style::ParaS
 }
 
 /// 문단 머리의 기하가 달라지면 외부 소비자의 이전 줄 배치를 재사용하지 않는다.
-pub(super) fn marker_shape_changed(
+pub(crate) fn marker_shape_changed(
     before: &crate::model::style::ParaShape,
     after: &crate::model::style::ParaShape,
 ) -> bool {
@@ -1235,6 +1235,7 @@ impl DocumentCore {
         end_offset: usize,
         props_json: &str,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if sec_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!("구역 {} 범위 초과", sec_idx)));
         }
@@ -1315,6 +1316,7 @@ impl DocumentCore {
         end_offset: usize,
         char_shape_id: u32,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if sec_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!("구역 {} 범위 초과", sec_idx)));
         }
@@ -1738,6 +1740,7 @@ impl DocumentCore {
         para_idx: usize,
         props_json: &str,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if sec_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!("구역 {} 범위 초과", sec_idx)));
         }
@@ -1870,6 +1873,7 @@ impl DocumentCore {
         para_idx: usize,
         para_shape_id: u16,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if sec_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!("구역 {} 범위 초과", sec_idx)));
         }
@@ -2453,6 +2457,7 @@ impl DocumentCore {
         style_id: usize,
         reset: bool,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         let style = self
             .document
             .doc_info

@@ -24,7 +24,7 @@ mod source_line_ladder;
 mod cell_format_origin;
 mod footnote_ops;
 mod foreign_paste;
-mod formatting;
+pub(super) mod formatting; // [hwpx-cowork] 단일 문단과 범위 서식이 같은 줄 재계산 조건을 쓴다.
 // [hwpx-cowork] 한/글 2022 편집·입력(날짜/시간 코드)
 mod h2022_edit;
 mod formatting_runs;
@@ -52,6 +52,7 @@ mod h2022_format;
 // 구역 나누기·합치기 — 한/글 [쪽-구역 나누기]와 구역 경계 지우기.
 mod section_ops;
 mod table_ops;
+mod table_paste; // [hwpx-cowork] 한/글의 셀 블록 복사와 셀 붙이기
 mod text_editing;
 pub(crate) use text_editing::PageBreakUndo; // [hwpx-cowork] 쪽 나누기 전용 선형 실행 취소
 // [hwpx-cowork] 글상자 높이 자동 늘림(한/글 protect=0 규칙) — 조판 준비 때 한 번

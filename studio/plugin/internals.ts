@@ -19,6 +19,11 @@ export interface CursorLike {
   getSelection(): { anchor: DocumentPosition; focus: DocumentPosition } | null;
   isInHeaderFooter(): boolean;
   isInFootnote(): boolean;
+  exitHeaderFooterMode(): void;
+  exitFootnoteMode(): void;
+  enterFootnoteMode(sec: number, para: number, ctrl: number, index: number, page: number): void;
+  setFnCursorPosition(para: number, offset: number): void;
+  setFnAnchor(): void;
 }
 
 type Loose = Record<string, unknown>;

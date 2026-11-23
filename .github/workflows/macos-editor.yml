@@ -1,0 +1,37 @@
+name: macOS installer verification
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag containing the universal editor
+        required: true
+permissions:
+  contents: read
+jobs:
+  open-documents:
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tests
+            server/templates
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify the release asset and launch the standalone app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          mkdir "$RUNNER_TEMP/installer"
+          cd "$RUNNER_TEMP/installer"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*macos-editor-*.zip' --pattern 'SHA256SUMS.txt'
+          archive=$(find . -maxdepth 1 -name '*.zip' -exec basename {} \;)
+          grep -F "  $archive" SHA256SUMS.txt | shasum -a 256 -c -
+          ditto -x -k "$archive" .
+          codesign --verify --deep --strict --verbose=2 'Hwpx Editor.app'
+          lipo -verify_arch x86_64 arm64 'Hwpx Editor.app/Contents/MacOS/Hwpx Editor'
+          python3 -m pip install playwright==1.65.2
+          python3 "$GITHUB_WORKSPACE/tests/macos_release_editor.py" 'Hwpx Editor.app'

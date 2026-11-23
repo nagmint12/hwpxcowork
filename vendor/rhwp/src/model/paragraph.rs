@@ -54,6 +54,9 @@ pub struct Paragraph {
     /// [hwpx-cowork] 취소선·밑줄처럼 줄 경계를 보존하는 서식과 글자 크기 변경을 구분한다.
     #[serde(skip)]
     pub interactive_format_reflow: bool,
+    /// [hwpx-cowork] 문단 앞뒤 간격 변경은 저장된 줄 나눔을 보존한다.
+    #[serde(skip)]
+    pub interactive_format_spacing: bool,
     /// 문단 스타일 ID 참조
     pub style_id: u8,
     /// 단 나누기 종류
@@ -3284,6 +3287,7 @@ impl Paragraph {
             hwpx_missing_para_shape: self.hwpx_missing_para_shape,
             interactive_format_dirty: self.interactive_format_dirty,
             interactive_format_reflow: self.interactive_format_reflow,
+            interactive_format_spacing: self.interactive_format_spacing,
             style_id: self.style_id,
             column_type: ColumnBreakType::None,
             raw_break_type: 0,
@@ -4673,6 +4677,21 @@ impl Paragraph {
         runs
     }
 
+    // [hwpx-cowork] 보이지 않는 HWP 제어문자도 별도 글자 모양을 가질 수 있다.
+    // 적용과 같은 UTF-16 구간을 잡아 두어 Undo가 해당 모양도 복원한다.
+    pub(crate) fn char_shape_refs_in_range(&self, start: usize, end: usize) -> Vec<CharShapeRef> {
+        let Some((from, to, _)) = self.char_shape_range_bounds(start, end) else {
+            return Vec::new();
+        };
+        self.char_shape_segments(from, to)
+            .filter_map(|(mut shape, _, overlaps)| {
+                if !overlaps { return None; }
+                shape.start_pos = shape.start_pos.max(from);
+                Some(shape)
+            })
+            .collect()
+    }
+
     /// 사전 검증된 구간 목록을 한 번에 복원한다. 선택 밖/문단 끝 ref는 유지한다.
     pub(crate) fn restore_char_shape_runs(
         &mut self,
@@ -4680,6 +4699,15 @@ impl Paragraph {
         end: usize,
         runs: &[CharShapeRun],
     ) {
+        let shapes: Vec<_> = runs.iter().map(|run| CharShapeRef {
+            start_pos: self.char_offsets[run.start_offset],
+            char_shape_id: run.char_shape_id,
+        }).collect();
+        self.restore_char_shape_refs(start, end, &shapes);
+    }
+
+    // [hwpx-cowork] 표시 글자와 제어문자 양쪽에서 같은 경계 복원 규칙을 쓴다.
+    pub(crate) fn restore_char_shape_refs(&mut self, start: usize, end: usize, shapes: &[CharShapeRef]) {
         let Some((from, to, text_end)) = self.char_shape_range_bounds(start, end) else {
             return;
         };
@@ -4695,10 +4723,7 @@ impl Paragraph {
                 char_shape_id: self.char_shapes.first().map_or(0, |r| r.char_shape_id),
             });
         }
-        refs.extend(runs.iter().map(|run| CharShapeRef {
-            start_pos: self.char_offsets[run.start_offset],
-            char_shape_id: run.char_shape_id,
-        }));
+        refs.extend(shapes.iter().cloned());
         // 경계에 원본 ref가 있으면 그것만 유지한다. 합성 tail과 같은 위치로 중복하지 않는다.
         if to < text_end && !self.char_shapes.iter().any(|r| r.start_pos == to) {
             let id = self.char_shape_id_at(end).unwrap_or(0);

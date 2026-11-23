@@ -2005,6 +2005,7 @@ impl DocumentCore {
         length: usize,
         text: &str,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(section_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         let normalized = normalize_text_newlines(text);
         let text = normalized.as_ref();
         self.validate_body_paragraph_index(section_idx, para_idx)?;
@@ -4110,6 +4111,7 @@ impl DocumentCore {
         boundaries: Option<(bool, bool)>,
         form_logical_offsets: Option<(usize, usize)>,
     ) -> Result<String, HwpError> {
+        if cell_ctx.is_none() { self.resolve_body_format_span(section_idx, start_para, end_para); } // [hwpx-cowork] 선택 치환과 끝 문단 병합
         // 인덱스/범위 검증 — section_idx 범위, start/end para 범위, 뒤집힌 오프셋(start > end)
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
@@ -4738,6 +4740,7 @@ impl DocumentCore {
         para_idx: usize,
         char_offset: usize,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(section_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         use crate::model::paragraph::ColumnBreakType;
 
         if section_idx >= self.document.sections.len() {
@@ -4926,6 +4929,7 @@ impl DocumentCore {
         para_idx: usize,
         char_offset: usize,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         use crate::model::paragraph::ColumnBreakType;
 
         if section_idx >= self.document.sections.len() {
@@ -5004,6 +5008,7 @@ impl DocumentCore {
         char_offset: usize,
         column: bool,
     ) -> Result<String, HwpError> {
+        self.prepare_body_format_at(section_idx, para_idx); // [hwpx-cowork] 분할 후 두 문단에 같은 서식 상속
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!("구역 인덱스 {} 범위 초과", section_idx))
         })?;
@@ -5068,6 +5073,7 @@ impl DocumentCore {
                 self.recompose_paragraph(section_idx, changed);
             }
         }
+        self.interactive_layout.unpublished_structure |= self.interactive_layout.pending;
         self.paginate_flow_edit(window, usize::from(target.is_none())); // [hwpx-cowork]
         self.invalidate_page_tree_cache();
 
@@ -5419,6 +5425,7 @@ impl DocumentCore {
         section_idx: usize,
         para_idx: usize,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(section_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -5534,6 +5541,7 @@ impl DocumentCore {
         section_idx: usize,
         para_idx: usize,
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_at(section_idx, para_idx); // [hwpx-cowork] 요청 순서대로 현재 문단의 원문 서식 확정
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",

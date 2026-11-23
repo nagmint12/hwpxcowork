@@ -1166,6 +1166,12 @@ export class FragmentDeleteCommand implements EditCommand {
 
   execute(wasm: WasmBridge): DocumentPosition {
     // 지역 변수로 받는다 — catch 에서 프로퍼티 좁히기가 풀려 TS2345 가 난다(CI 실측).
+    // [hwpx-cowork] 미완료 전체 서식을 가진 본문은 소유권을 넘겨 Undo에 보존한다.
+    const whole = wasm.tryDeleteWholeBodySelection?.(this.selection.start, this.selection.end);
+    if (whole !== undefined) {
+      this.fragmentId = whole;
+      return { ...this.cursorAfter };
+    }
     const fragmentId = wasm.captureDeleteRange(this.sectionIdx, this.startPara, this.endPara);
     this.fragmentId = fragmentId;
     try {
@@ -1415,7 +1421,7 @@ export class BodyRangeFormatCommand implements EditCommand {
   ) {}
   execute(wasm: WasmBridge): DocumentPosition {
     if (this.history) return this.undo(wasm);
-    this.history = wasm.applyBodyRangeFormat(this.start, this.end, this.props, this.focusPage());
+    this.history = wasm.applyBodyRangeFormat(this.start, this.end, this.props, this.focusPage(), this.type === 'applyParaFormat');
     return { ...this.start };
   }
   undo(wasm: WasmBridge): DocumentPosition {

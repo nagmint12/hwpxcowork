@@ -631,6 +631,7 @@ fn sweep_paragraph(base: &str, a: &Paragraph, b: &Paragraph, out: &mut Divergenc
         // [hwpx-cowork] Temporary XML parse provenance, resolved before IR use.
         hwpx_missing_para_shape: _,
         interactive_format_dirty: _, // [hwpx-cowork] 편집 중인 파생 작업 표시
+        interactive_format_spacing: _, // [hwpx-cowork] 원문 속성은 별도로 판정한다.
         interactive_format_reflow: _, // [hwpx-cowork] 같은 작업의 일시적인 줄 재계산 여부
         style_id,
         column_type,

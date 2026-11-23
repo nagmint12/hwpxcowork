@@ -75,6 +75,9 @@ const builder = requireTools('electron-builder');
 // ── 2. 앱 코드(deploy/desktop)를 한 번 고정해 쓴다 ──
 const desktopSource = path.join(out, 'desktop-source');
 fs.cpSync(path.join(root, 'deploy/desktop'), desktopSource, { recursive: true, errorOnExist: true, force: false });
+// 설치판은 기존 사용자 프로필과 같은 앱 ID를 사용한다.
+const installedManifest = path.join(desktopSource, 'package.json');
+put(installedManifest, JSON.stringify({ ...JSON.parse(fs.readFileSync(installedManifest)), distribution: 'installed' }, null, 2) + '\n');
 const desktopManifestFile = path.join(desktopSource, 'package.json');
 const desktopManifest = JSON.parse(fs.readFileSync(desktopManifestFile, 'utf8'));
 put(desktopManifestFile, JSON.stringify({ ...desktopManifest, distribution: 'installed' }, null, 2) + '\n');

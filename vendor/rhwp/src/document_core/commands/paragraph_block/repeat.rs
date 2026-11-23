@@ -85,6 +85,7 @@ impl DocumentCore {
         budget: ParagraphBlockBudget,
         fill: impl FnMut(&mut [Paragraph], usize) -> Result<Vec<TableTextReflowKey>, HwpError>,
     ) -> Result<RepeatParagraphBlockResult, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 기존 문단을 복제·재배열하기 전 논리 범위 확정
         let prepared = self.prepare_paragraph_block(request, budget, fill)?;
         self.commit_paragraph_block(request, prepared)
     }

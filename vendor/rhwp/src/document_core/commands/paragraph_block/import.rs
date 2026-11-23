@@ -122,6 +122,7 @@ impl DocumentCore {
         source: &Document,
         request: &ImportParagraphBlockRequest,
     ) -> Result<ImportParagraphBlockResult, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 기존 문단을 복제·재배열하기 전 논리 범위 확정
         let prepared = self.prepare_paragraph_block_import(source, request)?;
         let Some(resources) = prepared.resources else {
             return Ok(prepared.result);

@@ -546,6 +546,8 @@ impl Default for ResolvedBorderStyle {
 /// 해소된 스타일 세트 (DocInfo에서 변환)
 #[derive(Debug, Default, Clone)]
 pub struct ResolvedStyleSet {
+    // [hwpx-cowork] 본문 범위 서식이 바꾼 공백 사용처만 갱신해 동일한 한/글 공백 규칙을 재사용한다.
+    pub(crate) space_usage: std::sync::Arc<super::SpaceStyleUsage>,
     /// [hwpx-cowork] Render-session policy, independent of serialized document font settings.
     pub hangul2024_missing_glyphs: bool,
     pub(crate) word_compat_target: bool,
@@ -634,6 +636,7 @@ impl ResolvedStyleSet {
             new.len() >= old.len() && old.iter().zip(new).all(|(old, new)| debug_eq(old, new))
         }
         let Self {
+            space_usage: _, // 사용처 자체의 결과는 char_styles의 공백 폭에서 비교한다.
             hangul2024_missing_glyphs,
             word_compat_target,
             section_tab_width_bits: _,
@@ -795,6 +798,6 @@ crate::storage::clone_fields!(ResolvedParaStyle, {alignment, vertical_alignment,
 
 crate::storage::clone_fields!(ResolvedBorderStyle, {borders, fill_color, pattern, gradient, image_fill, diagonal_attr, diagonal, center_line});
 
-crate::storage::clone_fields!(ResolvedStyleSet, {hangul2024_missing_glyphs, word_compat_target, section_tab_width_bits, script_metrics, source_hwp3_native, source_program_projection_slots, native_pua_fonts, display_only_otf_slots, char_overlap_size_bounds, source_char_shapes, resolved_dpi, isolated_jamo_font, page_number_char_style_id, page_number_font_is_hft, supplemental_metrics, style_char_shapes, char_styles, para_styles, border_styles, numberings, bullets, hwp3_variant, hft_ascii_halfwidth, kerning_measurement_context, horizontal_shaping_context});
+crate::storage::clone_fields!(ResolvedStyleSet, {space_usage, hangul2024_missing_glyphs, word_compat_target, section_tab_width_bits, script_metrics, source_hwp3_native, source_program_projection_slots, native_pua_fonts, display_only_otf_slots, char_overlap_size_bounds, source_char_shapes, resolved_dpi, isolated_jamo_font, page_number_char_style_id, page_number_font_is_hft, supplemental_metrics, style_char_shapes, char_styles, para_styles, border_styles, numberings, bullets, hwp3_variant, hft_ascii_halfwidth, kerning_measurement_context, horizontal_shaping_context});
 
 crate::storage::clone_fields!(ResolvedImageFill, {bin_data_id, fill_mode, brightness, contrast, effect});

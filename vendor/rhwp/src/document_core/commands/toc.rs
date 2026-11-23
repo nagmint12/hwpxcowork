@@ -1068,6 +1068,7 @@ impl DocumentCore {
     /// new_section(한/글 '만들 위치: 현재 문서의 새 구역')이면 캐럿 문단 뒤에서 구역을 나눠 차례만 든 구역을 만들고
     /// 그 뒤 문단부터 다시 새 구역으로 한다(한/글 2022 실측: 구역 0 ~ 캐럿 문단 · 구역 1 차례 · 구역 2 나머지).
     pub(crate) fn make_toc(&mut self, sec: usize, para: usize, opts: &TocOptions, new_section: bool) -> Result<(TocRegion, usize), HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 기존 문단을 복제·재배열하기 전 논리 범위 확정
         // [hwpx-cowork] 2026-11-20 차례의 쪽 번호는 모든 쪽이 정해진 뒤에 적는다(뒤쪽 미루기).
         self.flush_typeset_tail();
         if sec >= self.document.sections.len() || para >= self.document.sections[sec].paragraphs.len() {
@@ -1106,6 +1107,7 @@ impl DocumentCore {
 
     /// 차례 새로 고침 — 차례 필드의 선택 사항으로 다시 만든다(opts 가 있으면 그것으로 고친다 — 한/글 '고침')
     pub(crate) fn update_toc(&mut self, region: TocRegion, field_id: u32, opts: &TocOptions) -> Result<(TocRegion, usize), HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 기존 문단을 복제·재배열하기 전 논리 범위 확정
         self.flush_typeset_tail(); // [hwpx-cowork] 2026-11-20 (make_toc 와 같다)
         let mut entries = self.collect_toc_entries(opts, Some(region));
         let mut paras = self.build_toc_paragraphs(opts, &mut entries, region.sec, Some(field_id))?;

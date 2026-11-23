@@ -203,5 +203,185 @@ ${a}`,
       '    notify(() => previousCipher?.dispose());', a => a.replace('notify(', 'if (!holdPrevious) notify('),
       'rollback 완료까지 이전 문서의 복구 암호 핸들 보존');
   }
+  if (patches.some(p => p.id === 'progressive-open-main-coordinator')) {
+    extra('rhwp090-open-font-preparation', 'src/main.ts',
+      `async function initializeDocument(
+  docInfo: DocumentInfo,
+  displayName: string,
+  options: { suppressDialogs?: boolean; suppressLocalFontPrompt?: boolean } = {},
+): Promise<void> {
+  const msg = sbMessage();
+  try {
+    // 이미 승인된 snapshot을 권한 prompt 없이 준비한 뒤 프로그램을 선택한다.`,
+      () => `type OpenFontOptions = { suppressDialogs?: boolean; suppressLocalFontPrompt?: boolean };
+let preparedOpenFontGeneration: number | undefined;
+
+// [hwpx-cowork] 2026-11-20 글꼴 표시 비교: 미리보기와 편집 화면이 같은 글꼴 준비를 기다린다.
+async function prepareOpenFonts(displayName: string, options: OpenFontOptions): Promise<void> {
+    const generation = wasm.documentGeneration;
+    if (preparedOpenFontGeneration === generation) return;
+    const assertCurrent = () => {
+      if (wasm.documentGeneration !== generation) throw new ProgressiveOpenSupersededError();
+    };
+    const msg = sbMessage();
+    // 이미 승인된 snapshot을 권한 prompt 없이 준비한 뒤 프로그램을 선택한다.`,
+      '점진 열기와 최종 화면에서 동일한 글꼴 준비를 사용');
+    extra('rhwp090-open-font-preparation-current', 'src/main.ts',
+      '    await loadStoredLocalFonts();\n    // 초기화 후 첫 문서 로드의 선택을 프로그램 공급·조판보다 먼저 확정한다.',
+      a => a.replace('await loadStoredLocalFonts();', 'await loadStoredLocalFonts();\n    assertCurrent();'),
+      '다른 문서로 교체된 열기는 해당 문서의 글꼴 선택을 건드리지 않음');
+    extra('rhwp090-open-font-preparation-info', 'src/main.ts',
+      `    await wasm.prepareDeclaredFontEnvironment(canvasView?.getRenderBackend());
+    docInfo = wasm.getDocumentInfo();
+    setDocumentFontSubstitutions(docInfo.fontSubstitutions);
+    currentDocumentFonts = [...new Set([
+      ...(docInfo.fontsUsed ?? []),
+      ...(docInfo.fontSubstitutions ?? []).map(([, target]) => target),
+    ])];
+    lastAppliedLocalFontGeneration = null;
+    console.log('[initDoc] 1. 폰트 로딩 시작');
+    await updateLoadProgress(55, '폰트 준비 중...');
+    if (currentDocumentFonts.length) {
+      await loadWebFonts(currentDocumentFonts, (loaded, total) => {`,
+      () => `    assertCurrent();
+    await wasm.prepareDeclaredFontEnvironment(canvasView?.getRenderBackend());
+    assertCurrent();
+    const docInfo = wasm.getDocumentInfo();
+    const fonts = [...new Set([
+      ...(docInfo.fontsUsed ?? []),
+      ...(docInfo.fontSubstitutions ?? []).map(([, target]) => target),
+    ])];
+    await updateLoadProgress(55, '폰트 준비 중...');
+    assertCurrent();
+    if (fonts.length) {
+      await loadWebFonts(fonts, (loaded, total) => {
+        if (wasm.documentGeneration !== generation) return;`,
+      '원본과 대체 글꼴의 공급이 끝나기 전에 문서 표시를 시작하지 않음');
+    extra('rhwp090-open-font-preparation-finish', 'src/main.ts',
+      "    console.log('[initDoc] 2. 폰트 로딩 완료');",
+      () => `    assertCurrent();
+    setDocumentFontSubstitutions(docInfo.fontSubstitutions);
+    currentDocumentFonts = fonts;
+    lastAppliedLocalFontGeneration = null;
+    preparedOpenFontGeneration = generation;
+}
+
+async function initializeDocument(
+  docInfo: DocumentInfo,
+  displayName: string,
+  options: OpenFontOptions = {},
+): Promise<void> {
+  const msg = sbMessage();
+  try {
+    await prepareOpenFonts(displayName, options);
+    docInfo = wasm.getDocumentInfo();`,
+      '동일 문서의 최종 화면은 이미 공급한 글꼴을 그대로 사용');
+    extra('rhwp090-open-preview-font-options', 'src/main.ts',
+      'async function loadDocumentForOpen(data: Uint8Array, fileName: string, pdfSource?: PdfInputSource): Promise<DocumentInfo> {',
+      () => `async function loadDocumentForOpen(
+  data: Uint8Array, fileName: string, pdfSource?: PdfInputSource, fontOptions: OpenFontOptions = {},
+): Promise<DocumentInfo> {`,
+      '편집기 임베드의 기존 글꼴 권한 안내 정책을 첫 미리보기에도 전달');
+    extra('rhwp090-open-preview-font-options-call', 'src/main.ts',
+      '    const docInfo = imported ?? await loadDocumentForOpen(data, fileName);',
+      a => a.replace('data, fileName)', 'data, fileName, undefined, options)'),
+      '일반 문서 열기의 글꼴 권한 옵션 사용');
+    extra('rhwp090-open-preview-font-barrier', 'src/main.ts',
+      '        await canvasView?.loadDocument({ coworkPreview: true });',
+      a => `        await prepareOpenFonts(fileName, fontOptions);\n${a}`,
+      '미리보기를 그리기 전에 지정 글꼴을 준비해 Noto에서 KoPub로 바뀌는 첫 화면 제거');
+    extra('rhwp090-open-preview-font-cancel', 'src/main.ts',
+      'isProgressiveOpenSuperseded, OpenProgressPaintGate }',
+      a => a.replace('OpenProgressPaintGate', 'ProgressiveOpenSupersededError, OpenProgressPaintGate'),
+      '글꼴 준비 중 교체된 이전 문서 열기 취소');
+    extra('rhwp090-open-preview-font-rollback', 'src/main.ts',
+      "      rollback() { plugins.notifyDocumentSwap(); eventBus.emit('document-swapped'); },",
+      () => `      rollback() {
+        preparedOpenFontGeneration = undefined;
+        const restored = wasm.pageCount > 0 ? wasm.getDocumentInfo() : undefined;
+        setDocumentFontSubstitutions(restored?.fontSubstitutions);
+        currentDocumentFonts = [...new Set([
+          ...(restored?.fontsUsed ?? []),
+          ...(restored?.fontSubstitutions ?? []).map(([, target]) => target),
+        ])];
+        plugins.notifyDocumentSwap();
+        eventBus.emit('document-swapped');
+      },`,
+      '점진 열기가 실패하고 이전 문서가 복구되면 글꼴 후보도 복구');
+
+    extra('rhwp090-zoom-slider-ten-percent', 'src/main.ts',
+      '    const percent = zoomSliderPositionToPercent(Number(zoomRange.value));',
+      () => '    const percent = 10 * Math.round(zoomSliderPositionToPercent(Number(zoomRange.value)) / 10);',
+      '배율 슬라이더를 10% 단위에 맞춤');
+    extra('rhwp090-zoom-slider-keyboard-ten-percent', 'src/main.ts',
+      `    const current = Math.round(vm.getZoom() * 100);
+    let next: number | null = null;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowDown':
+        next = current - 1;
+        break;
+      case 'ArrowRight':
+      case 'ArrowUp':
+        next = current + 1;
+        break;
+      case 'PageDown':
+        next = current - 10;
+        break;
+      case 'PageUp':
+        next = current + 10;
+        break;`,
+      () => `    let next: number;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowDown':
+      case 'PageDown':
+        event.preventDefault();
+        dispatcher.dispatch('view:zoom-out');
+        return;
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'PageUp':
+        event.preventDefault();
+        dispatcher.dispatch('view:zoom-in');
+        return;`,
+      '슬라이더 키 조작도 확대·축소 버튼과 같은 10% 이동 사용');
+    extra('rhwp090-wheel-zoom-step-state', 'src/view/viewport-manager.ts',
+      'const WHEEL_ZOOM_SENSITIVITY = 0.00625;\nconst MAX_WHEEL_DELTA_PX = 120;',
+      () => 'const WHEEL_ZOOM_STEP_PX = 40;\nconst WHEEL_ZOOM_RESET_MS = 120;',
+      '트랙패드의 작은 휠 입력은 한 눈금이 될 때까지 모음');
+    extra('rhwp090-wheel-zoom-remainder', 'src/view/viewport-manager.ts',
+      '  private zoomTarget = 1.0;',
+      a => `${a}\n  private wheelZoomRemainder = 0;\n  private lastWheelZoomAt = -Infinity;`,
+      '휠 배율 입력을 화면별로 관리');
+    extra('rhwp090-wheel-zoom-step-input', 'src/view/viewport-manager.ts',
+      `    const boundedDelta = Math.max(
+      -MAX_WHEEL_DELTA_PX,
+      Math.min(MAX_WHEEL_DELTA_PX, deltaY),
+    );
+    if (boundedDelta === 0) return;`,
+      () => `    if (!Number.isFinite(deltaY) || deltaY === 0) return;
+    const now = performance.now();
+    const direction = Math.sign(deltaY);
+    if (now - this.lastWheelZoomAt > WHEEL_ZOOM_RESET_MS
+        || (this.wheelZoomRemainder !== 0 && Math.sign(this.wheelZoomRemainder) !== direction)) {
+      this.wheelZoomRemainder = 0;
+    }
+    this.lastWheelZoomAt = now;
+    // Mouse-wheel ticks count once. Fractional pixel deltas accumulate across a gesture.
+    this.wheelZoomRemainder += direction * (e.deltaMode === 0
+      ? Math.min(1, Math.abs(deltaY) / WHEEL_ZOOM_STEP_PX) : 1);
+    if (Math.abs(this.wheelZoomRemainder) + Number.EPSILON < 1) return;
+    this.wheelZoomRemainder = 0;`,
+      'Ctrl·Command 휠에서 한 눈금마다 배율을 변경');
+    extra('rhwp090-wheel-zoom-reset-on-scroll', 'src/view/viewport-manager.ts',
+      '    if (!e.ctrlKey && !e.metaKey) {',
+      a => `${a}\n      this.wheelZoomRemainder = 0;`,
+      '일반 스크롤이 배율 눈금에 누적되지 않음');
+    extra('rhwp090-wheel-zoom-ten-percent', 'src/view/viewport-manager.ts',
+      '    const target = this.clampZoom(this.zoomTarget * Math.exp(-boundedDelta * WHEEL_ZOOM_SENSITIVITY));',
+      () => '    const target = this.clampZoom(this.zoomTarget - direction * 0.1);',
+      '휠 배율에 10%p 증감과 기존 포인터 기준점을 적용');
+  }
   return result;
 }

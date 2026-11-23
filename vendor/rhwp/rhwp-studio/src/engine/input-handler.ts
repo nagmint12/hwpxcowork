@@ -2409,7 +2409,7 @@ export class InputHandler {
     const supported = type === 'applyCharFormat'
       ? typeof props.fontSize === 'number' || typeof props.strikethrough === 'boolean' || typeof props.underline === 'boolean'
       : typeof props.alignment === 'string';
-    if (!supported || Object.keys(props).length !== 1 || !this.wasm.supportsBodyRangeFormat?.()
+    if ((!this.wasm.supportsTypedBodyRangeFormat?.() && (!supported || Object.keys(props).length !== 1)) || !this.wasm.supportsBodyRangeFormat?.()
       || start.parentParaIndex !== undefined || end.parentParaIndex !== undefined || start.isTextBox || end.isTextBox
       || (start.sectionIndex === end.sectionIndex && start.paragraphIndex === end.paragraphIndex)) return false;
     const focus = () => {
@@ -5877,12 +5877,18 @@ export class InputHandler {
     document.execCommand('copy');
   }
 
-  private async copySelectedObject(isCurrent: () => boolean = () => true): Promise<boolean> {
+  private async copySelectedObject(isCurrent: () => boolean = () => true, includeMultiple = true): Promise<boolean> {
     // 개체 선택 모드 → 직접 클립보드 기록 (textarea 포커스 불필요)
     if (this.cursor.isInPictureObjectSelection()) {
       const ref = this.cursor.getSelectedPictureRef();
       if (ref) {
         try {
+          if (includeMultiple && this.cursor.getSelectedPictureRefs().length > 1) {
+            const { text, html } = _keyboard.copyMultipleObjects.call(this);
+            if (!isCurrent()) return false;
+            await _keyboard.writeTextHtmlToClipboard(text, html);
+            return isCurrent();
+          }
           const cellPathJson = _keyboard.pictureCellPathJson(ref);
           const result = this.wasm.copyControl(ref.sec, ref.ppi, ref.ci, cellPathJson);
           if (JSON.parse(result).ok !== true) return false;
@@ -5939,7 +5945,32 @@ export class InputHandler {
   performPaste(): boolean {
     if (this.editMode === 'form') return false;
     this.focusTextarea();
-    return document.execCommand('paste');
+    if (document.execCommand('paste')) return true;
+    if (!navigator.clipboard?.read) return false;
+    // [hwpx-cowork] Browsers usually reject execCommand('paste'). Menu paste
+    // can use the Clipboard API and run the same handler as Ctrl+V.
+    const guard = _keyboard.guardPasteTarget.call(this);
+    void (async () => {
+      try {
+        const data = new DataTransfer();
+        for (const item of await navigator.clipboard.read()) {
+          for (const type of item.types) {
+            if (type === 'text/plain' || type === 'text/html' || type === 'text/rtf') {
+              data.setData(type, await (await item.getType(type)).text());
+            } else if (type.startsWith('image/')) {
+              data.items.add(new File([await item.getType(type)], 'clipboard-image', { type }));
+            }
+          }
+        }
+        if (!guard.current()) return;
+        this.onPaste(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }));
+      } catch {
+        showToast({ message: '클립보드를 읽을 수 없습니다. Ctrl+V로 붙여넣어 주세요.', durationMs: 4000 });
+      } finally {
+        guard.stop();
+      }
+    })();
+    return true;
   }
 
   /** 잘라내기 (커맨드 시스템용 — 컨텍스트 메뉴/도구 상자에서 호출) */
@@ -6000,7 +6031,7 @@ export class InputHandler {
         && currentTarget.ownerCellPathJson === target.ownerCellPathJson;
     };
     try {
-      if (!await this.copySelectedObject(isCurrent) || !isCurrent()) return;
+      if (!await this.copySelectedObject(isCurrent, false) || !isCurrent()) return;
       if (picture) {
         this.cursor.moveOutOfSelectedPicture();
         this.pictureObjectRenderer?.clear();

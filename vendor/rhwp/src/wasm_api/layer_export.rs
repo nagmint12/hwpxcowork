@@ -182,23 +182,24 @@ pub(crate) fn export_text_value_impl(
 impl HwpDocument {
     /// Opt-in schema-v2 export; the existing schema-v1 API is unchanged.
     #[wasm_bindgen(js_name = getPageLayerTreeV2Compat)]
-    pub fn get_page_layer_tree_v2_compat(&self, page: u32) -> Result<String, JsValue> {
+    pub fn get_page_layer_tree_v2_compat(&mut self, page: u32) -> Result<String, JsValue> {
         self.get_page_layer_tree_v2_compat_with_profile(page, "screen")
     }
 
     #[wasm_bindgen(js_name = getPageLayerTreeV2CompatWithProfile)]
     pub fn get_page_layer_tree_v2_compat_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_json(page, profile, TextExport::Compat)
     }
 
     /// Opt-in schema-v2 export; the existing schema-v1 API is unchanged.
     #[wasm_bindgen(js_name = getPageLayerTreeV2StrictGlyphOutline)]
     pub fn get_page_layer_tree_v2_strict_glyph_outline(
-        &self,
+        &mut self,
         page: u32,
     ) -> Result<String, JsValue> {
         self.get_page_layer_tree_v2_strict_glyph_outline_with_profile(page, "screen")
@@ -206,40 +207,43 @@ impl HwpDocument {
 
     #[wasm_bindgen(js_name = getPageLayerTreeV2StrictGlyphOutlineWithProfile)]
     pub fn get_page_layer_tree_v2_strict_glyph_outline_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_json(page, profile, TextExport::StrictOutline)
     }
 
     /// Opt-in schema-v2 export; the existing schema-v1 API is unchanged.
     #[wasm_bindgen(js_name = getPageLayerTreeV2StrictGlyphRun)]
-    pub fn get_page_layer_tree_v2_strict_glyph_run(&self, page: u32) -> Result<String, JsValue> {
+    pub fn get_page_layer_tree_v2_strict_glyph_run(&mut self, page: u32) -> Result<String, JsValue> {
         self.get_page_layer_tree_v2_strict_glyph_run_with_profile(page, "screen")
     }
 
     #[wasm_bindgen(js_name = getPageLayerTreeV2StrictGlyphRunWithProfile)]
     pub fn get_page_layer_tree_v2_strict_glyph_run_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<String, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_json(page, profile, TextExport::StrictRun)
     }
 
     /// Object adapter with owned binary resources. No WASM-memory views escape.
     #[wasm_bindgen(js_name = getPageLayerTreeValue)]
-    pub fn get_page_layer_tree_value(&self, page: u32) -> Result<JsValue, JsValue> {
+    pub fn get_page_layer_tree_value(&mut self, page: u32) -> Result<JsValue, JsValue> {
         self.get_page_layer_tree_value_with_profile(page, "screen")
     }
 
     #[wasm_bindgen(js_name = getPageLayerTreeValueWithProfile)]
     pub fn get_page_layer_tree_value_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -254,7 +258,7 @@ impl HwpDocument {
     /// APIs; omitted flags retain the original four-argument inline contract.
     #[wasm_bindgen(js_name = getPageLayerTreeValueWithProfileAndResourceKeys)]
     pub fn get_page_layer_tree_value_with_profile_and_resource_keys(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
         known_image_keys: JsValue,
@@ -262,6 +266,7 @@ impl HwpDocument {
         omit_font_bytes: Option<bool>,
         omit_image_bytes: Option<bool>,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         super::render_patch_boundary::export_text_value(
             self,
             page,
@@ -278,16 +283,17 @@ impl HwpDocument {
 
     /// Object adapter with owned binary resources. No WASM-memory views escape.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2Compat)]
-    pub fn get_page_layer_tree_value_v2_compat(&self, page: u32) -> Result<JsValue, JsValue> {
+    pub fn get_page_layer_tree_value_v2_compat(&mut self, page: u32) -> Result<JsValue, JsValue> {
         self.get_page_layer_tree_value_v2_compat_with_profile(page, "screen")
     }
 
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2CompatWithProfile)]
     pub fn get_page_layer_tree_value_v2_compat_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -300,12 +306,13 @@ impl HwpDocument {
     /// Only content-addressed keys supplied by the caller omit an array slot.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2CompatWithProfileAndResourceKeys)]
     pub fn get_page_layer_tree_value_v2_compat_with_profile_and_resource_keys(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
         known_image_keys: JsValue,
         known_svg_keys: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -318,7 +325,7 @@ impl HwpDocument {
     /// Object adapter with owned binary resources. No WASM-memory views escape.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphOutline)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_outline(
-        &self,
+        &mut self,
         page: u32,
     ) -> Result<JsValue, JsValue> {
         self.get_page_layer_tree_value_v2_strict_glyph_outline_with_profile(page, "screen")
@@ -326,10 +333,11 @@ impl HwpDocument {
 
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphOutlineWithProfile)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_outline_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -342,12 +350,13 @@ impl HwpDocument {
     /// Only content-addressed keys supplied by the caller omit an array slot.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphOutlineWithProfileAndResourceKeys)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_outline_with_profile_and_resource_keys(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
         known_image_keys: JsValue,
         known_svg_keys: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -360,7 +369,7 @@ impl HwpDocument {
     /// Object adapter with owned binary resources. No WASM-memory views escape.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphRun)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_run(
-        &self,
+        &mut self,
         page: u32,
     ) -> Result<JsValue, JsValue> {
         self.get_page_layer_tree_value_v2_strict_glyph_run_with_profile(page, "screen")
@@ -368,10 +377,11 @@ impl HwpDocument {
 
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphRunWithProfile)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_run_with_profile(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,
@@ -384,12 +394,13 @@ impl HwpDocument {
     /// Only content-addressed keys supplied by the caller omit an array slot.
     #[wasm_bindgen(js_name = getPageLayerTreeValueV2StrictGlyphRunWithProfileAndResourceKeys)]
     pub fn get_page_layer_tree_value_v2_strict_glyph_run_with_profile_and_resource_keys(
-        &self,
+        &mut self,
         page: u32,
         profile: &str,
         known_image_keys: JsValue,
         known_svg_keys: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.core.prepare_format_page(page); // [hwpx-cowork] 실제 레이어 조회 쪽의 최신 원문
         self.export_text_value(
             page,
             profile,

@@ -740,6 +740,7 @@ impl DocumentCore {
         end_para_idx: usize,
         end: (usize, bool),
     ) -> Result<String, HwpError> {
+        self.resolve_body_format_span(section_idx, start_para_idx, end_para_idx); // [hwpx-cowork] 복사하는 범위의 논리 모양
         self.copy_body_range(section_idx, start_para_idx, start, section_idx, end_para_idx, end)
     }
 
@@ -754,6 +755,7 @@ impl DocumentCore {
         end_para_idx: usize,
         end_char_offset: usize,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let end_after_control = self
             .document
             .sections
@@ -1079,7 +1081,7 @@ impl DocumentCore {
         // text는 비워둠 (serialize_para_text가 controls에서 확장 제어문자를 생성)
         // control_mask: 1 << ctrl_char_code (Table/Shape=0x000B→bit11=0x800 등)
         let ctrl_char_code = match control {
-            Control::Table(_) | Control::Shape(_) | Control::Picture(_) => 0x000Bu16,
+            Control::Table(_) | Control::Shape(_) | Control::Picture(_) | Control::Equation(_) => 0x000Bu16,
             Control::SectionDef(_) | Control::ColumnDef(_) => 0x0002u16,
             Control::Footnote(_) | Control::Endnote(_) => 0x0011u16,
             Control::Header(_) | Control::Footer(_) => 0x0010u16,
@@ -1155,7 +1157,7 @@ impl DocumentCore {
             plain_text: plain_text.clone(),
             copied_table_text_reflowed,
             section_start: false,
-            section_idx: 0,
+            section_idx,
         });
         // [Task #1161] 새 컨트롤 복사 → cascade 리셋(다음 첫 붙여넣기부터 누적 시작).
         self.paste_cascade_count = 0;
@@ -1164,6 +1166,62 @@ impl DocumentCore {
             "\"text\":\"{}\"",
             plain_text
         )))
+    }
+
+    // [hwpx-cowork] Keep shared object anchors and preserve document order.
+    pub fn copy_controls_native(
+        &mut self, targets: &mut [(usize, usize, Vec<(usize, usize, usize)>, usize)],
+    ) -> Result<String, HwpError> {
+        if targets.is_empty() {
+            return Ok("{\"ok\":false}".to_string());
+        }
+        targets.sort_unstable();
+        let previous = self.clipboard.take();
+        let result = (|| {
+            let mut paragraphs: Vec<Paragraph> = Vec::new();
+            let mut text = Vec::new();
+            let mut last_anchor = None;
+            for (sec, para, path, control) in targets.iter() {
+                self.copy_control_native(*sec, *para, path, *control)?;
+                let mut clip = self.clipboard.take().expect("copied control");
+                let paragraph = clip.paragraphs.remove(0);
+                let anchor = (*sec, *para, path);
+                if last_anchor == Some(anchor) {
+                    paragraphs.last_mut().expect("previous anchor").merge_from(&paragraph);
+                } else {
+                    paragraphs.push(paragraph);
+                    last_anchor = Some(anchor);
+                }
+                text.push(clip.plain_text);
+            }
+            Ok(ClipboardData {
+                source_section_paragraphs: None, paragraphs, plain_text: text.join("\n"),
+                copied_table_text_reflowed: false, section_start: false,
+                presentation_page_breaks: Vec::new(), section_idx: targets[0].0,
+            })
+        })();
+        match result {
+            Ok(clip) => {
+                self.clipboard = Some(clip);
+                Ok("{\"ok\":true}".to_string())
+            }
+            Err(error) => {
+                self.clipboard = previous;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn export_clipboard_fragment_html_native(&self) -> Result<String, HwpError> {
+        let clip = self.clipboard.as_ref().ok_or_else(|| {
+            HwpError::RenderError("클립보드가 비어 있습니다".to_string())
+        })?;
+        let mut html = String::from("<html><body><!--StartFragment-->");
+        for p in &clip.paragraphs {
+            html.push_str(&self.paragraph_to_html(p, None, None));
+        }
+        html.push_str("<!--EndFragment--></body></html>");
+        Ok(html)
     }
 
     /// 내부 클립보드의 내용을 캐럿 위치에 붙여넣는다 (본문 문단).
@@ -1208,6 +1266,7 @@ impl DocumentCore {
         char_offset: usize,
         after_control: bool,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let mut clip_paras = match &self.clipboard {
             Some(c) if !c.paragraphs.is_empty() => c.paragraphs.clone(),
             _ => return Ok("{\"ok\":false,\"error\":\"clipboard empty\"}".to_string()),
@@ -1357,7 +1416,7 @@ impl DocumentCore {
         )))
     }
 
-    fn paste_paragraphs_into_cell_paragraphs(
+    pub(super) fn paste_paragraphs_into_cell_paragraphs(
         cell_paras: &mut Vec<Paragraph>,
         cell_para_idx: usize,
         char_offset: usize,
@@ -1612,16 +1671,11 @@ impl DocumentCore {
             .as_ref()
             .map(|c| {
                 c.paragraphs
+                    .as_slice()
                     .first()
-                    .map(|p| {
-                        p.controls.iter().any(|ctrl| {
-                            matches!(
-                                ctrl,
-                                Control::Table(_) | Control::Picture(_) | Control::Shape(_)
-                            )
-                        })
-                    })
-                    .unwrap_or(false)
+                    .is_some_and(|p| c.paragraphs.len() == 1 && p.text.is_empty()
+                        && matches!(p.controls.as_slice(), [Control::Table(_) | Control::Picture(_)
+                            | Control::Shape(_) | Control::Equation(_)]))
             })
             .unwrap_or(false)
     }
@@ -1636,6 +1690,7 @@ impl DocumentCore {
         para_idx: usize,
         char_offset: usize,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let inherit_table_text_reflow = self
             .clipboard
             .as_ref()
@@ -2030,7 +2085,10 @@ impl DocumentCore {
             // the portable carrier preserves them, while HTML needs its existing
             // omission warning. AutoNumber already contributes displayed text.
             if !matches!(ctrl, Control::AutoNumber(_)) {
-                objects.entry(positions.get(ci).copied().unwrap_or(chars.len())).or_default().push(ctrl);
+                // Empty object paragraphs can report successive logical positions
+                // even though all of their controls are at the end of the text.
+                let position = positions.get(ci).copied().unwrap_or(chars.len()).min(chars.len());
+                objects.entry(position).or_default().push(ctrl);
             }
         }
         let numbers: std::collections::BTreeMap<usize, String> = slots.iter()

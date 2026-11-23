@@ -71,7 +71,7 @@ export const MUTATING_METHODS: readonly string[] = [
   'mergeParagraphInFootnote', 'applyParaFormatInFootnote',
   // 붙여넣기
   'pasteInternal', 'pasteInternalInCell', 'pasteInternalInCellByPath', 'pasteControl',
-  'pasteHtml', 'pasteHtmlInCell', 'pasteHtmlInCellByPath', 'pasteHwpJson', 'pasteDocumentFragment', 'pasteHwpJsonFragment', // [hwpx-cowork]
+  'pasteHtml', 'pasteHtmlInCell', 'pasteHtmlInCellByPath', 'pasteHwpJson', 'pasteDocumentFragment', 'pasteHwpJsonFragment', 'pasteCells', // [hwpx-cowork]
   'applyFormatBrush', // [hwpx-cowork] One undoable Alt+C application.
   // 글자/문단 모양
   'applyCharFormat', 'setCharShapeId', 'applyCharFormatInCell', 'applyCharFormatInCellByPath',
@@ -144,7 +144,7 @@ export const EXCLUDED_NON_DOCUMENT: readonly string[] = [
   'setCaretPosition',
   // [#7002] 내부 클립보드 적재 — 문서는 읽기만 하고 복사본을 코어 버퍼에 담는다.
   'copySelection', 'copySelectionInCell', 'copySelectionInCellByPath',
-  'copySelectionInHeaderFooter', 'copyControl', 'copyTableCellsTransposed',
+  'copySelectionInHeaderFooter', 'copyControl', 'copyControls', 'copyCellBlock', 'copyTableCellsTransposed',
   'copySelectionAcross', // [hwpx-cowork] 구역을 넘는 복사 — 문서는 읽기만(구역 정의를 클립보드 사본에 싣는다)
   // [#7002] 조회 — 본문은 읽기뿐인데 `*_mut` 접근자를 거치느라 `&mut self` 가 됐다.
   'getCellCharPropertiesAtByPath', 'getCharShapeRunsInCellByPath',

@@ -94,7 +94,7 @@
     "test:toc": "node --test tests/toc.test.mjs",
     "test:sections": "node --test tests/sections.test.mjs",
     "test:ui:toc": "python -I tests/ui_toc.py",
-    "test:clipboard": "node --test tests/clipboard.test.mjs tests/clipboard_fidelity.test.mjs tests/hyperlink_clipboard.test.mjs tests/clipboard_matrix.test.mjs",
+    "test:clipboard": "node --test tests/cell_paste.test.mjs tests/clipboard_fidelity.test.mjs tests/hyperlink_clipboard.test.mjs tests/clipboard_matrix.test.mjs",
     "test:clipboard:hangul": "python -I tests/clipboard_hangul.py",
     "test:clipboard:ui": "python -I tests/clipboard_import_ui.py",
     "test:hancom-board": "node --test tests/hancom_board.test.mjs",

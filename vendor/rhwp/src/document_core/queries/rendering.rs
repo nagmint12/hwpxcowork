@@ -4758,7 +4758,7 @@ impl DocumentCore {
     }
 
     /// [hwpx-cowork] 2026-11-20 앞쪽 재사용: 알려진 편집의 바뀐 자리. `before` 는 일반 dirty 표시 전의 기록이다.
-    fn note_typeset_change(&mut self, section_idx: usize, before: Option<Option<usize>>, para_idx: usize) {
+    pub(crate) fn note_typeset_change(&mut self, section_idx: usize, before: Option<Option<usize>>, para_idx: usize) {
         if let (Some(slot), Some(before)) = (self.typeset_unchanged_before.get_mut(section_idx), before) {
             *slot = before.map(|floor| floor.min(para_idx));
         }
@@ -4854,6 +4854,7 @@ impl DocumentCore {
 
     /// composed 벡터에 새 문단 항목을 삽입한다 (문단 분할/붙여넣기 후).
     pub(crate) fn insert_composed_paragraph(&mut self, section_idx: usize, para_idx: usize) {
+        self.rebase_body_formats(section_idx, para_idx, true); // [hwpx-cowork] 이전 범위는 새 문단을 건너뛴다.
         self.invalidate_page_tree_cache();
         let _tabs = self.styles.section_tab_scope(
             self.document.sections[section_idx]
@@ -4899,6 +4900,7 @@ impl DocumentCore {
 
     /// composed 벡터에서 문단 항목을 제거한다 (문단 병합/삭제 후).
     pub(crate) fn remove_composed_paragraph(&mut self, section_idx: usize, para_idx: usize) {
+        self.rebase_body_formats(section_idx, para_idx, false); // [hwpx-cowork] 남은 문단을 명령 당시 좌표에 연결한다.
         self.invalidate_page_tree_cache();
         let composed_before = self.composed[section_idx].as_ptr() as usize; // [hwpx-cowork]
         if para_idx < self.composed[section_idx].len() {
@@ -5117,6 +5119,7 @@ impl DocumentCore {
     /// (정규화·측정) → 페이지네이션 → 페이지 트리. 앞 단계를 뒤 단계보다 늦게
     /// 만들면 같은 패스 안에서 옛 값이 섞인다.
     pub(crate) fn rebuild_derived_state(&mut self) {
+        self.finish_range_source(); // [hwpx-cowork] 글꼴 환경 등 파생 상태 재구축 때 논리 편집 보존
         // [hwpx-cowork] 전체 문서나 과거 스냅샷을 교체하면 이전 측정·주소로 재개할 수 없다.
         self.interactive_layout = Default::default();
         if self.document.sections.iter().any(|s| s.paragraphs.iter().any(|p| p.interactive_format_dirty)) {
@@ -5595,7 +5598,12 @@ impl DocumentCore {
     /// section_index/is_first_in_column 계측은 측정 통일 작업의 진단·후속용으로 유지한다.
     pub(crate) fn paginate(&mut self) {
         if self.interactive_layout.pending && !self.interactive_layout.advancing {
-            return; // [hwpx-cowork] 다음 키가 진행 중인 앞 세대의 전 구역 조판을 동기로 강제하지 않는다.
+            // [hwpx-cowork] 독립된 근접 쪽을 발행하지 못한 구조 변경에서는 이전 주소로
+            // 그리면 다른 표를 참조할 수 있다. 이 드문 경우만 정규 조판으로 수렴시킨다.
+            if std::mem::take(&mut self.interactive_layout.unpublished_structure) {
+                self.flush_typeset_tail();
+            }
+            return;
         }
         match self.paginate_with_storage(&crate::storage::Unbounded) {
             Ok(v) => v,
@@ -6072,6 +6080,10 @@ impl DocumentCore {
             let hwp3_origin_page_tolerance = self.document.layout_profile().hwp3_layout()
                 || uses_hwp3_origin_page_tolerance(&self.document);
             let column_def = Self::find_initial_column_def(para_src);
+            self.interactive_layout.initial_columns.resize_with(
+                self.interactive_layout.initial_columns.len().max(idx + 1), Default::default);
+            self.interactive_layout.initial_columns[idx] = column_def.clone(); // [hwpx-cowork] 서식 미리보기와 같은 단 폭
+
             // TypesetEngine을 main pagination으로 사용. RHWP_USE_PAGINATOR=1 로 fallback 가능.
             let use_paginator = std::env::var("RHWP_USE_PAGINATOR")
                 .map(|v| v == "1")

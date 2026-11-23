@@ -472,19 +472,23 @@ pub(crate) fn fit_body_paragraph(
         return;
     };
     if let Some(para) = section.paragraphs.get_mut(para_idx) {
-        if let (true, Some(style)) = (
-            paragraph_takes_grid(para, para_shapes),
-            styles.para_styles.get(para.para_shape_id as usize),
-        ) {
-            let width = crate::renderer::px_to_hwpunit(
-                column_width_px - style.margin_left - style.margin_right,
-                dpi,
-            );
-            let indent = crate::renderer::px_to_hwpunit(style.indent, dpi);
-            rebreak_paragraph(para, grid, width, indent, styles, dpi);
-        }
+        fit_edited_paragraph(para, para_shapes, grid, column_width_px, styles, dpi);
     }
     fit_section_spacing(&mut section.paragraphs, para_shapes, grid);
+}
+
+// [hwpx-cowork] 범위 서식은 실제로 줄을 바꾼 문단만 격자에 맞춘다. 미방문 문단의
+// 저장 간격은 그 문단을 조합할 때 같은 한/글 격자 규칙으로 확정한다.
+pub(crate) fn fit_edited_paragraph(
+    para: &mut crate::model::paragraph::Paragraph, para_shapes: &[crate::model::style::ParaShape],
+    grid: CellGrid, column_width_px: f64, styles: &crate::renderer::style_resolver::ResolvedStyleSet, dpi: f64,
+) {
+    if let (true, Some(style)) = (paragraph_takes_grid(para, para_shapes), styles.para_styles.get(para.para_shape_id as usize)) {
+        let width = crate::renderer::px_to_hwpunit(column_width_px - style.margin_left - style.margin_right, dpi);
+        let indent = crate::renderer::px_to_hwpunit(style.indent, dpi);
+        rebreak_paragraph(para, grid, width, indent, styles, dpi);
+        fit_section_spacing(std::slice::from_mut(para), para_shapes, grid);
+    }
 }
 
 /// 구역 원고지 문단의 저장 줄 간격을 줄 격자 높이에 맞춘다. 한/글은 글자 높이(줄 간격 0)로

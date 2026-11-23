@@ -12,7 +12,7 @@ use crate::model::document::Document;
 use crate::model::event::DocumentEvent;
 use crate::model::image::Picture;
 use crate::model::paragraph::{CharShapeRef, Paragraph};
-use crate::model::shape::ShapeObject;
+use crate::model::shape::{OleShape, ShapeObject};
 use crate::model::style::HeadType;
 use crate::renderer::composer::restamp_indentation;
 use std::collections::HashMap;
@@ -83,6 +83,7 @@ impl crate::document_core::DocumentCore {
     pub fn apply_format_brush_native(
         &mut self, targets_json: &str, data: &[u8], mode: &str,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         if !matches!(mode, "character" | "paragraph" | "both" | "characterStyle" | "paragraphStyle") {
             return Err(HwpError::RenderError("모양 복사 종류가 올바르지 않습니다".to_string()));
         }
@@ -172,8 +173,12 @@ impl crate::document_core::DocumentCore {
         &mut self, section_idx: usize, para_idx: usize,
         path: &[(usize, usize, usize)], char_offset: usize, json: &str,
     ) -> Result<String, HwpError> {
+        self.paste_fragment_document(section_idx, para_idx, path, char_offset, Self::clipboard_model_document(json)?)
+    }
+
+    pub(super) fn clipboard_model_document(json: &str) -> Result<Document, HwpError> {
         let parts = crate::document_core::hwpjson::hwpjson_to_hwpx_parts(json)?;
-        self.paste_fragment_document(section_idx, para_idx, path, char_offset, parts_to_document(&parts)?)
+        parts_to_document(&parts)
     }
 
     /// [hwpx-cowork] An empty document has no existing content/id space to merge.
@@ -261,23 +266,30 @@ impl crate::document_core::DocumentCore {
         &mut self, section_idx: usize, para_idx: usize,
         path: &[(usize, usize, usize)], char_offset: usize, foreign: Document,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         self.resolve_control_para(section_idx, para_idx, path)?;
         let mut paragraphs: Vec<_> = foreign.sections.iter()
             .flat_map(|s| s.paragraphs.iter().cloned()).collect();
         if paragraphs.is_empty() {
             return Err(HwpError::InvalidFile("복사한 문단이 없습니다".to_string()));
         }
+        self.remap_clipboard_paragraphs(&foreign, &mut paragraphs);
+        self.paste_prepared_fragment(section_idx, para_idx, path, char_offset, paragraphs)
+    }
+
+    // [hwpx-cowork] Cell paste and ordinary paste share resource and reference remapping.
+    pub(super) fn remap_clipboard_paragraphs(&mut self, foreign: &Document, paragraphs: &mut [Paragraph]) {
         let mut pool = BinPool::take(&mut self.document);
-        let id_map = merge_foreign_doc_info(&mut self.document, &foreign, &mut pool);
-        let starts = section_starts(&foreign);
+        let id_map = merge_foreign_doc_info(&mut self.document, foreign, &mut pool);
+        let starts = section_starts(foreign);
         let breaks = {
-            let mut ctx = RemapCtx { map: &id_map, foreign: &foreign, pool: &mut pool,
+            let mut ctx = RemapCtx { map: &id_map, foreign, pool: &mut pool,
                 next_field_id: next_free_field_id(&self.document), paragraph_depth: 0,
                 field_ids: HashMap::new() };
-            ctx.paragraphs(&mut paragraphs);
-            ctx.carried_section_breaks(&paragraphs, &starts)
+            ctx.paragraphs(paragraphs);
+            ctx.carried_section_breaks(paragraphs, &starts)
         };
-        for paragraph in &mut paragraphs { strip_section_scoped_controls(paragraph); }
+        for paragraph in paragraphs.iter_mut() { strip_section_scoped_controls(paragraph); }
         // [hwpx-cowork] 구역 나누기는 다시 단다 — paste_internal_native 가 그 자리에서 구역을 나눈다(표 칸이면 뺀다)
         for (i, defs) in breaks { paragraphs[i].put_section_break(defs); }
         let imported = pool.imported();
@@ -285,6 +297,12 @@ impl crate::document_core::DocumentCore {
         self.document.doc_info.raw_stream_dirty = true;
         if imported { self.bump_bin_data_epoch(); }
         self.rebuild_resolved_styles();
+    }
+
+    fn paste_prepared_fragment(
+        &mut self, section_idx: usize, para_idx: usize, path: &[(usize, usize, usize)],
+        char_offset: usize, paragraphs: Vec<Paragraph>,
+    ) -> Result<String, HwpError> {
         let text = paragraphs.iter().map(super::code_controls::text_with_auto_numbers)
             .collect::<Vec<_>>().join("\n");
         let previous = self.clipboard.replace(crate::document_core::ClipboardData {
@@ -322,6 +340,7 @@ impl crate::document_core::DocumentCore {
         char_offset: usize,
         foreign: Document,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         // 인덱스 검증 — `paste_internal_native` 와 같은 문구를 쓴다(스튜디오가 같은 처리).
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
@@ -708,6 +727,7 @@ impl ForeignIdMap {
 struct BinPool {
     list: Vec<BinData>,
     content: Vec<BinDataContent>,
+    chart_parts: Vec<BinDataContent>,
     map: HashMap<u16, u16>,
     next_storage_id: u16,
     imported: bool,
@@ -721,6 +741,7 @@ impl BinPool {
         // (순번 채번은 구멍 있는 문서에서 충돌한다 — `Document::next_bin_data_storage_id`).
         let next_storage_id = content
             .iter()
+            .filter(|c| c.extension != "ooxml_chart")
             .map(|c| c.id)
             .chain(list.iter().map(|b| b.storage_id))
             .max()
@@ -729,6 +750,7 @@ impl BinPool {
         BinPool {
             list,
             content,
+            chart_parts: Vec::new(),
             map: HashMap::new(),
             next_storage_id,
             imported: false,
@@ -738,10 +760,26 @@ impl BinPool {
     fn restore(self, doc: &mut Document) {
         doc.doc_info.bin_data_list = self.list;
         doc.bin_data_content = self.content;
+        doc.bin_data_content.extend(self.chart_parts);
     }
 
     fn imported(&self) -> bool {
         self.imported
+    }
+
+    // [hwpx-cowork] HWPX chart parts are stored as Chart/chartN.xml, with
+    // internal IDs 60000+N. Copy their bytes without creating a manifest entry.
+    fn map_chart_part(&mut self, foreign: &Document, old: u16) -> Option<u16> {
+        if let Some(&id) = self.map.get(&old) { return Some(id); }
+        let source = foreign.bin_data_content.iter()
+            .find(|part| part.id == old && part.extension == "ooxml_chart")?;
+        let used: std::collections::HashSet<_> = self.content.iter().chain(&self.chart_parts)
+            .map(|part| part.id).collect();
+        let id = (60001..=u16::MAX).find(|id| !used.contains(id))?;
+        self.chart_parts.push(BinDataContent { id, ..source.clone() });
+        self.map.insert(old, id);
+        self.imported = true;
+        Some(id)
     }
 
     /// 외부 바이너리 참조를 현재 문서 번호로 옮긴다(없으면 그때 실어 들인다).
@@ -775,11 +813,12 @@ impl BinPool {
             });
         record.raw_data = None;
         record.storage_id = self.next_storage_id;
+        let storage_id = record.storage_id;
         self.next_storage_id = self.next_storage_id.saturating_add(1);
 
         self.list.push(record);
         self.content.push(BinDataContent {
-            id: new_id,
+            id: storage_id,
             data: src.data.clone(),
             extension: src.extension.clone(),
         });
@@ -1173,14 +1212,7 @@ impl RemapCtx<'_> {
     fn shape(&mut self, shape: &mut ShapeObject) {
         match shape {
             ShapeObject::Picture(picture) => self.picture(picture),
-            ShapeObject::Ole(ole) => {
-                if let Ok(old) = u16::try_from(ole.bin_data_id) {
-                    ole.bin_data_id = u32::from(self.pool.map_id(self.foreign, old));
-                }
-                if let Some(caption) = &mut ole.caption {
-                    self.paragraphs(&mut caption.paragraphs);
-                }
-            }
+            ShapeObject::Ole(ole) => self.ole(ole),
             ShapeObject::Group(group) => {
                 for child in &mut group.children {
                     self.shape(child);
@@ -1208,6 +1240,30 @@ impl RemapCtx<'_> {
             if let Some(caption) = &mut drawing.caption {
                 self.paragraphs(&mut caption.paragraphs);
             }
+        }
+    }
+
+    fn ole(&mut self, ole: &mut OleShape) {
+        if let Some(fallback) = &mut ole.chart_switch_fallback {
+            self.ole(fallback);
+        }
+        if let Ok(old) = u16::try_from(ole.bin_data_id) {
+            if ole.chart_id_ref.is_some() {
+                if let Some(id) = self.pool.map_chart_part(self.foreign, old) {
+                    ole.bin_data_id = u32::from(id);
+                    ole.chart_id_ref = Some(format!("Chart/chart{}.xml", id - 60000));
+                } else {
+                    // A damaged source must not alias an unrelated target chart.
+                    ole.chart_id_ref = None;
+                    ole.bin_data_id = ole.chart_switch_fallback.take()
+                        .map_or(0, |fallback| fallback.bin_data_id);
+                }
+            } else {
+                ole.bin_data_id = u32::from(self.pool.map_id(self.foreign, old));
+            }
+        }
+        if let Some(caption) = &mut ole.caption {
+            self.paragraphs(&mut caption.paragraphs);
         }
     }
 }

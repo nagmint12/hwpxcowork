@@ -76,6 +76,14 @@ pub(crate) fn try_resolve_styles_for_document<S: storage::Storage>(
     dpi: f64,
     storage: &S,
 ) -> Result<ResolvedStyleSet, S::Error> {
+    try_resolve_styles_with_space_usage(document, dpi, storage, None)
+}
+
+// [hwpx-cowork] 정의가 추가된 선택 서식에서는 현재 원본의 공백 사용처를 재사용한다.
+fn try_resolve_styles_with_space_usage<S: storage::Storage>(
+    document: &Document, dpi: f64, storage: &S,
+    usage: Option<&std::sync::Arc<SpaceStyleUsage>>,
+) -> Result<ResolvedStyleSet, S::Error> {
     let profile = document.layout_profile();
     let lookup = missing_fonts::try_lookup_context(document, storage)?;
     let mut styles = try_resolve_styles_with_variant(&lookup, dpi, profile.hwp3_layout(), storage)?;
@@ -107,27 +115,10 @@ pub(crate) fn try_resolve_styles_for_document<S: storage::Storage>(
         // 검증 HWPX의 일반 본문은 반각, 표 안은 기존 저장 메트릭을 쓴다.
         // 같은 글자 모양이 양쪽에 쓰이면 전역 스타일 보정으로 구분할 수
         // 없으므로 원래 측정을 유지한다.
-        let mut body_space_styles = std::collections::HashSet::new();
-        let mut table_space_styles = std::collections::HashSet::new();
-        for section in &document.sections {
-            for para in &section.paragraphs {
-                if !para
-                    .controls
-                    .iter()
-                    .any(|control| matches!(control, crate::model::control::Control::Table(_)))
-                {
-                    collect_paragraph_space_styles(para, &mut body_space_styles);
-                }
-                for control in &para.controls {
-                    if let crate::model::control::Control::Table(table) = control {
-                        collect_table_space_styles(table, &mut table_space_styles);
-                    }
-                }
-            }
-        }
+        styles.space_usage = usage.cloned().unwrap_or_else(|| std::sync::Arc::new(SpaceStyleUsage::for_document(document)));
         for (id, style) in styles.char_styles.iter_mut().enumerate() {
-            if body_space_styles.contains(&(id as u32))
-                && !table_space_styles.contains(&(id as u32))
+            if styles.space_usage.body.contains_key(&(id as u32))
+                && !styles.space_usage.table.contains(&(id as u32))
                 && style.font_size >= 56.0 / 3.0 - 0.01
                 && style.font_family.split(',').next() == Some("한양신명조")
                 && style.font_space_em.is_none()
@@ -137,6 +128,49 @@ pub(crate) fn try_resolve_styles_for_document<S: storage::Storage>(
         }
     }
     Ok(styles)
+}
+
+// [hwpx-cowork] 한/글 본문과 표 공백을 구분하는 기존 판정을 문단 단위로 증분 갱신한다.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SpaceStyleUsage {
+    body: std::collections::HashMap<u32, usize>,
+    table: std::collections::HashSet<u32>,
+}
+impl SpaceStyleUsage {
+    pub(crate) fn body_ids(para: &crate::model::paragraph::Paragraph) -> std::collections::HashSet<u32> {
+        let mut ids = std::collections::HashSet::new();
+        if !para.controls.iter().any(|c| matches!(c,crate::model::control::Control::Table(_))) {
+            collect_paragraph_space_styles(para, &mut ids);
+        }
+        ids
+    }
+    fn for_document(document: &Document) -> Self {
+        let mut result = Self::default();
+        for para in document.sections.iter().flat_map(|s| &s.paragraphs) {
+            for id in Self::body_ids(para) { *result.body.entry(id).or_default() += 1; }
+            for c in &para.controls {
+                if let crate::model::control::Control::Table(table) = c {
+                    collect_table_space_styles(table, &mut result.table);
+                }
+            }
+        }
+        result
+    }
+    pub(crate) fn replace_body(&mut self, old: &std::collections::HashSet<u32>, new: &std::collections::HashSet<u32>) -> bool {
+        let mut changed = false;
+        for id in old.difference(new) {
+            if let Some(n) = self.body.get_mut(id) {
+                *n -= 1;
+                if *n == 0 { self.body.remove(id); changed = true; }
+            }
+        }
+        for id in new.difference(old) {
+            let count = self.body.entry(*id).or_default();
+            changed |= *count == 0;
+            *count += 1;
+        }
+        changed
+    }
 }
 
 fn collect_paragraph_space_styles(
@@ -175,7 +209,16 @@ pub(crate) fn resolve_styles_with_environment(
     environment: Option<&super::font_environment::FontEnvironment>,
     profile: crate::model::provenance::LayoutCompatibilityProfile,
 ) -> ResolvedStyleSet {
-    let mut styles = resolve_styles_for_document(document, dpi);
+    resolve_styles_with_usage(document, dpi, environment, profile, None)
+}
+
+pub(crate) fn resolve_styles_with_usage(
+    document: &Document, dpi: f64, environment: Option<&super::font_environment::FontEnvironment>,
+    profile: crate::model::provenance::LayoutCompatibilityProfile,
+    usage: Option<&std::sync::Arc<SpaceStyleUsage>>,
+) -> ResolvedStyleSet {
+    let mut styles = try_resolve_styles_with_space_usage(document, dpi, &storage::Unbounded, usage)
+        .unwrap_or_else(|never| match never {});
     styles.script_metrics = super::script_metrics::ScriptMetricsContract::for_profile(profile);
     // 독립 동일 입력의 2020은 HCRDotum을 강제하고, 2024는 원 face/대체 face의
     // 자모 전진을 유지한다. 세대는 기존 명시적 출력 profile에서만 받는다.
@@ -485,6 +528,7 @@ fn try_resolve_styles_with_variant<S: storage::Storage>(
         page_number::resolve(doc_info, false);
 
     let mut styles = ResolvedStyleSet {
+        space_usage: Default::default(), // [hwpx-cowork]
         hangul2024_missing_glyphs: false,
         source_hwp3_native: false,
         word_compat_target: doc_targets_ms_word(doc_info),

@@ -69,7 +69,157 @@ pub struct DeleteFragment {
     pub text_reflowed_table_paths: std::collections::HashSet<RenderPath>,
 }
 
+// [hwpx-cowork] 원문 버퍼와 해당 버퍼를 가리키는 조판 결과를 함께 주차한다.
+// 글꼴 환경·실제 BinData·공유 이력·편집기 옵션은 현재 엔진에 남는다.
+pub(crate) struct WholeBodyFragment {
+    pub(crate) view: Box<DocumentCore>,
+    environment: u64,
+}
+
 impl DocumentCore {
+    fn swap_body_projection(&mut self, parked: &mut DocumentCore) {
+        // 포인터를 키로 삼는 측정/쪽 캐시는 원문과 같은 소유자를 따라가야 한다.
+        macro_rules! swap_fields {
+            ($($field:ident),+ $(,)?) => { $(std::mem::swap(&mut self.$field, &mut parked.$field);)+ };
+        }
+        swap_fields!(
+            split_cell_doc_id,
+            pagination,
+            styles,
+            composed,
+            body_page_field_error,
+            render_normalization,
+            measured_tables,
+            dirty_sections,
+            measured_sections,
+            dirty_paragraphs,
+            para_column_map,
+            deferred_pagination_descriptor,
+            pending_pagination_job,
+            typeset_checkpoints,
+            flow_sections,
+            row_tail,
+            row_paint,
+            row_text,
+            typeset_unchanged_before,
+            typeset_tail_job,
+            typeset_tail_completed,
+            cell_compose_memo,
+            paragraph_format_memo,
+            stored_rows_memo,
+            measure_frame_memo,
+            metric_request_memo,
+            only_text_edits_pending,
+            interactive_layout,
+            progressive_open_completed,
+            page_tree_cache,
+            header_footer_preview_tree_cache,
+            layer_tree_json_cache,
+            page_layer_tree_cache,
+            pending_cell_format_vpos,
+            overflow_links_cache,
+            para_offset
+        );
+        std::mem::swap(&mut self.document.sections, &mut parked.document.sections);
+        std::mem::swap(
+            &mut self.document.doc_properties,
+            &mut parked.document.doc_properties,
+        );
+    }
+
+    // [hwpx-cowork] 단일 구역 전체 치환은 삭제 조각을 만들기 위해 수천 문단을 복제할 필요가 없다.
+    // 경계 문단만 기존 삭제기에 넘기므로 남는 구역 정의·문단 끝·숨은 부호 규칙도 동일하다.
+    pub(crate) fn try_delete_whole_body(
+        &mut self,
+        s: usize,
+        start: usize,
+        offset: usize,
+        end: usize,
+        until: usize,
+    ) -> Result<Option<u32>, HwpError> {
+        if !self.typeset_tail_deferral
+            || self.batch_mode
+            || self.progressive_open_job.is_some()
+            || !self.interactive_layout.pending
+            || self.interactive_layout.format_cursor.is_none()
+            || self.document.sections.len() != 1
+            || s != 0
+            || start != 0
+            || offset != 0
+            || end < 2
+        {
+            return Ok(None);
+        }
+        let body = &self.document.sections[0];
+        if body.paragraphs.len().checked_sub(1) != Some(end)
+            || until != body.paragraphs[end].char_offsets.len()
+        {
+            return Ok(None);
+        }
+        self.resolve_body_format_at(0, 0);
+        self.resolve_body_format_at(0, end);
+        let body = &self.document.sections[0];
+        let reduced = crate::model::document::Section {
+            paragraphs: vec![body.paragraphs[0].clone(), body.paragraphs[end].clone()],
+            section_def: body.section_def.clone(),
+            trailing_lists: body.trailing_lists.clone(),
+            raw_provenance: body.raw_provenance.clone(),
+            raw_stream: None,
+        };
+        let environment = self.layout_environment_stamp();
+        let mut parked = Box::new(DocumentCore::new_empty());
+        parked.document.sections = vec![reduced];
+        parked.document.doc_properties = self.document.doc_properties.clone();
+        parked.styles = self.styles.clone();
+        self.swap_body_projection(&mut parked);
+        self.rebuild_derived_state();
+        self.interactive_layout.range_visits = parked.interactive_layout.range_visits;
+        // 기존 deleteRange가 경계 제어문자를 거절하면 원문·서식·쪽·캐럿을 모두 되돌린다.
+        if let Err(error) = self.delete_range_native(0, 0, 0, 1, until, None) {
+            self.swap_body_projection(&mut parked);
+            self.layout_engine.clear_layout_caches();
+            return Err(error);
+        }
+        let id = self.next_fragment_id;
+        self.next_fragment_id += 1;
+        self.whole_body_fragments.insert(
+            id,
+            WholeBodyFragment {
+                view: parked,
+                environment,
+            },
+        );
+        Ok(Some(id))
+    }
+
+    fn restore_whole_body(&mut self, id: u32) -> Result<String, HwpError> {
+        if self.document.sections.len() != 1 || self.document.sections[0].paragraphs.len() != 1 {
+            return Err(HwpError::RenderError(
+                "전체 선택 조각을 복원할 본문이 달라졌습니다.".into(),
+            ));
+        }
+        let mut saved = self.whole_body_fragments.remove(&id).unwrap();
+        let same_environment = self.layout_environment_stamp() == saved.environment;
+        let visits = self.interactive_layout.range_visits;
+        self.swap_body_projection(&mut saved.view);
+        self.interactive_layout.range_visits = self.interactive_layout.range_visits.max(visits);
+        self.layout_engine.clear_layout_caches();
+        if same_environment {
+            self.refresh_range_style_definitions(false);
+        } else {
+            self.rebuild_derived_state();
+        }
+        self.event_log.push(DocumentEvent::TextInserted {
+            section: 0,
+            para: 0,
+            offset: 0,
+            len: 0,
+        });
+        Ok(super::super::helpers::json_ok_with(
+            "\"paraIdx\":0,\"charOffset\":0",
+        ))
+    }
+
     /// 삭제 직전 문단 범위 원본을 조각으로 보관하고 조각 ID 를 반환한다.
     ///
     /// 반드시 `delete_range_native` **호출 전**에 불린다. 호출 순서:
@@ -80,6 +230,7 @@ impl DocumentCore {
         start_para: usize,
         end_para: usize,
     ) -> Result<u32, HwpError> {
+        self.resolve_body_format_span(section_idx, start_para, end_para); // [hwpx-cowork] 잘라낼 문단 이력
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -136,6 +287,10 @@ impl DocumentCore {
     /// 뒤 문단의 line_segs 와 구역 raw 필드를 캡처 시점 값으로 되돌린 뒤
     /// 파생 상태를 재구성한다(스냅샷 복원과 동일 경로).
     pub fn restore_delete_fragment_native(&mut self, frag_id: u32) -> Result<String, HwpError> {
+        if self.whole_body_fragments.contains_key(&frag_id) {
+            return self.restore_whole_body(frag_id);
+        }
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let pos = self
             .fragment_store
             .iter()
@@ -228,6 +383,10 @@ impl DocumentCore {
     /// TS 히스토리가 엔트리를 축출·클리어할 때 스냅샷 `discardSnapshot` 과 짝으로
     /// 호출하는 것이 계약이다. 코어는 자동 축출하지 않는다.
     pub fn discard_delete_fragment_native(&mut self, frag_id: u32) {
+        if let Some(saved) = self.whole_body_fragments.remove(&frag_id) {
+            // [hwpx-cowork] 취소 이력에서 퇴출되어도 이미 관찰 가능한 변경 원장은 보존한다.
+            saved.view.record_detached_range_events();
+        }
         self.fragment_store.retain(|(id, _)| *id != frag_id);
     }
 }

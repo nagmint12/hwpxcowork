@@ -193,7 +193,7 @@ export class Alignment {
     const nestedOf = new Map<string, EngineParagraph[]>();
     for (const p of Array.isArray(paragraphs) ? paragraphs : []) {
       if (!p || typeof p.ref !== 'string' || p.where === '메모' || this.baseByRef.has(p.ref)) continue;
-      const q: EngineParagraph = { ref: p.ref, text: String(p.text ?? ''), where: p.where, parent: p.parent ?? null, container: p.container ?? null, cell: p.cell ?? null, kind: p.kind, sig: p.sig ?? null };
+      const q: EngineParagraph = { ref: p.ref, text: String(p.text ?? ''), where: p.where, parent: p.parent ?? null, container: p.container ?? null, cell: p.cell ?? null, note: p.note, kind: p.kind, sig: p.sig ?? null };
       this.baseByRef.set(q.ref, q);
       if (q.parent) this.parents.add(q.parent);
       const m = BODY_RE.exec(q.ref);

@@ -2448,6 +2448,13 @@ impl DocumentCore {
         )
     }
 
+    // [hwpx-cowork] 웹한글컨트롤 모양 조회는 본문 리스트의 논리 범위도 즉시 읽는다.
+    pub(crate) fn prepare_list_format(&mut self, list_id: u32, index: usize) {
+        if self.body_range_source_pending() && list_id == ROOT_LIST_ID {
+            if let Some((s,p)) = root_para_location(self, index) { self.resolve_body_format_at(s,p); }
+        }
+    }
+
     /// 커서 좌표가 가리키는 문단 — 리스트 표를 한 번만 만든다.
     fn cursor_paragraph_ref(&self, list_id: u32, para_in_list: usize) -> Option<&Paragraph> {
         if list_id == ROOT_LIST_ID {

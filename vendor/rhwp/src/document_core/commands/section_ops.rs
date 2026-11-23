@@ -30,6 +30,7 @@ impl DocumentCore {
         para_idx: usize,
         char_offset: usize,
     ) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
                 "구역 인덱스 {} 범위 초과 (총 {}개)",
@@ -176,6 +177,7 @@ impl DocumentCore {
     /// `section_idx` 구역을 앞 구역에 합친다. 합친 문단은 앞 구역의 모양을 따른다.
     /// 돌려주는 `para`는 앞 구역에서 옮겨 온 첫 문단의 번호다.
     pub fn merge_section_native(&mut self, section_idx: usize) -> Result<String, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let count = self.document.sections.len();
         if section_idx == 0 || section_idx >= count {
             return Err(HwpError::RenderError(format!(

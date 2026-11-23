@@ -1418,7 +1418,7 @@ impl HwpDocument {
     #[wasm_bindgen(js_name = renderPagePatchToCanvasFilteredWithProfile)]
     #[allow(clippy::too_many_arguments)]
     pub fn render_page_patch_to_canvas_filtered_with_profile(
-        &self,
+        &mut self,
         page_num: u32,
         canvas: &HtmlCanvasElement,
         scale: f64,
@@ -1431,6 +1431,7 @@ impl HwpDocument {
     ) -> Result<(), JsValue> {
         use crate::renderer::render_tree::BoundingBox;
 
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 부분 다시 그리기
         render_patch_boundary::render_page_patch_to_canvas_filtered_with_profile(
             self,
             page_num,
@@ -1488,7 +1489,7 @@ impl HwpDocument {
     /// screen profile 기본값이므로 `getPageLayerTreeWithProfile` 로 위임한다 — 같은 핫패치
     /// 경계를 지나야 한다. PageRenderer 가 좁은 질의를 못 쓸 때 되돌아오는 경로다.
     #[wasm_bindgen(js_name = getPageLayerTree)]
-    pub fn get_page_layer_tree(&self, page_num: u32) -> Result<String, JsValue> {
+    pub fn get_page_layer_tree(&mut self, page_num: u32) -> Result<String, JsValue> {
         self.get_page_layer_tree_with_profile(page_num, "screen", Some(false), Some(false))
     }
 
@@ -1504,7 +1505,7 @@ impl HwpDocument {
     /// 최상위 `imageBytes:"inline"` 메타데이터가 있으므로 JSON 전체의 byte identity는 보장하지 않는다.
     #[wasm_bindgen(js_name = getPageLayerTreeWithProfile)]
     pub fn get_page_layer_tree_with_profile(
-        &self,
+        &mut self,
         page_num: u32,
         profile: &str,
         omit_image_bytes: Option<bool>,
@@ -1512,6 +1513,7 @@ impl HwpDocument {
     ) -> Result<String, JsValue> {
         let omit_image_bytes = omit_image_bytes.unwrap_or(false);
         let omit_font_bytes = omit_font_bytes.unwrap_or(false);
+        self.core.prepare_format_page(page_num); // [hwpx-cowork] 레이어 기반 편집 화면
         render_patch_boundary::get_page_layer_tree_with_profile(
             self,
             page_num,
@@ -2206,7 +2208,8 @@ impl HwpDocument {
     pub fn typeset_resume_stats(&self) -> String {
         let control = &self.core.typeset_resume;
         format!(
-            "{{\"tablePaints\":{},\"tableWindows\":{},\"lastTableWindowPages\":{},\"lastTableWindowRows\":{},\"flowWindowEdits\":{},\"flowWindowSections\":{},\"enabled\":{},\"resumed\":{},\"full\":{},\"skippedParagraphs\":{},\"verifyChecks\":{},\"verifyMismatches\":{},\"firstMismatch\":{},\"tailDeferral\":{},\"tailParked\":{},\"tailCompleted\":{},\"tailPending\":{}}}",
+            "{{\"rangeFormatVisits\":{},\"rangeFormatPending\":{},\"tablePaints\":{},\"tableWindows\":{},\"lastTableWindowPages\":{},\"lastTableWindowRows\":{},\"flowWindowEdits\":{},\"flowWindowSections\":{},\"enabled\":{},\"resumed\":{},\"full\":{},\"skippedParagraphs\":{},\"verifyChecks\":{},\"verifyMismatches\":{},\"firstMismatch\":{},\"tailDeferral\":{},\"tailParked\":{},\"tailCompleted\":{},\"tailPending\":{}}}",
+            self.core.interactive_layout.range_visits, self.core.body_range_source_pending(),
             control.table_paints.get(), // [hwpx-cowork] 원본 행을 그대로 투영해 실제로 그린 횟수
             control.table_windows.get(), control.window_pages.get(), control.window_rows.get(), // [hwpx-cowork]
             control.flow_window_edits.get(), // [hwpx-cowork]
@@ -7652,13 +7655,15 @@ impl HwpDocument {
     ///
     /// 항목 이름과 단위는 한글 것이다(`Height` 는 HWPUNIT, `AlignType` 은 코드값).
     #[wasm_bindgen(js_name = getCharShapeSet)]
-    pub fn get_char_shape_set(&self, list_id: u32, para_in_list: u32, pos: u32) -> String {
+    pub fn get_char_shape_set(&mut self, list_id: u32, para_in_list: u32, pos: u32) -> String {
+        self.core.prepare_list_format(list_id, para_in_list as usize);
         self.char_shape_set_json(list_id, para_in_list as usize, pos as usize)
     }
 
     /// 커서 자리의 문단 모양 — 웹한글컨트롤 `ParaShape` 파라미터셋 값(§8.2.11).
     #[wasm_bindgen(js_name = getParaShapeSet)]
-    pub fn get_para_shape_set(&self, list_id: u32, para_in_list: u32) -> String {
+    pub fn get_para_shape_set(&mut self, list_id: u32, para_in_list: u32) -> String {
+        self.core.prepare_list_format(list_id, para_in_list as usize);
         self.para_shape_set_json(list_id, para_in_list as usize)
     }
 
@@ -8463,7 +8468,7 @@ impl HwpDocument {
 
     /// 현재 이벤트 로그를 JSON으로 반환한다.
     #[wasm_bindgen(js_name = getEventLog)]
-    pub fn get_event_log(&self) -> String {
+    pub fn get_event_log(&mut self) -> String {
         self.serialize_event_log()
     }
 
@@ -8525,6 +8530,13 @@ impl HwpDocument {
     ///
     /// 반드시 `deleteRangeNative` 호출 **전**에 불린다. 반환 조각 ID 는
     /// `restoreDeleteFragment`/`discardDeleteFragment` 에 쓴다.
+    // [hwpx-cowork] 서식을 펼치는 동안 전체 선택을 타자로 치환하는 원자적 진입점.
+    #[wasm_bindgen(js_name = tryDeleteWholeBodySelection)]
+    pub fn try_delete_whole_body_selection(&mut self, s: usize, first: usize, offset: usize, last: usize,
+        until: usize) -> Result<Option<u32>, JsValue> {
+        self.core.try_delete_whole_body(s, first, offset, last, until).map_err(Into::into)
+    }
+
     #[wasm_bindgen(js_name = captureDeleteRange)]
     pub fn capture_delete_range(
         &mut self,
@@ -8598,11 +8610,12 @@ impl HwpDocument {
     /// 반환값: JSON 객체 (fontFamily, fontSize, bold, italic, underline, strikethrough, textColor 등)
     #[wasm_bindgen(js_name = getCharPropertiesAt)]
     pub fn get_char_properties_at(
-        &self,
+        &mut self,
         sec_idx: usize,
         para_idx: usize,
         char_offset: usize,
     ) -> Result<String, JsValue> {
+        self.core.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork] 화면 밖의 요청도 같은 논리 서식을 읽는다.
         self.get_char_properties_at_native(sec_idx, para_idx, char_offset)
             .map_err(|e| e.into())
     }
@@ -8634,10 +8647,11 @@ impl HwpDocument {
     /// 반환값: JSON 객체 (alignment, lineSpacing, marginLeft, marginRight, indent 등)
     #[wasm_bindgen(js_name = getParaPropertiesAt)]
     pub fn get_para_properties_at(
-        &self,
+        &mut self,
         sec_idx: usize,
         para_idx: usize,
     ) -> Result<String, JsValue> {
+        self.core.resolve_body_format_at(sec_idx, para_idx); // [hwpx-cowork]
         self.get_para_properties_at_native(sec_idx, para_idx)
             .map_err(|e| e.into())
     }
@@ -9620,12 +9634,13 @@ impl HwpDocument {
     /// 문자 offset 범위의 모양 구간 목록을 조회한다.
     #[wasm_bindgen(js_name = getCharShapeRuns)]
     pub fn get_char_shape_runs(
-        &self,
+        &mut self,
         sec: usize,
         para: usize,
         start: usize,
         end: usize,
     ) -> Result<String, JsValue> {
+        self.core.resolve_body_format_at(sec, para); // [hwpx-cowork] 서식 조회·이력의 부분 범위
         self.get_char_shape_runs_native(sec, para, start, end)
             .map_err(Into::into)
     }
@@ -9922,7 +9937,8 @@ impl HwpDocument {
 
     /// [hwpx-cowork] 쪽 감추기 Undo는 컨트롤 원래 순서와 원시 레코드를 포함한 소유 문단 하나만 기억한다.
     #[wasm_bindgen(js_name = capturePageHide)]
-    pub fn capture_page_hide(&self, section: usize, paragraph: usize) -> Result<PageHideHistory, JsValue> {
+    pub fn capture_page_hide(&mut self, section: usize, paragraph: usize) -> Result<PageHideHistory, JsValue> {
+        self.core.resolve_body_format_at(section, paragraph); // [hwpx-cowork] 문단 사본에 미완 서식을 포함한다.
         let saved = self.core.document.sections.get(section).and_then(|s| s.paragraphs.get(paragraph))
             .ok_or_else(|| JsValue::from_str("감추기 문단을 찾을 수 없습니다."))?.clone();
         Ok(PageHideHistory { owner: self.core.split_cell_doc_id, section, paragraph, saved })
@@ -10035,11 +10051,15 @@ impl HwpDocument {
 
     // [hwpx-cowork] 선택한 원본 범위를 한 번에 전달하며 편집 쪽은 표시 우선순위로만 쓴다.
     #[wasm_bindgen(js_name = applyBodyRangeFormat)]
-    pub fn apply_body_range_format_api(&mut self, s:u32,p:u32,o:u32, end_s:u32,end_p:u32,end_o:u32,props:&str,page:u32) -> Result<BodyRangeFormatHistory,JsValue> {
+    pub fn apply_body_range_format_api(&mut self, s:u32,p:u32,o:u32, end_s:u32,end_p:u32,end_o:u32,props:&str,page:u32,paragraph:Option<bool>) -> Result<BodyRangeFormatHistory,JsValue> {
         let inner = self.core.apply_body_range_format((s as usize,p as usize,o as usize),
-            (end_s as usize,end_p as usize,end_o as usize),props,page)?;
+            (end_s as usize,end_p as usize,end_o as usize),props,page,paragraph)?;
         Ok(BodyRangeFormatHistory { owner:self.core.split_cell_doc_id,inner })
     }
+    // [hwpx-cowork] Studio 기능 판별 및 원문 전개 상태 조회.
+    #[wasm_bindgen(js_name = bodyRangeSourcePending)]
+    pub fn body_range_source_pending(&self) -> bool { self.core.body_range_source_pending() }
+
     #[wasm_bindgen(js_name = swapBodyRangeFormat)]
     pub fn swap_body_range_format_api(&mut self, saved:&mut BodyRangeFormatHistory, page:u32) -> Result<(),JsValue> {
         if saved.owner != self.core.split_cell_doc_id { return Err(JsValue::from_str("이 서식 이력은 다른 문서에 속합니다.")); }
@@ -10470,13 +10490,14 @@ impl HwpDocument {
     /// 선택 영역을 HTML 문자열로 변환한다 (본문).
     #[wasm_bindgen(js_name = exportSelectionHtml)]
     pub fn export_selection_html(
-        &self,
+        &mut self,
         section_idx: u32,
         start_para_idx: u32,
         start_char_offset: u32,
         end_para_idx: u32,
         end_char_offset: u32,
     ) -> Result<String, JsValue> {
+        self.core.resolve_body_format_span(section_idx as usize, start_para_idx as usize, end_para_idx as usize); // [hwpx-cowork]
         self.export_selection_html_native(
             section_idx as usize,
             start_para_idx as usize,
@@ -10561,13 +10582,15 @@ impl HwpDocument {
     /// [hwpx-cowork] Copied fragment with native controls and image resources.
     // [hwpx-cowork] Native format brush definitions run in browser WASM.
     #[wasm_bindgen(js_name = exportFormatBrush)]
-    pub fn export_format_brush(&self, sec: u32, para: u32, path: &str, offset: u32) -> Result<Vec<u8>, JsValue> {
+    pub fn export_format_brush(&mut self, sec: u32, para: u32, path: &str, offset: u32) -> Result<Vec<u8>, JsValue> {
+        self.core.resolve_body_format_at(sec as usize, para as usize); // [hwpx-cowork]
         self.export_format_brush_native(sec as usize, para as usize, &parse_cell_path_arg(path)?, offset as usize)
             .map_err(|e| e.into())
     }
 
     #[wasm_bindgen(js_name = getFormatBrushInfo)]
-    pub fn get_format_brush_info(&self, sec: u32, para: u32, path: &str, offset: u32) -> Result<String, JsValue> {
+    pub fn get_format_brush_info(&mut self, sec: u32, para: u32, path: &str, offset: u32) -> Result<String, JsValue> {
+        self.core.resolve_body_format_at(sec as usize, para as usize); // [hwpx-cowork]
         self.get_format_brush_info_native(sec as usize, para as usize, &parse_cell_path_arg(path)?, offset as usize)
             .map_err(|e| e.into())
     }
@@ -10585,6 +10608,59 @@ impl HwpDocument {
         let path = parse_cell_path_arg(path_json)?;
         self.paste_document_fragment_native(section_idx as usize, para_idx as usize,
             &path, char_offset as usize, data).map_err(|e| e.into())
+    }
+
+    // [hwpx-cowork] The editor asks about a table fragment before showing the
+    // Hancom cell paste choices. The document is only edited on confirmation.
+    #[wasm_bindgen(js_name = canPasteCells)]
+    pub fn can_paste_cells(
+        &self, sec: u32, para: u32, path: &str, format: &str, bytes: &[u8],
+    ) -> Result<bool, JsValue> {
+        Ok(self.can_paste_cells_native(
+            sec as usize, para as usize, &parse_cell_path_arg(path)?, format, bytes,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = pasteCells)]
+    pub fn paste_cells(
+        &mut self, sec: u32, para: u32, path: &str, offset: u32,
+        format: &str, bytes: &[u8], mode: &str, origin: &str,
+    ) -> Result<String, JsValue> {
+        let origin: Option<(u16, u16)> = serde_json::from_str(origin)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.paste_cells_native(
+            sec as usize, para as usize, &parse_cell_path_arg(path)?, offset as usize,
+            format, bytes, mode, origin,
+        ).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = copyCellBlock)]
+    pub fn copy_cell_block(
+        &mut self, sec: u32, para: u32, path: &str,
+        start_row: u16, start_col: u16, end_row: u16, end_col: u16,
+    ) -> Result<String, JsValue> {
+        self.copy_cell_block_native(
+            sec as usize, para as usize, &parse_cell_path_arg(path)?,
+            start_row, start_col, end_row, end_col,
+        ).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = exportCellBlockHtml)]
+    pub fn export_cell_block_html(&self) -> Result<String, JsValue> {
+        self.export_cell_block_html_native().map_err(|e| e.into())
+    }
+
+    // [hwpx-cowork] Preserve every selected object in a single clipboard fragment.
+    #[wasm_bindgen(js_name = copyControls)]
+    pub fn copy_controls(&mut self, targets: &str) -> Result<String, JsValue> {
+        let mut targets = serde_json::from_str::<Vec<(usize, usize, Vec<(usize, usize, usize)>, usize)>>(targets)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.copy_controls_native(&mut targets).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = exportClipboardFragmentHtml)]
+    pub fn export_clipboard_fragment_html(&self) -> Result<String, JsValue> {
+        self.export_clipboard_fragment_html_native().map_err(|e| e.into())
     }
 
     /// [hwpx-cowork] Share the empty-document decision with the format-brush

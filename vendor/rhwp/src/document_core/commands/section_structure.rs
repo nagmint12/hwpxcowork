@@ -47,6 +47,7 @@ impl DocumentCore {
     /// 뒤 구역 정의(용지·바탕쪽 등)는 사라지고 글은 앞 구역 설정을 따른다(한/글). → 합치기 전 앞 구역 문단 수.
     /// 파생 상태는 다시 만들지 않는다(rebuild_after_section_structure_change).
     pub(crate) fn merge_section_into_previous(&mut self, k: usize) -> Result<usize, HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         if k == 0 || k >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!("앞 구역에 합칠 구역이 없습니다: {}", k)));
         }
@@ -65,6 +66,7 @@ impl DocumentCore {
     /// 구역 sec 를 문단 at(≥1, 구역 나누기 문단)에서 나눈다 — at 부터가 새 구역 sec+1 이 되고 그 문단의 구역 정의가 새 구역 정의다.
     /// 파생 상태는 다시 만들지 않는다.
     pub(crate) fn split_section_at(&mut self, sec: usize, at: usize) -> Result<(), HwpError> {
+        self.finish_range_source(); // [hwpx-cowork] 원본 문단 순서를 재편하는 작업 경계
         let section = self
             .document
             .sections

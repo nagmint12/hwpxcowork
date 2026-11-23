@@ -33,6 +33,8 @@ pub(crate) struct FlowWindow {
     pages: Range<usize>,
     natural_entry: bool,
     natural_exit: bool,
+    // [hwpx-cowork] 이전 서식의 측정 재사용 없이 현재 두 경계 안의 원문으로 새로 투영한다.
+    pending_format: bool,
 }
 
 fn ordinary_page(page: &PageContent) -> bool {
@@ -55,7 +57,7 @@ fn plain_result(result: &PaginationResult) -> bool {
 }
 
 // [hwpx-cowork] 표와 함께 출력한 host·숨긴 빈 문단은 쪽 목록 밖에도 소유자 번호를 둔다.
-fn splice_set(
+pub(super) fn splice_set(
     old: &mut HashSet<usize>,
     local: HashSet<usize>,
     range: &Range<usize>,
@@ -72,7 +74,7 @@ fn splice_set(
         .collect();
 }
 
-fn splice_heights(
+pub(super) fn splice_heights(
     old: &mut HashMap<usize, f64>,
     local: HashMap<usize, f64>,
     range: &Range<usize>,
@@ -251,7 +253,16 @@ impl DocumentCore {
     }
 
     pub(crate) fn flow_window_before(&self, idx: usize, para: usize) -> Option<FlowWindow> {
-        if self.interactive_layout.pending { return None; } // [hwpx-cowork] 미완성 범위 서식의 측정은 근접 창의 이전 컷이 아니다.
+        if self.interactive_layout.pending {
+            let pages = &self.pagination.get(idx)?.pages;
+            let local = pages.partition_point(|p| first_owner(p).is_some_and(|owner| owner <= para)).checked_sub(1)?;
+            let base: usize = self.pagination[..idx].iter().map(|s| s.pages.len()).sum();
+            let (_, _, first, last) = self.independent_format_page_bounds((base + local) as u32)?;
+            return (first <= para && para <= last).then_some(FlowWindow {
+                section: idx, paragraphs: first..last + 1, pages: local..local + 1,
+                natural_entry: false, natural_exit: false, pending_format: true,
+            });
+        }
         let stamp = self.flow_sections.get(idx)?.as_ref()?;
         // [hwpx-cowork] 구역 전체가 한 표인 경우 일반 문단 구간은 쪼갤 수 없다.
         if stamp.row_table.is_some() {
@@ -351,6 +362,7 @@ impl DocumentCore {
             pages: from..until,
             natural_entry: !hard_start(from),
             natural_exit: !hard_start(until),
+            pending_format: false,
         })
     }
 
@@ -383,6 +395,14 @@ impl DocumentCore {
 
     fn apply_flow_window(&mut self, window: FlowWindow, inserted: usize) -> bool {
         let idx = window.section;
+        if window.pending_format {
+            let base: usize = self.pagination[..idx].iter().map(|r| r.pages.len()).sum();
+            let first = window.paragraphs.start;
+            let last = window.paragraphs.end - 1 + inserted;
+            self.resolve_body_format_span(idx, first, last);
+            return self.project_format_window((base + window.pages.start) as u32, idx,
+                window.pages.start, first, last, Some(inserted));
+        }
         let start = window.paragraphs.start;
         let range = start..window.paragraphs.end + inserted;
         let Some(stamp) = self.flow_sections[idx].as_ref() else {

@@ -16,11 +16,19 @@ pub(super) struct InteractiveMeasurement {
 #[derive(Default)]
 pub(crate) struct InteractiveLayout {
     pub(super) pending: bool,
+    // [hwpx-cowork] 마지막 정규 조판의 단 정의. 서식이 전체 문단에서 단 부호를 다시 찾지 않는다.
+    pub(super) initial_columns: Vec<crate::model::page::ColumnDef>,
     pub(super) advancing: bool,
     pub(super) revision: u64,
     pub(super) published: u64,
     pub(super) section: Option<(ProgressiveOpenJob, MeasuredSection)>,
     pub(super) format_cursor: Option<(usize, usize)>,
+    // [hwpx-cowork] 아직 원문에 펼치지 않은 선택 범위. 실행 순서는 Undo/Redo까지 포함한다.
+    pub(super) ranges: Vec<super::range_format::RangePass>,
+    pub(crate) range_visits: u64,
+    // [hwpx-cowork] 원문 주소가 바뀌면 앞 세대의 쪽이 잘못된 문단을 가리킬 수 있다.
+    pub(super) unpublished_structure: bool,
+    pub(super) range_numbering_dirty: bool, // [hwpx-cowork] 문단 머리 번호는 전역 원문 반영 후 확정
     pub(super) formatted_rows: std::collections::HashSet<(usize, usize)>,
     pub(super) projected_pages: std::collections::HashSet<u32>,
     pub(super) measuring: Option<InteractiveMeasurement>,
@@ -31,6 +39,10 @@ pub(crate) struct InteractiveLayout {
 }
 
 impl DocumentCore {
+    pub(crate) fn body_range_source_pending(&self) -> bool {
+        !self.interactive_layout.ranges.is_empty()
+    }
+
     pub(crate) fn interactive_layout_pending(&self) -> bool {
         self.interactive_layout.pending
     }

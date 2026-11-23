@@ -46,7 +46,7 @@ export const editCommands: CommandDef[] = [
     label: t('command.edit.cut.label'),
     icon: 'icon-cut',
     shortcutLabel: 'Ctrl+X',
-    canExecute: (ctx) => ctx.hasDocument && !ctx.isFormMode && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) => ctx.hasDocument && !ctx.isFormMode && (ctx.hasSelection || ctx.inCellSelectionMode || ctx.inPictureObjectSelection || ctx.inTableObjectSelection), // [hwpx-cowork]
     execute(services) {
       services.getInputHandler()?.performCut();
     },
@@ -56,7 +56,7 @@ export const editCommands: CommandDef[] = [
     label: t('command.edit.copy.label'),
     icon: 'icon-copy',
     shortcutLabel: 'Ctrl+C',
-    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inCellSelectionMode || ctx.inPictureObjectSelection || ctx.inTableObjectSelection), // [hwpx-cowork]
     execute(services) {
       services.getInputHandler()?.performCopy();
     },
