@@ -53,13 +53,24 @@ def inspect_app(bundle, temp):
                 fixture.write_bytes(body_document(family)['buffer'])
                 page.evaluate('bodyDraws.clear()')
                 subprocess.run(['open', '-a', str(bundle), str(fixture)], check=True)
-                page.wait_for_function("name => releaseEditor.wasm.fileName === name && ['a','2','.','한'].every(c=>bodyDraws.has(c))",
-                                       arg=fixture.name, timeout=60000)
+                try:
+                    # Finder may return the on-disk name in decomposed Unicode.
+                    page.wait_for_function("""name => releaseEditor.wasm.fileName.normalize('NFC') === name.normalize('NFC')
+                        && ['a','2','.','한'].every(c=>bodyDraws.has(c))""", arg=fixture.name, timeout=45000)
+                except Exception:
+                    print('Open state', family, page.evaluate("""() => ({
+                      file:releaseEditor.wasm.fileName, status:document.querySelector('#sb-message')?.textContent,
+                      dirty:releaseEditor.documentState.isDirty(), draws:[...bodyDraws.keys()],
+                      dialog:document.querySelector('.modal-overlay')?.innerText
+                    })"""), flush=True)
+                    raise
                 rows = page.evaluate(COMPARE, {'family': family})
                 check_paint(rows, family)
                 print('PASS native file open and glyphs', family, 'installed Wingdings:', rows[0]['hasWingdings'], flush=True)
                 page.evaluate("window.rhwpStudio.automation.execute('file:new-doc', {}, {allowDialog:true})")
-                page.wait_for_function("releaseEditor.wasm.fileName === '새 문서.hwp'")
+                page.wait_for_function("""releaseEditor.wasm.fileName === '새 문서.hwp'
+                    && document.querySelector('#sb-message')?.textContent.includes('새 문서')
+                    && !releaseEditor.documentState.isDirty()""")
     finally:
         if app.poll() is None:
             app.terminate()
