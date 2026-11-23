@@ -66,6 +66,10 @@ h2 { margin: 0 0 16px; font-size: 21px; letter-spacing: -.03em; }
 .info-main section { margin-block: 2rem; }
 .info-main p { margin-block: .5rem 1rem; }
 .info-main .actions { margin-block: 1.5rem 2rem; }
+.about-brand { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; }
+.about-brand > div { flex: 1 1 18rem; }
+.about-brand img { display: block; background: #fff; border-radius: 12px; }
+.about-brand .lead { margin-bottom: 0; }
 .info-links { display: flex; flex-wrap: wrap; gap: .65rem 1.25rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 
 @media (max-width: 560px) {

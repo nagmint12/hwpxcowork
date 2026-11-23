@@ -69,7 +69,7 @@ export async function buildPersonal(out, base) {
   fs.writeFileSync(dest('manual.md'), manual);
   fs.copyFileSync(path.join(here,'browser/start.js'), dest('personal-start.js'));
   fs.copyFileSync(path.join(here,'browser/personal.css'), dest('personal.css'));
-  for (const name of ['about.html', 'privacy.html', 'terms.html', 'site.css', 'google9ca4ee124be68f95.html']) {
+  for (const name of ['about.html', 'privacy.html', 'terms.html', 'site.css', 'hwpx-cowork-logo-purple.png', 'google9ca4ee124be68f95.html']) {
     fs.copyFileSync(path.join(here, name), dest(name));
   }
   const html = index.replace(/<script src="\/intro\.js"><\/script>/,'')
