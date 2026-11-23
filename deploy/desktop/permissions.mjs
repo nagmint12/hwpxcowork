@@ -11,6 +11,6 @@ export function desktopPermission(owned, contents, permission, origin, details =
   const requesting = details.requestingUrl ? local(details.requestingUrl) : details.isMainFrame === false ? null : top;
   if (!requesting || requesting.origin !== top.origin) return false;
   return details.isMainFrame === false
-    ? ['/studio/', '/studio/index.html'].includes(requesting.pathname)
+    ? ['/studio/', '/studio/index.html', '/studio/cowork-embed.html'].includes(requesting.pathname)
     : ['/', '/index.html'].includes(requesting.pathname);
 }

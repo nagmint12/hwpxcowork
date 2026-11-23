@@ -4,6 +4,18 @@ import { desktopPermission } from '../deploy/desktop/permissions.mjs';
 import { createBlockedCloseHandler } from '../deploy/desktop/close-policy.mjs';
 const owned = { getURL: () => 'http://localhost:54321/?teaser=0' };
 
+test('the document tab can load installed fonts on its own port and in stdio mode', () => {
+  for (const portless of [false, true]) {
+    const base = portless ? 'http://localhost' : 'http://localhost:54321';
+    const host = { getURL: () => base + '/?teaser=0' };
+    const allowed = path => desktopPermission(host, host, 'local-fonts', base,
+      { isMainFrame: false, requestingUrl: new URL(path, base).href }, 54321, portless);
+    assert.equal(allowed('/studio/cowork-embed.html?renderer=canvas2d'), true);
+    assert.equal(allowed('/uploads/cowork-embed.html'), false);
+    assert.equal(allowed('https://example.org/studio/cowork-embed.html'), false);
+  }
+});
+
 test('own document page and own studio iframe can load fonts; other frames/origins/installations cannot', () => {
   const decide = (origin, details, contents = owned, permission = 'local-fonts', port = 54321) => desktopPermission(owned, contents, permission, origin, details, port);
   assert.equal(decide('http://localhost:54321', { isMainFrame: true, requestingUrl: owned.getURL() }), true);
