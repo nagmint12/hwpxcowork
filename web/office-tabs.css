@@ -30,7 +30,7 @@
 .office-product-menu-wrap > .office-action:hover:not(:disabled),
 .office-tab-item > button:hover:not(:disabled),
 .office-document-tools > button:hover:not(:disabled) { background: #e8e0f2; }
-.office-bar > .office-action, .office-product-menu-wrap > .office-action { flex: 0 0 auto; gap: 5px; padding: 0 8px; color: var(--text); }
+.office-bar > .office-action, .office-product-menu-wrap > .office-action { flex: 0 0 auto; justify-content: center; gap: 5px; padding: 0 8px; color: var(--text); }
 .office-action[aria-current="page"] { color: var(--entry-accent); font-weight: 700; background: var(--panel); border-color: var(--line); }
 .office-action .ic, .office-tab-icon, .office-document-menu .ic { width: 15px; height: 15px; }
 .office-product-icon { width: 24px; height: 24px; object-fit: contain; }
@@ -57,7 +57,7 @@
 }
 .office-bar > .office-library-home[aria-current="page"]:hover:not(:disabled) { background: #503378; }
 .office-bar > .office-library-home:focus-visible { outline: 2px solid currentColor; }
-.office-product-menu-wrap { position: relative; flex: none; }
+.office-product-menu-wrap { position: relative; flex: none; display: flex; align-items: center; }
 .office-product-menu {
   position: absolute;
   z-index: 90;
@@ -78,7 +78,7 @@
 .office-intro-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; }
 .office-intro-dialog h2 { margin: 0; font-size: 1rem; }
 .office-intro-dialog iframe { display: block; width: 100%; height: min(70vh, 506px); border: 0; background: #121925; }
-.office-plus { font-size: 19px; line-height: 1; }
+.office-action > .ic { margin-inline-end: 0; }
 .office-tablist {
   height: 100%;
   display: flex;

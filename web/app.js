@@ -204,14 +204,14 @@ const DocList = {
           <input class="lib-find" type="search" v-model="query" placeholder="문서 찾기" aria-label="문서 찾기" data-testid="lib-find"/>
         </div>
         <div class="row lib-tools">
-          <button class="small" data-testid="lib-newfolder" :disabled="!can('write')" :title="can('write') ? '이 자리에 폴더를 만듭니다' : '이 자리에 폴더를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'new' }"><span class="ic" v-html="ICON.folder"></span>새 폴더</button>
+          <button class="small" data-testid="lib-newfolder" :disabled="!can('write')" :title="can('write') ? '이 자리에 폴더를 만듭니다' : '이 자리에 폴더를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'new' }"><span class="ic" v-html="ICON.folder"></span><span class="toolbar-label">새 폴더</span></button>
           <label class="btnlike small primary" :class="{ disabled: !can('write'), busy: !!uploading }" :aria-busy="uploading ? 'true' : 'false'" :title="uploading ? uploading.name + ' 올리는 중' : can('write') ? '이 자리에 HWPX 를 올립니다' : '이 자리에 올릴 권한이 없습니다'" data-testid="lib-upload">
-            <input type="file" :accept="me.browserPersonal ? '.hwpx,.hwp' : '.hwpx'" multiple style="display:none" :disabled="!can('write') || !!uploading" @change="upload"/><template v-if="uploading"><span class="spin"></span>올리는 중 {{ uploading.n }}/{{ uploading.total }}</template><template v-else>＋ HWPX 올리기</template></label>
-          <button class="small" data-testid="lib-newdoc" :disabled="!can('write')" :title="can('write') ? '이 자리에 빈 한글 문서를 만들어 엽니다' : '이 자리에 문서를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'newdoc' }"><span class="ic" v-html="ICON.edit"></span>새 문서로 시작</button>
-          <button class="small" v-if="curAccess" data-testid="lib-access" :title="curAccess.tip" @click="dlg = { type: 'access', target: curAccess.target }"><span class="ic" v-html="ICON.people"></span>권한</button>
+            <input type="file" :accept="me.browserPersonal ? '.hwpx,.hwp' : '.hwpx'" multiple style="display:none" :disabled="!can('write') || !!uploading" @change="upload"/><template v-if="uploading"><span class="spin" aria-hidden="true"></span><span class="toolbar-label">올리는 중 {{ uploading.n }}/{{ uploading.total }}</span></template><template v-else><span class="ic" aria-hidden="true" v-html="ICON.plus"></span><span class="toolbar-label">HWPX 올리기</span></template></label>
+          <button class="small" data-testid="lib-newdoc" :disabled="!can('write')" :title="can('write') ? '이 자리에 빈 한글 문서를 만들어 엽니다' : '이 자리에 문서를 만들 권한이 없습니다'" @click="dlg = { type: 'name', mode: 'newdoc' }"><span class="ic" v-html="ICON.edit"></span><span class="toolbar-label">새 문서로 시작</span></button>
+          <button class="small" v-if="curAccess" data-testid="lib-access" :title="curAccess.tip" @click="dlg = { type: 'access', target: curAccess.target }"><span class="ic" v-html="ICON.people"></span><span class="toolbar-label">권한</span></button>
           <template v-if="lib && lib.local && lib.local.canLink">
-            <button class="small" data-testid="lib-local" title="이 PC 의 폴더를 개인 문서함에 연결합니다 — 그 폴더의 HWPX 를 열어 고치면 그 파일에 저장됩니다" @click="dlg = { type: 'local' }"><span class="ic" v-html="ICON.pc"></span>PC 폴더 연결</button>
-            <button class="small" data-testid="lib-remotes" title="여럿이 모여 검토할 서버(주소 + 그 서버의 내 토큰)" @click="dlg = { type: 'remotes' }"><span class="ic" v-html="ICON.people"></span>검토 서버</button>
+            <button class="small" data-testid="lib-local" title="이 PC 의 폴더를 개인 문서함에 연결합니다 — 그 폴더의 HWPX 를 열어 고치면 그 파일에 저장됩니다" @click="dlg = { type: 'local' }"><span class="ic" v-html="ICON.pc"></span><span class="toolbar-label">PC 폴더 연결</span></button>
+            <button class="small" data-testid="lib-remotes" title="여럿이 모여 검토할 서버(주소 + 그 서버의 내 토큰)" @click="dlg = { type: 'remotes' }"><span class="ic" v-html="ICON.people"></span><span class="toolbar-label">검토 서버</span></button>
           </template>
           <span class="muted lib-note" v-if="placeNote" :title="placeNote.tip">{{ placeNote.text }}</span>
         </div>
@@ -1613,7 +1613,7 @@ const App = {
     <header v-if="state.me" class="office-bar" aria-label="문서 작업 공간" data-testid="office-primary-row" :inert="introOpen">
       <div class="office-product-menu-wrap" ref="productMenuWrap">
         <button ref="productMenuButton" type="button" class="office-action office-app-menu" data-testid="office-app-menu"
-          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><img class="office-product-icon" src="/icons/icon-128.png" width="24" height="24" alt=""><span class="office-action-text">HWPX Cowork</span></button>
+          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><img class="office-product-icon" src="/icons/icon-128.png" width="24" height="24" alt=""><span class="office-action-text toolbar-label">HWPX Cowork</span></button>
         <div v-if="productMenuOpen" class="office-product-menu" data-testid="office-product-menu">
           <a href="https://github.com/nagmint12/hwpxcowork#readme" target="_blank" rel="noopener" @click="closeProductMenu(true)">HWPX Cowork 정보</a>
           <a href="https://github.com/nagmint12/hwpxcowork/releases/latest" target="_blank" rel="noopener" @click="closeProductMenu(true)">다운로드</a>
@@ -1622,7 +1622,7 @@ const App = {
         </div>
       </div>
       <button ref="homeButton" type="button" class="office-action office-library-home" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
-        :disabled="windowClosing" title="문서함 (메인 화면)" aria-label="문서함 (메인 화면)" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
+        :disabled="windowClosing" title="문서함 (메인 화면)" aria-label="문서함 (메인 화면)" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text toolbar-label">문서함</span></button>
       <div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey" v-if="tabs.items.length">
         <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
           <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"
@@ -1641,9 +1641,9 @@ const App = {
           </button>
         </div>
       </div>
-      <button type="button" class="office-action" data-testid="office-new-document" :disabled="windowClosing" title="새 문서" aria-label="새 문서" @click="newDocument"><span class="office-plus" aria-hidden="true">+</span></button>
+      <button type="button" class="office-action" data-testid="office-new-document" :disabled="windowClosing" title="새 문서" aria-label="새 문서" @click="newDocument"><span class="ic" aria-hidden="true" v-html="ICON.plus"></span></button>
       <button type="button" class="office-action" data-testid="office-open-files" :disabled="opening || windowClosing" :aria-busy="opening" :title="openFilesTip" @click="pickFiles">
-        <span v-if="opening" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.file"></span><span class="office-action-text">파일 열기</span></button>
+        <span v-if="opening" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.file"></span><span class="office-action-text toolbar-label">파일 열기</span></button>
       <input ref="fileInput" type="file" :accept="state.me?.browserPersonal ? '.hwpx,.hwp' : '.hwpx'" multiple hidden data-testid="office-file-input" @change="filesPicked"/>
       <small v-if="opening" class="office-visually-hidden" role="status">파일 여는 중…</small>
       <div id="office-document-controls" :inert="windowClosing || !!tabs.find(docId)?.closing"></div>

@@ -108,6 +108,17 @@ def test_app(pw, url, profile, channel):
     print('PASS bundled regular and bold text fonts on first cover date draw', flush=True)
     page.goto(url)
     page.get_by_test_id('office-open-files').wait_for()
+    toolbar = page.get_by_test_id('office-app-menu')
+    top = toolbar.bounding_box()
+    home = page.get_by_test_id('office-library').bounding_box()
+    assert abs(top['y'] + top['height'] / 2 - home['y'] - home['height'] / 2) <= 0.5, (top, home)
+    assert page.get_by_test_id('office-new-document').locator('svg').is_visible()
+    assert page.get_by_test_id('lib-upload').locator('svg').is_visible()
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert toolbar.get_attribute('aria-label') == 'HWPX Cowork 메뉴'
+    assert toolbar.locator('.office-product-icon').is_visible()
+    assert toolbar.locator('.office-action-text').bounding_box()['width'] <= 1
+    page.set_viewport_size({'width': 1500, 'height': 900})
     assert '브라우저에 저장' in page.locator('.pages-storage-note').inner_text()
     assert page.get_by_test_id('office-library').get_attribute('aria-current') == 'page'
     assert page.locator('.office-product-icon').evaluate('img => img.decode().then(() => img.naturalWidth > 0)')

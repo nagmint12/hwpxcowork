@@ -114,6 +114,8 @@ button.chip:hover { border-color: #b8c2cf; }
 .quote { color: #4b5563; }
 .ins, ins { color: var(--ins); text-decoration: underline; text-decoration-color: rgba(29, 78, 216, .5); background: rgba(29, 78, 216, .07); }
 .del, del { color: var(--del); text-decoration: line-through; background: rgba(185, 28, 28, .06); }
+/* Center toolbar lettering by its cap height and baseline within the flex row. */
+.toolbar-label { line-height: 1; text-box: trim-both cap alphabetic; }
 .ic { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
 .ic svg { display: block; }
 .ic.sm svg { width: 11px; height: 11px; }

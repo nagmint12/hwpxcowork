@@ -53,7 +53,8 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .libtable th.sortable:hover { text-decoration: underline; }
 .libtable th .sort-ic { margin-left: 3px; font-size: 10px; color: var(--accent); }
 .lib-tools { gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-.lib-tools :is(button, label) { min-height: 32px; }
+.lib-tools > :is(button, label) { min-height: 32px; justify-content: center; }
+.lib-tools .ic { margin-inline-end: 0; }
 .lib-tools .primary { background: var(--entry-accent); border-color: var(--entry-accent); }
 .lib-tools .primary:hover { background: var(--entry-hover); border-color: var(--entry-hover); }
 .lib-tools .ic svg { width: 14px; height: 14px; }

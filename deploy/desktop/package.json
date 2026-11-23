@@ -1,7 +1,7 @@
 {
   "name": "hwpx-cowork-personal",
   "productName": "HWPX Cowork",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "distribution": "portable",
   "private": true,
   "type": "module",
