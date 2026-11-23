@@ -107,3 +107,5 @@ jobs:
           $online = try { (Server).nonce } catch { $null }
           if ($online) { throw 'Updated server did not stop with the app' }
           "Verified update to $expectedVersion, saved configuration, relaunch and server shutdown."
+          # The last pipe probe is expected to exit nonzero after shutdown.
+          exit 0
