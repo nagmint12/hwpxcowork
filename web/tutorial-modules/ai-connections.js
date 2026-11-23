@@ -8,7 +8,7 @@ export function buildAiConnections(env) {
   const { ctx, config } = env;
   const { finish, intro } = stepHelpers(env);
   let mcpUrl = '';
-  try { mcpUrl = new URL('/mcp', config.publicUrl || location.origin).href; } catch { mcpUrl = EXAMPLE_MCP_URL; }
+  try { mcpUrl = config.browserPersonal ? EXAMPLE_MCP_URL : new URL('/mcp', config.publicUrl || location.origin).href; } catch { mcpUrl = EXAMPLE_MCP_URL; }
   const guide = connectGuide(mcpUrl);
   const item = id => guide.find(step => step.id === id);
   const at = title => steps.findIndex(step => step.title === title);

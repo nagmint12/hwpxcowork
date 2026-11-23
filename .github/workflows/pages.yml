@@ -10,6 +10,13 @@ on:
       - 'engine/**'
       - 'server/**'
       - 'docs/manuals/**'
+      - 'docs/DEPLOYMENT_AND_AI_GUIDE.md'
+      - 'docs/AGENT_SETUP.md'
+      - 'docs/MCP_EVENTS_GUIDE.md'
+      - 'docs/CHATGPT_WORK_FILES.md'
+      - 'docs/AUTOMATIC_AI_GUIDE.md'
+      - 'docs/SERVER_MIGRATION.md'
+      - 'deploy/Caddyfile.example'
       - 'skill/hwpx-standard-report/reference/**'
       - 'tutorial/**'
       - 'package*.json'
@@ -75,6 +82,8 @@ jobs:
           export PAGES_RELEASE_JSON="$RUNNER_TEMP/latest-release.json"
           gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$PAGES_RELEASE_JSON"
           node deploy/github-pages/build-site.mjs _site
+      - name: Check links in the published artifact
+        run: python3 deploy/github-pages/check-links.py _site --base "/${GITHUB_REPOSITORY#*/}/"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

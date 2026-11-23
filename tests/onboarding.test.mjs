@@ -45,6 +45,24 @@ test('영상과 시작 안내에서 토큰·쿼리·문서 경로를 보존하�
   for (const bad of ['https://other.test/', '//other.test/', '/\\other.test/', '/\t/other.test/', '/\n/other.test/']) assert.equal(safeNext(bad), '/');
 });
 
+test('시작·튜토리얼은 Pages 프로젝트 루트 안에서 쿼리와 문서 위치를 보존한다', () => {
+  for (const prefix of ['/hwpxcowork/', '/nested/project/']) {
+    const base = new URL(prefix, 'https://pages.test');
+    for (const input of [null, '/', '/other/', '//another.test/path', prefix + '../outside']) {
+      assert.equal(safeNext(input, base), prefix);
+    }
+    for (const intent of ['start', 'tutorial']) {
+      for (const path of ['/', prefix, prefix.slice(0, -1)]) {
+        const url = new URL(appDestination(path + '?mode=review#/doc/demo', intent, base), base);
+        assert.equal(url.pathname, prefix);
+        assert.equal(url.searchParams.get('welcome'), intent);
+        assert.equal(url.searchParams.get('mode'), 'review');
+        assert.equal(url.hash, '#/doc/demo');
+      }
+    }
+  }
+});
+
 test('명시적 시작 선택은 로그인 성공 후 한 번만 소비하고 나머지 주소는 보존한다', () => {
   for (const intent of ['start', 'tutorial']) {
     let replaced;

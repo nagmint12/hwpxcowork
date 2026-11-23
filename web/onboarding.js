@@ -1,7 +1,8 @@
-import { DEPLOYMENTS, SUBSCRIPTIONS, setupPlan, safeNext, appDestination } from './onboarding-model.js';
+import { DEPLOYMENTS, SUBSCRIPTIONS, setupPlan, appDestination } from './onboarding-model.js';
 
 const query = new URLSearchParams(location.search);
-const next = safeNext(query.get('next') || '/');
+const appBase = new URL('./', import.meta.url);
+const next = query.get('next');
 const root = document.getElementById('welcome');
 const labels = ['사용 방식', 'AI 연결', '설치'];
 let step = 0;
@@ -10,7 +11,7 @@ let subscription = null;
 let installOs = /Mac/i.test(navigator.platform) ? 'mac' : 'windows';
 let releasePackages = [];
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const go = intent => appDestination(next, intent);
+const go = intent => appDestination(next, intent, appBase);
 document.getElementById('skip').href = go('start');
 
 function card(option, selected) {

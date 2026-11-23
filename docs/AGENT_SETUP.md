@@ -163,7 +163,7 @@ claude --dangerously-load-development-channels server:hwpx
 
 1. **웹 편집기 상단의 내 에이전트**가 `○ 연결 안 됨` 에서 **`● Claude Code`(연결됨)** 로 바뀝니다.
 2. Claude Code 에서 **`/mcp`** → `hwpx` 가 connected, 도구 목록이 보입니다.
-3. 웹 편집기에서 문단을 골라 **AI에게 맡기기** → 비워 두고 [보내기](검토) → 터미널에 `← hwpx: 웹 편집기에서 맡긴 AI 작업 #3(AI 검토)이 대기 중입니다…` 가 뜨고 Claude 가 `task → (read) → edit(done)`(예전 연결이면 `start_request → 제안·메모 → complete_request`)으로 처리합니다. 웹 레일의 AI 작업 카드가 `전달됨 → 처리 중 → 완료` 로 바뀝니다. 띄운 직후라면 첫 알림은 5초쯤 뒤에 옵니다.
+3. 웹 편집기에서 문단을 골라 **AI에게 맡기기** → 비워 두고 **보내기**(검토) → 터미널에 `← hwpx: 웹 편집기에서 맡긴 AI 작업 #3(AI 검토)이 대기 중입니다…` 가 뜨고 Claude 가 `task → (read) → edit(done)`(예전 연결이면 `start_request → 제안·메모 → complete_request`)으로 처리합니다. 웹 레일의 AI 작업 카드가 `전달됨 → 처리 중 → 완료` 로 바뀝니다. 띄운 직후라면 첫 알림은 5초쯤 뒤에 옵니다.
 
 > **주의 — `● 연결됨` 인데 초인종이 안 오는 경우.** `.mcp.json` 은 브리지를 언제나 `--channel` 로 띄우므로, Claude Code 를 `--dangerously-load-development-channels server:hwpx` **없이** 띄워도 브리지는 서버 알림 통로에 붙고 웹 상단은 `● Claude Code` 가 됩니다. 하지만 그 세션은 채널 알림을 받지 않습니다(Claude Code 가 버림). 그래서 웹에서 '자동'으로 맡긴 일은 내 에이전트로 보내져 **`전달됨`(대기)에 머뭅니다** — 브리지의 다시 알림(1분 뒤)도 같은 이유로 닿지 않습니다.
 > - 확인: 시작 배너 아래 `Channels (experimental) messages from server:hwpx …` 줄이 없으면 플래그 없이 띄운 것입니다.
@@ -286,7 +286,7 @@ node server/mcp-stdio.js [--channel] [--v1 [--lean] | --v2 [--tools core|all]] [
 | `--channel` | 채널 알림 켜기(없으면 v0.2 처럼 도구만 중계) |
 | `--v1` | 예전 연결(`--mcp 1` 과 같다 — 머리글 `X-Hwpx-Mcp: 1`): `start_request`·`propose_*`·`complete_request` 등 예전 도구. 주소에 `?v=1` 을 붙여도 같다 |
 | `--lean` | 예전 연결의 얇은 흐름 — 요청 내용·도구 응답을 모델용으로 짧게 받는다(`start_request` 가 내용을 함께 줌, 쓰기의 `complete` 로 완료). `--v2` 가 없으면 예전 연결이다. `--no-lean` 으로 끈다. 주소에 `?lean=1` 을 붙여도 같다 |
-| `--v2` | v2 연결(`--mcp 2`와 같다 — [MCP_REDESIGN_2026-11-16.md](MCP_REDESIGN_2026-11-16.md)): 작업 도구 넷 `task`(맡기 + 요청 내용)·`read`(글과 주소만)·`edit`(ops 를 한 번에, `done` 으로 완료)·`finish`. 주소에 `?v=2` 를 붙여도 같다. `--tools core` 는 작업 도구와 그림·스킬 파일 도구만, `all`(기본)은 문서 목록·새 문서·사람이 정할 일·변경 요청·멀티에이전트 도구까지. 서버가 새 연결을 알아야 한다(옛 서버는 예전 도구로 답한다 — 그때는 `--v1`) |
+| `--v2` | v2 연결(`--mcp 2`와 같다 — [연결과 대기열 안내](AGENT_SETUP.md#12-chatgptcodex-연결과-대기열)): 작업 도구 넷 `task`(맡기 + 요청 내용)·`read`(글과 주소만)·`edit`(ops 를 한 번에, `done` 으로 완료)·`finish`. 주소에 `?v=2` 를 붙여도 같다. `--tools core` 는 작업 도구와 그림·스킬 파일 도구만, `all`(기본)은 문서 목록·새 문서·사람이 정할 일·변경 요청·멀티에이전트 도구까지. 서버가 새 연결을 알아야 한다(옛 서버는 예전 도구로 답한다 — 그때는 `--v1`) |
 | `--no-tools` | 도구는 중계하지 않고 알림만(`--channel` 과 함께, 도구는 다른 hwpx MCP 연결을 쓸 때) |
 
 2026-11-17부터 `node scripts/setup-agent.mjs` 는 인자 없이도 새 연결로 준비한다 — `.mcp.json` 의 브리지 인자를 `--v2` 로, 예전 연결 지침이던 `CLAUDE.md` 는 `CLAUDE.v1.md` 로 남기고 새 연결 지침(저장소의 `agent/CLAUDE.md`)으로 바꾸며, 허용 목록에 작업 도구 넷을 더한다(`agent/v2/` 본보기는 없어졌다 — `agent/CLAUDE.md` 가 새 연결 지침이다). 예전 연결로 되돌리기는 `--v1`(브리지 `--v1 --lean`, 지침 `CLAUDE.v1.md` 또는 `agent/v1/CLAUDE.md`). 바꾼 뒤 에이전트 세션을 다시 띄워야 적용된다. 프로그램 소스 폴더(시험·묶음 스크립트가 함께 있는 개발용 폴더)의 `agent/` 는 배포 묶음·공개 저장소의 새 연결 본보기이므로 그 자리에서는 `--v1` 을 거절한다 — 예전 연결은 다른 폴더에 만든다(`node scripts/setup-agent.mjs --dir agent-v1 --v1` — 그 폴더에서 Claude Code 를 띄운다). **새 연결은 서버가 알 때만 쓴다** — `setup-agent` 의 서버 확인에 "이 서버는 새 연결(--v2)을 모릅니다"가 나오면 그 서버는 예전 도구로 답해 새 지침과 맞지 않으므로 `--v1` 로 준비한다.

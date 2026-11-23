@@ -13,7 +13,7 @@ export async function buildPersonal(out, base) {
   const from = (...parts) => path.join(root, ...parts);
   const dest = (...parts) => path.join(out, ...parts);
   const prefix = base.slice(0, -1);
-  const staticNames = /(["'`(=]|\$\{location\.origin\})\/(?=(?:api|studio|vendor|icons|teaser3?|tutorial-assets|tutorial-media|onboarding-assets|manual-resources|help-assets|rhwp-fonts|cowork-[\w.-]+)(?:[/?#'"`])|[\w.-]+\.(?:html|css|js|ico)(?:[?#'"`])|\?teaser=)/g;
+  const staticNames = /(["'`(=]|\$\{location\.origin\})\/(?=(?:api|studio|vendor|icons|teaser3?|tutorial-assets|tutorial-media|onboarding-assets|manual-resources|help-assets|rhwp-fonts|cowork-[\w.-]+)(?:[/?#'"`])|(?:manual\.md|[\w.-]+\.(?:html|css|js|ico))(?:\$\{|[?#'"`])|\?teaser=)/g;
   const release = process.env.PAGES_RELEASE_JSON ? JSON.parse(fs.readFileSync(process.env.PAGES_RELEASE_JSON, 'utf8')) : null;
   const { links, packages } = pagesDownloads(release, base);
   fs.writeFileSync(dest('personal-downloads.json'), JSON.stringify({ packages }));
@@ -34,7 +34,9 @@ export async function buildPersonal(out, base) {
       for (const child of fs.readdirSync(src)) copyWeb(path.join(src, child), path.join(dst, child));
     } else if (jsStyles.test(src)) {
       const text = fs.readFileSync(src, 'utf8');
-      fs.writeFileSync(dst, rebase(text));
+      const output = path.basename(src) === 'help.html'
+        ? text.replace('<html lang="ko">', '<html lang="ko" data-browser-personal>') : text;
+      fs.writeFileSync(dst, rebase(output));
     } else fs.copyFileSync(src,dst);
   }
   const web = from('web');
@@ -51,7 +53,20 @@ export async function buildPersonal(out, base) {
   fs.copyFileSync(require.resolve('vue/dist/vue.esm-browser.prod.js'), dest('vendor/vue.esm-browser.prod.js'));
   fs.cpSync(from('vendor/rhwp/npm/editor'), dest('vendor/rhwp-editor'), { recursive: true, filter: p => fs.statSync(p).isDirectory() ? path.basename(p) !== 'tests' : /(?:\.js|LICENSE)$/.test(p) });
   fs.mkdirSync(dest('manual-resources'),{recursive:true});
-  for (const name of ['AGENT_SETUP.md','MCP_EVENTS_GUIDE.md','CHATGPT_WORK_FILES.md','AUTOMATIC_AI_GUIDE.md']) if(fs.existsSync(from('docs',name))) fs.copyFileSync(from('docs',name),dest('manual-resources', name));
+  for (const name of ['AGENT_SETUP.md', 'MCP_EVENTS_GUIDE.md', 'CHATGPT_WORK_FILES.md', 'AUTOMATIC_AI_GUIDE.md', 'SERVER_MIGRATION.md']) {
+    const markdown = fs.readFileSync(from('docs', name), 'utf8');
+    const repoDocs = 'https://github.com/nagmint12/hwpxcowork/blob/main/docs/';
+    const linked = markdown.replace(/\]\((?:\.\/)?([\w.-]+\.md)(#[^)]+)?\)/g,
+      (_, file, hash = '') => '](' + repoDocs + file + hash + ')');
+    fs.writeFileSync(dest('manual-resources', name), linked);
+  }
+  fs.copyFileSync(from('deploy', 'Caddyfile.example'), dest('manual-resources', 'Caddyfile.example'));
+  // Relative links work in both the rendered help and the downloadable Markdown.
+  const manual = fs.readFileSync(from('docs', 'DEPLOYMENT_AND_AI_GUIDE.md'), 'utf8')
+    .replace(/\]\(\/manual-resources\//g, '](./manual-resources/')
+    .replace(/\]\((AGENT_SETUP\.md|SERVER_MIGRATION\.md|\.\.\/deploy\/Caddyfile\.example)\)/g,
+      (_, file) => '](./manual-resources/' + path.posix.basename(file) + ')');
+  fs.writeFileSync(dest('manual.md'), manual);
   fs.copyFileSync(path.join(here,'browser/start.js'), dest('personal-start.js'));
   fs.copyFileSync(path.join(here,'browser/personal.css'), dest('personal.css'));
   for (const name of ['about.html', 'privacy.html', 'terms.html', 'site.css']) {

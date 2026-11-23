@@ -35,6 +35,7 @@
   <div id="teaser" class="tz" aria-label="hwpx-cowork 소개 영상" role="region"></div>
   <button type="button" class="tz-skip" hidden>건너뛰기 ›</button>
   <script type="module">
+    import { safeNext, appDestination } from '../onboarding-model.js';
     import { mount } from './player.js';
     const el = document.getElementById('teaser');
     // 영상 순서(2026-11-17 사용자 지시): teaser → teaser3. 첫 접속 소개(?intro=1&next=/…)에서는 teaser 다음에 이 영상이 나오고,
@@ -42,16 +43,16 @@
     // 클릭·키·휠이 2초 안에 3번 이상(조급하게 누름)이어도 바로 넘어간다. next 는 같은 사이트 경로만 받는다.
     const q = new URLSearchParams(location.search);
     const intro = q.get('intro') === '1';
-    const raw = q.get('next') || '/';
-    const next = raw.startsWith('/') && !/[\\\u0000-\u0020]/.test(raw) && new URL(raw, location.origin).origin === location.origin ? raw : '/';
+    const appBase = new URL('../', location.href);
+    const next = safeNext(q.get('next'), appBase);
     const returnToTutorial = q.get('return') === 'tutorial';
-    const welcome = new URL(returnToTutorial ? '/?teaser=0&welcome=tutorial' : '/onboarding.html', location.origin);
+    const welcome = new URL(returnToTutorial ? appDestination(null, 'tutorial', appBase) : 'onboarding.html', appBase);
     if (!returnToTutorial) welcome.searchParams.set('next', next);
     let left = false;
     const leave = (url) => { if (!left) { left = true; location.replace(url); } };
     const go = () => leave(`${welcome.pathname}${welcome.search}`);
     const following = () => {
-      const url = new URL('/teaser/', location.origin);
+      const url = new URL('teaser/', appBase);
       for (const [key, value] of q) if (!['t', 'intro', 'next'].includes(key)) url.searchParams.set(key, value);
       return `${url.pathname}${url.search}`;
     };

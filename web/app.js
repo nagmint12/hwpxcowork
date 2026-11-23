@@ -567,6 +567,10 @@ const DocView = {
         <button type="button" class="office-direct-export" data-testid="save-hangul" :disabled="saving || !s.info" :title="saveTip" @click="saveHangul">
           <span v-if="saving" class="spin dark" aria-hidden="true"></span><span v-else aria-hidden="true">↓</span><span class="toolbar-label">한글로 저장</span>
         </button>
+        <button v-if="s.canConfigure" ref="optionsTrigger" type="button" class="office-document-options" data-testid="doc-settings"
+          aria-label="문서 옵션" aria-haspopup="dialog" :aria-expanded="s.settingsOpen" title="문서 옵션 열기" @click="openOptions">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7h8m6 0h4M3 17h3m6 0h9"/><circle cx="14" cy="7" r="3"/><circle cx="9" cy="17" r="3"/></svg><span class="office-work-label toolbar-label">문서 옵션</span>
+        </button>
         <button ref="actionTrigger" type="button" class="office-document-menu" data-testid="bar-more-toggle" aria-label="문서 작업" title="문서 작업"
           :aria-expanded="moreOpen === 'actions'" aria-controls="office-document-actions" @click="toggleMore('actions')">
           <span class="ic" aria-hidden="true" v-html="ICON.more"></span><span class="office-work-label toolbar-label">문서 작업</span>
@@ -603,7 +607,7 @@ const DocView = {
               <label>문서 이름<input ref="titleInp" data-testid="doc-title-input" v-model="titleEdit" maxlength="100"/></label>
               <div class="office-popover-actions"><button class="primary small" type="submit">바꾸기</button><button class="small" type="button" @click="cancelTitle">취소</button></div>
             </form>
-            <button v-if="s.canConfigure" type="button" data-testid="doc-settings" @click="closeMore(); s.settingsOpen = true">문서 설정</button>
+            <button v-if="s.canConfigure" type="button" data-testid="more-doc-settings" aria-haspopup="dialog" @click="openOptions">문서 옵션</button>
           </div>
           <div class="office-popover-group" data-testid="document-view-options" aria-labelledby="office-view-heading">
             <h3 id="office-view-heading">보기</h3>
@@ -686,7 +690,7 @@ const DocView = {
       <Composer :model="s.composer" @close="d.closeWindow('composer')"/></FloatWin>
     <EditPopover v-if="s.popover" :key="s.popover.key" :model="s.popover" @close="d.closeWindow('popover')"/>
     <QuickReply v-if="s.reply" :key="s.reply.key" :model="s.reply" @close="d.closeWindow('reply')"/>
-    <SettingsDialog v-if="s.settingsOpen" @close="s.settingsOpen = false"/>
+    <SettingsDialog v-if="s.settingsOpen" :browser-personal="browserPersonal" @close="closeOptions"/>
   </div>`,
   setup(props, { emit }) {
     const d = createDocStore(props.id, { onUnavailable: reason => emit('unavailable', props.id, reason) });
@@ -1113,7 +1117,7 @@ const DocView = {
      * 편집기 안에서 누른 Esc(fromEditor — 선택 풀기·studio 대화상자 닫기 등)는 보내지 않은 글이 있는 창을 닫지 않는다
      */
     function closeFloating({ fromEditor = false } = {}) {
-      if (s.settingsOpen && !fromEditor) { s.settingsOpen = false; return true; }
+      if (s.settingsOpen && !fromEditor) { closeOptions(); return true; }
       const top = s.reply ? 'reply' : s.popover ? 'popover' : s.composer && s.composer.phase !== 'sending' ? 'composer' : null;
       if (!top || (fromEditor && d.windowHasText(top))) return false;
       d.closeWindow(top);
@@ -1382,6 +1386,15 @@ const DocView = {
 
     const moreOpen = ref(null); const moreEl = ref(null); const popoverEl = ref(null);
     const statusTrigger = ref(null); const actionTrigger = ref(null);
+    const optionsTrigger = ref(null);
+    function openOptions() {
+      closeMore();
+      s.settingsOpen = true;
+    }
+    function closeOptions() {
+      s.settingsOpen = false;
+      nextTick(() => { if (props.active) optionsTrigger.value?.focus({ preventScroll: true }); });
+    }
     function toggleMore(kind) {
       if (moreOpen.value === kind) { closeMore(true); return; }
       moreOpen.value = kind;
@@ -1610,7 +1623,7 @@ const DocView = {
     });
     return {
       d, s, ed, rootEl, editorEl, active, ICON, browserPersonal: !!state.me?.browserPersonal, recoveryFiles, canRename, titleEdit, titleInp, renameTrigger, editTitle, cancelTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
-      agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, popoverEl, statusTrigger, actionTrigger, toggleMore, closeMore, onMoreFocusOut, tools, toggleTools, mobileEnvironment, openMobileOptions,
+      agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, popoverEl, statusTrigger, actionTrigger, optionsTrigger, openOptions, closeOptions, toggleMore, closeMore, onMoreFocusOut, tools, toggleTools, mobileEnvironment, openMobileOptions,
       folded, peek, panelEl, openPeek, togglePin, edgeTip, aiGlance, onTabEnter, onTabLeave, onPanelEnter, onPanelLeave, onPanelFocusOut,
       memosOn, toggleMemos, movedMemos, resetMemoPos, railOver, over, overStyle,
       documentView, toggleDocumentView,

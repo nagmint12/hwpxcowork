@@ -10,17 +10,23 @@ export const SUBSCRIPTIONS = [
 ];
 export const CLI_AI = { chatgpt: 'codex', claude: 'claude-code', none: 'none' };
 
-// WHATWG URL 정규화 뒤에도 같은 사이트인 경로만 허용한다(역슬래시·제어 문자 우회 포함).
-export function safeNext(raw, origin = 'https://hwpx.invalid') {
-  if (typeof raw !== 'string' || !raw.startsWith('/') || /[\\\u0000-\u0020]/.test(raw)) return '/';
+// 저장소 아래에 게시된 앱도 시작 안내와 같은 경로로 돌아간다.
+export function safeNext(raw, appBase = 'https://hwpx.invalid/') {
+  const base = new URL(appBase);
+  const home = base.pathname;
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || /[\\\u0000-\u0020]/.test(raw)) return home;
   try {
-    const url = new URL(raw, origin);
-    return url.origin === new URL(origin).origin ? `${url.pathname}${url.search}${url.hash}` : '/';
-  } catch { return '/'; }
+    const url = new URL(raw, base);
+    if (url.origin !== base.origin) return home;
+    // 기존 시작 링크는 프로젝트 홈도 / 또는 /?… 로 전달한다.
+    if (url.pathname === '/' || url.pathname + '/' === home) url.pathname = home;
+    if (!url.pathname.startsWith(home)) return home;
+    return url.pathname + url.search + url.hash;
+  } catch { return home; }
 }
 
-export function appDestination(next, intent, origin = 'https://hwpx.invalid') {
-  const url = new URL(safeNext(next, origin), origin);
+export function appDestination(next, intent, appBase = 'https://hwpx.invalid/') {
+  const url = new URL(safeNext(next, appBase), appBase);
   url.searchParams.set('teaser', '0');
   url.searchParams.set('welcome', intent === 'tutorial' ? 'tutorial' : 'start');
   return `${url.pathname}${url.search}${url.hash}`;

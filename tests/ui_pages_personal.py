@@ -106,8 +106,18 @@ def test_app(pw, url, profile, channel):
     assert {'400', '700'} <= set(date_fonts), date_fonts
     cover.close()
     print('PASS bundled regular and bold text fonts on first cover date draw', flush=True)
-    page.goto(url)
+    page.goto(url + 'onboarding.html?next=%2F%3Fteaser%3D0')
+    assert page.locator('#skip').evaluate('a => a.href') == url + '?teaser=0&welcome=start'
+    page.locator('[data-choice="personal"]').click()
+    page.locator('[data-choice="none"]').click()
+    page.locator('#tutorial-start').click()
+    page.wait_for_url('**#/tutorial')
+    page.goto(url + 'teaser3/?intro=1&next=%2F')
+    page.locator('.tz-skip').click()
+    page.locator('#skip').click()
     page.get_by_test_id('office-open-files').wait_for()
+    assert urllib.parse.urlsplit(page.url).path == urllib.parse.urlsplit(url).path
+    print('PASS onboarding, teaser, tutorial and document library navigation', flush=True)
     toolbar = page.get_by_test_id('office-app-menu')
     top = toolbar.bounding_box()
     home = page.get_by_test_id('office-library').bounding_box()
@@ -130,6 +140,22 @@ def test_app(pw, url, profile, channel):
     page.get_by_test_id('office-file-input').set_input_files(FIXTURE)
     frame = editor(page)
     doc = page.evaluate('window.__doc.id')
+    options = page.get_by_test_id('doc-settings')
+    options.click()
+    dialog = page.get_by_role('dialog', name='문서 옵션')
+    assert dialog.locator('[data-setting]').count() == 3
+    export = dialog.locator('[data-setting="exportKind"]')
+    export.get_by_role('button', name='파일에 담을 내용 도움말').click()
+    assert export.locator('dl').is_visible()
+    original = export.locator('input:checked').get_attribute('value')
+    for value in [('tracked' if original == 'final' else 'final'), original]:
+        export.locator(f'input[data-value="{value}"]').check()
+        dialog.get_by_test_id('settings-save').click()
+        dialog.wait_for(state='hidden')
+        options.click()
+        assert export.locator('input:checked').get_attribute('value') == value
+    dialog.get_by_text('취소', exact=True).click()
+    print('PASS personal document options, help, save and reopen', flush=True)
     personal_url = page.url
     mark = 'Pages-local-edit'
     memo = '근거를 확인했습니다 Pages 메모'

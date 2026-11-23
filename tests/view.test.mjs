@@ -277,7 +277,7 @@ test('한글로 저장 설명: 문서 설정 exportKind 그대로', () => {
 });
 
 test('⚙ 문서 설정 창 모델: 일곱 줄 · 창 값 ↔ 설정 · 바뀐 키만 보냄 · 사람 목록(관리자는 언제나·viewer 못 고름·목록에 없는 이름) · 승인→실시간 경고', () => {
-  assert.deepEqual(SETTING_FIELDS.map((f) => [f.key, f.label]), [['editMode', '편집 방식'], ['editors', '수정 권한'], ['track', '실시간 기록'], ['exportKind', '한글로 저장'], ['aiMemo', 'AI 메모'], ['aiQuick', 'AI에게 빠르게 맡기기'], ['aiApply', 'AI 자동 반영']]);
+  assert.deepEqual(SETTING_FIELDS.map((f) => [f.key, f.label]), [['editMode', '편집 반영 방식'], ['editors', '편집 가능한 사람'], ['track', '실시간 편집 기록'], ['exportKind', '파일에 담을 내용'], ['aiMemo', 'AI 작업 메모'], ['aiQuick', '빠른 AI 요청'], ['aiApply', 'AI 제안 반영']]);
   assert.deepEqual(SETTING_FIELDS.find((x) => x.key === 'aiQuick').options, [['send', '바로 보내기'], ['compose', '확인 후 보내기']]);
   assert.deepEqual(SETTING_FIELDS[0].options, [['realtime', '실시간'], ['review', '승인 후 반영']]);
   // 값은 서버 설정 값 그대로(SETTING_VALUES — editors 는 all|some), 선택지마다 설명(title)이 있다

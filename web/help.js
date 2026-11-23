@@ -10,7 +10,7 @@ let config = {}; let diagnostics = null; let selectedWebUrl = ''; let statusTime
 const $ = (id) => document.getElementById(id);
 /** 칸이 있을 때만 글을 넣는다 — 설명서 HTML 과 이 파일이 잠깐 다른 판이어도 오류 없이 넘어간다 */
 const setText = (id, value) => { const el = $(id); if (el) el.textContent = value; };
-const origin = location.origin;
+const browserPersonal = document.documentElement.hasAttribute('data-browser-personal');
 const readToken = () => { try { return localStorage.getItem('hwpx.token') || ''; } catch { return ''; } };
 const authHeaders = (token) => ({ Authorization: `Bearer ${token}` });
 const hashAnchor = () => { try { return decodeURIComponent(location.hash.slice(1)); } catch { return ''; } };
@@ -44,6 +44,13 @@ $('manual-retry').addEventListener('click', loadManual);
 
 /** 관리자 절(data-admin)은 /api/me 의 role 이 admin 일 때만 보인다 — 토큰이 없거나 확인에 실패하면 숨긴 채로 둔다. */
 async function revealAdmin() {
+  if (browserPersonal) {
+    $('manual').hidden = false;
+    document.querySelector('nav a[href="#manual"]').hidden = false;
+    $('manual').querySelector('.admin-tag').hidden = true;
+    if (!manualLoaded) loadManual();
+    return;
+  }
   const token = readToken();
   me = null;
   if (token) {
@@ -94,7 +101,7 @@ window.addEventListener('hashchange', () => {
   markTopic();
 });
 
-function urls() { return connectionUrls({ browserOrigin: origin, publicUrl: config.publicUrl, diagnostics, selectedWebUrl }); }
+function urls() { return connectionUrls({ browserOrigin: browserPersonal ? null : location.origin, publicUrl: config.publicUrl, diagnostics, selectedWebUrl }); }
 const psQuote = (s) => `'${String(s).replaceAll("'", "''")}'`;
 // Claude Code 는 머리글의 ${HWPX_COWORK_TOKEN} 을 연결할 때 환경 변수로 바꾼다 — 작은따옴표 안에 두어 셸이 미리 풀지 않게(토큰이 설정 파일에 적히지 않음)
 const TOKEN_REF = '${HWPX_COWORK_TOKEN}';
@@ -103,10 +110,10 @@ function render() {
   const oauth = config.oauth;
   setText('oauth-status', oauth?.enabled ? '연결 준비됨. 아래 주소를 ChatGPT에 등록하세요.' : (oauth?.reason || '이 서버의 https 주소가 아직 준비되지 않았습니다. 관리자에게 ChatGPT 연결용 주소를 확인받으세요.'));
   setText('oauth-mcp', oauth?.enabled ? oauth.mcpUrl : 'https 주소 확인 필요');
-  setText('current-web', u.currentWebUrl || '서버에서 설명서를 여세요');
+  setText('current-web', (browserPersonal && new URL('./', location.href).href) || u.currentWebUrl || '서버에서 설명서를 여세요');
   setText('shared-web', u.sharedWebUrl || '서버 주소 확인 필요');
   setText('shared-mcp', u.mcpUrl || '중앙 MCP 주소 확인 필요');
-  setText('address-note', u.localOnly ? '지금 주소는 이 PC 전용입니다. 다른 PC나 웹 AI에서 쓸 주소는 관리자에게 받으세요.'
+  setText('address-note', browserPersonal ? 'AI 연결에는 설치한 서버의 MCP 주소를 사용하세요.' : u.localOnly ? '지금 주소는 이 PC 전용입니다. 다른 PC나 웹 AI에서 쓸 주소는 관리자에게 받으세요.'
     : u.source === 'diagnostic' ? '서버 점검에서 찾은 주소 후보입니다. 다른 PC에서 실제로 접속되는지 확인한 뒤 공유하세요.'
       : '주소에는 토큰을 넣지 않습니다. AI는 연결할 때 내 토큰으로 인증합니다.');
   const mcp = u.mcpUrl || 'CENTRAL_MCP_URL';
@@ -296,4 +303,10 @@ $('check-connections')?.addEventListener('click', async () => {
 render();
 revealHash();
 revealAdmin();
-fetch('/api/config').then((r) => { if (!r.ok) throw new Error(); return r.json(); }).then((c) => { config = c; render(); }).catch(() => {});
+if (browserPersonal) {
+  for (const button of document.querySelectorAll('[data-copy="shared-mcp"], [data-copy="other-mcp"], [data-copy="oauth-mcp"]')) button.disabled = true;
+  $('download-worker').disabled = true;
+  setText('worker-download-status', '실행기 ZIP은 설치한 서버의 사용 설명서에서 받을 수 있습니다.');
+  $('oauth-list').disabled = true;
+  setText('oauth-connections', 'ChatGPT 연결은 설치한 서버에서 관리합니다.');
+} else fetch('/api/config').then((r) => { if (!r.ok) throw new Error(); return r.json(); }).then((c) => { config = c; render(); }).catch(() => {});
