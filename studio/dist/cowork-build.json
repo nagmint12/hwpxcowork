@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-23T05:11:17.601Z",
-  "enginePackage": "vendor\\rhwp\\pkg",
+  "builtAt": "2026-11-23T06:09:26.002Z",
+  "enginePackage": "artifacts\\integrated-20261123\\engine-pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "308392eaba4df126c7bf6ffcb952f2616e6e3911"
+    "commit": "22cd857b7f7888475abe52c71ff41b8d52251037"
   },
   "patches": [
     {
@@ -747,6 +747,86 @@
       "id": "rhwp090-progressive-hold-recovery-cipher",
       "file": "src/core/wasm-bridge.ts",
       "why": "rollback 완료까지 이전 문서의 복구 암호 핸들 보존"
+    },
+    {
+      "id": "rhwp090-open-font-preparation",
+      "file": "src/main.ts",
+      "why": "점진 열기와 최종 화면에서 동일한 글꼴 준비를 사용"
+    },
+    {
+      "id": "rhwp090-open-font-preparation-current",
+      "file": "src/main.ts",
+      "why": "다른 문서로 교체된 열기는 해당 문서의 글꼴 선택을 건드리지 않음"
+    },
+    {
+      "id": "rhwp090-open-font-preparation-info",
+      "file": "src/main.ts",
+      "why": "원본과 대체 글꼴의 공급이 끝나기 전에 문서 표시를 시작하지 않음"
+    },
+    {
+      "id": "rhwp090-open-font-preparation-finish",
+      "file": "src/main.ts",
+      "why": "동일 문서의 최종 화면은 이미 공급한 글꼴을 그대로 사용"
+    },
+    {
+      "id": "rhwp090-open-preview-font-options",
+      "file": "src/main.ts",
+      "why": "편집기 임베드의 기존 글꼴 권한 안내 정책을 첫 미리보기에도 전달"
+    },
+    {
+      "id": "rhwp090-open-preview-font-options-call",
+      "file": "src/main.ts",
+      "why": "일반 문서 열기의 글꼴 권한 옵션 사용"
+    },
+    {
+      "id": "rhwp090-open-preview-font-barrier",
+      "file": "src/main.ts",
+      "why": "미리보기를 그리기 전에 지정 글꼴을 준비해 Noto에서 KoPub로 바뀌는 첫 화면 제거"
+    },
+    {
+      "id": "rhwp090-open-preview-font-cancel",
+      "file": "src/main.ts",
+      "why": "글꼴 준비 중 교체된 이전 문서 열기 취소"
+    },
+    {
+      "id": "rhwp090-open-preview-font-rollback",
+      "file": "src/main.ts",
+      "why": "점진 열기가 실패하고 이전 문서가 복구되면 글꼴 후보도 복구"
+    },
+    {
+      "id": "rhwp090-zoom-slider-ten-percent",
+      "file": "src/main.ts",
+      "why": "배율 슬라이더를 10% 단위에 맞춤"
+    },
+    {
+      "id": "rhwp090-zoom-slider-keyboard-ten-percent",
+      "file": "src/main.ts",
+      "why": "슬라이더 키 조작도 확대·축소 버튼과 같은 10% 이동 사용"
+    },
+    {
+      "id": "rhwp090-wheel-zoom-step-state",
+      "file": "src/view/viewport-manager.ts",
+      "why": "트랙패드의 작은 휠 입력은 한 눈금이 될 때까지 모음"
+    },
+    {
+      "id": "rhwp090-wheel-zoom-remainder",
+      "file": "src/view/viewport-manager.ts",
+      "why": "휠 배율 입력을 화면별로 관리"
+    },
+    {
+      "id": "rhwp090-wheel-zoom-step-input",
+      "file": "src/view/viewport-manager.ts",
+      "why": "Ctrl·Command 휠에서 한 눈금마다 배율을 변경"
+    },
+    {
+      "id": "rhwp090-wheel-zoom-reset-on-scroll",
+      "file": "src/view/viewport-manager.ts",
+      "why": "일반 스크롤이 배율 눈금에 누적되지 않음"
+    },
+    {
+      "id": "rhwp090-wheel-zoom-ten-percent",
+      "file": "src/view/viewport-manager.ts",
+      "why": "휠 배율에 10%p 증감과 기존 포인터 기준점을 적용"
     }
   ],
   "plugin": {

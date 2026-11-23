@@ -1,25 +1,17 @@
 {
-  "builtAt": "2026-11-23T05:06:16.024Z",
+  "builtAt": "2026-11-23T06:09:08.830Z",
   "profile": "release",
   "source": "vendor\\rhwp",
   "base": {
     "tag": "v0.9.0",
-    "commit": "308392e"
+    "commit": "1b44d0e2f9"
   },
-  "modified": [
-    "M src/paint/json.rs",
-    "M src/renderer/hancom_fontdb.rs",
-    "M src/renderer/local_font_width.rs",
-    "M src/renderer/missing_glyph_policy.rs",
-    "M src/renderer/mod.rs",
-    "M src/renderer/skia/font_lookup.rs",
-    "M src/renderer/style_resolver.rs"
-  ],
+  "modified": [],
   "wasmBindgen": "0.2.127",
   "features": "console_error_panic_hook,wasm-api",
   "nameSection": false,
-  "targetDir": "..\\..\\public-build-20261113\\target",
-  "cacheLastSource": "..\\..\\..\\vendor\\rhwp",
+  "targetDir": "artifacts\\public-build-20261113\\target",
+  "cacheLastSource": "artifacts\\pages-personal-20261123\\source\\vendor\\rhwp",
   "workspaceRefreshed": [
     "rhwp-contracts",
     "rhwp-ooxml-chart",

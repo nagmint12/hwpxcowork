@@ -51,7 +51,7 @@ export class HwpDocument {
      * mode: left|center|right|top|middle|bottom|hspace|vspace|width|height|size. {moved, skipped}
      */
     alignObjectsH2022(targets_json: string, mode: string): string;
-    applyBodyRangeFormat(s: number, p: number, o: number, end_s: number, end_p: number, end_o: number, props: string, page: number): BodyRangeFormatHistory;
+    applyBodyRangeFormat(s: number, p: number, o: number, end_s: number, end_p: number, end_o: number, props: string, page: number, paragraph?: boolean | null): BodyRangeFormatHistory;
     /**
      * [#5959] 셀/zone border_fill_id 직접 대입 (undo·redo 전용).
      *
@@ -184,6 +184,7 @@ export class HwpDocument {
      */
     beginDeferredPagination(fragment_budget: number): string;
     beginHwpxSave(): HwpxSaveSession | undefined;
+    bodyRangeSourcePending(): boolean;
     /**
      * 나누기 — 웹한글컨트롤 `Run("BreakPage"·"BreakColumn"·"BreakColDef"·"BreakSection")`.
      *
@@ -199,14 +200,9 @@ export class HwpDocument {
      * adapter, avoiding a second resource import before full source adoption.
      */
     canAdoptDocumentFragment(section_idx: number, para_idx: number, path_json: string, char_offset: number): boolean;
+    canPasteCells(sec: number, para: number, path: string, format: string, bytes: Uint8Array): boolean;
     cancelDeferredPagination(): boolean;
     canvasMetricsActive(): boolean;
-    /**
-     * 삭제 직전 문단 범위 원본을 조각으로 보관한다 (#5769).
-     *
-     * 반드시 `deleteRangeNative` 호출 **전**에 불린다. 반환 조각 ID 는
-     * `restoreDeleteFragment`/`discardDeleteFragment` 에 쓴다.
-     */
     captureDeleteRange(section_idx: number, start_para: number, end_para: number): number;
     captureNoteShape(section: number, endnote: boolean): NoteShapeHistory;
     /**
@@ -300,6 +296,7 @@ export class HwpDocument {
      * 반환값: JSON `{"ok":true,"converted":true}` 또는 `{"ok":true,"converted":false}`
      */
     convertToEditable(): string;
+    copyCellBlock(sec: number, para: number, path: string, start_row: number, start_col: number, end_row: number, end_col: number): string;
     /**
      * 컨트롤 객체(표, 이미지, 도형)를 내부 클립보드에 복사한다.
      *
@@ -307,6 +304,7 @@ export class HwpDocument {
      * 경로(`[{"controlIndex","cellIndex","cellParaIndex"}, ...]`)의 컨트롤을 복사한다.
      */
     copyControl(section_idx: number, para_idx: number, cell_path_json: string, control_idx: number): string;
+    copyControls(targets: string): string;
     /**
      * 개체 모양 복사 — 보관함에 넣는다. {kind, line, fill, size, shadow, picEffect}.
      */
@@ -675,6 +673,8 @@ export class HwpDocument {
      * formula: string, writeResult? }`. positional 과 동일 동작.
      */
     evaluateTableFormulaEx(options_json: string): string;
+    exportCellBlockHtml(): string;
+    exportClipboardFragmentHtml(): string;
     /**
      * [hwpx-cowork] 한글 Ctrl+V 가 읽는 문서모델(hwpjson) 보드 HTML — 클립보드 HTML 끝에 붙인다.
      */
@@ -2398,6 +2398,7 @@ export class HwpDocument {
      * 페이지네이션 메타데이터만 조회하므로 render tree build가 필요 없다 (#2428).
      */
     pageHasFootnoteFootholds(page_num: number): boolean;
+    pasteCells(sec: number, para: number, path: string, offset: number, format: string, bytes: Uint8Array, mode: string, origin: string): string;
     /**
      * 내부 클립보드의 컨트롤 객체를 캐럿 위치에 붙여넣는다.
      *
@@ -3241,6 +3242,13 @@ export class HwpDocument {
      */
     transposeTableCellsInPlace(section_idx: number, parent_para_idx: number, control_idx: number): string;
     /**
+     * 삭제 직전 문단 범위 원본을 조각으로 보관한다 (#5769).
+     *
+     * 반드시 `deleteRangeNative` 호출 **전**에 불린다. 반환 조각 ID 는
+     * `restoreDeleteFragment`/`discardDeleteFragment` 에 쓴다.
+     */
+    tryDeleteWholeBodySelection(s: number, first: number, offset: number, last: number, until: number): number | undefined;
+    /**
      * [hwpx-cowork] 2026-11-20 구역 조판 체크포인트(앞쪽 재사용) 통계(시험·진단용):
      * `{"enabled","resumed","full","skippedParagraphs","verifyChecks","verifyMismatches"}`.
      * resumed = 체크포인트에서 이어 간 구역 조판 수, skippedParagraphs = 그때 다시 하지 않은 앞 문단 수(누적).
@@ -3455,7 +3463,7 @@ export interface InitOutput {
     readonly fontSymbolUnicodeRange: (a: number, b: number, c: number) => [number, number];
     readonly hwpdocument_addBookmark: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_alignObjectsH2022: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-    readonly hwpdocument_applyBodyRangeFormat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
+    readonly hwpdocument_applyBodyRangeFormat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number];
     readonly hwpdocument_applyCellBorderFillIds: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_applyCellStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_applyCharFormat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
@@ -3487,9 +3495,11 @@ export interface InitOutput {
     readonly hwpdocument_beginBatch: (a: number) => [number, number, number, number];
     readonly hwpdocument_beginDeferredPagination: (a: number, b: number) => [number, number, number, number];
     readonly hwpdocument_beginHwpxSave: (a: number) => [number, number, number];
+    readonly hwpdocument_bodyRangeSourcePending: (a: number) => number;
     readonly hwpdocument_breakAtCursor: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_buildFontEnvironmentFromAvailablePrograms: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_canAdoptDocumentFragment: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly hwpdocument_canPasteCells: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly hwpdocument_cancelDeferredPagination: (a: number) => number;
     readonly hwpdocument_canvasMetricsActive: (a: number) => number;
     readonly hwpdocument_captureDeleteRange: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -3516,7 +3526,9 @@ export interface InitOutput {
     readonly hwpdocument_collectCanvasMetricRequests: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_collectCanvasMetricRequestsForParagraph: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly hwpdocument_convertToEditable: (a: number) => [number, number, number, number];
+    readonly hwpdocument_copyCellBlock: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
     readonly hwpdocument_copyControl: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly hwpdocument_copyControls: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_copyObjectFormatH2022: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_copySelection: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly hwpdocument_copySelectionAcross: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
@@ -3582,6 +3594,8 @@ export interface InitOutput {
     readonly hwpdocument_equalizeTableCellSizes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly hwpdocument_evaluateTableFormula: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
     readonly hwpdocument_evaluateTableFormulaEx: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly hwpdocument_exportCellBlockHtml: (a: number) => [number, number, number, number];
+    readonly hwpdocument_exportClipboardFragmentHtml: (a: number) => [number, number, number, number];
     readonly hwpdocument_exportClipboardHancomHtml: (a: number) => [number, number, number, number];
     readonly hwpdocument_exportClipboardHwpx: (a: number) => [number, number, number, number];
     readonly hwpdocument_exportClipboardHwpxHancom: (a: number) => [number, number, number, number];
@@ -3931,6 +3945,7 @@ export interface InitOutput {
     readonly hwpdocument_ordinaryTextFontProgram: (a: number, b: number, c: number, d: number) => [number, number];
     readonly hwpdocument_pageCount: (a: number) => number;
     readonly hwpdocument_pageHasFootnoteFootholds: (a: number, b: number) => number;
+    readonly hwpdocument_pasteCells: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => [number, number, number, number];
     readonly hwpdocument_pasteControl: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly hwpdocument_pasteDocumentFragment: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly hwpdocument_pasteHtml: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
@@ -4114,6 +4129,7 @@ export interface InitOutput {
     readonly hwpdocument_textToLogicalOffset: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly hwpdocument_toggleHideHeaderFooter: (a: number, b: number, c: number) => [number, number, number, number];
     readonly hwpdocument_transposeTableCellsInPlace: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly hwpdocument_tryDeleteWholeBodySelection: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly hwpdocument_typesetResumeStats: (a: number) => [number, number];
     readonly hwpdocument_typesetTailPending: (a: number) => number;
     readonly hwpdocument_ungroupShape: (a: number, b: number, c: number, d: number) => [number, number, number, number];
