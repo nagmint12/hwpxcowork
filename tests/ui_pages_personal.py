@@ -140,8 +140,8 @@ def test_app(pw, url, profile, channel):
     page.get_by_test_id('office-file-input').set_input_files(FIXTURE)
     frame = editor(page)
     doc = page.evaluate('window.__doc.id')
-    options = page.get_by_test_id('doc-settings')
-    options.click()
+    options_button = page.get_by_test_id('doc-settings')
+    options_button.click()
     dialog = page.get_by_role('dialog', name='문서 옵션')
     assert dialog.locator('[data-setting]').count() == 3
     export = dialog.locator('[data-setting="exportKind"]')
@@ -152,7 +152,7 @@ def test_app(pw, url, profile, channel):
         export.locator(f'input[data-value="{value}"]').check()
         dialog.get_by_test_id('settings-save').click()
         dialog.wait_for(state='hidden')
-        options.click()
+        options_button.click()
         assert export.locator('input:checked').get_attribute('value') == value
     dialog.get_by_text('취소', exact=True).click()
     print('PASS personal document options, help, save and reopen', flush=True)
