@@ -159,6 +159,8 @@ fn fallback_candidates_for_char(family: &str, lang: usize, c: Option<char>) -> V
                 if !output.contains(&name.as_str()) { output.push(name); }
             }
         }
+        // [hwpx-cowork] Apply the product exclusion to all slots, including scalar-specific defaults.
+        output.retain(|face| !super::excluded_symbol_font(face));
         cache.borrow_mut().insert(key, output.clone());
         output
     })
@@ -276,6 +278,8 @@ fn select_glyph_uncached(family: &str, c: char, bold: bool, italic: bool, lang: 
         // [hwpx-cowork] The second member of an internal extracted-HFT chain
         // is the established stand-in for undecoded ranges, not a document's
         // substFont overriding an installed primary's ordinary fallback.
+        // [hwpx-cowork] Wingdings is valid as the requested face, never as a text substitute.
+        if index > 0 && super::excluded_symbol_font(name) { continue; }
         if index > 0 && primary_available && !super::hft_ttf::is_native(primary) { break; }
         if find_local_face(name).is_some_and(|f| f.advance_em(c).is_some() && style_of(f).is_none()) {
             // Stale style metadata cannot disprove existing coverage.

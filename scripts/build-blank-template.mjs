@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { HwpxDoc } from '../engine/doc.js';
 import { Section } from '../engine/section.js';
+import { charVariant } from '../engine/formatting.js';
 import { elements, removeElements } from '../engine/page-layout.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,9 +14,13 @@ export async function buildBlankTemplate() {
   const head = sec.xml.slice(0, sec.xml.indexOf('>', sec.xml.indexOf('<hs:sec')) + 1);
   let prop = elements(sec.xml, 'hp:secPr')[0].xml;
   prop = removeElements(prop, 'hp:masterPage').replace(/masterPageCnt="\d+"/, 'masterPageCnt="0"').replace(/(<hp:startNum\b[^>]*\bpage=")\d+"/, '$10"');
-  const style = doc.header.style({ id: '0' });
-  const controlCharPr = sec.bodyParas[0].runs[0].charPr;
-  const para = `<hp:p id="0" paraPrIDRef="${style.paraPr}" styleIDRef="${style.styleId}" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${controlCharPr}">${prop}<hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl></hp:run><hp:run charPrIDRef="${style.charPr}"><hp:t/></hp:run></hp:p>`;
+  const style = doc.header.style({ name: '바탕글' });
+  if (!style) throw new Error('원본에 바탕글 스타일이 없습니다.');
+  const charPr = charVariant(doc.header, style.charPr, { font: 'Noto Sans KR', sizePt: 10 });
+  const normalStyle = elements(doc.header.xml, 'hh:style').find(el => el.attrs.id === style.styleId);
+  doc.header.xml = doc.header.xml.replace(normalStyle.xml, tag => tag.replace(/\bcharPrIDRef="\d+"/, `charPrIDRef="${charPr}"`));
+  // 빈 문단의 첫 입력은 제어 run의 글자 모양을 물려받을 수 있다.
+  const para = `<hp:p id="0" paraPrIDRef="${style.paraPr}" styleIDRef="${style.styleId}" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${charPr}">${prop}<hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl></hp:run><hp:run charPrIDRef="${charPr}"><hp:t/></hp:run></hp:p>`;
   doc.sections = [new Section(head + para + '</hs:sec>', 0)];
   doc._rewriteSectionFiles();
   for (const name of [...doc.container.files.keys()]) if (/^(BinData\/|Preview\/)|^Contents\/(masterpage|chart)/i.test(name)) doc.container.remove(name);

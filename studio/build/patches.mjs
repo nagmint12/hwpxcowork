@@ -81,6 +81,19 @@ export const PATCHES = [
 // '다른 글꼴로 대체'가 아니라 같은 글꼴이 다른 이름으로 설치된 것이다 — 엔진 installed_render_font_aliases
 // (vendor/rhwp/src/renderer/mod.rs)와 같은 짝. 이 이름들도 설치 감지 후보에 넣고, 표시 정책은 이 짝을 원본으로 본다.
 export const COWORK_SAME_FACE_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  // Unqualified KoPub names refer to its ordinary Medium face (the SFNT family includes the weight).
+  'KoPub돋움체': ['KoPubDotum Medium'],
+  'KoPubDotum': ['KoPubDotum Medium'],
+  'KoPub Dotum': ['KoPubDotum Medium'],
+  'KoPub바탕체': ['KoPubBatang Medium'],
+  'KoPubBatang': ['KoPubBatang Medium'],
+  'KoPub Batang': ['KoPubBatang Medium'],
+  'KoPubWorld돋움체': ['KoPubWorldDotum Medium'],
+  'KoPubWorldDotum': ['KoPubWorldDotum Medium'],
+  'KoPubWorld Dotum': ['KoPubWorldDotum Medium'],
+  'KoPubWorld바탕체': ['KoPubWorldBatang Medium'],
+  'KoPubWorldBatang': ['KoPubWorldBatang Medium'],
+  'KoPubWorld Batang': ['KoPubWorldBatang Medium'],
   '한양견명조': ['HY견명조', 'HYMyeongJo-Extra'],
   '한양견고딕': ['HY견고딕', 'HYGothic-Extra'],
   '한양중고딕': ['HY중고딕', 'HYGothic', 'HYGothic-Medium'],

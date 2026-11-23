@@ -149,7 +149,7 @@ fn text_family_candidates_for_weight(requested: &str, bold: bool) -> Vec<String>
     // 없다는 이유로 고딕을 우선하거나 굵은 본문에 ExtraLight를 고르지 않는다.
     // 공통 정책의 정적 CSS 이름만 해제하며 사용자 요청 이름은 아래에서 보존한다.
     // [hwpx-cowork] Physical fallback families follow the declared source faces.
-    for family in crate::renderer::missing_glyph_policy::fallback_families(requested) {
+    for family in crate::renderer::missing_glyph_policy::text_fallback_families(requested) {
         if !families.iter().any(|candidate| candidate == family) {
             families.push((*family).to_string());
         }

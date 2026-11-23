@@ -3,6 +3,8 @@
 //  2) 만든 문서는 여느 문서처럼 열고(문단·파일·한글로 저장) 고칠 수 있다, 폴더·개인 문서함 자리, 권한 없는 자리는 403
 //  3) PATCH /api/docs/:id { title }: 수정·관리 권한, 빈 이름 거절, 보기 전용 403, WebSocket 'renamed' 알림, fileName 은 그대로
 import { startServer, uploadDoc, watchWs, fixture } from './helpers/server.mjs';
+import { HwpxDoc } from '../engine/doc.js';
+import { elements } from '../engine/page-layout.js';
 import fs from 'node:fs';
 
 let passed = 0;
@@ -41,6 +43,11 @@ try {
   ok(paras.length === 1 && paras[0].text === '', '문단 하나, 글 없음');
   const file = await A(`/api/docs/${n1.id}/file`);
   ok(Buffer.isBuffer(file) && file.subarray(0, 2).toString() === 'PK', `파일 받기 ${file.length}B`);
+  const blank = await HwpxDoc.load(file);
+  const normal = blank.header.style({ name: '바탕글' });
+  const [first] = elements(blank.sections[0].xml, 'hp:p');
+  ok(normal && first.attrs.styleIDRef === normal.styleId && blank.header.charHeight(normal.charPr) === 1000
+    && blank.sections[0].bodyParas[0].runs.every(run => run.charPr === normal.charPr), '빈 문단과 첫 입력의 글자 모양이 바탕글 10pt');
   const exp = await A.res(`/api/docs/${n1.id}/file?kind=export`);
   ok(exp.ok && /%EC%83%88%20%EB%AC%B8%EC%84%9C\.hwpx/.test(exp.headers.get('content-disposition') || ''), `한글로 저장 이름 = 제목: ${exp.headers.get('content-disposition')}`);
   const fold = await A('/api/folders', { method: 'POST', body: { name: '작업', space: 'public' } });

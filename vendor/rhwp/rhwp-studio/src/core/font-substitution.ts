@@ -267,6 +267,12 @@ function formatCssFontFamilies(families: string[]): string {
  * 엔진이 주는 체인은 인용 방식이 섞여 있다 — 앞쪽 설치 별칭은 `"..."`, 뒤쪽 generic
  * 체인은 `'...'`, 맨 끝 `sans-serif` 는 무인용이다. 셋을 모두 받는다.
  */
+// [hwpx-cowork] A legacy Wingdings cmap may only supply a run that requested it.
+const wingdingsFamily = /^(?:__rhwp_(?:ttf|intrinsic)__)?@?Wingdings(?:$|[ 23-])/i;
+export function canFallbackToFont(requested: string, candidate: string): boolean {
+  return !wingdingsFamily.test(candidate) || wingdingsFamily.test(requested);
+}
+
 export function parseCssFontFamilyList(familyPart: string): string[] {
   const BACKSLASH = String.fromCharCode(92);
   const out: string[] = [];
@@ -539,9 +545,9 @@ export function fontFamilyCandidatesForDisplayWithRules(
     ruleIds.push(FONT_RULE_DISPLAY_CHAIN_POLICY_IDS['paint-substitute']);
   }
 
-  const documentFallbackFamilies = options.documentFallbackFamilies
+  const documentFallbackFamilies = (options.documentFallbackFamilies
     ?? documentFontSubstitutions.get(normalizedFamilyKey(fontName))
-    ?? [];
+    ?? []).filter(face => canFallbackToFont(fontName, face));
   let documentFallbackAccepted = false;
   for (const documentFallback of documentFallbackFamilies) {
     const localFallback = options.confirmedLocalFonts === undefined

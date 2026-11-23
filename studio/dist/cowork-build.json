@@ -1,11 +1,11 @@
 {
-  "builtAt": "2026-11-23T02:16:34.742Z",
+  "builtAt": "2026-11-23T05:11:17.601Z",
   "enginePackage": "vendor\\rhwp\\pkg",
   "source": "vendor\\rhwp",
   "upstream": {
     "repo": "edwardkim/rhwp",
     "tag": "v0.9.0",
-    "commit": "4ca26c170b7ea716b6d26320f63cb777d5eb8c24"
+    "commit": "308392eaba4df126c7bf6ffcb952f2616e6e3911"
   },
   "patches": [
     {
@@ -717,6 +717,11 @@
       "id": "fontfix-fork-canvas-font-merge",
       "file": "src/core/wasm-bridge.ts",
       "why": "Canvas 글꼴 병합을 fork 방식으로: 엔진 내부 별칭을 원 이름으로 되돌려 설치·웹 글꼴 대신 Noto 로 그리지 않음"
+    },
+    {
+      "id": "fontfix-kopub-before-discovery",
+      "file": "src/core/wasm-bridge.ts",
+      "why": "KoPub 원본과 실제 설치 이름을 첫 프레임부터 본문 웹폰트보다 먼저 선택"
     },
     {
       "id": "fontfix-fork-canvas-font-merge-tail",

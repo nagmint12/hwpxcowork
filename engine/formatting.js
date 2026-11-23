@@ -380,7 +380,7 @@ function paraProps(header, shapeId, modern = true) {
   const ls = elements(context.xml, 'hh:lineSpacing')[0]?.xml; const type = attrXml(ls, 'type', 'PERCENT');
   return { align: attrXml(elements(xml, 'hh:align')[0]?.xml, 'horizontal', 'JUSTIFY'), lineSpacing: { type, value: Number(attrXml(ls, 'value', 160)) / (type === 'PERCENT' ? 1 : factor) }, spaceBeforePt: get('hc:prev'), spaceAfterPt: get('hc:next'), indentPt: get('hc:intent'), leftMarginPt: get('hc:left'), rightMarginPt: get('hc:right'), oneLine: attrXml(elements(xml, 'hh:breakSetting')[0]?.xml, 'lineWrap', 'BREAK') === 'SQUEEZE' };
 }
-function charVariant(header, baseId, patch = {}) {
+export function charVariant(header, baseId, patch = {}) {
   const src = shape(header, 'charPr', baseId); let xml = src;
   if (patch.font !== undefined) xml = patchElements(xml, 'hh:fontRef', ensureFont(header, patch.font));
   if (patch.sizePt !== undefined) xml = rootAttrs(xml, { height: Math.round(patch.sizePt * 100) });

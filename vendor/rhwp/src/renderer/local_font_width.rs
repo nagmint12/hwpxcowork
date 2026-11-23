@@ -80,8 +80,17 @@ pub(crate) fn find_local_face(font_family: &str) -> Option<&'static LocalFontFac
             .filter(|c| !c.is_whitespace())
             .flat_map(char::to_lowercase)
             .collect();
-        let found = LOCAL_FONT_NAMES
-            .binary_search_by(|(name, _)| (*name).cmp(key.as_str()))
+        // [hwpx-cowork] KoPub distributes separate Light/Medium/Bold families.
+        // For a document's unqualified family, use the Medium program when no
+        // exact name exists. family_alias then gives Canvas its actual SFNT family.
+        let lookup = |name: &str| LOCAL_FONT_NAMES.binary_search_by(|(entry, _)| (*entry).cmp(name));
+        let found = lookup(&key).or_else(|miss| match key.as_str() {
+            "kopub돋움체" | "kopubdotum" => lookup("kopubdotummedium"),
+            "kopub바탕체" | "kopubbatang" => lookup("kopubbatangmedium"),
+            "kopubworld돋움체" | "kopubworlddotum" => lookup("kopubworlddotummedium"),
+            "kopubworld바탕체" | "kopubworldbatang" => lookup("kopubworldbatangmedium"),
+            _ => Err(miss),
+        })
             .ok()
             .map(|i| LOCAL_FONT_NAMES[i].1);
         cache.borrow_mut().insert(primary.to_string(), found);

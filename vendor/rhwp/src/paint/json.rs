@@ -1860,7 +1860,7 @@ fn write_text_style(buf: &mut String, style: &TextStyle, text: &str) {
     buf.push('{');
     // [hwpx-cowork] Byte-backed painters consume the same ordered glyph fallback as Canvas/SVG.
     buf.push_str("\"glyphFallbackFamilies\":[");
-    for (i, family) in crate::renderer::missing_glyph_policy::fallback_families(&style.font_family).iter().enumerate() {
+    for (i, family) in crate::renderer::missing_glyph_policy::text_fallback_families(&style.font_family).iter().enumerate() {
         if i > 0 { buf.push(','); }
         buf.push_str(&json_escape(family));
     }

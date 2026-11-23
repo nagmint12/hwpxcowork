@@ -19,10 +19,25 @@ import { makePng } from './helpers/image.mjs';
 const json = r => { assert.ok(!r.isError, r.content?.[0]?.text); return JSON.parse(r.content.find(c => c.type === 'text').text); };
 const body = d => d.sections.flatMap(s => s.bodyParas.map(p => Section.text(p, 'final')));
 
-test('표준서식 새 문서: 검증된 23개 스타일·용지 유지, 내용·그림·머리말·꼬리말·바탕쪽·쪽 번호 제거', async () => {
+test('표준서식 새 문서: 바탕글 10pt, 나머지 스타일·용지 유지, 내용과 개체 제거', async () => {
   const bytes = await buildBlankTemplate(), d = await HwpxDoc.load(bytes);
   const original = await HwpxDoc.load(await fs.readFile(path.join(root, 'tutorial', '결과보고서.hwpx')));
-  assert.deepEqual(d.formattingCatalog().styles, original.formattingCatalog().styles);
+  const normal = d.header.style({ name: '바탕글' });
+  const originalNormal = original.header.style({ name: '바탕글' });
+  assert.deepEqual(d.formattingCatalog().styles, original.formattingCatalog().styles.map(style =>
+    style.id === originalNormal.styleId ? { ...style, charPrId: normal.charPr } : style));
+  assert.equal(d.header.charHeight(normal.charPr), 1000);
+  const charXml = d.header.block('charPr', normal.charPr);
+  const fontRef = elements(charXml, 'hh:fontRef')[0];
+  const groups = elements(d.header.xml, 'hh:fontface');
+  for (const slot of ['hangul', 'latin', 'hanja', 'japanese', 'other', 'symbol', 'user']) {
+    const group = groups.find(el => el.attrs.lang === slot.toUpperCase());
+    assert.equal(elements(group.xml, 'hh:font').find(el => el.attrs.id === fontRef.attrs[slot]).attrs.face, 'Noto Sans KR');
+  }
+  const originalChar = original.header.block('charPr', originalNormal.charPr);
+  assert.equal(charXml, originalChar.replace(`id="${originalNormal.charPr}"`, `id="${normal.charPr}"`)
+    .replace(/\bheight="\d+"/, 'height="1000"').replace(elements(originalChar, 'hh:fontRef')[0].xml, fontRef.xml));
+  assert.ok(d.sections[0].bodyParas[0].runs.every(run => run.charPr === normal.charPr));
   assert.equal(d.sections.length, 1); assert.deepEqual(body(d), ['']);
   assert.equal(d.memos().length, 0); assert.equal(d.changes().length, 0);
   assert.equal(d.tables().length, 0); assert.equal(d.figures().length, 0);

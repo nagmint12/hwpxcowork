@@ -116,7 +116,7 @@ export function adaptRhwp090Patches(patches) {
   // fork 의 병합(설치 face 별칭 보존 #6600, 동의 여부와 무관) 그대로 + 내부 별칭은 바로 뒤의 원 이름으로 되돌린다(같은 뜻).
   extra('fontfix-fork-canvas-font-import', 'src/core/wasm-bridge.ts',
     "  completeFontFamilyList,\n} from './font-substitution';",
-    a => a.replace('  completeFontFamilyList,', '  completeFontFamilyList,\n  resolveFont,'),
+    a => a.replace('  completeFontFamilyList,', '  completeFontFamilyList,\n  resolveFont,\n  canFallbackToFont,'),
     'fork 병합이 쓰는 resolveFont 를 가져옴');
   extra('fontfix-fork-canvas-font-merge', 'src/core/wasm-bridge.ts',
     `  const incoming = parseCssFontFamilyList(familyPart);
@@ -139,6 +139,20 @@ export function adaptRhwp090Patches(patches) {
   void documentSubstituteFamilies; void completeFontFamilyList;
   const studioChain = fontFamilyCandidatesForDisplay(primary, 0, 0);`,
     'Canvas 글꼴 병합을 fork 방식으로: 엔진 내부 별칭을 원 이름으로 되돌려 설치·웹 글꼴 대신 Noto 로 그리지 않음');
+  // KoPub's SFNT family can include Medium even when the saved name omits the weight.
+  // Let CSS try the engine's original KoPub faces on the very first frame, while
+  // asynchronous local font detection is still pending. An absent face falls through.
+  extra('fontfix-kopub-before-discovery', 'src/core/wasm-bridge.ts',
+    '  if (studioChain[0]) push(studioChain[0]);',
+    a => `  const koPub = /^KoPub(?:World)?\\s*(?:Dotum|Batang|돋움체|바탕체)/i;
+  if (koPub.test(primary) && koPub.test(incoming[1] ?? '')) {
+    for (const name of incoming) {
+      if (!koPub.test(name)) break;
+      push(name);
+    }
+  }
+${a}`,
+    'KoPub 원본과 실제 설치 이름을 첫 프레임부터 본문 웹폰트보다 먼저 선택');
   extra('fontfix-fork-canvas-font-merge-tail', 'src/core/wasm-bridge.ts',
     `  const primaryAllowed = studioChain.some(name =>
     name.toLocaleLowerCase('en-US') === primary.toLocaleLowerCase('en-US'));
@@ -158,7 +172,7 @@ export function adaptRhwp090Patches(patches) {
     push(name);
   }
   for (const name of studioChain.slice(1)) push(name);
-  return prefix + formatCssFontFamilyList(merged);`,
+  return prefix + formatCssFontFamilyList(merged.filter(name => canFallbackToFont(primary, name)));`,
     'fork 병합: 감지 동의와 관계없이 엔진 체인 보존, 표시 정책 나머지는 뒤에 이어 붙임');
   // fork 는 ctx.font 치환 결과를 글꼴 상태가 같으면 다시 썼다(hwpx-cowork 2026-10-31 셈 기억). 0.9 는 한 번 그릴 때만 기억한다.
   extra('fontfix-fork-canvas-font-cache', 'src/core/wasm-bridge.ts',

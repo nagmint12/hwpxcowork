@@ -23,7 +23,8 @@ let wasm;
 let messages = [];
 
 async function staticBytes(relative) {
-  const response = await fetch(new URL(relative, scope));
+  // Revalidate the shared template and engine when the worker starts a session after deployment.
+  const response = await fetch(new URL(relative, scope), { cache: 'no-cache' });
   if (!response.ok) throw Error('편집기 자료를 읽지 못했습니다 (' + relative + ', ' + response.status + ')');
   return new Uint8Array(await response.arrayBuffer());
 }

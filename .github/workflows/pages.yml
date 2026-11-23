@@ -19,11 +19,16 @@ on:
       - 'deploy/Caddyfile.example'
       - 'skill/hwpx-standard-report/reference/**'
       - 'tutorial/**'
+      - 'tests/ui_pages_fonts.py'
+      - 'tests/ui_pages_personal.py'
       - 'package*.json'
       - '.github/workflows/pages.yml'
   release:
     types: [published, edited, released, deleted]
   workflow_dispatch:
+concurrency:
+  group: ${{ github.event_name == 'release' && github.run_id || 'pages' }}
+  cancel-in-progress: true
 permissions:
   contents: read
   pages: write
@@ -39,19 +44,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
-  deploy:
+  build:
     if: github.event_name != 'release'
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           sparse-checkout: |
             web
             studio/dist
@@ -60,6 +59,7 @@ jobs:
             server
             engine
             tutorial
+            tests
             docs
             skill/hwpx-standard-report/reference
       - uses: actions/setup-node@v4
@@ -84,9 +84,46 @@ jobs:
           node deploy/github-pages/build-site.mjs _site
       - name: Check links in the published artifact
         run: python3 deploy/github-pages/check-links.py _site --base "/${GITHUB_REPOSITORY#*/}/"
+      - name: Verify body fonts in the built Pages editor
+        run: |
+          python3 -m pip install playwright==1.65.2
+          python3 -m playwright install --with-deps --only-shell chromium
+          python3 tests/ui_pages_fonts.py _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+  macos-fonts:
+    needs: build
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tests
+            server/templates
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify the same Pages artifact on macOS
+        run: |
+          mkdir _site
+          tar -xf "$RUNNER_TEMP/pages/artifact.tar" -C _site
+          python3 -m pip install playwright==1.65.2
+          python3 -m playwright install --only-shell chromium
+          python3 tests/ui_pages_fonts.py _site
+  deploy:
+    needs: macos-fonts
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4

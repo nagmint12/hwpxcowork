@@ -33,9 +33,11 @@ function patch(dir) {
   }
 }
 patch(studio);
-for (const weight of ['Regular', 'Bold']) {
-  const font = path.join(studio, 'fonts', `NotoSansKR-${weight}.woff2`);
-  if (fs.readFileSync(font).toString('ascii', 0, 4) !== 'wOF2') throw Error(`유효한 WOFF2 글꼴이 필요합니다: ${font}`);
+for (const family of ['NotoSerifKR', 'NotoSansKR']) {
+  for (const weight of ['Regular', 'Bold']) {
+    const font = path.join(studio, 'fonts', `${family}-${weight}.woff2`);
+    if (fs.readFileSync(font).toString('ascii', 0, 4) !== 'wOF2') throw Error(`유효한 WOFF2 글꼴이 필요합니다: ${font}`);
+  }
 }
 fs.copyFileSync(new URL('./browser/editor-start.js', import.meta.url), path.join(studio, 'pages-editor-start.js'));
 if (!keyGuard || !assistantGuard) throw Error('공개용 AI 키 저장 및 도우미 차단이 포함된 편집기 빌드가 필요합니다.');

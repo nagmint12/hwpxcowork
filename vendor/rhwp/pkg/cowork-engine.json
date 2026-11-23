@@ -1,16 +1,33 @@
 {
-  "builtAt": "2026-11-21T23:19:12.352Z",
+  "builtAt": "2026-11-23T05:06:16.024Z",
   "profile": "release",
   "source": "vendor\\rhwp",
   "base": {
     "tag": "v0.9.0",
-    "commit": "651e02c410"
+    "commit": "308392e"
   },
-  "modified": [],
+  "modified": [
+    "M src/paint/json.rs",
+    "M src/renderer/hancom_fontdb.rs",
+    "M src/renderer/local_font_width.rs",
+    "M src/renderer/missing_glyph_policy.rs",
+    "M src/renderer/mod.rs",
+    "M src/renderer/skia/font_lookup.rs",
+    "M src/renderer/style_resolver.rs"
+  ],
   "wasmBindgen": "0.2.127",
   "features": "console_error_panic_hook,wasm-api",
   "nameSection": false,
-  "targetDir": "artifacts\\public-build-20261113\\target",
-  "cacheLastSource": "vendor\\rhwp",
-  "workspaceRefreshed": []
+  "targetDir": "..\\..\\public-build-20261113\\target",
+  "cacheLastSource": "..\\..\\..\\vendor\\rhwp",
+  "workspaceRefreshed": [
+    "rhwp-contracts",
+    "rhwp-ooxml-chart",
+    "rhwp-password-crypto",
+    "rhwp",
+    "rhwp-native-ffi",
+    "llm-verifier-verdict-protocol",
+    "llm-verifier-claim-bind",
+    "llm-verifier-criteria-decomp"
+  ]
 }

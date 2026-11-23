@@ -1,7 +1,7 @@
 import { fontProgramOwnsFamily, intrinsicCanvasSourceFamily } from './canvas-intrinsic-font.mjs';
 import { getHostFontState, localFontFaceKey, loadRendererLocalFont,
   onHostFontsChanged, resolveRendererLocalFontCandidates, type LocalFontRecord } from './local-fonts.ts';
-import { parseCssFontFamilyList, formatCssFontFamilyList } from './font-substitution.ts';
+import { canFallbackToFont, parseCssFontFamilyList, formatCssFontFamilyList } from './font-substitution.ts';
 import { ordinaryTextFontFaceData, type OrdinaryTextFontSource } from './ordinary-text-font.ts';
 import { fontSymbolDescriptors, type FontSymbolInspector } from './font-symbol-coverage.ts';
 
@@ -183,7 +183,8 @@ export class HostCanvasFontSession {
     const weightToken = tokens.find(token => /^\d+$/.test(token));
     const weight = weightToken ? Number(weightToken) : tokens.includes('bold') ? 700 : 400;
     const slant = tokens.includes('italic') ? 'italic' : tokens.includes('oblique') ? 'oblique' : 'normal';
-    const families = parseCssFontFamilyList(match[3]);
+    const incoming = parseCssFontFamilyList(match[3]);
+    const families = incoming.filter(name => canFallbackToFont(incoming[0], name));
     if (this.aliases.has(families[0])) return cssFont;
     const intrinsic = families[0] ? intrinsicCanvasSourceFamily(families[0]) : null;
     const prepared: string[] = [];

@@ -47,7 +47,7 @@ before(async () => {
     import * as coworkLocalFonts from ${JSON.stringify(local)};
     // [hwpx-cowork] 2026-11-10: 0.9.0 substituteCssFontFamily 는 documentSubstituteFamilies·completeFontFamilyList·getLocalFontState 도 쓴다.
     // 원본 wasm-bridge.ts 와 같은 모듈에서 가져오고, 그 판에 없는 이름은 쓰이지 않는다.
-    const { fontFamilyCandidatesForDisplay, formatCssFontFamilyList, parseCssFontFamilyList, resolveFont,
+    const { fontFamilyCandidatesForDisplay, formatCssFontFamilyList, parseCssFontFamilyList, resolveFont, canFallbackToFont,
       documentSubstituteFamilies, completeFontFamilyList } = coworkSubstitution;
     const { getLocalFontState } = coworkLocalFonts;
     export * from ${JSON.stringify(substitution)};
@@ -207,6 +207,7 @@ studioTest('ordinary sentence periods choose a loaded body face before legacy Wi
     const names = api.parseCssFontFamilyList(descriptor.slice(descriptor.indexOf('px ') + 3));
     assert.ok(['Noto Sans KR', 'Noto Serif KR'].includes(names[0]), `${family}: ${descriptor}`);
     assert.equal(api.getWebFontSupplySnapshot(names[0]).status, 'loaded');
+    assert.ok(!names.includes('Wingdings'), descriptor);
   }
   await api.loadWebFonts(['Wingdings'], undefined, { disableExternalWebFonts: true });
   assert.equal(api.fontFamilyCandidatesForDisplay('Wingdings')[0], 'Wingdings', '명시적으로 요청한 기호 face는 보존한다');

@@ -13,6 +13,25 @@ pub(crate) fn fallback_families(family: &str) -> Vec<&'static str> {
     super::hancom_fontdb::fallback_candidates(family, 5)
 }
 
+// [hwpx-cowork] A whole CSS run has no scalar. Hancom's Hangul text slot starts
+// with ordinary text faces; the symbol slot also lists Wingdings, whose legacy
+// cmap can draw letters and digits as pictograms when the requested face is absent.
+// Per-character substitutions continue to use their individual language slots.
+pub(crate) fn text_fallback_families(family: &str) -> Vec<&'static str> {
+    let mut families = super::hancom_fontdb::fallback_candidates(family, 0);
+    // [hwpx-cowork] Once the requested KoPub face and its document substitutes
+    // are exhausted, the public web font preserves the requested text design.
+    if let Some(design) = super::kopub_face(family) {
+        let bundled = match design {
+            super::KoPubFace::Dotum => "Noto Sans KR",
+            super::KoPubFace::Batang => "Noto Serif KR",
+        };
+        families.retain(|f| *f != bundled);
+        families.insert(0, bundled);
+    }
+    families
+}
+
 pub(crate) fn default_fallback_em(family: &str, c: char) -> Option<f64> {
     fallback_families(family).iter().find_map(|name| {
         find_local_face(name).and_then(|face| face.advance_em(c))

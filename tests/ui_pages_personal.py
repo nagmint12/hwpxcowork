@@ -30,7 +30,9 @@ def site(target):
         def send_error(self, code, *args):
             misses.append((code, self.path))
             return super().send_error(code, *args)
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Static, directory=target))
+    class Server(http.server.ThreadingHTTPServer):
+        request_queue_size = 64  # Multiple editor assets are requested together on a cold start.
+    server = Server(('127.0.0.1', 0), functools.partial(Static, directory=target))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield f'http://127.0.0.1:{server.server_port}/hwpxcowork/'
@@ -84,8 +86,8 @@ def test_app(pw, url, profile, channel):
         const draw = Context.prototype.fillText;
         Context.prototype.fillText = function(text, ...args) {
           if (!window.firstReportDate && /[0-9]/.test(text) && this.font.includes('KoPub') && this.font.includes('Noto Sans KR')) {
-            window.firstReportDate = [...document.fonts]
-              .filter(f => f.family.replaceAll('"','') === 'Noto Sans KR' && f.status === 'loaded').map(f => f.weight);
+            window.firstReportDate = {chain: this.font, weights: [...document.fonts]
+              .filter(f => f.family.replaceAll('"','') === 'Noto Sans KR' && f.status === 'loaded').map(f => f.weight)};
           }
           return draw.call(this, text, ...args);
         };
@@ -103,7 +105,8 @@ def test_app(pw, url, profile, channel):
     cover.get_by_test_id('office-file-input').set_input_files(ROOT / 'tutorial/결과보고서.hwpx')
     date_fonts = cover.wait_for_function("""() => [...document.querySelectorAll('.editorhost iframe')]
       .map(f => f.contentWindow?.firstReportDate).find(Boolean)""", timeout=90000).json_value()
-    assert {'400', '700'} <= set(date_fonts), date_fonts
+    assert {'400', '700'} <= set(date_fonts['weights']), date_fonts
+    assert 'wingdings' not in date_fonts['chain'].lower(), date_fonts
     cover.close()
     print('PASS bundled regular and bold text fonts on first cover date draw', flush=True)
     page.goto(url + 'onboarding.html?next=%2F%3Fteaser%3D0')

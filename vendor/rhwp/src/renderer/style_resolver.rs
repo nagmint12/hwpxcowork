@@ -1501,7 +1501,8 @@ fn try_lookup_font_name_decision<A: storage::Storage>(
             let declared_hft_fallback = (font.alt_type == 2 && !font.is_embedded
                 && !super::hancom_fontdb::has_native_hft_binding(name, lang_index))
                 .then(|| font.subst_font.as_ref())
-                .flatten().filter(|s| !s.is_embedded && super::local_font_width::find_local_face(&s.face).is_some());
+                .flatten().filter(|s| !s.is_embedded && !super::excluded_symbol_font(&s.face)
+                    && super::local_font_width::find_local_face(&s.face).is_some());
             let substitution = declared_hft_fallback.map(|s| (s.face.as_str(), FontSubstitutionBoundary::HancomFontDb, "hancom-fontdb.document-substitute"))
                 .or(substitution);
             let resolved = substitution
@@ -1518,6 +1519,7 @@ fn try_lookup_font_name_decision<A: storage::Storage>(
                 .as_ref()
                 .filter(|substitute| !substitute.is_embedded)
                 .filter(|substitute| !substitute.face.trim().is_empty())
+                .filter(|substitute| !super::excluded_symbol_font(&substitute.face))
                 .filter(|substitute| substitute.face.trim() != resolved)
             {
                 let requested = substitute.face.trim();
@@ -1643,6 +1645,17 @@ pub(crate) fn lookup_font_name_in_environment(
                 {
                     decision.css_family_chain.push((*face).to_string());
                 }
+            }
+        }
+    }
+    // [hwpx-cowork] Environment-provided fallback faces follow the same policy as FontDB.
+    // A document's explicitly named Wingdings face still uses its own glyphs.
+    if !decision.requested_face.as_deref().is_some_and(super::excluded_symbol_font) {
+        decision.css_family_chain.retain(|face| !super::excluded_symbol_font(face));
+        if decision.normalized_face.as_deref().is_some_and(super::excluded_symbol_font) {
+            decision.normalized_face = decision.requested_face.clone();
+            if let Some(requested) = &decision.requested_face {
+                decision.css_family_chain.insert(0, requested.clone());
             }
         }
     }

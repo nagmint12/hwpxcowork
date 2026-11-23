@@ -3831,7 +3831,17 @@ pub(crate) fn internal_font_family_members(font_family: &str) -> Vec<&str> {
         .split(',')
         .map(str::trim)
         .filter(|family| !family.is_empty())
+        .enumerate()
+        .filter_map(|(i, face)| (i == 0 || !excluded_symbol_font(face)).then_some(face))
         .collect()
+}
+
+// [hwpx-cowork] Only explicit faces may use the Wingdings symbol cmap. Recognize
+// Windows vertical names, numbered families and PostScript style names in fallback lists.
+pub(crate) fn excluded_symbol_font(family: &str) -> bool {
+    let name = family.trim().trim_matches(['\'', '"']).trim_start_matches('@');
+    name.get(..9).is_some_and(|s| s.eq_ignore_ascii_case("Wingdings"))
+        && name[9..].chars().next().is_none_or(|c| matches!(c, ' ' | '-' | '2' | '3'))
 }
 
 fn push_unique_family<'a>(
@@ -3929,7 +3939,7 @@ pub(crate) fn render_font_family_names_for_weight(font_family: &str, bold: bool)
         push_unique_family(&mut family_names, declared_fallback);
     }
     // [hwpx-cowork] Missing glyphs must use the same Hancom face as width measurement.
-    for family in missing_glyph_policy::fallback_families(primary) {
+    for family in missing_glyph_policy::text_fallback_families(primary) {
         push_unique_family(&mut family_names, family);
     }
     let mut families: Vec<String> = family_names
@@ -3972,7 +3982,7 @@ pub fn canvas_font_family_chain(font_family: &str) -> String {
         push_unique_family(&mut family_names, declared_fallback);
     }
     // [hwpx-cowork] Keep document/installed faces first, then Hancom glyph fallback.
-    for family in missing_glyph_policy::fallback_families(primary) {
+    for family in missing_glyph_policy::text_fallback_families(primary) {
         push_unique_family(&mut family_names, family);
     }
     let mut families: Vec<String> = family_names
@@ -5428,6 +5438,23 @@ mod tests {
         assert_eq!(format_note_marker(3, 8, 0, ')' as u16), "다)");
     }
 
+    // [hwpx-cowork] The same glyph can be Latin text or an intentional Wingdings symbol.
+    #[test]
+    fn wingdings_is_an_explicit_face_only() {
+        for requested in ["KoPub돋움체", "KoPubWorld돋움체 Bold", "Absent Body Face,Wingdings 2"] {
+            assert!(!render_font_family_chain(requested).contains("Wingdings"));
+            assert!(!canvas_font_family_chain(requested).contains("Wingdings"));
+        }
+        for name in ["Wingdings", "Wingdings-Regular", "@WINGDINGS 2", "Wingdings3"] {
+            assert!(excluded_symbol_font(name));
+            assert!(render_font_family_chain(name).starts_with(&format!("'{name}'")));
+            assert!(canvas_font_family_chain(name).starts_with(&format!("\"{name}\"")));
+        }
+        for slot in 0..7 {
+            assert!(!hancom_fontdb::fallback_candidates("KoPub돋움체", slot).iter().any(|f| excluded_symbol_font(f)));
+        }
+    }
+
     /// [#3314] 굵기 접미사 face 의 base family 추출과 렌더 체인 삽입.
     #[test]
     fn test_base_family_without_weight_suffix() {
@@ -5460,7 +5487,7 @@ mod tests {
         let plain = render_font_family_chain("맑은 고딕");
         assert!(plain.starts_with("'맑은 고딕','Malgun Gothic'"));
         // [hwpx-cowork] 2026-11-11 사용자 결정: 없는 글꼴의 대체 순서는 엔진 기준 — 요청 face 바로 뒤에 한/글 FontDB 기본
-        // 대체(`missing_glyph_policy::fallback_families`, 한컴바탕부터)가 오고 맑은 고딕 등 일반 대체는 그 뒤다. 한/글 2022
+        // 대체(`missing_glyph_policy::text_fallback_families`, 한컴바탕부터)가 오고 맑은 고딕 등 일반 대체는 그 뒤다. 한/글 2022
         // 숨은 COM 쪽 그림(`artifacts/test-failures-20261111/hangul/unknown-font-p1.png`)도 설치 안 된 `Tom's Handwriting` 을
         // 한컴바탕 계열 명조로 그린다. 인용·이스케이프 계약(`\'`·`\\`)은 그대로 본다.
         for (requested, quoted) in [
@@ -5478,11 +5505,11 @@ mod tests {
         }
 
         // [hwpx-cowork] 2026-11-11 사용자 결정(없는 글꼴의 대체 순서는 엔진 기준): 별칭·설치 face 이름 뒤, 일반 대체 앞에
-        // 한/글 FontDB 기본 대체(`missing_glyph_policy::fallback_families` — 한컴바탕·함초롬바탕 …)가 들어간다.
+        // 한/글 FontDB 기본 대체(`missing_glyph_policy::text_fallback_families` — 한컴바탕·함초롬바탕 …)가 들어간다.
         // 아래 [#6171]·[#6263] 단언은 별칭의 순서 계약은 그대로 보고, 그 사이에 엔진 규칙의 대체 목록을 넣어 비교한다.
         let with_hancom_fallback = |aliases: &[&str], family: &str| -> String {
             let mut names: Vec<&str> = aliases.to_vec();
-            for fallback in missing_glyph_policy::fallback_families(family) {
+            for fallback in missing_glyph_policy::text_fallback_families(family) {
                 if !names.contains(&fallback) {
                     names.push(fallback);
                 }
@@ -5548,7 +5575,7 @@ mod tests {
         // [hwpx-cowork] 2026-11-11 Canvas 체인도 같은 엔진 규칙(별칭 → 한/글 FontDB 기본 대체 → 일반 대체)을 쓴다.
         let canvas_with_hancom_fallback = |aliases: &[&str], family: &str| -> String {
             let mut names: Vec<&str> = aliases.to_vec();
-            for fallback in missing_glyph_policy::fallback_families(family) {
+            for fallback in missing_glyph_policy::text_fallback_families(family) {
                 if !names.contains(&fallback) {
                     names.push(fallback);
                 }

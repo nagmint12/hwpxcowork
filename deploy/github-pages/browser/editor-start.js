@@ -1,10 +1,12 @@
-// The editor's first Canvas frame can use Noto Sans KR before document font discovery finishes.
-// Make its regular and bold text glyphs available before that frame, including on a clean browser.
+// Canvas does not wait for CSS fonts. Register both body families before the editor's first draw.
 async function startEditor() {
-  const faces = await Promise.all([['Regular', '400'], ['Bold', '700']].map(([name, weight]) => {
-    const url = new URL(`./fonts/NotoSansKR-${name}.woff2`, import.meta.url);
-    return new FontFace('Noto Sans KR', `url("${url}") format("woff2")`, { weight }).load();
-  }));
+  const variants = [['Regular', '400'], ['Bold', '700']];
+  const faces = await Promise.all(['Noto Serif KR', 'Noto Sans KR'].flatMap(family =>
+    variants.map(([style, weight]) => {
+      const file = family.replaceAll(' ', '') + '-' + style + '.woff2';
+      const url = new URL('./fonts/' + file, import.meta.url);
+      return new FontFace(family, `url("${url}") format("woff2")`, { weight }).load();
+    })));
   for (const face of faces) document.fonts.add(face);
   await import(document.querySelector('script[data-pages-editor]').dataset.pagesEditor);
 }
