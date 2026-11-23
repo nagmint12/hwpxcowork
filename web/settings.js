@@ -17,7 +17,7 @@ export const SettingsDialog = {
   template: `<FloatWin :anchor="null" :width="580" role="dialog" aria-label="문서 옵션" title="문서 옵션" cls="docsettings" @close="$emit('close')">
     <div class="ds-body" data-testid="settings-dialog">
       <div class="ds-scroll" ref="content" tabindex="-1">
-        <p class="ds-intro">이 문서에 적용할 옵션을 선택하세요.</p>
+        <p class="ds-intro">{{ browserPersonal ? '이 브라우저에서는 편집과 파일 저장 방식을 변경할 수 있습니다. 참여자 권한과 AI 검토는 서버에서 설정합니다.' : '이 문서에 적용할 옵션을 선택하세요.' }}</p>
         <section v-for="group in groups" :key="group.label" class="ds-group">
           <h3>{{ group.label }}</h3>
           <div class="ds-row" v-for="f in group.fields" :key="f.key" :data-setting="f.key">
@@ -25,15 +25,15 @@ export const SettingsDialog = {
               <button type="button" class="ds-help" :aria-label="f.label + ' 도움말'" :aria-expanded="expanded === f.key" :aria-controls="helpId(f.key)"
                 :title="f.help" @click="expanded = expanded === f.key ? null : f.key">?</button></div>
             <div class="ds-opts" role="radiogroup" :aria-label="f.label" :aria-describedby="helpId(f.key) + '-effect'">
-              <label v-for="[v, label] in f.options" :key="v" class="ds-opt" :class="{ on: valueOf(f.key) === v }" :title="f.tips[v]">
-                <input type="radio" :name="'ds-' + d.s.id + '-' + f.key" :value="v" :checked="valueOf(f.key) === v" :data-value="v" @change="setValue(f.key, v)"/>{{ label }}</label>
+              <label v-for="[v, label] in f.options" :key="v" class="ds-opt" :class="{ on: valueOf(f.key) === v, unavailable: !!serverOnlyReason(f.key) }" :title="f.tips[v]">
+                <input type="radio" :name="'ds-' + d.s.id + '-' + f.key" :value="v" :disabled="!!serverOnlyReason(f.key)" :checked="valueOf(f.key) === v" :data-value="v" @change="setValue(f.key, v)"/>{{ label }}</label>
             </div>
-            <p class="ds-effect" :id="helpId(f.key) + '-effect'">{{ idle(f.key) ? '실시간 편집으로 바꾸면 이 기록 방식이 적용됩니다.' : f.tips[valueOf(f.key)] }}</p>
+            <p class="ds-effect" :id="helpId(f.key) + '-effect'">{{ serverOnlyReason(f.key) || (idle(f.key) ? '실시간 편집으로 바꾸면 이 기록 방식이 적용됩니다.' : f.tips[valueOf(f.key)]) }}</p>
             <div class="ds-explanation" :id="helpId(f.key)" v-show="expanded === f.key">
               <p>{{ f.help }}</p>
               <dl><template v-for="[v, label] in f.options" :key="v"><dt>{{ label }}</dt><dd>{{ f.tips[v] }}</dd></template></dl>
             </div>
-            <div class="ds-people" v-if="f.key === 'editors' && form.editorsMode === 'some'" data-testid="settings-people">
+            <div class="ds-people" v-if="!browserPersonal && f.key === 'editors' && form.editorsMode === 'some'" data-testid="settings-people">
               <span class="muted" v-if="loadingUsers"><span class="spin dark"></span> 사람 목록을 읽는 중…</span>
               <label v-for="u in people" :key="u.name" class="ds-person" :class="{ off: u.disabled }" :title="u.note || null">
                 <input type="checkbox" :checked="u.checked" :disabled="u.disabled" :data-person="u.name" @change="togglePerson(u.name, $event.target.checked)"/> {{ u.name }}<span class="muted" v-if="u.note"> · {{ u.note }}</span></label>
@@ -57,15 +57,18 @@ export const SettingsDialog = {
     const content = ref(null);
     const expanded = ref(null);
     const helpId = key => 'doc-option-' + d.s.id + '-' + key;
-    const groups = computed(() => {
-      const fields = keys => SETTING_FIELDS.filter(field => keys.includes(field.key));
-      const result = [
-        { label: '편집과 기록', fields: fields(props.browserPersonal ? ['editMode', 'track'] : ['editMode', 'editors', 'track']) },
-        { label: 'HWPX 내보내기', fields: fields(['exportKind']) },
-      ];
-      if (!props.browserPersonal) result.push({ label: 'AI 검토', fields: fields(['aiMemo', 'aiQuick', 'aiApply']) });
-      return result;
-    });
+    const fields = keys => SETTING_FIELDS.filter(field => keys.includes(field.key));
+    const groups = [
+      { label: '편집과 기록', fields: fields(['editMode', 'editors', 'track']) },
+      { label: 'HWPX 내보내기', fields: fields(['exportKind']) },
+      { label: 'AI 검토', fields: fields(['aiMemo', 'aiQuick', 'aiApply']) },
+    ];
+    function serverOnlyReason(key) {
+      if (!props.browserPersonal) return '';
+      if (key === 'editors') return '공동 서버에서 참여자별 편집 권한을 지정합니다.';
+      if (['aiMemo', 'aiQuick', 'aiApply'].includes(key)) return 'AI를 연결한 서버에서 사용하는 옵션입니다.';
+      return '';
+    }
     const valueOf = (k) => (k === 'editors' ? form.editorsMode : form[k]);
     // 실시간 기록은 실시간 편집일 때만 쓴다 — 승인 방식이면 옅게 + '실시간일 때만'
     const idle = (k) => k === 'track' && form.editMode !== 'realtime';
@@ -103,7 +106,7 @@ export const SettingsDialog = {
         emit('close');
       } catch (e) { error.value = e.message || String(e); } finally { busy.value = false; }
     }
-    return { d, form, groups, content, expanded, helpId, valueOf, idle, setValue, togglePerson, people, loadingUsers, busy, error, dirty, warning, warnTip: SETTINGS_WARN_TIP, save };
+    return { d, form, groups, content, expanded, helpId, serverOnlyReason, valueOf, idle, setValue, togglePerson, people, loadingUsers, busy, error, dirty, warning, warnTip: SETTINGS_WARN_TIP, save };
   },
 };
 export default SettingsDialog;

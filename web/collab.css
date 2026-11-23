@@ -379,11 +379,12 @@ button.pill.ver:hover:not(:disabled) { border-color: #a9c3ea; background: var(--
 .ds-label, .ds-opts, .ds-opt, .ds-people, .ds-person { display: flex; align-items: center; gap: 6px; }
 .ds-label { font-size: 13px; font-weight: 650; }
 .ds-opts, .ds-people { flex-wrap: wrap; }
-.ds-help { border: 1px solid #bfb4ce; background: transparent; color: #5f4c76; border-radius: 50%; width: 22px; min-width: 22px; height: 22px; padding: 0; font-size: 12px; font-weight: 650; line-height: 1; }
+.ds-help { display: inline-grid; place-items: center; justify-content: center; flex: none; border: 1px solid #bfb4ce; background: transparent; color: #5f4c76; border-radius: 50%; width: 22px; min-width: 22px; height: 22px; padding: 0; font-size: 12px; font-weight: 650; line-height: 1; }
 .ds-help[aria-expanded="true"], .ds-help:hover { background: #eee7f7; }
 .ds-opt { cursor: pointer; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: white; }
 .ds-opt.on { border-color: #a08bb8; color: #50336f; background: #f2edf8; font-weight: 600; }
 .ds-opt input, .ds-person input { width: auto; margin: 0; padding: 0; accent-color: #65428e; box-shadow: none; }
+.ds-opt.unavailable { cursor: default; color: var(--muted); border-color: var(--line); background: #f6f5f7; }
 .ds-opt:focus-within, .ds-help:focus-visible { outline: 2px solid #664287; outline-offset: 1px; }
 .ds-effect { grid-column: 2; }
 .ds-people, .ds-explanation { grid-column: 1 / -1; background: #f7f5fa; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; }

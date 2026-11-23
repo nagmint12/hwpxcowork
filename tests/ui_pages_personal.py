@@ -140,10 +140,38 @@ def test_app(pw, url, profile, channel):
     page.get_by_test_id('office-file-input').set_input_files(FIXTURE)
     frame = editor(page)
     doc = page.evaluate('window.__doc.id')
+    title = page.get_by_test_id('doc-title')
+    field = page.get_by_role('textbox', name='문서 제목', exact=True)
+    title.click()
+    first_title = field.input_value()
+    field.fill('취소할 제목')
+    field.press('Escape')
+    assert title.inner_text() == first_title
+    page.get_by_role('tablist', name='열린 문서').get_by_role('tab', selected=True).press('F2')
+    field.fill('수정한 문서 제목')
+    field.press('Enter')
+    page.wait_for_function("document.querySelector('[data-testid=doc-title]')?.textContent.trim() === '수정한 문서 제목'")
+    title.click()
+    field.fill('탭에서 바꾼 최종 제목')
+    page.get_by_test_id('bar-more-toggle').click()
+    field.wait_for(state='hidden')
+    assert title.inner_text() == '탭에서 바꾼 최종 제목'
+    page.get_by_test_id('office-rename-document').click()
+    assert field.input_value() == '탭에서 바꾼 최종 제목'
+    field.press('Escape')
+    print('PASS title click, Escape, F2, Enter, blur and menu rename', flush=True)
     options_button = page.get_by_test_id('doc-settings')
     options_button.click()
     dialog = page.get_by_role('dialog', name='문서 옵션')
-    assert dialog.locator('[data-setting]').count() == 3
+    assert dialog.locator('[data-setting]').count() == 7
+    for key in ['editors', 'aiMemo', 'aiQuick', 'aiApply']:
+        row = dialog.locator(f'[data-setting="{key}"]')
+        assert row.locator('input:enabled').count() == 0
+        assert '서버' in row.locator('.ds-effect').inner_text()
+        row.get_by_role('button').click()
+        assert row.locator('dl').is_visible()
+    for key in ['editMode', 'track', 'exportKind']:
+        assert dialog.locator(f'[data-setting="{key}"] input:enabled').count() == 2
     export = dialog.locator('[data-setting="exportKind"]')
     export.get_by_role('button', name='파일에 담을 내용 도움말').click()
     assert export.locator('dl').is_visible()
@@ -251,6 +279,7 @@ def test_app(pw, url, profile, channel):
     page = ctx.pages[0]
     page.goto(personal_url)
     editor(page, doc)
+    assert page.get_by_test_id('doc-title').inner_text() == '탭에서 바꾼 최종 제목'
     assert any(memo in m['text'] for m in api(page, 'docs/' + doc + '/memos'))
     assert any(mark in p['text'] for p in api(page, 'docs/' + doc + '/paragraphs'))
     assert any(replacement in p['text'] for p in api(page, prefix + '/paragraphs'))

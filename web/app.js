@@ -557,6 +557,11 @@ const DocView = {
   emits: ['state', 'unavailable', 'restore'],
   components: { FloatWin, Composer, EditPopover, QuickReply, ReviewRail, SettingsDialog, InlineConfirm },
   template: `<div ref="rootEl" class="docview v3" :class="{ 'view-simple': s.view !== 'detail', 'view-detail': s.view === 'detail', 'doc-live': realtime, stacked, 'panel-min': stacked && panel.min, 'panel-folded': folded, 'panel-peek': folded && !!peek, 'fold-hint': foldHint, resizing }" :style="panelVars" data-view="v3" :data-mode="ed?.mode || ''">
+    <Teleport v-if="active && canRename && titleEdit !== null" :to="titleSlot">
+      <input ref="titleInp" class="office-tab-title-input" data-testid="doc-title-input" aria-label="문서 제목"
+        title="Enter로 저장 · Esc로 취소" v-model="titleEdit" maxlength="100" :readonly="titleBusy"
+        @keydown.stop="onTitleKey" @blur="saveTitle(false)"/>
+    </Teleport>
     <Teleport to="#office-document-controls">
       <div v-if="active" ref="moreEl" class="office-document-tools" :data-doc-id="s.id" @keydown.esc.stop.prevent="closeMore(true)" @focusout="onMoreFocusOut">
         <button ref="statusTrigger" type="button" class="office-save-status" :class="compactStatus.cls" data-testid="draft-chip"
@@ -602,11 +607,7 @@ const DocView = {
           <div class="office-popover-group">
             <button type="button" data-testid="more-save-hangul" :disabled="saving || !s.info" :title="saveTip" @click="saveHangul(); closeMore(true)">
               <span v-if="saving" class="spin dark" aria-hidden="true"></span>한글로 저장</button>
-            <button v-if="canRename && titleEdit === null" ref="renameTrigger" type="button" data-testid="office-rename-document" @click="editTitle">문서 이름 바꾸기</button>
-            <form v-else-if="canRename" class="office-rename" @submit.prevent="saveTitle" @keydown.esc.stop.prevent="cancelTitle">
-              <label>문서 이름<input ref="titleInp" data-testid="doc-title-input" v-model="titleEdit" maxlength="100"/></label>
-              <div class="office-popover-actions"><button class="primary small" type="submit">바꾸기</button><button class="small" type="button" @click="cancelTitle">취소</button></div>
-            </form>
+            <button v-if="canRename" type="button" data-testid="office-rename-document" @click="editTitle">문서 이름 바꾸기</button>
             <button v-if="s.canConfigure" type="button" data-testid="more-doc-settings" aria-haspopup="dialog" @click="openOptions">문서 옵션</button>
           </div>
           <div class="office-popover-group" data-testid="document-view-options" aria-labelledby="office-view-heading">
@@ -701,32 +702,52 @@ const DocView = {
     provide('doc', d);
     provide('officeDocument', { active, overlay });
 
-    watch(() => [s.info?.title, s.draft.dirty, s.draft.saving, s.draft.error || s.draft.stale], ([title, dirty, saving, failed]) => {
-      emit('state', props.id, { ...(title ? { title } : {}), dirty, saving, failed: !!failed });
-    }, { immediate: true });
-    // 상단 문서 이름: 눌러서 그 자리에서 바꾼다(Enter·칸 밖 = 저장, Esc = 취소). 권한 = 수정 또는 설정(서버 renameDocument)
     const canRename = computed(() => !!s.info && (!!s.canEdit || !!s.canConfigure));
-    const titleEdit = ref(null); const titleInp = ref(null); const renameTrigger = ref(null); let titleBusy = false;
+    const titleEdit = ref(null); const titleInp = ref(null); const titleBusy = ref(false);
+    const titleSlot = '#' + tabId(props.id) + '-rename';
+    let originalTitle = ''; let pendingRename = null;
+    watch(() => [s.info?.title, s.draft.dirty, s.draft.saving, s.draft.error || s.draft.stale, canRename.value],
+      ([title, dirty, saving, failed, allowed]) => {
+        if (!allowed) titleEdit.value = null;
+        emit('state', props.id, { ...(title ? { title } : {}), dirty, saving, failed: !!failed, canRename: allowed });
+      }, { immediate: true });
+
     function editTitle() {
-      if (!canRename.value) return;
-      titleEdit.value = s.info?.title || '';
+      if (!props.active || !canRename.value || titleBusy.value) return;
+      closeMore();
+      if (titleEdit.value === null) {
+        originalTitle = s.info.title;
+        titleEdit.value = originalTitle;
+      }
       nextTick(() => { titleInp.value?.focus(); titleInp.value?.select(); });
     }
-    function cancelTitle() {
+    function finishTitle(restoreFocus) {
+      const focusTab = restoreFocus && document.activeElement === titleInp.value;
       titleEdit.value = null;
-      nextTick(() => renameTrigger.value?.focus({ preventScroll: true }));
+      if (focusTab) nextTick(() => { if (props.active) document.getElementById(tabId(props.id))?.focus({ preventScroll: true }); });
     }
-    async function saveTitle() {
-      if (titleEdit.value === null || titleBusy) return;
+    function onTitleKey(event) {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Enter') { event.preventDefault(); void saveTitle(true); }
+      if (event.key === 'Escape' && !titleBusy.value) { event.preventDefault(); finishTitle(true); }
+    }
+    function saveTitle(restoreFocus) {
+      if (titleEdit.value === null || pendingRename) return pendingRename;
       const name = titleEdit.value.trim();
-      if (!name || name === s.info?.title) { cancelTitle(); return; }
-      titleBusy = true;
-      try {
-        const out = await api(`/api/docs/${encodeURIComponent(props.id)}`, { method: 'PATCH', body: { title: name } });
-        if (s.info) s.info.title = out.title;
-        cancelTitle();
-        toast('이름을 바꿨습니다');
-      } catch (e) { toastError(e, '이름을 바꾸지 못했습니다: '); nextTick(() => titleInp.value?.focus()); } finally { titleBusy = false; }
+      if (!name || name === originalTitle || name === s.info?.title || !canRename.value) {
+        finishTitle(restoreFocus);
+        return;
+      }
+      titleBusy.value = true;
+      pendingRename = api('/api/docs/' + encodeURIComponent(props.id), { method: 'PATCH', body: { title: name } })
+        .then(out => {
+          if (s.info) s.info.title = out.title;
+          finishTitle(restoreFocus);
+          toast('이름을 바꿨습니다');
+        })
+        .catch(e => { toastError(e, '이름을 바꾸지 못했습니다: '); })
+        .finally(() => { pendingRename = null; titleBusy.value = false; });
+      return pendingRename;
     }
     const automation = ref(null); const automationLoading = ref(false); const automationError = ref(false);
     provide('automation', automation);
@@ -1008,6 +1029,7 @@ const DocView = {
       } finally { unlock?.(); }
     }
     async function prepareClose() {
+      await pendingRename;
       await saveForClose();
       if (hasUnsentInput() && !confirm(`‘${s.info?.title || '문서'}’에 작성 중인 메모, 요청 또는 이름이 있습니다. 입력을 버리고 닫을까요?`)) return false;
       if (tourOn.value) await flushTour(props.id, { strict: true });
@@ -1494,7 +1516,7 @@ const DocView = {
       retainedSaves.discard(props.id);
       await handle?.cancelSave();
     };
-    const session = { backgroundSave, leaveTutorial, saveForClose, prepareClose, bodyNeedsSave, hasUnsentInput, discardLocalChanges, restoreWorkFocus };
+    const session = { editTitle, backgroundSave, leaveTutorial, saveForClose, prepareClose, bodyNeedsSave, hasUnsentInput, discardLocalChanges, restoreWorkFocus };
     onMounted(async () => {
       void refreshRecoveryFiles();
       officeDocs.set(props.id, session);
@@ -1622,7 +1644,7 @@ const DocView = {
       if (window.__doc === d) delete window.__doc;
     });
     return {
-      d, s, ed, rootEl, editorEl, active, ICON, browserPersonal: !!state.me?.browserPersonal, recoveryFiles, canRename, titleEdit, titleInp, renameTrigger, editTitle, cancelTitle, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
+      d, s, ed, rootEl, editorEl, active, ICON, browserPersonal: !!state.me?.browserPersonal, recoveryFiles, canRename, titleEdit, titleInp, titleSlot, titleBusy, editTitle, onTitleKey, saveTitle, rebasing, carrying, saving, tabs, curTab, composerTitle, chip, compactStatus, behind, behindTip, verLabel, verTitle, localTip, localLabel, unsupportedTip, people, present, agentLabel, crChip, crChipTip, myRole, isAdmin, showAdmin, serverNotice,
       agentTip, stacked, panel, panelVars, resizing, foldHint, splitTip, pickTab, startResize, resetPanel, keyResize, moreOpen, moreEl, popoverEl, statusTrigger, actionTrigger, optionsTrigger, openOptions, closeOptions, toggleMore, closeMore, onMoreFocusOut, tools, toggleTools, mobileEnvironment, openMobileOptions,
       folded, peek, panelEl, openPeek, togglePin, edgeTip, aiGlance, onTabEnter, onTabLeave, onPanelEnter, onPanelLeave, onPanelFocusOut,
       memosOn, toggleMemos, movedMemos, resetMemoPos, railOver, over, overStyle,
@@ -1654,15 +1676,17 @@ const App = {
       <div v-if="tabs.items.length" class="office-tab-region"><div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey">
         <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
           <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"
-            data-testid="office-tab" :data-doc-id="tab.id" :title="tabLabel(tab)" :aria-label="tabLabel(tab)" :aria-busy="tab.closing || tab.saving || reviewedSavings.has(tab.id)" :disabled="windowClosing" @click="activateTab(tab.id)">
+            data-testid="office-tab" :data-doc-id="tab.id" :title="tabLabel(tab)" :aria-label="tabLabel(tab)" :aria-busy="tab.closing || tab.saving || reviewedSavings.has(tab.id)" :disabled="windowClosing" @click="clickTab(tab, $event)" @keydown.f2.prevent="renameActiveTab(tab)">
             <span class="office-tab-icon" aria-hidden="true" v-html="ICON.file"></span>
-            <span class="office-tab-name" :class="{ split: officeNames.get(tab.id)?.prefix }" :data-testid="tab.id === docId ? 'doc-title' : undefined">
+            <span class="office-tab-name" :class="{ split: officeNames.get(tab.id)?.prefix, editable: tab.id === docId && tab.canRename }"
+              :title="tab.id === docId && tab.canRename ? tab.title + ' · 클릭하여 제목 변경 (F2)' : undefined" :data-testid="tab.id === docId ? 'doc-title' : undefined">
               <template v-if="officeNames.get(tab.id)?.prefix"><span class="office-tab-prefix"><span class="toolbar-label">{{ officeNames.get(tab.id).prefix }}</span></span><span class="office-tab-suffix"><span class="toolbar-label">{{ officeNames.get(tab.id).suffix }}</span></span></template>
               <span v-else class="toolbar-label">{{ tab.title }}</span>
             </span>
             <span v-if="officeNames.get(tab.id)?.duplicate" class="office-tab-number" aria-hidden="true">{{ officeNames.get(tab.id).duplicate }}</span>
             <span v-if="tab.failed || tab.unavailable" class="office-tab-state failed" aria-hidden="true">!</span><span v-else-if="tab.dirty" class="office-tab-state" aria-hidden="true">●</span>
           </button>
+          <span :id="tabId(tab.id) + '-rename'" class="office-tab-title-slot"></span>
           <button type="button" class="office-tab-close" tabindex="-1" data-testid="office-tab-close" :data-doc-id="tab.id" :disabled="tab.closing || windowClosing"
             :title="tab.closing ? '저장 중' : '탭 닫기'" :aria-label="tab.title + ' 탭 닫기'" @click="closeTab(tab.id, true)">
             <span v-if="tab.closing" class="spin dark" aria-hidden="true"></span><span v-else class="ic" aria-hidden="true" v-html="ICON.x"></span>
@@ -1856,6 +1880,13 @@ const App = {
       scrollToTab(id);
       const restored = target === 'work' && await officeDocs.get(id)?.restoreWorkFocus(canRestore);
       if (!restored && canRestore()) scrollToTab(id, true);
+    }
+    function renameActiveTab(tab) {
+      if (tab.id === docId.value && tab.canRename && !tab.closing && !windowClosing.value) officeDocs.get(tab.id)?.editTitle();
+    }
+    function clickTab(tab, event) {
+      if (tab.id === docId.value && tab.canRename && event.target.closest('.office-tab-name')) renameActiveTab(tab);
+      else void activateTab(tab.id);
     }
     function updateTab(id, updates) {
       const tab = tabs.find(id);
@@ -2138,7 +2169,7 @@ const App = {
     return {
       state, docId, tabs, officeNames, tabId, panelId, overlayId, tabStopId, reviewedSavings, tabLabel, ICON, isLibrary, opening, windowClosing, fileInput, homeButton, library, openFilesTip, hasApplicationMenu, openApplicationMenu,
       productMenuOpen, productMenuWrap, productMenuButton, closeProductMenu, openTutorial, openIntro, introOpen, introClose, closeIntro, bindIntroEscape,
-      activateTab, closeTab, scrollTabs, onTabKey, goLibrary, newDocument, pickFiles, filesPicked, openDocument, updateTab, documentUnavailable, restoreTab, logout, saveAllTabs,
+      activateTab, clickTab, renameActiveTab, closeTab, scrollTabs, onTabKey, goLibrary, newDocument, pickFiles, filesPicked, openDocument, updateTab, documentUnavailable, restoreTab, logout, saveAllTabs,
       closeIssue, discardConfirm, cancelDiscard, retryButton, cancelCloseIssue, askDiscard, retryCloseIssue, discardFailedTab,
       toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice,
     };
