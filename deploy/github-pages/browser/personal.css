@@ -1,0 +1,25 @@
+.pages-product-icon { width: 24px; height: 24px; object-fit: contain; }
+.office-product-menu a {
+  color: inherit;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  border-radius: 4px;
+}
+.office-product-menu a:is(:hover, :focus-visible) { background: var(--hover, #64748b20); }
+.office-bar > .pages-library-home {
+  color: #492779;
+  background: #eee6fb;
+  border-color: #b99bdc;
+  font-weight: 700;
+}
+.office-bar > .pages-library-home:hover:not(:disabled) { background: #e2d3f5; }
+.office-bar > .pages-library-home[aria-current="page"] {
+  background: #62408f;
+  color: white;
+  border-color: #62408f;
+}
+.office-bar > .pages-library-home[aria-current="page"]:hover:not(:disabled) { background: #503378; }
+.office-bar > .pages-library-home:focus-visible { outline: 2px solid currentColor; }
+.pages-storage-note { margin: 0 0 12px; font-size: .875rem; color: var(--text); line-height: 1.6; }

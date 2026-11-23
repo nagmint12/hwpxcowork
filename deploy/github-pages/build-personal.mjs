@@ -13,7 +13,11 @@ export async function buildPersonal(out, base) {
   const dest = (...parts) => path.join(out, ...parts);
   const prefix = base.slice(0, -1);
   const staticNames = /(["'`(=]|\$\{location\.origin\})\/(?=(?:api|studio|vendor|icons|teaser3?|tutorial-assets|tutorial-media|onboarding-assets|manual-resources|help-assets|rhwp-fonts|cowork-[\w.-]+)(?:[/?#'"`])|[\w.-]+\.(?:html|css|js|ico)(?:[?#'"`])|\?teaser=)/g;
-  function rebase(s) { return s.replace(staticNames, (_, left) => left + base); }
+  // Installers are served by the download site, including OS anchors and package URLs.
+  function rebase(s) {
+    return s.replace(staticNames, (_, left) => left + base)
+      .replace(/(["'`])\/download(?=[/#?"'`])/g, '$1https://asmint.duckdns.org/download');
+  }
   const jsStyles = /\.(?:js|mjs|css|html)$/i;
   function copyWeb(src, dst) {
     const stat = fs.statSync(src);
@@ -41,7 +45,9 @@ export async function buildPersonal(out, base) {
   fs.mkdirSync(dest('manual-resources'),{recursive:true});
   for (const name of ['AGENT_SETUP.md','MCP_EVENTS_GUIDE.md','CHATGPT_WORK_FILES.md','AUTOMATIC_AI_GUIDE.md']) if(fs.existsSync(from('docs',name))) fs.copyFileSync(from('docs',name),dest('manual-resources', name));
   fs.copyFileSync(path.join(here,'browser/start.js'), dest('personal-start.js'));
+  fs.copyFileSync(path.join(here,'browser/personal.css'), dest('personal.css'));
   const html = index.replace(/<script src="\/intro\.js"><\/script>/,'')
+    .replace('</head>', '<link rel="stylesheet" href="./personal.css"></head>')
     .replace(/<script type="module">[\s\S]*?<\/script>/, '<meta name="hwpx-personal-app" content="' + prefix + entry + '"><script type="module" src="./personal-start.js"></script>')
     .replace('<div id="app"></div>', '<div id="app"><p role="status" style="padding:1rem">개인 문서함을 여는 중…</p></div>');
   fs.writeFileSync(dest('index.html'), rebase(html));

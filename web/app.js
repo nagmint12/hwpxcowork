@@ -196,6 +196,7 @@ const DocList = {
         <section v-if="showDrive" class="list-drive"><DriveTab :library="lib" :library-location="cur" @imported="driveImported"/></section>
         <template v-else>
         <h1 class="lib-title">문서함</h1>
+        <p v-if="me.browserPersonal" class="pages-storage-note">여기서 열거나 만든 문서는 이 기기의 브라우저에 저장됩니다. 사이트 데이터를 지우면 문서함도 비워집니다. 편집본을 파일로 보관하려면 ‘한글로 저장’을 누르세요.</p>
         <div class="lib-head">
           <nav class="lib-crumbs" aria-label="위치"><template v-for="(c, i) in crumbList" :key="i"><span v-if="i" class="muted">›</span><a href="#/" :class="{ cur: i === crumbList.length - 1 }" @click.prevent="go(c.loc)">{{ c.label }}</a></template></nav>
           <span class="spacer"></span>
@@ -1612,14 +1613,18 @@ const App = {
     <header v-if="state.me" class="office-bar" aria-label="문서 작업 공간" data-testid="office-primary-row" :inert="introOpen">
       <div class="office-product-menu-wrap" ref="productMenuWrap">
         <button ref="productMenuButton" type="button" class="office-action office-app-menu" data-testid="office-app-menu"
-          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><span class="office-app-menu-icon" aria-hidden="true">☰</span><span class="office-action-text">HWPX Cowork</span></button>
+          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><img v-if="state.me.browserPersonal" class="pages-product-icon" src="/icons/icon-128.png" width="24" height="24" alt=""><span v-else class="office-app-menu-icon" aria-hidden="true">☰</span><span class="office-action-text">HWPX Cowork</span></button>
         <div v-if="productMenuOpen" class="office-product-menu" data-testid="office-product-menu">
+          <template v-if="state.me.browserPersonal">
+            <a href="https://github.com/nagmint12/hwpxcowork#readme" target="_blank" rel="noopener" @click="closeProductMenu(true)">HWPX Cowork 정보</a>
+            <a href="/download" target="_blank" rel="noopener" @click="closeProductMenu(true)">다운로드</a>
+          </template>
           <button type="button" data-testid="cowork-tutorial" @click="openTutorial">튜토리얼</button>
           <button type="button" data-testid="cowork-intro" @click="openIntro">소개 영상 보기</button>
         </div>
       </div>
       <button ref="homeButton" type="button" class="office-action" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
-        :disabled="windowClosing" title="문서함" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
+        :disabled="windowClosing" :class="{'pages-library-home': state.me.browserPersonal}" :title="state.me.browserPersonal ? '문서함 (메인 화면)' : '문서함'" :aria-label="state.me.browserPersonal ? '문서함 (메인 화면)' : '문서함'" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
       <div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey" v-if="tabs.items.length">
         <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
           <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"
@@ -1744,7 +1749,7 @@ const App = {
     });
     provide('officeEditingRowVisible', editingRowVisible);
     let exitAttempt = 0; let nativeCloseToken = null;
-    const openFilesTip = 'HWPX를 선택하면 내 개인 문서함에 사본을 만들고 탭에서 엽니다.';
+    const openFilesTip = window.hwpxPages ? '선택한 파일의 사본을 이 브라우저의 문서함에 저장합니다.' : 'HWPX를 선택하면 내 개인 문서함에 사본을 만들고 탭에서 엽니다.';
     const adminOpen = ref(false); const adminContext = ref(null); const tokenNotice = ref(false);
     provide('openAdmin', (context) => { if (state.me?.role !== 'admin') return; adminContext.value = context; adminOpen.value = true; });
     provide('prepareOfficeRestart', saveAllTabs);
@@ -2071,7 +2076,7 @@ const App = {
     });
     return {
       state, docId, tabs, officeNames, tabId, panelId, overlayId, tabStopId, reviewedSavings, tabLabel, ICON, isLibrary, opening, windowClosing, fileInput, homeButton, library, openFilesTip, hasApplicationMenu, openApplicationMenu,
-      productMenuOpen, productMenuWrap, productMenuButton, openTutorial, openIntro, introOpen, introClose, closeIntro, bindIntroEscape,
+      productMenuOpen, productMenuWrap, productMenuButton, closeProductMenu, openTutorial, openIntro, introOpen, introClose, closeIntro, bindIntroEscape,
       activateTab, closeTab, scrollTabs, onTabKey, goLibrary, newDocument, pickFiles, filesPicked, openDocument, updateTab, documentUnavailable, restoreTab, logout, saveAllTabs,
       closeIssue, discardConfirm, cancelDiscard, retryButton, cancelCloseIssue, askDiscard, retryCloseIssue, discardFailedTab,
       toasts, ready, adminRoute, tutorialRoute, adminOpen, adminContext, tokenNotice,

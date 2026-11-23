@@ -129,8 +129,11 @@ function refreshInstaller() {
 }
 
 render(false);
-fetch('/download/release.json').then(response => response.ok ? response.json() : null).then(manifest => {
-  if (!Array.isArray(manifest?.packages)) return;
-  releasePackages = manifest.packages.filter(p => p && !p.archived && !/previous|archive/.test(p.target || '') && typeof p.file === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:exe|zip)$/.test(p.file));
-  refreshInstaller();
-}).catch(() => { /* 다운로드 페이지 링크는 계속 쓸 수 있다. */ });
+const releaseManifest = new URL('/download/release.json', location.href);
+if (releaseManifest.origin === location.origin) {
+  fetch(releaseManifest).then(response => response.ok ? response.json() : null).then(manifest => {
+    if (!Array.isArray(manifest?.packages)) return;
+    releasePackages = manifest.packages.filter(p => p && !p.archived && !/previous|archive/.test(p.target || '') && typeof p.file === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:exe|zip)$/.test(p.file));
+    refreshInstaller();
+  }).catch(() => { /* 다운로드 페이지 링크는 계속 쓸 수 있다. */ });
+}

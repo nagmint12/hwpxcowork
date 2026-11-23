@@ -78,14 +78,44 @@ def test_app(pw, url, profile, channel):
     if channel:
         options['channel'] = channel
     ctx = pw.chromium.launch_persistent_context(profile, **options)
+    # A late font download can repaint the cover correctly while its first frame still uses Wingdings.
+    ctx.add_init_script("""(() => {
+      for (const Context of [window.CanvasRenderingContext2D, window.OffscreenCanvasRenderingContext2D].filter(Boolean)) {
+        const draw = Context.prototype.fillText;
+        Context.prototype.fillText = function(text, ...args) {
+          if (!window.firstReportDate && /[0-9]/.test(text) && this.font.includes('KoPub') && this.font.includes('Noto Sans KR')) {
+            window.firstReportDate = [...document.fonts]
+              .filter(f => f.family.replaceAll('"','') === 'Noto Sans KR' && f.status === 'loaded').map(f => f.weight);
+          }
+          return draw.call(this, text, ...args);
+        };
+      }
+    })()""")
     page = ctx.pages[0]
     errors = []
     hosts = set()
     ctx.on('request', lambda req: hosts.add(urllib.parse.urlsplit(req.url).netloc) if req.url.startswith(('http:', 'https:')) else None)
     page.on('pageerror', lambda err: errors.append(str(err)))
     page.on('dialog', lambda dialog: dialog.accept())
+    # Opening the actual file starts at its cover. The guided tutorial jumps to an exercise instead.
+    cover = ctx.new_page()
+    cover.goto(url)
+    cover.get_by_test_id('office-file-input').set_input_files(ROOT / 'tutorial/결과보고서.hwpx')
+    date_fonts = cover.wait_for_function("""() => [...document.querySelectorAll('.editorhost iframe')]
+      .map(f => f.contentWindow?.firstReportDate).find(Boolean)""", timeout=90000).json_value()
+    assert {'400', '700'} <= set(date_fonts), date_fonts
+    cover.close()
+    print('PASS bundled regular and bold text fonts on first cover date draw', flush=True)
     page.goto(url)
     page.get_by_test_id('office-open-files').wait_for()
+    assert '브라우저에 저장' in page.locator('.pages-storage-note').inner_text()
+    assert page.get_by_test_id('office-library').get_attribute('aria-current') == 'page'
+    assert page.locator('.pages-product-icon').evaluate('img => img.decode().then(() => img.naturalWidth > 0)')
+    page.get_by_test_id('office-app-menu').click()
+    product_menu = page.get_by_test_id('office-product-menu')
+    assert product_menu.get_by_role('link', name='다운로드').get_attribute('href') == 'https://asmint.duckdns.org/download'
+    assert product_menu.get_by_role('link', name='HWPX Cowork 정보').is_visible()
+    page.keyboard.press('Escape')
     page.get_by_test_id('office-file-input').set_input_files(FIXTURE)
     frame = editor(page)
     doc = page.evaluate('window.__doc.id')
