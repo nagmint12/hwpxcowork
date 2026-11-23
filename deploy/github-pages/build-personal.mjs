@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './build-seed.mjs';
 import { buildWorker } from './build-worker.mjs';
+import { pagesDownloads } from './downloads.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -13,10 +14,17 @@ export async function buildPersonal(out, base) {
   const dest = (...parts) => path.join(out, ...parts);
   const prefix = base.slice(0, -1);
   const staticNames = /(["'`(=]|\$\{location\.origin\})\/(?=(?:api|studio|vendor|icons|teaser3?|tutorial-assets|tutorial-media|onboarding-assets|manual-resources|help-assets|rhwp-fonts|cowork-[\w.-]+)(?:[/?#'"`])|[\w.-]+\.(?:html|css|js|ico)(?:[?#'"`])|\?teaser=)/g;
-  // Installers are served by the download site, including OS anchors and package URLs.
+  const release = process.env.PAGES_RELEASE_JSON ? JSON.parse(fs.readFileSync(process.env.PAGES_RELEASE_JSON, 'utf8')) : null;
+  const { links, packages } = pagesDownloads(release, base);
+  fs.writeFileSync(dest('personal-downloads.json'), JSON.stringify({ packages }));
   function rebase(s) {
     return s.replace(staticNames, (_, left) => left + base)
-      .replace(/(["'`])\/download(?=[/#?"'`])/g, '$1https://asmint.duckdns.org/download');
+      // The server generates a custom ZIP. Pages distributes the published Windows installer.
+      .replace(/`\/download\/windows-setup\.zip\?[^`]*`/g, () => JSON.stringify(links.get('/download#windows')))
+      .replace(/(["'`])(\/download(?:[#/][\w./-]*)?)\1/g, (_, quote, url) => {
+        if (!links.has(url)) throw Error(`Pages 다운로드 경로를 지정하세요: ${url}`);
+        return quote + links.get(url) + quote;
+      });
   }
   const jsStyles = /\.(?:js|mjs|css|html)$/i;
   function copyWeb(src, dst) {

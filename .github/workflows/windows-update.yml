@@ -1,4 +1,4 @@
-name: Windows same-version update
+name: Windows installer update
 on:
   workflow_dispatch:
     inputs:
@@ -71,7 +71,8 @@ jobs:
           }
           if ((Test-Path $app) -or (Test-Path $config)) { throw 'Expected a clean runner' }
           Install $old
-          $version = Version
+          if ((Version) -ne (Get-Item $old).VersionInfo.ProductVersion) { throw 'Previous version was not installed' }
+          $expectedVersion = (Get-Item $new).VersionInfo.ProductVersion
           $oldAsar = (Get-FileHash $asar).Hash
           $previous = Launch
           $first = Ready
@@ -80,7 +81,7 @@ jobs:
           if (!$previous.WaitForExit(10000) -or $previous.ExitCode -ne 0) { throw 'Previous app failed to exit cleanly' }
           $online = try { (Server).nonce } catch { $null }
           if ($online) { throw 'Previous server still running after update' }
-          if ((Version) -ne $version -or (Get-FileHash $asar).Hash -eq $oldAsar) { throw 'Same-version replacement failed' }
+          if ((Version) -ne $expectedVersion -or (Get-FileHash $asar).Hash -eq $oldAsar) { throw 'Installer replacement failed' }
           if ((Get-FileHash $config).Hash -ne $savedConfig) { throw 'Existing configuration changed during installation' }
           $updated = Launch
           $next = Ready
@@ -89,4 +90,4 @@ jobs:
           if (!$updated.CloseMainWindow() -or !$updated.WaitForExit(60000) -or $updated.ExitCode -ne 0) { throw 'Updated app failed to close cleanly' }
           $online = try { (Server).nonce } catch { $null }
           if ($online) { throw 'Updated server did not stop with the app' }
-          "Verified update over running $version, saved configuration, relaunch and server shutdown."
+          "Verified update to $expectedVersion, saved configuration, relaunch and server shutdown."

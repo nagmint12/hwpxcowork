@@ -19,7 +19,7 @@ const all = (name) => args.flatMap((a, i) => (a === name ? [args[i + 1]] : []));
 const pc = one('--pc'), mac = one('--mac'), out = one('--out');
 const carry = all('--carry'), carryFiles = all('--carry-file');
 const releasedOn = one('--date') || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
-const downloadBase = (one('--download-base') || 'https://cowork.example.com/download').replace(/\/$/, '');
+const downloadBase = (one('--download-base') || 'https://github.com/nagmint12/hwpxcowork/releases/latest/download').replace(/\/$/, '');
 if (!pc || !mac || !out || carry.length !== carryFiles.length) {
   console.error('node scripts/assemble-release.mjs --pc <폴더> --mac <폴더> [--carry <이전 릴리즈> --carry-file <파일>]... --out <새 폴더>');
   process.exit(2);

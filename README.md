@@ -4,7 +4,7 @@
 
 ![개인 구독 AI로 검토하고 반영하는 흐름, 한/글과 HWPX Cowork 사이의 양방향 복사, 줄·쪽 나눔과 편집 성능 개선](docs/assets/readme-overview.webp)
 
-**[설치 없이 개인 편집기 열기](https://nagmint12.github.io/hwpxcowork/)** · **[다운로드](https://github.com/nagmint12/hwpxcowork/releases)** · **[설치 안내](#설치--두-가지-길)**
+**[설치 없이 개인 편집기 열기](https://nagmint12.github.io/hwpxcowork/)** · **[최신 다운로드](https://github.com/nagmint12/hwpxcowork/releases/latest)** · **[설치 안내](#설치--두-가지-길)**
 
 GitHub Pages에서 **파일 열기**로 내 HWP·HWPX를 열고, 문서에 메모를 단 뒤 **한글로 저장**으로 HWPX를 내려받을 수 있습니다. 문서함과 연습 진도는 해당 브라우저에 저장됩니다. **HWPX Cowork → 튜토리얼**에서는 준비된 예시 답변으로 실제 문서에 수정 제안을 반영하거나 거절합니다.
 

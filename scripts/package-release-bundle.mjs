@@ -21,13 +21,13 @@ const opt = (name, def) => { const i = argv.indexOf(name); return i < 0 ? def : 
 const stage = path.resolve(root, opt('--stage', path.join('artifacts', `release-build-${stamp}`)));
 const out = path.resolve(root, opt('--out', path.join('artifacts', `release-${stamp}`)));
 const serverUrl = opt('--server-url', '');
-const downloadBase = 'https://cowork.example.com/download';
+const downloadBase = opt('--download-base', 'https://github.com/nagmint12/hwpxcowork/releases/latest/download').replace(/\/$/, '');
 const top = `hwpx-cowork-${version}`;
 const bundleName = `hwpx-cowork-${version}-${stamp}.zip`;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 // 1) 세 설치형 묶음(서버·개인 실행기·참여자 앱)
-const args = ['scripts/package-portable.mjs', '--target', 'server-install,worker-install,user-app', '--out', stage];
+const args = ['scripts/package-portable.mjs', '--target', 'server-install,worker-install,user-app', '--out', stage, '--download-base', downloadBase];
 if (serverUrl) args.push('--server-url', serverUrl);
 const r = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
 if (r.status !== 0) { console.error('package-portable 실패'); process.exit(1); }
@@ -45,7 +45,7 @@ const readme = [
   '========================================',
   '',
   '빠른 시작(Windows): 이 폴더의 설치 시작.bat을 더블클릭하면 개인 서버를 AI 없이 준비하고 엽니다.',
-  `개인·공동 서버와 Codex·Claude Code를 골라 설치: ${downloadBase.replace(/\/download$/, '')}/onboarding.html`,
+  `개인·공동 서버와 Codex·Claude Code를 골라 설치: https://nagmint12.github.io/hwpxcowork/onboarding.html`,
   '선택한 설치 ZIP 안의 설치 시작.bat을 실행하면 필요한 준비와 VS Code용 안내가 이어집니다.',
   '',
   '이 ZIP 하나에 세 가지가 들어 있습니다. 필요한 폴더만 쓰면 됩니다.',
@@ -62,7 +62,7 @@ const readme = [
   '   server-url.txt 에 서버 주소를 적고 hwpx-cowork.bat 또는 make-shortcut.bat',
   '',
   '설치형은 Node 런타임과 npm 라이브러리를 넣지 않았습니다. 설치 도우미가 인터넷에서 받습니다.',
-  `체험 서버: https://cowork.example.com/   내려받기: ${downloadBase}`,
+  `브라우저 편집기: https://nagmint12.github.io/hwpxcowork/   최신 설치 파일: https://github.com/nagmint12/hwpxcowork/releases/latest`,
   '',
 ].join('\r\n');
 bundle.file(`${top}/읽어보기.txt`, '﻿' + readme, { unixPermissions: 0o644 });

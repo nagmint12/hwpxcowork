@@ -100,7 +100,7 @@ const Login = {
   template: `<div class="entry-page">
     <header class="entry-header"><div class="entry-shell entry-header-inner">
       <a class="entry-brand" href="/?teaser=0"><img src="/icons/icon-128.png?v=20261118" width="32" height="32" alt=""><span>hwpx<span class="brand-dot">.</span>cowork</span></a>
-      <nav aria-label="시작 도구"><a href="/download">다운로드</a><a href="/help.html#start" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a></nav>
+      <nav aria-label="시작 도구"><a href="https://github.com/nagmint12/hwpxcowork/releases/latest">다운로드</a><a href="/help.html#start" target="_blank" rel="noopener" data-testid="help-login">사용 설명서</a></nav>
     </div></header>
     <main class="entry-shell entry-main">
       <section class="entry-intro">
@@ -1613,18 +1613,16 @@ const App = {
     <header v-if="state.me" class="office-bar" aria-label="문서 작업 공간" data-testid="office-primary-row" :inert="introOpen">
       <div class="office-product-menu-wrap" ref="productMenuWrap">
         <button ref="productMenuButton" type="button" class="office-action office-app-menu" data-testid="office-app-menu"
-          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><img v-if="state.me.browserPersonal" class="pages-product-icon" src="/icons/icon-128.png" width="24" height="24" alt=""><span v-else class="office-app-menu-icon" aria-hidden="true">☰</span><span class="office-action-text">HWPX Cowork</span></button>
+          :disabled="windowClosing" :aria-expanded="hasApplicationMenu ? undefined : productMenuOpen" aria-label="HWPX Cowork 메뉴" title="HWPX Cowork 메뉴" @click="openApplicationMenu"><img class="office-product-icon" src="/icons/icon-128.png" width="24" height="24" alt=""><span class="office-action-text">HWPX Cowork</span></button>
         <div v-if="productMenuOpen" class="office-product-menu" data-testid="office-product-menu">
-          <template v-if="state.me.browserPersonal">
-            <a href="https://github.com/nagmint12/hwpxcowork#readme" target="_blank" rel="noopener" @click="closeProductMenu(true)">HWPX Cowork 정보</a>
-            <a href="/download" target="_blank" rel="noopener" @click="closeProductMenu(true)">다운로드</a>
-          </template>
+          <a href="https://github.com/nagmint12/hwpxcowork#readme" target="_blank" rel="noopener" @click="closeProductMenu(true)">HWPX Cowork 정보</a>
+          <a href="https://github.com/nagmint12/hwpxcowork/releases/latest" target="_blank" rel="noopener" @click="closeProductMenu(true)">다운로드</a>
           <button type="button" data-testid="cowork-tutorial" @click="openTutorial">튜토리얼</button>
           <button type="button" data-testid="cowork-intro" @click="openIntro">소개 영상 보기</button>
         </div>
       </div>
-      <button ref="homeButton" type="button" class="office-action" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
-        :disabled="windowClosing" :class="{'pages-library-home': state.me.browserPersonal}" :title="state.me.browserPersonal ? '문서함 (메인 화면)' : '문서함'" :aria-label="state.me.browserPersonal ? '문서함 (메인 화면)' : '문서함'" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
+      <button ref="homeButton" type="button" class="office-action office-library-home" data-testid="office-library" :aria-current="isLibrary ? 'page' : null"
+        :disabled="windowClosing" title="문서함 (메인 화면)" aria-label="문서함 (메인 화면)" @click="goLibrary"><span class="ic" aria-hidden="true" v-html="ICON.folder"></span><span class="office-action-text">문서함</span></button>
       <div class="office-tablist" role="tablist" aria-label="열린 문서" aria-orientation="horizontal" @wheel="scrollTabs" @keydown="onTabKey" v-if="tabs.items.length">
         <div v-for="tab in tabs.items" :key="tab.id" role="presentation" class="office-tab-item" :class="{selected: tab.id === docId}">
           <button type="button" class="office-tab" role="tab" :id="tabId(tab.id)" :aria-selected="tab.id === docId" :aria-controls="panelId(tab.id)" :tabindex="tab.id === tabStopId ? 0 : -1"

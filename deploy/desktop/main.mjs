@@ -345,7 +345,7 @@ function menus() {
       { label: '튜토리얼', enabled: tabs, click: editorCommand('tutorial') },
       { label: '소개 영상 보기', enabled: tabs, click: editorCommand('intro') },
       { type: 'separator' },
-      { label: `${product} 정보`, click: (_item, window) => void showAbout(window).catch(showError) }, { type: 'separator' },
+      { label: `${product} 정보`, click: (_item, window) => void showAbout(window).catch(showError) }, { label: '다운로드', click: () => void shell.openExternal(`${githubRepository}/releases/latest`).catch(showError) }, { type: 'separator' },
       { label: '운영 방식 바꾸기', enabled: !officeLeaving, submenu: MODES.filter(m => m !== mode).map(m => ({ label: `${MODE_LABELS[m]}…`, click: () => void switchMode(m) })) }, { type: 'separator' },
       { role: 'hide', label: '가리기', visible: mac }, { role: 'quit', label: '종료' }] },
     { label: '파일', submenu: [

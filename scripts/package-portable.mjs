@@ -93,7 +93,7 @@ const FORBIDDEN = [/(^|\/)config\.json$/, /(^|\/)\.hwpx-cowork-secret$/, /(^|\/)
 
 // ── 인자 ──────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const o = { targets: ['server-install', 'worker-install', 'user-app'], out: null, nodeVersion: DEFAULT_NODE_VERSION, nodeCache: path.join(os.tmpdir(), 'hwpx-cowork-node-runtime'), keepStaging: false, help: false, serverUrl: '', downloadBase: 'https://cowork.example.com/download' };
+  const o = { targets: ['server-install', 'worker-install', 'user-app'], out: null, nodeVersion: DEFAULT_NODE_VERSION, nodeCache: path.join(os.tmpdir(), 'hwpx-cowork-node-runtime'), keepStaging: false, help: false, serverUrl: '', downloadBase: 'https://github.com/nagmint12/hwpxcowork/releases/latest/download' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`${a} 뒤에 값이 필요합니다`); return argv[++i]; };

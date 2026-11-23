@@ -34,7 +34,7 @@ function windowsInstall(plan) {
   const legacy = releasePackages.find(p => p.target === plan.target && p.file.endsWith('.zip'));
   const app = releasePackages.find(p => p.target === 'windows-app' && p.file.endsWith('.exe'));
   const pkg = legacy || app;
-  if (!pkg) return `<p class="note">다운로드 페이지에서 Windows 설치 파일과 안내를 확인하세요.</p>${downloadLink(null, 'Windows 다운로드 페이지', '/download#windows')}`;
+  if (!pkg) return `<p class="note">다운로드 페이지에서 Windows 설치 파일과 안내를 확인하세요.</p>${downloadLink(null, 'Windows 다운로드', '/download#windows')}`;
   const mode = deployment === 'personal' ? '혼자 쓰기' : '여러 사람과 함께 쓰기';
   const label = legacy ? 'Windows ZIP 다운로드' : 'Windows 설치 파일 다운로드';
   const steps = legacy ? plan.steps : [
@@ -48,12 +48,12 @@ function windowsInstall(plan) {
 
 function macInstall(plan) {
   if (deployment === 'shared') {
-    return '<p class="note">공동 작업 서버를 설치하려면 Windows를 선택하세요. Mac에서는 브라우저로 기존 서버에 접속할 수 있습니다.</p><a href="/download#mac">Mac 편집기 보기 ↗</a>';
+    return '<p class="note">공동 작업 서버를 설치하려면 Windows를 선택하세요. Mac에서는 브라우저로 기존 서버에 접속할 수 있습니다.</p><a href="/download#mac">Mac 편집기 다운로드 ↗</a>';
   }
   const packages = releasePackages.filter(p => /^(?:macos-editor|local-editor-macos)-/.test(p.target || '') && p.file.endsWith('.zip'));
   const links = (packages.length ? packages : [null]).map(pkg => {
     const arch = pkg?.arch === 'arm64' ? ' · Apple Silicon' : pkg?.arch === 'x64' ? ' · Intel' : '';
-    return downloadLink(pkg, pkg ? `Mac 편집기 다운로드${arch}` : 'Mac 다운로드 페이지', '/download#mac');
+    return downloadLink(pkg, pkg ? `Mac 편집기 다운로드${arch}` : 'Mac 다운로드', '/download#mac');
   });
   return `<div class="actions">${links.join('')}</div><p class="compat">macOS 12.1 이상</p>${instructions(['ZIP을 풀고 앱을 응용 프로그램 폴더로 옮깁니다.', 'Hwpx Editor를 엽니다.'])}${plan.needsLogin ? '<p class="note">구독 AI 연결은 Windows용 Hwpx Cowork에서 설정합니다.</p>' : ''}`;
 }

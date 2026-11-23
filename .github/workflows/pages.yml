@@ -14,6 +14,8 @@ on:
       - 'tutorial/**'
       - 'package*.json'
       - '.github/workflows/pages.yml'
+  release:
+    types: [published, edited, released, deleted]
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           sparse-checkout: |
             web
             studio/dist
@@ -54,8 +57,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y fonts-noto-cjk
           python3 -m pip install matplotlib
-      - name: Build personal workspace
-        run: node deploy/github-pages/build-site.mjs _site
+      - name: Build personal workspace with GitHub release downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PAGES_RELEASE_JSON="$RUNNER_TEMP/latest-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$PAGES_RELEASE_JSON"
+          node deploy/github-pages/build-site.mjs _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

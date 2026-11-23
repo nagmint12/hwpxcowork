@@ -110,10 +110,10 @@ def test_app(pw, url, profile, channel):
     page.get_by_test_id('office-open-files').wait_for()
     assert '브라우저에 저장' in page.locator('.pages-storage-note').inner_text()
     assert page.get_by_test_id('office-library').get_attribute('aria-current') == 'page'
-    assert page.locator('.pages-product-icon').evaluate('img => img.decode().then(() => img.naturalWidth > 0)')
+    assert page.locator('.office-product-icon').evaluate('img => img.decode().then(() => img.naturalWidth > 0)')
     page.get_by_test_id('office-app-menu').click()
     product_menu = page.get_by_test_id('office-product-menu')
-    assert product_menu.get_by_role('link', name='다운로드').get_attribute('href') == 'https://asmint.duckdns.org/download'
+    assert product_menu.get_by_role('link', name='다운로드').get_attribute('href') == 'https://github.com/nagmint12/hwpxcowork/releases/latest'
     assert product_menu.get_by_role('link', name='HWPX Cowork 정보').is_visible()
     page.keyboard.press('Escape')
     page.get_by_test_id('office-file-input').set_input_files(FIXTURE)
